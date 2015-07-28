@@ -38,7 +38,6 @@
 #include <systemsettings.h>
 #include <stabilizationsettings.h>
 #include <systemalarms.h>
-#include <revosettings.h>
 #include <positionstate.h>
 #include <taskinfo.h>
 
@@ -72,30 +71,7 @@ int32_t configuration_check()
     bool coptercontrol     = bdinfo->board_type == 0x04;
 
     // Classify navigation capability
-#ifdef REVOLUTION
-    RevoSettingsInitialize();
-    uint8_t revoFusion;
-    RevoSettingsFusionAlgorithmGet(&revoFusion);
-    bool navCapableFusion;
-    switch (revoFusion) {
-    case REVOSETTINGS_FUSIONALGORITHM_COMPLEMENTARYMAGGPSOUTDOOR:
-    case REVOSETTINGS_FUSIONALGORITHM_GPSNAVIGATIONINS13:
-        navCapableFusion = true;
-        break;
-    default:
-        navCapableFusion = false;
-        // check for hitl.  hitl allows to feed position and velocity state via
-        // telemetry, this makes nav possible even with an unsuited algorithm
-        if (PositionStateHandle()) {
-            if (PositionStateReadOnly()) {
-                navCapableFusion = true;
-            }
-        }
-    }
-#else
     const bool navCapableFusion = false;
-#endif /* ifdef REVOLUTION */
-
 
     // Classify airframe type
     bool multirotor = (GetCurrentFrameType() == FRAME_TYPE_MULTIROTOR);
