@@ -206,23 +206,11 @@ export OPGCSSYNTHDIR := $(BUILD_DIR)/openpilotgcs-synthetics
 DIRS += $(OPGCSSYNTHDIR)
 
 # Define supported board lists
-ALL_BOARDS    := coptercontrol oplinkmini revolution osd revoproto simposix discoveryf4bare gpsplatinum
+ALL_BOARDS    := coptercontrol oplinkmini 
 
 # Short names of each board (used to display board name in parallel builds)
 coptercontrol_short    := 'cc  '
 oplinkmini_short       := 'oplm'
-revolution_short       := 'revo'
-osd_short              := 'osd '
-revoproto_short        := 'revp'
-simposix_short         := 'posx'
-discoveryf4bare_short  := 'df4b'
-gpsplatinum_short      := 'gps9'
-
-# SimPosix only builds on Linux so drop it from the list for
-# all other platforms.
-ifneq ($(UNAME), Linux)
-    ALL_BOARDS := $(filter-out simposix, $(ALL_BOARDS))
-endif
 
 # Start out assuming that we'll build fw, bl and bu for all boards
 FW_BOARDS  := $(ALL_BOARDS)
