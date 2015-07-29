@@ -48,8 +48,6 @@ HEADERS += \
     $$UAVOBJECT_SYNTHETICS/debuglogentry.h \
     $$UAVOBJECT_SYNTHETICS/ekfconfiguration.h \
     $$UAVOBJECT_SYNTHETICS/ekfstatevariance.h \
-    $$UAVOBJECT_SYNTHETICS/revocalibration.h \
-    $$UAVOBJECT_SYNTHETICS/revosettings.h \
     $$UAVOBJECT_SYNTHETICS/gcstelemetrystats.h \
     $$UAVOBJECT_SYNTHETICS/gyrostate.h \
     $$UAVOBJECT_SYNTHETICS/gyrosensor.h \
@@ -158,8 +156,6 @@ SOURCES += \
     $$UAVOBJECT_SYNTHETICS/altitudefiltersettings.cpp \
     $$UAVOBJECT_SYNTHETICS/ekfconfiguration.cpp \
     $$UAVOBJECT_SYNTHETICS/ekfstatevariance.cpp \
-    $$UAVOBJECT_SYNTHETICS/revocalibration.cpp \
-    $$UAVOBJECT_SYNTHETICS/revosettings.cpp \
     $$UAVOBJECT_SYNTHETICS/gcstelemetrystats.cpp \
     $$UAVOBJECT_SYNTHETICS/accelsensor.cpp \
     $$UAVOBJECT_SYNTHETICS/accelstate.cpp \

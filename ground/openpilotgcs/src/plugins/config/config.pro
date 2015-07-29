@@ -38,11 +38,9 @@ HEADERS += \
     cfg_vehicletypes/configfixedwingwidget.h \
     cfg_vehicletypes/configgroundvehiclewidget.h \
     cfg_vehicletypes/configcustomwidget.h \
-    configrevowidget.h \
     config_global.h \
     mixercurve.h \
     dblspindelegate.h \
-    configrevohwwidget.h \
     calibration/calibrationutils.h \
     calibration/wizardstate.h \
     calibration/wizardmodel.h \
@@ -76,7 +74,6 @@ SOURCES += \
     channelform.cpp \
     inputchannelform.cpp \
     configcamerastabilizationwidget.cpp \
-    configrevowidget.cpp \
     configtxpidwidget.cpp \
     cfg_vehicletypes/vehicleconfig.cpp \
     cfg_vehicletypes/configccpmwidget.cpp \
@@ -87,7 +84,6 @@ SOURCES += \
     outputchannelform.cpp \
     mixercurve.cpp \
     dblspindelegate.cpp \
-    configrevohwwidget.cpp \
     calibration/calibrationutils.cpp \
     calibration/wizardstate.cpp \
     calibration/wizardmodel.cpp \
@@ -117,10 +113,8 @@ FORMS += \
     inputchannelform.ui \
     camerastabilization.ui \
     outputchannelform.ui \
-    revosensors.ui \
     txpid.ui \
     mixercurve.ui \
-    configrevohwwidget.ui \
     oplink.ui
 
 RESOURCES += configgadget.qrc

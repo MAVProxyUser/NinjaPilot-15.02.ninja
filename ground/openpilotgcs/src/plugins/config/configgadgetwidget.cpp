@@ -34,10 +34,8 @@
 #include "configstabilizationwidget.h"
 #include "configcamerastabilizationwidget.h"
 #include "configtxpidwidget.h"
-#include "configrevohwwidget.h"
 #include "config_cc_hw_widget.h"
 #include "configoplinkwidget.h"
-#include "configrevowidget.h"
 #include "defaultattitudewidget.h"
 #include "defaulthwsettingswidget.h"
 #include "uavobjectutilmanager.h"
@@ -192,11 +190,7 @@ void ConfigGadgetWidget::onAutopilotConnect()
             stackWidget->replaceTab(ConfigGadgetWidget::hardware, qwd);
         } else if ((board & 0xff00) == 0x0900) {
             // Revolution family
-            QWidget *qwd = new ConfigRevoWidget(this);
-            stackWidget->replaceTab(ConfigGadgetWidget::sensors, qwd);
-
-            qwd = new ConfigRevoHWWidget(this);
-            stackWidget->replaceTab(ConfigGadgetWidget::hardware, qwd);
+            qDebug() << "Unsupported OpenPilot Revo family board " << board;
         } else {
             // Unknown board
             qDebug() << "Unknown board " << board;
