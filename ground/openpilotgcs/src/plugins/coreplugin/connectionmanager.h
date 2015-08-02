@@ -38,6 +38,7 @@
 #include <QtCore/QLinkedList>
 #include <QPushButton>
 #include <QComboBox>
+#include <QMessageBox>
 
 #include "core_global.h"
 #include <QTimer>
@@ -149,6 +150,10 @@ protected:
 private:
     bool connectDevice();
     bool polling;
+    bool NonccFound;
+    bool NonccWarningClosed;
+    QMessageBox *NonccWarningMessageBox;
+
     Internal::MainWindow *m_mainWindow;
     QList <IConnection *> connectionBackup;
     QTimer *reconnect;

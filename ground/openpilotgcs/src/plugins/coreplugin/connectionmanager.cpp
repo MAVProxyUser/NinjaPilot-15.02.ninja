@@ -89,6 +89,8 @@ void ConnectionManager::init()
     // new connection object from plugins
     QObject::connect(ExtensionSystem::PluginManager::instance(), SIGNAL(objectAdded(QObject *)), this, SLOT(objectAdded(QObject *)));
     QObject::connect(ExtensionSystem::PluginManager::instance(), SIGNAL(aboutToRemoveObject(QObject *)), this, SLOT(aboutToRemoveObject(QObject *)));
+
+    NonccWarningClosed = true;
 }
 
 
@@ -435,11 +437,26 @@ void ConnectionManager::devChanged(IConnection *connection)
     }
     // clear device list combobox
     m_availableDevList->clear();
+    NonccFound = false;
 
     // remove registered devices of this IConnection from the list
     updateConnectionList(connection);
 
     updateConnectionDropdown();
+
+    if (NonccFound && NonccWarningClosed) {
+        NonccWarningClosed     = false;
+        NonccWarningMessageBox = new QMessageBox();
+        NonccWarningMessageBox->setWindowTitle(tr("Non CopterControl: OPCC, CC3D, or Atom? Not Supported!"));
+        NonccWarningMessageBox->setIcon(QMessageBox::Warning);
+        NonccWarningMessageBox->setStandardButtons(QMessageBox::Ok);
+        NonccWarningMessageBox->setText(tr("Only Old CC/CC3D + Atom boards are supported in the NinjaPilot fork\n\nPlease use OPNG or OpenPilot instead."));
+        NonccWarningMessageBox->show();
+    }
+    if (!NonccFound && !NonccWarningClosed) {
+        NonccWarningMessageBox->close();
+        NonccWarningClosed = true;
+    }
 
     qDebug() << "# devices " << m_devList.count();
     emit availableDevicesChanged(m_devList);
@@ -457,17 +474,21 @@ void ConnectionManager::updateConnectionDropdown()
 {
     // add all the list again to the combobox
     foreach(DevListItem d, m_devList) {
-        m_availableDevList->addItem(d.getConName());
-        m_availableDevList->setItemData(m_availableDevList->count() - 1, d.getConName(), Qt::ToolTipRole);
-        if (!m_ioDev && d.getConName().startsWith("USB")) {
-            if (m_mainWindow->generalSettings()->autoConnect() || m_mainWindow->generalSettings()->autoSelect()) {
-                m_availableDevList->setCurrentIndex(m_availableDevList->count() - 1);
+        if (!d.getConName().contains("Nano") && !d.getConName().contains("Revolution")) { // ONLY cc3d or Atom supported. 
+            m_availableDevList->addItem(d.getConName());
+            m_availableDevList->setItemData(m_availableDevList->count() - 1, d.getConName(), Qt::ToolTipRole);
+            if (!m_ioDev && d.getConName().startsWith("USB")) {
+                if (m_mainWindow->generalSettings()->autoConnect() || m_mainWindow->generalSettings()->autoSelect()) {
+                    m_availableDevList->setCurrentIndex(m_availableDevList->count() - 1);
+                }
+                if (m_mainWindow->generalSettings()->autoConnect() && polling) {
+                    qDebug() << "Automatically opening device";
+                    connectDevice(d);
+                    qDebug() << "ConnectionManager::updateConnectionDropdown autoconnected USB device";
+                }
             }
-            if (m_mainWindow->generalSettings()->autoConnect() && polling) {
-                qDebug() << "Automatically opening device";
-                connectDevice(d);
-                qDebug() << "ConnectionManager::updateConnectionDropdown autoconnected USB device";
-            }
+        } else {
+            NonccFound = true;
         }
     }
     if (m_ioDev) {
