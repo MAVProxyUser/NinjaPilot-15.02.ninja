@@ -45,7 +45,6 @@
 #include "pages/savepage.h"
 #include "pages/notyetimplementedpage.h"
 #include "pages/outputcalibrationpage.h"
-#include "pages/revocalibrationpage.h"
 #include "pages/airframeinitialtuningpage.h"
 #include "extensionsystem/pluginmanager.h"
 #include "vehicleconfigurationhelper.h"
