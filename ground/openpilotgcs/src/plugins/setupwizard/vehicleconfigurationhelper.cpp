@@ -37,7 +37,6 @@
 #include "stabilizationsettings.h"
 #include "stabilizationbank.h"
 #include "stabilizationsettingsbank1.h"
-#include "revocalibration.h"
 #include "accelgyrosettings.h"
 #include "gpssettings.h"
 #include "airspeedsettings.h"
@@ -638,18 +637,6 @@ void VehicleConfigurationHelper::applySensorBiasConfiguration()
 
             copterControlCalibration->setData(data);
             addModifiedObject(copterControlCalibration, tr("Writing board settings"));
-            break;
-        }
-        case VehicleConfigurationSource::CONTROLLER_REVO:
-        {
-            RevoCalibration *revolutionCalibration = RevoCalibration::GetInstance(m_uavoManager);
-            Q_ASSERT(revolutionCalibration);
-            RevoCalibration::DataFields data = revolutionCalibration->getData();
-
-            data.BiasCorrectedRaw = RevoCalibration::BIASCORRECTEDRAW_TRUE;
-
-            revolutionCalibration->setData(data);
-            addModifiedObject(revolutionCalibration, tr("Writing board settings"));
             break;
         }
         default:
