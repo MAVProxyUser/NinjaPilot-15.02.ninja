@@ -28,6 +28,7 @@
 #include "gcssplashscreen.h"
 #include "version_info/version_info.h"
 #include <QDebug>
+#include <QDate>
 
 const QChar CopyrightSymbol(0x00a9);
 
@@ -38,15 +39,21 @@ GCSSplashScreen::GCSSplashScreen() :
     m_pixmap  = new QPixmap(":/app/splash.png");
 
     m_painter = new QPainter(m_pixmap);
-    m_painter->setPen(Qt::lightGray);
+    m_painter->setPen(Qt::black);
     QFont font("Tahoma", 8);
     m_painter->setFont(font);
-    m_painter->drawText(405, 170, QString(CopyrightSymbol) +
+
+    m_painter->drawText(405, 150, QString(CopyrightSymbol) +
                         QString(" 2010-") + VersionInfo::year() +
                         QString(tr(" The OpenPilot Project - All Rights Reserved")));
 
-    m_painter->drawText(406, 173, 310, 100, Qt::TextWordWrap | Qt::AlignTop | Qt::AlignLeft,
-                        QString(tr("GCS Revision - ")) + VersionInfo::revision());
+    QDate date = QDate::currentDate();
+    m_painter->drawText(405, 160, QString(CopyrightSymbol) +
+                        QString(" Aug 2015-") + date.toString("MMM yyyy") +
+                        QString(tr(" RateMode Ninja's NinjaPilot *fork*")));
+
+    m_painter->drawText(405, 170, QString(tr("GCS Revision - ")) + VersionInfo::revision());
+
     setPixmap(*m_pixmap);
 }
 
@@ -58,10 +65,10 @@ void GCSSplashScreen::drawMessageText(const QString &message)
     QPixmap pix(*m_pixmap);
     QPainter progressPainter(&pix);
 
-    progressPainter.setPen(Qt::lightGray);
+    progressPainter.setPen(Qt::black);
     QFont font("Tahoma", 13);
     progressPainter.setFont(font);
-    progressPainter.drawText(170, 385, message);
+    progressPainter.drawText(170, 420, message);
     setPixmap(pix);
 }
 
