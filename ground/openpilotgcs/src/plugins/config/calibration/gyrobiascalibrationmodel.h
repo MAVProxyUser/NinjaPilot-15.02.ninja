@@ -37,7 +37,6 @@
 #include <gyrostate.h>
 #include <gyrosensor.h>
 #include <attitudesettings.h>
-#include <revocalibration.h>
 #include <accelgyrosettings.h>
 
 #include <QObject>
@@ -73,7 +72,6 @@ private:
     typedef struct {
         UAVObject::Metadata gyroStateMetadata;
         UAVObject::Metadata gyroSensorMetadata;
-        RevoCalibration::DataFields revoCalibrationData;
         AttitudeSettings::DataFields attitudeSettingsData;
     } Memento;
 
@@ -94,7 +92,6 @@ private:
     // convenience pointers
     GyroState *gyroState;
     GyroSensor *gyroSensor;
-    RevoCalibration *revoCalibration;
     AttitudeSettings *attitudeSettings;
     AccelGyroSettings *accelGyroSettings;
 

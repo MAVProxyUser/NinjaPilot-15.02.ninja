@@ -42,9 +42,6 @@ GyroBiasCalibrationModel::GyroBiasCalibrationModel(QObject *parent) :
     gyroSensor = GyroSensor::GetInstance(getObjectManager());
     Q_ASSERT(gyroSensor);
 
-    revoCalibration   = RevoCalibration::GetInstance(getObjectManager());
-    Q_ASSERT(revoCalibration);
-
     attitudeSettings  = AttitudeSettings::GetInstance(getObjectManager());
     Q_ASSERT(attitudeSettings);
 
@@ -59,10 +56,6 @@ void GyroBiasCalibrationModel::start()
     m_dirty = false;
 
     // configure board for calibration
-    RevoCalibration::DataFields revoCalibrationData = revoCalibration->getData();
-    memento.revoCalibrationData = revoCalibrationData;
-    revoCalibrationData.BiasCorrectedRaw = RevoCalibration::BIASCORRECTEDRAW_FALSE;
-    revoCalibration->setData(revoCalibrationData);
 
     AttitudeSettings::DataFields attitudeSettingsData = attitudeSettings->getData();
     memento.attitudeSettingsData = attitudeSettingsData;
@@ -148,7 +141,6 @@ void GyroBiasCalibrationModel::getSample(UAVObject *obj)
 
         gyroState->setMetadata(memento.gyroStateMetadata);
         gyroSensor->setMetadata(memento.gyroSensorMetadata);
-        revoCalibration->setData(memento.revoCalibrationData);
         attitudeSettings->setData(memento.attitudeSettingsData);
 
         stopped();

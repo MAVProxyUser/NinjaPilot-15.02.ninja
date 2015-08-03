@@ -43,14 +43,6 @@ HEADERS += \
     calibration/calibrationutils.h \
     calibration/wizardstate.h \
     calibration/wizardmodel.h \
-    calibration/thermal/thermalcalibration.h \
-    calibration/thermal/thermalcalibrationhelper.h \
-    calibration/thermal/thermalcalibrationmodel.h \
-    calibration/thermal/boardsetuptransition.h \
-    calibration/thermal/dataacquisitiontransition.h \
-    calibration/thermal/settingshandlingtransitions.h \
-    calibration/thermal/compensationcalculationtransition.h \
-    calibration/sixpointcalibrationmodel.h \
     calibration/levelcalibrationmodel.h \
     calibration/gyrobiascalibrationmodel.h \
     calibration/calibrationuiutils.h \
@@ -85,10 +77,6 @@ SOURCES += \
     calibration/calibrationutils.cpp \
     calibration/wizardstate.cpp \
     calibration/wizardmodel.cpp \
-    calibration/thermal/thermalcalibration.cpp \
-    calibration/thermal/thermalcalibrationhelper.cpp \
-    calibration/thermal/thermalcalibrationmodel.cpp \
-    calibration/sixpointcalibrationmodel.cpp \
     calibration/levelcalibrationmodel.cpp \
     calibration/gyrobiascalibrationmodel.cpp \
     configoplinkwidget.cpp
