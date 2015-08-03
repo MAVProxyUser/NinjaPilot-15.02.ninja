@@ -29,7 +29,6 @@ HEADERS += \
     defaulthwsettingswidget.h \
     channelform.h \
     inputchannelform.h \
-    configcamerastabilizationwidget.h \
     configtxpidwidget.h \
     outputchannelform.h \    
     cfg_vehicletypes/vehicleconfig.h \
@@ -73,7 +72,6 @@ SOURCES += \
     defaulthwsettingswidget.cpp \
     channelform.cpp \
     inputchannelform.cpp \
-    configcamerastabilizationwidget.cpp \
     configtxpidwidget.cpp \
     cfg_vehicletypes/vehicleconfig.cpp \
     cfg_vehicletypes/configccpmwidget.cpp \
@@ -111,7 +109,6 @@ FORMS += \
     defaultattitude.ui \
     defaulthwsettings.ui \
     inputchannelform.ui \
-    camerastabilization.ui \
     outputchannelform.ui \
     txpid.ui \
     mixercurve.ui \

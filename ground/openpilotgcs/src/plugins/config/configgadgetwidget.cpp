@@ -32,7 +32,6 @@
 #include "configinputwidget.h"
 #include "configoutputwidget.h"
 #include "configstabilizationwidget.h"
-#include "configcamerastabilizationwidget.h"
 #include "configtxpidwidget.h"
 #include "config_cc_hw_widget.h"
 #include "configoplinkwidget.h"
@@ -98,12 +97,6 @@ ConfigGadgetWidget::ConfigGadgetWidget(QWidget *parent) : QWidget(parent)
     icon->addFile(":/configgadget/images/stabilization_selected.png", QSize(), QIcon::Selected, QIcon::Off);
     qwd  = new ConfigStabilizationWidget(this);
     stackWidget->insertTab(ConfigGadgetWidget::stabilization, qwd, *icon, QString("Stabilization"));
-
-    icon = new QIcon();
-    icon->addFile(":/configgadget/images/camstab_normal.png", QSize(), QIcon::Normal, QIcon::Off);
-    icon->addFile(":/configgadget/images/camstab_selected.png", QSize(), QIcon::Selected, QIcon::Off);
-    qwd  = new ConfigCameraStabilizationWidget(this);
-    stackWidget->insertTab(ConfigGadgetWidget::camerastabilization, qwd, *icon, QString("Gimbal"));
 
     icon = new QIcon();
     icon->addFile(":/configgadget/images/txpid_normal.png", QSize(), QIcon::Normal, QIcon::Off);

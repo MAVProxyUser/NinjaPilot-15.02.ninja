@@ -47,7 +47,7 @@ class ConfigGadgetWidget : public QWidget {
 public:
     ConfigGadgetWidget(QWidget *parent = 0);
     ~ConfigGadgetWidget();
-    enum widgetTabs { hardware = 0, aircraft, input, output, sensors, stabilization, camerastabilization, txpid, oplink };
+    enum widgetTabs { hardware = 0, aircraft, input, output, sensors, stabilization, txpid, oplink };
     void startInputWizard();
 
 public slots:
