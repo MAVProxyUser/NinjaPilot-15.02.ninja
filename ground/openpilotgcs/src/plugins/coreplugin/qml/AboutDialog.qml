@@ -83,7 +83,7 @@ Rectangle {
                     anchors.fill: parent
                     Text {
                         id: headerLabel
-                        text: qsTr("OpenPilot Ground Control Station")
+                        text: qsTr("NinjaPilot Ground Control Station")
                         Layout.fillWidth: true
                         font.pixelSize: 14
                         font.bold: true
