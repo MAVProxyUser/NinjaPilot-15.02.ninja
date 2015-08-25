@@ -59,8 +59,6 @@ HEADERS += \
     $$UAVOBJECT_SYNTHETICS/systemstats.h \
     $$UAVOBJECT_SYNTHETICS/systemalarms.h \
     $$UAVOBJECT_SYNTHETICS/objectpersistence.h \
-    $$UAVOBJECT_SYNTHETICS/overosyncstats.h \
-    $$UAVOBJECT_SYNTHETICS/overosyncsettings.h \
     $$UAVOBJECT_SYNTHETICS/systemsettings.h \
     $$UAVOBJECT_SYNTHETICS/stabilizationstatus.h \
     $$UAVOBJECT_SYNTHETICS/stabilizationsettings.h \
@@ -165,8 +163,6 @@ SOURCES += \
     $$UAVOBJECT_SYNTHETICS/systemstats.cpp \
     $$UAVOBJECT_SYNTHETICS/systemalarms.cpp \
     $$UAVOBJECT_SYNTHETICS/objectpersistence.cpp \
-    $$UAVOBJECT_SYNTHETICS/overosyncstats.cpp \
-    $$UAVOBJECT_SYNTHETICS/overosyncsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/systemsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/stabilizationstatus.cpp \
     $$UAVOBJECT_SYNTHETICS/stabilizationsettings.cpp \
