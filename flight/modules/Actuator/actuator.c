@@ -42,7 +42,6 @@
 #include "flightstatus.h"
 #include "mixersettings.h"
 #include "mixerstatus.h"
-#include "cameradesired.h"
 #include "manualcontrolcommand.h"
 #include "taskinfo.h"
 #include <systemsettings.h>
@@ -69,8 +68,6 @@ static int8_t counter;
 #define TASK_PRIORITY                   (tskIDLE_PRIORITY + 4) // device driver
 #define FAILSAFE_TIMEOUT_MS             100
 #define MAX_MIX_ACTUATORS               ACTUATORCOMMAND_CHANNEL_NUMELEM
-
-#define CAMERA_BOOT_DELAY_MS            7000
 
 #define ACTUATOR_ONESHOT125_CLOCK       2000000
 #define ACTUATOR_ONESHOT125_PULSE_SCALE 4
@@ -352,7 +349,6 @@ static void actuatorTask(__attribute__((unused)) void *parameters)
         Mixer_t *mixers = (Mixer_t *)&mixerSettings.Mixer1Type;
 
         for (int ct = 0; ct < MAX_MIX_ACTUATORS; ct++) {
-            // During boot all camera actuators should be completely disabled (PWM pulse = 0).
             // command.Channel[i] is reused below as a channel PWM activity flag:
             // 0 - PWM disabled, >0 - PWM set to real mixer value using scaleChannel() later.
             // Setting it to 1 by default means "Rescale this channel and enable PWM on its output".
@@ -414,33 +410,6 @@ static void actuatorTask(__attribute__((unused)) void *parameters)
                         status[ct] = accessory.AccessoryVal;
                     } else {
                         status[ct] = -1;
-                    }
-                }
-
-                if ((mixer_type >= MIXERSETTINGS_MIXER1TYPE_CAMERAROLLORSERVO1) &&
-                    (mixer_type <= MIXERSETTINGS_MIXER1TYPE_CAMERAYAW)) {
-                    CameraDesiredData cameraDesired;
-                    if (CameraDesiredGet(&cameraDesired) == 0) {
-                        switch (mixer_type) {
-                        case MIXERSETTINGS_MIXER1TYPE_CAMERAROLLORSERVO1:
-                            status[ct] = cameraDesired.RollOrServo1;
-                            break;
-                        case MIXERSETTINGS_MIXER1TYPE_CAMERAPITCHORSERVO2:
-                            status[ct] = cameraDesired.PitchOrServo2;
-                            break;
-                        case MIXERSETTINGS_MIXER1TYPE_CAMERAYAW:
-                            status[ct] = cameraDesired.Yaw;
-                            break;
-                        default:
-                            break;
-                        }
-                    } else {
-                        status[ct] = -1;
-                    }
-
-                    // Disable camera actuators for CAMERA_BOOT_DELAY_MS after boot
-                    if (thisSysTime < (CAMERA_BOOT_DELAY_MS / portTICK_RATE_MS)) {
-                        command.Channel[ct] = 0;
                     }
                 }
             }

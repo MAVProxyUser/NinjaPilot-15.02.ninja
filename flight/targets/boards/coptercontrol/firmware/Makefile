@@ -46,7 +46,6 @@ MODULES += FirmwareIAP
 MODULES += Telemetry
 
 # List of optional modules to include
-OPTMODULES += CameraStab
 OPTMODULES += ComUsbBridge
 OPTMODULES += GPS
 OPTMODULES += TxPID
@@ -55,11 +54,6 @@ OPTMODULES += Osd/osdoutput
 #OPTMODULES += Fault
 
 SRC += $(FLIGHTLIB)/notification.c
-
-# Include all camera options
-CDEFS += -DUSE_INPUT_LPF -DUSE_GIMBAL_LPF -DUSE_GIMBAL_FF
-
-
 
 # Erase flash firmware should be buildable from command line
 ifeq ($(ERASE_FLASH), YES)
@@ -115,8 +109,6 @@ ifndef TESTAPP
     SRC += $(OPUAVSYNTHDIR)/mixersettings.c
     SRC += $(OPUAVSYNTHDIR)/firmwareiapobj.c
     SRC += $(OPUAVSYNTHDIR)/attitudesettings.c
-    SRC += $(OPUAVSYNTHDIR)/camerastabsettings.c
-    SRC += $(OPUAVSYNTHDIR)/cameradesired.c
     SRC += $(OPUAVSYNTHDIR)/gpspositionsensor.c
     SRC += $(OPUAVSYNTHDIR)/gpsvelocitysensor.c
     SRC += $(OPUAVSYNTHDIR)/gpssettings.c
