@@ -250,11 +250,6 @@ extern "C" {
 #include <pios_i2c_esc.h>
 #endif
 
-#ifdef PIOS_INCLUDE_OVERO
-/* #define PIOS_OVERO_SPI */
-#include <pios_overo.h>
-#endif
-
 #ifdef PIOS_INCLUDE_SDCARD
 /* #define LOG_FILENAME "startup.log" */
 #include <dosfs.h>
