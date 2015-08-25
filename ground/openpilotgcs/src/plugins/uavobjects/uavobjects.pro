@@ -55,7 +55,6 @@ HEADERS += \
     $$UAVOBJECT_SYNTHETICS/accelstate.h \
     $$UAVOBJECT_SYNTHETICS/magsensor.h \
     $$UAVOBJECT_SYNTHETICS/magstate.h \
-    $$UAVOBJECT_SYNTHETICS/camerastabsettings.h \
     $$UAVOBJECT_SYNTHETICS/flighttelemetrystats.h \
     $$UAVOBJECT_SYNTHETICS/systemstats.h \
     $$UAVOBJECT_SYNTHETICS/systemalarms.h \
@@ -116,7 +115,6 @@ HEADERS += \
     $$UAVOBJECT_SYNTHETICS/receiveractivity.h \
     $$UAVOBJECT_SYNTHETICS/attitudesettings.h \
     $$UAVOBJECT_SYNTHETICS/txpidsettings.h \
-    $$UAVOBJECT_SYNTHETICS/cameradesired.h \
     $$UAVOBJECT_SYNTHETICS/faultsettings.h \
     $$UAVOBJECT_SYNTHETICS/poilearnsettings.h \
     $$UAVOBJECT_SYNTHETICS/poilocation.h \
@@ -163,7 +161,6 @@ SOURCES += \
     $$UAVOBJECT_SYNTHETICS/gyrosensor.cpp \
     $$UAVOBJECT_SYNTHETICS/magsensor.cpp \
     $$UAVOBJECT_SYNTHETICS/magstate.cpp \
-    $$UAVOBJECT_SYNTHETICS/camerastabsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/flighttelemetrystats.cpp \
     $$UAVOBJECT_SYNTHETICS/systemstats.cpp \
     $$UAVOBJECT_SYNTHETICS/systemalarms.cpp \
@@ -225,7 +222,6 @@ SOURCES += \
     $$UAVOBJECT_SYNTHETICS/receiveractivity.cpp \
     $$UAVOBJECT_SYNTHETICS/attitudesettings.cpp \
     $$UAVOBJECT_SYNTHETICS/txpidsettings.cpp \
-    $$UAVOBJECT_SYNTHETICS/cameradesired.cpp \
     $$UAVOBJECT_SYNTHETICS/faultsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/poilearnsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/poilocation.cpp \
