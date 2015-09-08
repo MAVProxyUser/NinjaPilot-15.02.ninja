@@ -756,18 +756,6 @@ bool UploaderGadgetWidget::autoUpdate(bool erase)
     case 0x402:
         filename = "fw_coptercontrol";
         break;
-    case 0x501:
-        filename = "fw_osd";
-        break;
-    case 0x902:
-        filename = "fw_revoproto";
-        break;
-    case 0x903:
-        filename = "fw_revolution";
-        break;
-    case 0x904:
-        filename = "fw_discoveryf4bare";
-        break;
     default:
         emit progressUpdate(FAILURE, QVariant(tr("Unknown board id '0x%1'").arg(QString::number(m_dfu->devices[0].ID, 16))));
         emit autoUpdateFailed();
@@ -776,6 +764,7 @@ bool UploaderGadgetWidget::autoUpdate(bool erase)
     filename = ":/firmware/" + filename + ".opfw";
     QByteArray firmware;
     if (!QFile::exists(filename)) {
+	qDebug() << "No firmware images found!";
         emit progressUpdate(FAILURE, QVariant(tr("Firmware image not found.")));
         emit autoUpdateFailed();
         return false;
