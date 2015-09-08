@@ -110,12 +110,12 @@ typedef QMap<QString, QString> AppOptionValues;
 const int OptionIndent = 4;
 const int DescriptionIndent = 24;
 
-const QLatin1String APP_NAME("OpenPilot GCS");
+const QLatin1String APP_NAME("NinjaPilot GCS");
 
 const QLatin1String CORE_PLUGIN_NAME("Core");
 
-const QLatin1String SETTINGS_ORG_NAME("OpenPilot");
-const QLatin1String SETTINGS_APP_NAME("OpenPilotGCS_config");
+const QLatin1String SETTINGS_ORG_NAME("NinjaPilot");
+const QLatin1String SETTINGS_APP_NAME("NinjaPilotGCS_config");
 
 #ifdef Q_OS_MAC
 const QLatin1String SHARE_PATH("/../Resources");
@@ -123,7 +123,7 @@ const QLatin1String SHARE_PATH("/../Resources");
 const QLatin1String SHARE_PATH("/../share/openpilotgcs");
 #endif
 
-const char *DEFAULT_CONFIG_FILENAME = "OpenPilotGCS.xml";
+const char *DEFAULT_CONFIG_FILENAME = "NinjaPilotGCS.xml";
 
 const char *fixedOptionsC = " [OPTION]... [FILE]...\n"
                             "Options:\n"
@@ -606,7 +606,7 @@ int main(int argc, char * *argv)
         }
         if (!errors.isEmpty()) {
             QMessageBox::warning(0,
-                                 QCoreApplication::translate("Application", "OpenPilot GCS - Plugin loader messages"),
+                                 QCoreApplication::translate("Application", "NinjaPilot GCS - Plugin loader messages"),
                                  errors.join(QString::fromLatin1("\n\n")));
         }
     }

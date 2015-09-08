@@ -102,11 +102,11 @@ MainWindow::MainWindow() :
     m_additionalContexts(m_globalContext),
     // keep this in sync with main() in app/main.cpp
     m_settings(new QSettings(XmlConfig::XmlSettingsFormat, QSettings::UserScope,
-                             QLatin1String("OpenPilot"), QLatin1String("OpenPilotGCS_config"), this)),
+                             QLatin1String("NinjaPilot"), QLatin1String("NinjaPilotGCS_config"), this)),
     m_globalSettings(new QSettings(XmlConfig::XmlSettingsFormat, QSettings::SystemScope,
-                                   QLatin1String("OpenPilot"), QLatin1String("OpenPilotGCS_config"), this)),
+                                   QLatin1String("NinjaPilot"), QLatin1String("NinjaPilotGCS_config"), this)),
     m_settingsDatabase(new SettingsDatabase(QFileInfo(m_settings->fileName()).path(),
-                                            QLatin1String("OpenPilotGCS_config"),
+                                            QLatin1String("NinjaPilotGCS_config"),
                                             this)),
     m_dontSaveSettings(false),
     m_actionManager(new ActionManagerPrivate(this)),
@@ -137,10 +137,10 @@ MainWindow::MainWindow() :
 #ifndef Q_WS_MAC
     qApp->setWindowIcon(QIcon(":/core/images/openpilot_logo_128.png"));
 #endif
-    QCoreApplication::setApplicationName(QLatin1String("OpenPilotGCS"));
+    QCoreApplication::setApplicationName(QLatin1String("NinjaPilotGCS"));
     QCoreApplication::setApplicationVersion(QLatin1String(Core::Constants::GCS_VERSION_LONG));
-    QCoreApplication::setOrganizationName(QLatin1String("OpenPilot"));
-    QCoreApplication::setOrganizationDomain(QLatin1String("openpilot.org"));
+    QCoreApplication::setOrganizationName(QLatin1String("NinjaPilot"));
+    QCoreApplication::setOrganizationDomain(QLatin1String("ninjapilot.org"));
     QSettings::setDefaultFormat(XmlConfig::XmlSettingsFormat);
     qApp->setStyle(QStyleFactory::create("Fusion"));
 
@@ -690,7 +690,7 @@ void MainWindow::registerDefaultActions()
     // Window menu separators
     QAction *tmpaction1 = new QAction(this);
     tmpaction1->setSeparator(true);
-    cmd = am->registerAction(tmpaction1, QLatin1String("OpenPilot.Window.Sep.Split"), uavGadgetManagerContext);
+    cmd = am->registerAction(tmpaction1, QLatin1String("NinjaPilot.Window.Sep.Split"), uavGadgetManagerContext);
     mwindow->addAction(cmd, Constants::G_WINDOW_HIDE_TOOLBAR);
 
     m_showToolbarsAction = new QAction(tr("Edit Gadgets Mode"), this);
@@ -702,7 +702,7 @@ void MainWindow::registerDefaultActions()
     // Window menu separators
     QAction *tmpaction2 = new QAction(this);
     tmpaction2->setSeparator(true);
-    cmd = am->registerAction(tmpaction2, QLatin1String("OpenPilot.Window.Sep.Split2"), uavGadgetManagerContext);
+    cmd = am->registerAction(tmpaction2, QLatin1String("NinjaPilot.Window.Sep.Split2"), uavGadgetManagerContext);
     mwindow->addAction(cmd, Constants::G_WINDOW_SPLIT);
 
 #ifdef Q_WS_MAC
@@ -763,7 +763,7 @@ void MainWindow::registerDefaultActions()
     connect(tmpaction, SIGNAL(triggered()), this, SLOT(aboutPlugins()));
 
     // Credits Action
-    tmpaction = new QAction(QIcon(Constants::ICON_PLUGIN), tr("About &OpenPilot..."), this);
+    tmpaction = new QAction(QIcon(Constants::ICON_PLUGIN), tr("About &NinjaPilot..."), this);
     cmd = am->registerAction(tmpaction, Constants::ABOUT_AUTHORS, m_globalContext);
     mhelp->addAction(cmd, Constants::G_HELP_ABOUT);
     tmpaction->setEnabled(true);
@@ -800,7 +800,7 @@ void MainWindow::saveAll()
     }
 
     emit m_coreImpl->saveSettingsRequested();
-    saveSettings(); // OpenPilot-specific.
+    saveSettings(); // NinjaPilot-specific.
 }
 
 void MainWindow::exit()

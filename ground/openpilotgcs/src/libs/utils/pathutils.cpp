@@ -97,7 +97,7 @@ QString PathUtils::GetStoragePath()
 {
     // This routine works with "/" as the standard:
     // Work out where the settings are stored on the machine
-    QSettings set(XmlConfig::XmlSettingsFormat, QSettings::UserScope, QLatin1String("OpenPilot"), QLatin1String("OpenPilotGCS_config"));
+    QSettings set(XmlConfig::XmlSettingsFormat, QSettings::UserScope, QLatin1String("NinjaPilot"), QLatin1String("NinjaPilotGCS_config"));
     QFileInfo f(set.fileName());
     QDir dir(f.absoluteDir());
 
@@ -105,7 +105,7 @@ QString PathUtils::GetStoragePath()
     QString storagePath = homeDirPath;
 
     storagePath += QLatin1Char('/');
-    // storagePath += QLatin1String("OpenPilot");
+    // storagePath += QLatin1String("NinjaPilot");
     // storagePath += QLatin1Char('/');
     return storagePath;
 }
