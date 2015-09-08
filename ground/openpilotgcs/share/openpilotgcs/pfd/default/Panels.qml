@@ -989,7 +989,7 @@ Item {
         } 
 
         Text {
-             text: ["None", "Basic (No Nav)", "CompMag", "Comp+Mag+GPS", "EKFIndoor"
+             text: ["None", "Basic (No Nav)", "CompMag", "Comp+Mag+GPS", "EKFIndoor"]
              anchors.right: parent.right
              color: "white"
              font {
