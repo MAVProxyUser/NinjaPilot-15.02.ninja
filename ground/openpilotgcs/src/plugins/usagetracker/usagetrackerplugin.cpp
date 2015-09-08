@@ -81,7 +81,7 @@ void UsageTrackerPlugin::onAutopilotConnect()
             message.setIcon(QMessageBox::Information);
             message.addButton(tr("Yes, count me in"), QMessageBox::AcceptRole);
             message.addButton(tr("No, I will not help"), QMessageBox::RejectRole);
-            message.setText(tr("Openpilot GCS has a function to collect limited anonymous information about "
+            message.setText(tr("The NinjaPilot version of Openpilot GCS has a function to collect limited anonymous information about "
                                "the usage of the application itself and the OpenPilot hardware connected to it.<p>"
                                "The intention is to not include anything that can be considered sensitive "
                                "or a threat to the users integrity. The collected information will be sent "
@@ -138,7 +138,7 @@ void UsageTrackerPlugin::trackUsage()
     if (shouldSend(hash)) {
         query.addQueryItem("hash", hash);
 
-        QUrl url("https://www.openpilot.org/opver?" + query.toString(QUrl::FullyEncoded));
+        QUrl url("https://www.ratemode.ninja/opver?" + query.toString(QUrl::FullyEncoded));
 
         QNetworkAccessManager *networkAccessManager = new QNetworkAccessManager();
 
