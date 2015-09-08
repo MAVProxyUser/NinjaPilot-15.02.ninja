@@ -138,7 +138,7 @@ isEmpty(TOOLS_DIR) {
 
 GCS_APP_PATH = $$GCS_BUILD_TREE/bin
 macx {
-    GCS_APP_TARGET   = "OpenPilot GCS"
+    GCS_APP_TARGET   = "NinjaPilot GCS"
     GCS_LIBRARY_PATH = $$GCS_APP_PATH/$${GCS_APP_TARGET}.app/Contents/Plugins
     GCS_PLUGIN_PATH  = $$GCS_LIBRARY_PATH
     GCS_QT_QML_PATH = $$GCS_APP_PATH/$${GCS_APP_TARGET}.app/Contents/Imports
