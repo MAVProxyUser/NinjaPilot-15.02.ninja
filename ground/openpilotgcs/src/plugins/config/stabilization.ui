@@ -25330,15 +25330,6 @@ border-radius: 5;</string>
                    <property name="value">
                     <number>51</number>
                    </property>
-                   <property name="objrelation" stdset="0">
-                    <stringlist>
-                     <string>objname:AltitudeHoldSettings</string>
-                     <string>fieldname:VerticalPosP</string>
-                     <string>scale:0.01</string>
-                     <string>haslimits:yes</string>
-                     <string>buttongroup:98,10</string>
-                    </stringlist>
-                   </property>
                   </widget>
                  </item>
                  <item row="2" column="0">
@@ -25436,16 +25427,6 @@ border-radius: 5;</string>
                    <property name="tickPosition">
                     <enum>QSlider::TicksBelow</enum>
                    </property>
-                   <property name="objrelation" stdset="0">
-                    <stringlist>
-                     <string>objname:AltitudeHoldSettings</string>
-                     <string>fieldname:VerticalVelPID</string>
-                     <string>element:Ki</string>
-                     <string>scale:0.01</string>
-                     <string>haslimits:yes</string>
-                     <string>buttongroup:98</string>
-                    </stringlist>
-                   </property>
                   </widget>
                  </item>
                  <item row="3" column="2">
@@ -25482,16 +25463,6 @@ border-radius: 5;</string>
                    </property>
                    <property name="value">
                     <number>25</number>
-                   </property>
-                   <property name="objrelation" stdset="0">
-                    <stringlist>
-                     <string>objname:AltitudeHoldSettings</string>
-                     <string>fieldname:VerticalVelPID</string>
-                     <string>element:Ki</string>
-                     <string>scale:0.01</string>
-                     <string>haslimits:yes</string>
-                     <string>buttongroup:98,10</string>
-                    </stringlist>
                    </property>
                   </widget>
                  </item>
@@ -25543,16 +25514,6 @@ border-radius: 5;</string>
                    <property name="tickPosition">
                     <enum>QSlider::TicksBelow</enum>
                    </property>
-                   <property name="objrelation" stdset="0">
-                    <stringlist>
-                     <string>objname:AltitudeHoldSettings</string>
-                     <string>fieldname:VerticalVelPID</string>
-                     <string>element:Kd</string>
-                     <string>scale:0.0001</string>
-                     <string>haslimits:yes</string>
-                     <string>buttongroup:98</string>
-                    </stringlist>
-                   </property>
                   </widget>
                  </item>
                  <item row="4" column="2">
@@ -25589,16 +25550,6 @@ border-radius: 5;</string>
                    </property>
                    <property name="value">
                     <number>51</number>
-                   </property>
-                   <property name="objrelation" stdset="0">
-                    <stringlist>
-                     <string>objname:AltitudeHoldSettings</string>
-                     <string>fieldname:VerticalVelPID</string>
-                     <string>element:Kd</string>
-                     <string>scale:0.0001</string>
-                     <string>haslimits:yes</string>
-                     <string>buttongroup:98,10</string>
-                    </stringlist>
                    </property>
                   </widget>
                  </item>
@@ -25656,16 +25607,6 @@ border-radius: 5;</string>
                    <property name="tickPosition">
                     <enum>QSlider::TicksBelow</enum>
                    </property>
-                   <property name="objrelation" stdset="0">
-                    <stringlist>
-                     <string>objname:AltitudeHoldSettings</string>
-                     <string>fieldname:VerticalVelPID</string>
-                     <string>element:Beta</string>
-                     <string>scale:0.01</string>
-                     <string>haslimits:yes</string>
-                     <string>buttongroup:98</string>
-                    </stringlist>
-                   </property>
                   </widget>
                  </item>
                  <item row="5" column="2">
@@ -25706,16 +25647,6 @@ border-radius: 5;</string>
                    <property name="value">
                     <number>90</number>
                    </property>
-                   <property name="objrelation" stdset="0">
-                    <stringlist>
-                     <string>objname:AltitudeHoldSettings</string>
-                     <string>fieldname:VerticalVelPID</string>
-                     <string>element:Beta</string>
-                     <string>scale:0.01</string>
-                     <string>haslimits:yes</string>
-                     <string>buttongroup:98,10</string>
-                    </stringlist>
-                   </property>
                   </widget>
                  </item>
                  <item row="2" column="2">
@@ -25753,16 +25684,6 @@ border-radius: 5;</string>
                    <property name="value">
                     <number>50</number>
                    </property>
-                   <property name="objrelation" stdset="0">
-                    <stringlist>
-                     <string>objname:AltitudeHoldSettings</string>
-                     <string>fieldname:VerticalVelPID</string>
-                     <string>element:Kp</string>
-                     <string>scale:0.01</string>
-                     <string>haslimits:yes</string>
-                     <string>buttongroup:98,10</string>
-                    </stringlist>
-                   </property>
                   </widget>
                  </item>
                  <item row="1" column="1">
@@ -25782,15 +25703,6 @@ border-radius: 5;</string>
                    <property name="tickPosition">
                     <enum>QSlider::TicksBelow</enum>
                    </property>
-                   <property name="objrelation" stdset="0">
-                    <stringlist notr="true">
-                     <string>objname:AltitudeHoldSettings</string>
-                     <string>fieldname:VerticalPosP</string>
-                     <string>scale:0.01</string>
-                     <string>haslimits:yes</string>
-                     <string>buttongroup:98</string>
-                    </stringlist>
-                   </property>
                   </widget>
                  </item>
                  <item row="2" column="1">
@@ -25809,16 +25721,6 @@ border-radius: 5;</string>
                    </property>
                    <property name="tickPosition">
                     <enum>QSlider::TicksBelow</enum>
-                   </property>
-                   <property name="objrelation" stdset="0">
-                    <stringlist>
-                     <string>objname:AltitudeHoldSettings</string>
-                     <string>fieldname:VerticalVelPID</string>
-                     <string>element:Kp</string>
-                     <string>scale:0.01</string>
-                     <string>haslimits:yes</string>
-                     <string>buttongroup:98</string>
-                    </stringlist>
                    </property>
                   </widget>
                  </item>
