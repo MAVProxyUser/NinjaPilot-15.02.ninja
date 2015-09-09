@@ -1,5 +1,7 @@
-![Possible NinjaPilot Logo?](https://pbs.twimg.com/media/COadvoiUEAALEe-.png)
-(Image credits to: velezvelez)
+<p align="center">
+  <img src="https://github.com/MAVProxyUser/NinjaPilot-15.02.ninja/raw/master/NinjaLogo.png" alt="Possible NinjaPilot Logo?"/>
+</p>
+Image credits to: velezvelez
 
 What is NinjaPilot all about? 
 -----------------------------
