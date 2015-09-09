@@ -6,6 +6,7 @@
  * @{
  * @file       pios_config.h
  * @author     The OpenPilot Team, http://www.openpilot.org Copyright (C) 2010-2013.
+ * @author     LibrePilot, https://bitbucket.org/librepilot, Copyright (C) 2015
  * @brief      PiOS configuration header, the compile time config file for the PIOS.
  *             Defines which PiOS libraries and features are included in the firmware.
  * @see        The GNU Public License (GPL) Version 3
@@ -97,7 +98,7 @@
 /* PIOS receiver drivers */
 #define PIOS_INCLUDE_PWM
 #define PIOS_INCLUDE_PPM
-/* #define PIOS_INCLUDE_PPM_FLEXI */
+#define PIOS_INCLUDE_PPM_FLEXI
 #define PIOS_INCLUDE_DSM
 #define PIOS_INCLUDE_SBUS
 /* #define PIOS_INCLUDE_GCSRCVR */
@@ -111,6 +112,8 @@
 #define PIOS_INCLUDE_IAP
 #define PIOS_INCLUDE_SERVO
 /* #define PIOS_INCLUDE_I2C_ESC */
+/* #define PIOS_INCLUDE_OVERO */
+/* #define PIOS_OVERO_SPI */
 /* #define PIOS_INCLUDE_SDCARD */
 /* #define LOG_FILENAME "startup.log" */
 #define PIOS_INCLUDE_FLASH
@@ -159,13 +162,13 @@
 #define CPULOAD_LIMIT_CRITICAL          95
 
 /* Task stack sizes */
-#define PIOS_ACTUATOR_STACK_SIZE        820
+#define PIOS_ACTUATOR_STACK_SIZE        700
 #define PIOS_MANUAL_STACK_SIZE          735
 #define PIOS_RECEIVER_STACK_SIZE        620
 #define PIOS_STABILIZATION_STACK_SIZE   400
 
 #ifdef DIAG_TASKS
-#define PIOS_SYSTEM_STACK_SIZE          740
+#define PIOS_SYSTEM_STACK_SIZE          760
 #else
 #define PIOS_SYSTEM_STACK_SIZE          660
 #endif
