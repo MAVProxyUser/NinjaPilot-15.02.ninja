@@ -104,6 +104,13 @@ public:
     ConfigTaskWidget(QWidget *parent = 0);
     virtual ~ConfigTaskWidget();
 
+    // Combobox helper functions
+    static bool isComboboxOptionSelected(QComboBox *combo, int optionValue);
+    static int getComboboxSelectedOption(QComboBox *combo);
+    static void setComboboxSelectedOption(QComboBox *combo, int optionValue);
+    static int getComboboxIndexForOption(QComboBox *combo, int optionValue);
+    static void enableComboBoxOptionItem(QComboBox *combo, int optionValue, bool enable);
+
     void disableMouseWheelEvents();
     bool eventFilter(QObject *obj, QEvent *evt);
 
@@ -148,6 +155,7 @@ public:
         m_outOfLimitsStyle = style;
     }
     void addHelpButton(QPushButton *button, QString url);
+    void setWikiURL(QString url);
     void forceShadowUpdates();
     void forceConnectedState();
     virtual bool shouldObjectBeSaved(UAVObject *object);
@@ -208,6 +216,8 @@ private:
     bool m_isConnected;
     bool m_isWidgetUpdatesAllowed;
     QStringList m_objects;
+    QString m_wikiURL; // Wiki address for help button
+                       // Concatenated with WIKI_URL_ROOT
 
     QMultiHash<int, WidgetBinding *> m_reloadGroups;
     QMultiHash<QWidget *, WidgetBinding *> m_widgetBindingsPerWidget;

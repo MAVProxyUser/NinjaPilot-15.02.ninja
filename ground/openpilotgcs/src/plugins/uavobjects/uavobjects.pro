@@ -111,8 +111,10 @@ HEADERS += \
     $$UAVOBJECT_SYNTHETICS/hwsettings.h \
     $$UAVOBJECT_SYNTHETICS/gcsreceiver.h \
     $$UAVOBJECT_SYNTHETICS/receiveractivity.h \
+    $$UAVOBJECT_SYNTHETICS/receiverstatus.h \
     $$UAVOBJECT_SYNTHETICS/attitudesettings.h \
     $$UAVOBJECT_SYNTHETICS/txpidsettings.h \
+    $$UAVOBJECT_SYNTHETICS/txpidstatus.h \
     $$UAVOBJECT_SYNTHETICS/faultsettings.h \
     $$UAVOBJECT_SYNTHETICS/poilearnsettings.h \
     $$UAVOBJECT_SYNTHETICS/poilocation.h \
@@ -216,8 +218,10 @@ SOURCES += \
     $$UAVOBJECT_SYNTHETICS/hwsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/gcsreceiver.cpp \
     $$UAVOBJECT_SYNTHETICS/receiveractivity.cpp \
+    $$UAVOBJECT_SYNTHETICS/receiverstatus.cpp \
     $$UAVOBJECT_SYNTHETICS/attitudesettings.cpp \
     $$UAVOBJECT_SYNTHETICS/txpidsettings.cpp \
+    $$UAVOBJECT_SYNTHETICS/txpidstatus.cpp \
     $$UAVOBJECT_SYNTHETICS/faultsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/poilearnsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/poilocation.cpp \

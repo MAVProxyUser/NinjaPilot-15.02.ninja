@@ -191,6 +191,13 @@ macx {
     }
 }
 
+DEFINES += WIKI_URL_ROOT=$$shell_quote(\"$$WIKI_URL_ROOT\")
+
+isEmpty(WIKI_URL_ROOT) {
+    WIKI_URL_ROOT = Unknown
+} else {
+    WIKI_URL_ROOT = "$$WIKI_URL_ROOT"
+}
 
 DEFINES += GCS_DATA_BASENAME=\\\"$$GCS_DATA_BASENAME\\\"
 

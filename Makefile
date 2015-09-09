@@ -57,6 +57,8 @@ UAVOGEN_BUILD_CONF	:= release
 ANDROIDGCS_BUILD_CONF	:= debug
 GOOGLE_API_VERSION	:= 14
 
+WIKI_URL_ROOT := https://ninjapilot.org/wiki/doesnotexistyet
+
 # Clean out undesirable variables from the environment and command-line
 # to remove the chance that they will cause problems with our build
 define SANITIZE_VAR
@@ -459,6 +461,7 @@ OPENPILOTGCS_MAKEFILE := $(OPENPILOTGCS_DIR)/Makefile
 openpilotgcs_qmake $(OPENPILOTGCS_MAKEFILE): | $(OPENPILOTGCS_DIR)
 	$(V1) ( cd $(OPENPILOTGCS_DIR) && \
 	    $(QMAKE) $(ROOT_DIR)/ground/openpilotgcs/openpilotgcs.pro -spec $(QT_SPEC) -r CONFIG+="$(GCS_BUILD_CONF) $(GCS_SILENT)" $(GCS_QMAKE_OPTS) \
+            'WIKI_URL_ROOT="$(WIKI_URL_ROOT)"' \
 	)
 
 .PHONY: openpilotgcs

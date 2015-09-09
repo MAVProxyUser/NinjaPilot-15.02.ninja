@@ -2,7 +2,8 @@
  ******************************************************************************
  *
  * @file       configtxpidswidget.cpp
- * @author     The OpenPilot Team, http://www.openpilot.org Copyright (C) 2012.
+ * @author     The LibrePilot Project, http://www.librepilot.org Copyright (C) 2015.
+ *             The OpenPilot Team, http://www.openpilot.org Copyright (C) 2012.
  * @addtogroup GCSPlugins GCS Plugins
  * @{
  * @addtogroup ConfigPlugin Config Plugin
@@ -28,6 +29,7 @@
 #include "configtxpidwidget.h"
 #include "txpidsettings.h"
 #include "hwsettings.h"
+#include "attitudesettings.h"
 #include "stabilizationsettings.h"
 #include "stabilizationsettingsbank1.h"
 #include "stabilizationsettingsbank2.h"
@@ -40,6 +42,7 @@ ConfigTxPIDWidget::ConfigTxPIDWidget(QWidget *parent) : ConfigTaskWidget(parent)
     m_txpid = new Ui_TxPIDWidget();
     m_txpid->setupUi(this);
 
+    setWikiURL("TxPID");
     ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
     Core::Internal::GeneralSettings *settings = pm->getObject<Core::Internal::GeneralSettings>();
     if (!settings->useExpertMode()) {
@@ -87,8 +90,10 @@ ConfigTxPIDWidget::ConfigTxPIDWidget(QWidget *parent) : ConfigTaskWidget(parent)
 
     addWidgetBinding("TxPIDSettings", "UpdateMode", m_txpid->UpdateMode);
 
-    addWidget(m_txpid->TxPIDEnable);
+    connect(this, SIGNAL(widgetContentsChanged(QWidget *)), this, SLOT(processLinkedWidgets(QWidget *)));
 
+    addWidget(m_txpid->TxPIDEnable);
+    addWidget(m_txpid->enableAutoCalcYaw);
     enableControls(false);
     populateWidgets();
     refreshWidgetsValues();
@@ -159,9 +164,29 @@ static bool isExpoOption(int pidOption)
     }
 }
 
+static bool isFullPIDOption(int pidOption)
+{
+    switch (pidOption) {
+    case TxPIDSettings::PIDS_ROLLRATEPID:
+    case TxPIDSettings::PIDS_PITCHRATEPID:
+        return true;
+
+    default:
+        return false;
+    }
+}
+
 static bool isAcroPlusFactorOption(int pidOption)
 {
-    return pidOption == TxPIDSettings::PIDS_ACROPLUSFACTOR;
+    switch (pidOption) {
+    case TxPIDSettings::PIDS_ACROPITCHFACTOR:
+    case TxPIDSettings::PIDS_ACROROLLFACTOR:
+    case TxPIDSettings::PIDS_ACROROLLPITCHFACTOR:
+        return true;
+
+    default:
+        return false;
+    }
 }
 
 template <class StabilizationSettingsBankX>
@@ -172,9 +197,11 @@ static float defaultValueForPidOption(const StabilizationSettingsBankX *bank, in
         return 0.0f;
 
     case TxPIDSettings::PIDS_ROLLRATEKP:
+    case TxPIDSettings::PIDS_ROLLRATEPID:
         return bank->getRollRatePID_Kp();
 
     case TxPIDSettings::PIDS_PITCHRATEKP:
+    case TxPIDSettings::PIDS_PITCHRATEPID:
         return bank->getPitchRatePID_Kp();
 
     case TxPIDSettings::PIDS_ROLLPITCHRATEKP:
@@ -291,6 +318,13 @@ static float defaultValueForPidOption(const StabilizationSettingsBankX *bank, in
     case TxPIDSettings::PIDS_YAWEXPO:
         return bank->getStickExpo_Yaw();
 
+    case TxPIDSettings::PIDS_ACROROLLFACTOR:
+    case TxPIDSettings::PIDS_ACROROLLPITCHFACTOR:
+        return bank->getAcroInsanityFactor_Roll();
+
+    case TxPIDSettings::PIDS_ACROPITCHFACTOR:
+        return bank->getAcroInsanityFactor_Pitch();
+
     case -1: // The PID Option field was uninitialized.
         return 0.0f;
 
@@ -305,6 +339,15 @@ float ConfigTxPIDWidget::getDefaultValueForPidOption(int pidOption)
     if (pidOption == TxPIDSettings::PIDS_GYROTAU) {
         StabilizationSettings *stab = qobject_cast<StabilizationSettings *>(getObject(QString("StabilizationSettings")));
         return stab->getGyroTau();
+    } else if (pidOption == TxPIDSettings::PIDS_ACCELTAU) {
+        AttitudeSettings *att = qobject_cast<AttitudeSettings *>(getObject(QString("AttitudeSettings")));
+        return att->getAccelTau();
+    } else if (pidOption == TxPIDSettings::PIDS_ACCELKP) {
+        AttitudeSettings *att = qobject_cast<AttitudeSettings *>(getObject(QString("AttitudeSettings")));
+        return att->getAccelKp();
+    } else if (pidOption == TxPIDSettings::PIDS_ACCELKI) {
+        AttitudeSettings *att = qobject_cast<AttitudeSettings *>(getObject(QString("AttitudeSettings")));
+        return att->getAccelKi();
     }
 
     int pidBankIndex = m_txpid->pidBank->currentIndex();
@@ -421,4 +464,24 @@ void ConfigTxPIDWidget::saveSettings()
     applySettings();
     UAVObject *obj = HwSettings::GetInstance(getObjectManager());
     saveObjectToSD(obj);
+}
+
+void ConfigTxPIDWidget::processLinkedWidgets(QWidget *widget)
+{
+    Q_UNUSED(widget);
+    bool fullPidEnabled =
+        isFullPIDOption(m_txpid->PID1->currentIndex()) ||
+        isFullPIDOption(m_txpid->PID2->currentIndex()) ||
+        isFullPIDOption(m_txpid->PID3->currentIndex());
+    bool calcYawEnabled = fullPidEnabled && m_txpid->enableAutoCalcYaw->isChecked();
+
+    m_txpid->fullPID_Y_P_FactorSlider->setEnabled(calcYawEnabled);
+    m_txpid->fullPID_Y_P_FactorSpinBox->setEnabled(calcYawEnabled);
+    m_txpid->fullPID_Y_I_FactorSpinBox->setEnabled(calcYawEnabled);
+    m_txpid->fullPID_Y_D_FactorSpinBox->setEnabled(calcYawEnabled);
+    m_txpid->enableAutoCalcYaw->setEnabled(fullPidEnabled);
+    m_txpid->fullPID_RP_I_FactorSlider->setEnabled(fullPidEnabled);
+    m_txpid->fullPID_RP_I_FactorSpinBox->setEnabled(fullPidEnabled);
+    m_txpid->fullPID_RP_D_FactorSpinBox->setEnabled(fullPidEnabled);
+    m_txpid->groupBox_FullPids->setEnabled(fullPidEnabled);
 }

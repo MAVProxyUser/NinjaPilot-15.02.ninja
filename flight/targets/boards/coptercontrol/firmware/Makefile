@@ -114,9 +114,11 @@ ifndef TESTAPP
     SRC += $(OPUAVSYNTHDIR)/gpssettings.c
     SRC += $(OPUAVSYNTHDIR)/hwsettings.c
     SRC += $(OPUAVSYNTHDIR)/receiveractivity.c
+    SRC += $(OPUAVSYNTHDIR)/receiverstatus.c
     SRC += $(OPUAVSYNTHDIR)/mixerstatus.c
     SRC += $(OPUAVSYNTHDIR)/ratedesired.c
     SRC += $(OPUAVSYNTHDIR)/txpidsettings.c
+    SRC += $(OPUAVSYNTHDIR)/txpidstatus.c
     SRC += $(OPUAVSYNTHDIR)/mpu6000settings.c
     # Command line option for Gcsreceiver module
     ifeq ($(GCSRECEIVER), YES)
