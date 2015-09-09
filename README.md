@@ -1,7 +1,6 @@
 <p align="center">
   <img src="https://github.com/MAVProxyUser/NinjaPilot-15.02.ninja/raw/master/NinjaLogo.png" alt="Possible NinjaPilot Logo?"/>
 </p>
-Image credits to: velezvelez
 
 What is NinjaPilot all about? 
 -----------------------------
@@ -81,3 +80,8 @@ make all
 
 The project supported Windows, Linux and Mac OS X platforms as well as Android.
 Formerly you could check the wiki for more details: http://wiki.openpilot.org/display/Doc/OpenPilot+Developer+Manual (defunct)
+
+Logo image credits 
+------------------
+velezvelez - https://forums.openpilot.org/user/23337-velez/
+
