@@ -1,6 +1,7 @@
-What is NinjaPilot all about? 
 ![Possible NinjaPilot Logo?](https://pbs.twimg.com/media/COadvoiUEAALEe-.png)
+
 (Image credits to: velezvelez)
+What is NinjaPilot all about? 
 
 NinjaPilot is a slimed down OpenPilot release featuring ONLY CopterControl based (OPCC/CC3D/Atom) support. 
 The code is actually based on the last commit of 15.02 before the CC3D was disabled / depreciated in the 
