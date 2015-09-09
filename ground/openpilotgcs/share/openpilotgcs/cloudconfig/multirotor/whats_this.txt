@@ -1,0 +1,2 @@
+This folder is here to host downloaded or bundled vehicle settings template files (.optmpl).
+
