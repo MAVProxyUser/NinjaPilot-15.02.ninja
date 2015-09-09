@@ -4,10 +4,10 @@
 : ${ROOT_DIR?} ${BUILD_DIR?} ${PACKAGE_LBL?} ${PACKAGE_DIR?} ${PACKAGE_NAME?} ${PACKAGE_SEP?}
 
 # more variables
-APP_PATH="${BUILD_DIR}/openpilotgcs_release/bin/OpenPilot GCS.app"
-TEMP_FILE="${PACKAGE_DIR}/OpenPilot-temp.dmg"
+APP_PATH="${BUILD_DIR}/openpilotgcs_release/bin/NinjaPilot GCS.app"
+TEMP_FILE="${PACKAGE_DIR}/NinjaPilot-temp.dmg"
 OUT_FILE="${PACKAGE_DIR}/../${PACKAGE_NAME}${PACKAGE_SEP}${PACKAGE_LBL}${PACKAGE_SEP}osx.dmg"
-VOL_NAME="OpenPilot"
+VOL_NAME="NinjaPilot"
 
 # prepare the stage
 rm -f "${TEMP_FILE}"
@@ -20,7 +20,7 @@ echo "Unmount existing /Volumes/${VOL_NAME}"
 hdiutil unmount "/Volumes/${VOL_NAME}"
 fi
 
-hdiutil convert "${ROOT_DIR}/package/osx/OpenPilot.dmg" \
+hdiutil convert "${ROOT_DIR}/package/osx/NinjaPilot.dmg" \
     -format UDRW -o "${TEMP_FILE}"
 device=$(hdiutil attach "${TEMP_FILE}" | \
     egrep '^/dev/' | sed 1q | awk '{print $1}')
@@ -30,7 +30,7 @@ mountvolume=$(hdiutil info | egrep "^${device}"| egrep "${VOL_NAME}" | sed 's/.*
 
 echo "Image mounted as /Volumes/${mountvolume}"
 
-if [ ! -d "/Volumes/${mountvolume}/OpenPilot GCS.app" ]
+if [ ! -d "/Volumes/${mountvolume}/NinjaPilot GCS.app" ]
 then
     echo "Cannot find a valid image at /Volumes/${mountvolume}"
     exit 1
@@ -47,7 +47,7 @@ cp "${ROOT_DIR}/LICENSE.txt" "/Volumes/${mountvolume}/Docs"
 cp "${ROOT_DIR}/GPLv3.txt" "/Volumes/${mountvolume}/Docs"
 
 "${ROOT_DIR}/package/osx/libraries" \
-    "/Volumes/${mountvolume}/OpenPilot GCS.app" || exit 1
+    "/Volumes/${mountvolume}/NinjaPilot GCS.app" || exit 1
 
 hdiutil detach ${device}
 

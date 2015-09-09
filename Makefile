@@ -712,7 +712,7 @@ endif
 
 # Define some variables
 PACKAGE_LBL       := $(shell $(VERSION_INFO) --format=\$${LABEL})
-PACKAGE_NAME      := OpenPilot
+PACKAGE_NAME      := NinjaPilot
 PACKAGE_SEP       := -
 PACKAGE_FULL_NAME := $(PACKAGE_NAME)$(PACKAGE_SEP)$(PACKAGE_LBL)
 
