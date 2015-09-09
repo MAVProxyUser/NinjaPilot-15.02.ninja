@@ -8,7 +8,8 @@
  * @{
  *
  * @file       txpid.c
- * @author     The OpenPilot Team, http://www.openpilot.org Copyright (C) 2011.
+ * @author     The LibrePilot Project, http://www.librepilot.org Copyright (C) 2015.
+ *             The OpenPilot Team, http://www.openpilot.org Copyright (C) 2011.
  * @brief      Optional module to tune PID settings using R/C transmitter.
  *
  * @see        The GNU Public License (GPL) Version 3
@@ -55,11 +56,16 @@
 #include "accessorydesired.h"
 #include "manualcontrolcommand.h"
 #include "stabilizationsettings.h"
+#include "attitudesettings.h"
+#ifdef REVOLUTION
+#include "altitudeholdsettings.h"
+#endif
 #include "stabilizationbank.h"
 #include "stabilizationsettingsbank1.h"
 #include "stabilizationsettingsbank2.h"
 #include "stabilizationsettingsbank3.h"
 #include "flightstatus.h"
+#include "txpidstatus.h"
 #include "hwsettings.h"
 
 //
@@ -82,6 +88,7 @@
 // Private functions
 static void updatePIDs(UAVObjEvent *ev);
 static uint8_t update(float *var, float val);
+static uint8_t updateUint16(uint16_t *var, float val);
 static uint8_t updateUint8(uint8_t *var, float val);
 static uint8_t updateInt8(int8_t *var, float val);
 static float scale(float val, float inMin, float inMax, float outMin, float outMax);
@@ -95,6 +102,10 @@ int32_t TxPIDInitialize(void)
     bool txPIDEnabled;
     HwSettingsOptionalModulesData optionalModules;
 
+#ifdef REVOLUTION
+    AltitudeHoldSettingsInitialize();
+#endif
+
     HwSettingsInitialize();
     HwSettingsOptionalModulesGet(&optionalModules);
 
@@ -106,6 +117,7 @@ int32_t TxPIDInitialize(void)
 
     if (txPIDEnabled) {
         TxPIDSettingsInitialize();
+        TxPIDStatusInitialize();
         AccessoryDesiredInitialize();
 
         UAVObjEvent ev = {
@@ -130,7 +142,14 @@ int32_t TxPIDInitialize(void)
         metadata.telemetryUpdateMode   = UPDATEMODE_PERIODIC;
         metadata.telemetryUpdatePeriod = TELEMETRY_UPDATE_PERIOD_MS;
         StabilizationSettingsSetMetadata(&metadata);
-#endif
+
+        AttitudeSettingsInitialize();
+        AttitudeSettingsGetMetadata(&metadata);
+        metadata.telemetryAcked = 0;
+        metadata.telemetryUpdateMode   = UPDATEMODE_PERIODIC;
+        metadata.telemetryUpdatePeriod = TELEMETRY_UPDATE_PERIOD_MS;
+        AttitudeSettingsSetMetadata(&metadata);
+#endif /* if (TELEMETRY_UPDATE_PERIOD_MS != 0) */
 
         return 0;
     }
@@ -188,10 +207,25 @@ static void updatePIDs(UAVObjEvent *ev)
     }
     StabilizationSettingsData stab;
     StabilizationSettingsGet(&stab);
+
+    AttitudeSettingsData att;
+    AttitudeSettingsGet(&att);
+
+#ifdef REVOLUTION
+    AltitudeHoldSettingsData altitude;
+    AltitudeHoldSettingsGet(&altitude);
+#endif
     AccessoryDesiredData accessory;
 
-    uint8_t needsUpdateBank = 0;
-    uint8_t needsUpdateStab = 0;
+    TxPIDStatusData txpid_status;
+    TxPIDStatusGet(&txpid_status);
+
+    uint8_t needsUpdateBank     = 0;
+    uint8_t needsUpdateStab     = 0;
+    uint8_t needsUpdateAtt      = 0;
+#ifdef REVOLUTION
+    uint8_t needsUpdateAltitude = 0;
+#endif
 
     // Loop through every enabled instance
     for (uint8_t i = 0; i < TXPIDSETTINGS_PIDS_NUMELEM; i++) {
@@ -214,9 +248,21 @@ static void updatePIDs(UAVObjEvent *ev)
                 continue;
             }
 
+            TxPIDStatusCurPIDToArray(txpid_status.CurPID)[i] = value;
+
             switch (TxPIDSettingsPIDsToArray(inst.PIDs)[i]) {
             case TXPIDSETTINGS_PIDS_ROLLRATEKP:
                 needsUpdateBank |= update(&bank.RollRatePID.Kp, value);
+                break;
+            case TXPIDSETTINGS_PIDS_ROLLRATEPID:
+                needsUpdateBank |= update(&bank.RollRatePID.Kp, value);
+                needsUpdateBank |= update(&bank.RollRatePID.Ki, value * inst.PitchRollRateFactors.I);
+                needsUpdateBank |= update(&bank.RollRatePID.Kd, value * inst.PitchRollRateFactors.D);
+                break;
+            case TXPIDSETTINGS_PIDS_PITCHRATEPID:
+                needsUpdateBank |= update(&bank.PitchRatePID.Kp, value);
+                needsUpdateBank |= update(&bank.PitchRatePID.Ki, value * inst.PitchRollRateFactors.I);
+                needsUpdateBank |= update(&bank.PitchRatePID.Kd, value * inst.PitchRollRateFactors.D);
                 break;
             case TXPIDSETTINGS_PIDS_ROLLRATEKI:
                 needsUpdateBank |= update(&bank.RollRatePID.Ki, value);
@@ -228,7 +274,7 @@ static void updatePIDs(UAVObjEvent *ev)
                 needsUpdateBank |= update(&bank.RollRatePID.ILimit, value);
                 break;
             case TXPIDSETTINGS_PIDS_ROLLRATERESP:
-                needsUpdateBank |= update(&bank.ManualRate.Roll, value);
+                needsUpdateBank |= updateUint16(&bank.ManualRate.Roll, value);
                 break;
             case TXPIDSETTINGS_PIDS_ROLLATTITUDEKP:
                 needsUpdateBank |= update(&bank.RollPI.Kp, value);
@@ -255,7 +301,7 @@ static void updatePIDs(UAVObjEvent *ev)
                 needsUpdateBank |= update(&bank.PitchRatePID.ILimit, value);
                 break;
             case TXPIDSETTINGS_PIDS_PITCHRATERESP:
-                needsUpdateBank |= update(&bank.ManualRate.Pitch, value);
+                needsUpdateBank |= updateUint16(&bank.ManualRate.Pitch, value);
                 break;
             case TXPIDSETTINGS_PIDS_PITCHATTITUDEKP:
                 needsUpdateBank |= update(&bank.PitchPI.Kp, value);
@@ -286,8 +332,8 @@ static void updatePIDs(UAVObjEvent *ev)
                 needsUpdateBank |= update(&bank.PitchRatePID.ILimit, value);
                 break;
             case TXPIDSETTINGS_PIDS_ROLLPITCHRATERESP:
-                needsUpdateBank |= update(&bank.ManualRate.Roll, value);
-                needsUpdateBank |= update(&bank.ManualRate.Pitch, value);
+                needsUpdateBank |= updateUint16(&bank.ManualRate.Roll, value);
+                needsUpdateBank |= updateUint16(&bank.ManualRate.Pitch, value);
                 break;
             case TXPIDSETTINGS_PIDS_ROLLPITCHATTITUDEKP:
                 needsUpdateBank |= update(&bank.RollPI.Kp, value);
@@ -318,7 +364,7 @@ static void updatePIDs(UAVObjEvent *ev)
                 needsUpdateBank |= update(&bank.YawRatePID.ILimit, value);
                 break;
             case TXPIDSETTINGS_PIDS_YAWRATERESP:
-                needsUpdateBank |= update(&bank.ManualRate.Yaw, value);
+                needsUpdateBank |= updateUint16(&bank.ManualRate.Yaw, value);
                 break;
             case TXPIDSETTINGS_PIDS_YAWATTITUDEKP:
                 needsUpdateBank |= update(&bank.YawPI.Kp, value);
@@ -348,9 +394,43 @@ static void updatePIDs(UAVObjEvent *ev)
             case TXPIDSETTINGS_PIDS_GYROTAU:
                 needsUpdateStab |= update(&stab.GyroTau, value);
                 break;
-            case TXPIDSETTINGS_PIDS_ACROPLUSFACTOR:
-                needsUpdateBank |= update(&bank.AcroInsanityFactor, value);
+            case TXPIDSETTINGS_PIDS_ACROROLLFACTOR:
+                needsUpdateBank |= updateUint8(&bank.AcroInsanityFactor.Roll, value);
                 break;
+            case TXPIDSETTINGS_PIDS_ACROPITCHFACTOR:
+                needsUpdateBank |= updateUint8(&bank.AcroInsanityFactor.Pitch, value);
+                break;
+            case TXPIDSETTINGS_PIDS_ACROROLLPITCHFACTOR:
+                needsUpdateBank |= updateUint8(&bank.AcroInsanityFactor.Roll, value);
+                needsUpdateBank |= updateUint8(&bank.AcroInsanityFactor.Pitch, value);
+                break;
+            case TXPIDSETTINGS_PIDS_ACCELTAU:
+                needsUpdateAtt  |= update(&att.AccelTau, value);
+                break;
+            case TXPIDSETTINGS_PIDS_ACCELKP:
+                needsUpdateAtt  |= update(&att.AccelKp, value);
+                break;
+            case TXPIDSETTINGS_PIDS_ACCELKI:
+                needsUpdateAtt  |= update(&att.AccelKi, value);
+                break;
+
+#ifdef REVOLUTION
+            case TXPIDSETTINGS_PIDS_ALTITUDEPOSKP:
+                needsUpdateAltitude |= update(&altitude.VerticalPosP, value);
+                break;
+            case TXPIDSETTINGS_PIDS_ALTITUDEVELOCITYKP:
+                needsUpdateAltitude |= update(&altitude.VerticalVelPID.Kp, value);
+                break;
+            case TXPIDSETTINGS_PIDS_ALTITUDEVELOCITYKI:
+                needsUpdateAltitude |= update(&altitude.VerticalVelPID.Ki, value);
+                break;
+            case TXPIDSETTINGS_PIDS_ALTITUDEVELOCITYKD:
+                needsUpdateAltitude |= update(&altitude.VerticalVelPID.Kd, value);
+                break;
+            case TXPIDSETTINGS_PIDS_ALTITUDEVELOCITYBETA:
+                needsUpdateAltitude |= update(&altitude.VerticalVelPID.Beta, value);
+                break;
+#endif
             default:
                 PIOS_Assert(0);
             }
@@ -358,6 +438,20 @@ static void updatePIDs(UAVObjEvent *ev)
     }
     if (needsUpdateStab) {
         StabilizationSettingsSet(&stab);
+    }
+    if (needsUpdateAtt) {
+        AttitudeSettingsSet(&att);
+    }
+#ifdef REVOLUTION
+    if (needsUpdateAltitude) {
+        AltitudeHoldSettingsSet(&altitude);
+    }
+#endif
+    if (inst.RatePIDRecalculateYaw != TXPIDSETTINGS_RATEPIDRECALCULATEYAW_FALSE) {
+        float newKp = (bank.RollRatePID.Kp + bank.PitchRatePID.Kp) * .5f * inst.YawRateFactors.P;
+        needsUpdateBank |= update(&bank.YawRatePID.Kp, newKp);
+        needsUpdateBank |= update(&bank.YawRatePID.Ki, newKp * inst.YawRateFactors.I);
+        needsUpdateBank |= update(&bank.YawRatePID.Kd, newKp * inst.YawRateFactors.D);
     }
     if (needsUpdateBank) {
         switch (inst.BankNumber) {
@@ -376,6 +470,15 @@ static void updatePIDs(UAVObjEvent *ev)
         default:
             return;
         }
+    }
+
+    if (needsUpdateStab ||
+        needsUpdateAtt ||
+#ifdef REVOLUTION
+        needsUpdateAltitude ||
+#endif /* REVOLUTION */
+        needsUpdateBank) {
+        TxPIDStatusSet(&txpid_status);;
     }
 }
 
@@ -427,6 +530,21 @@ static uint8_t update(float *var, float val)
      * of numbers we see here*/
     if (fabsf(*var - val) > 1e-9f) {
         *var = val;
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Updates var using val if needed.
+ * \returns 1 if updated, 0 otherwise
+ */
+static uint8_t updateUint16(uint16_t *var, float val)
+{
+    uint16_t roundedVal = (uint16_t)roundf(val);
+
+    if (*var != roundedVal) {
+        *var = roundedVal;
         return 1;
     }
     return 0;

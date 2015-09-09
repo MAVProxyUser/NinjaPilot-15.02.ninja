@@ -37,6 +37,7 @@
 #include <manualcontrolsettings.h>
 #include <manualcontrolcommand.h>
 #include <receiveractivity.h>
+#include <receiverstatus.h>
 #include <flightstatus.h>
 #include <flighttelemetrystats.h>
 #ifndef PIOS_EXCLUDE_ADVANCED_FEATURES
@@ -67,7 +68,7 @@
 // safe band to allow a bit of calibration error or trim offset (in microseconds)
 #define CONNECTION_OFFSET                250
 
-#define ASSISTEDCONTROL_DEADBAND_MINIMUM 0.02f // minimum value for a well bahaved Tx.
+#define ASSISTEDCONTROL_DEADBAND_MINIMUM 2 // minimum value for a well bahaved Tx, in percent.
 
 // Private types
 
@@ -86,7 +87,7 @@ static void receiverTask(void *parameters);
 static float scaleChannel(int16_t value, int16_t max, int16_t min, int16_t neutral);
 static uint32_t timeDifferenceMs(portTickType start_time, portTickType end_time);
 static bool validInputRange(int16_t min, int16_t max, uint16_t value);
-static void applyDeadband(float *value, float deadband);
+static void applyDeadband(float *value, uint8_t deadband);
 static void SettingsUpdatedCb(UAVObjEvent *ev);
 
 #ifndef PIOS_EXCLUDE_ADVANCED_FEATURES
@@ -94,7 +95,7 @@ static uint8_t isAssistedFlightMode(uint8_t position);
 #endif
 
 #ifdef USE_INPUT_LPF
-static void applyLPF(float *value, ManualControlSettingsResponseTimeElem channel, ManualControlSettingsResponseTimeData *responseTime, float deadband, float dT);
+static void applyLPF(float *value, ManualControlSettingsResponseTimeElem channel, ManualControlSettingsResponseTimeData *responseTime, uint8_t deadband, float dT);
 #endif
 
 #define RCVR_ACTIVITY_MONITOR_CHANNELS_PER_GROUP 12
@@ -102,12 +103,17 @@ static void applyLPF(float *value, ManualControlSettingsResponseTimeElem channel
 struct rcvr_activity_fsm {
     ManualControlSettingsChannelGroupsOptions group;
     uint16_t prev[RCVR_ACTIVITY_MONITOR_CHANNELS_PER_GROUP];
-    uint8_t sample_count;
+    uint8_t  sample_count;
+    uint8_t  quality;
 };
 static struct rcvr_activity_fsm activity_fsm;
 
 static void resetRcvrActivity(struct rcvr_activity_fsm *fsm);
 static bool updateRcvrActivity(struct rcvr_activity_fsm *fsm);
+static void resetRcvrStatus(struct rcvr_activity_fsm *fsm);
+static bool updateRcvrStatus(
+    struct rcvr_activity_fsm *fsm,
+    ManualControlSettingsChannelGroupsOptions group);
 
 #define assumptions \
     ( \
@@ -143,6 +149,7 @@ int32_t ReceiverInitialize()
     AccessoryDesiredInitialize();
     ManualControlCommandInitialize();
     ReceiverActivityInitialize();
+    ReceiverStatusInitialize();
     ManualControlSettingsInitialize();
 #ifndef PIOS_EXCLUDE_ADVANCED_FEATURES
     StabilizationSettingsInitialize();
@@ -208,6 +215,7 @@ static void receiverTask(__attribute__((unused)) void *parameters)
     /* Initialize the RcvrActivty FSM */
     portTickType lastActivityTime = xTaskGetTickCount();
     resetRcvrActivity(&activity_fsm);
+    resetRcvrStatus(&activity_fsm);
 
     // Main task loop
     lastSysTime = xTaskGetTickCount();
@@ -232,9 +240,13 @@ static void receiverTask(__attribute__((unused)) void *parameters)
                 /* Reset the aging timer because activity was detected */
                 lastActivityTime = lastSysTime;
             }
+            /* Read signal quality from the group used for the throttle */
+            (void)updateRcvrStatus(&activity_fsm,
+                                   settings.ChannelGroups.Throttle);
         }
         if (timeDifferenceMs(lastActivityTime, lastSysTime) > 5000) {
             resetRcvrActivity(&activity_fsm);
+            resetRcvrStatus(&activity_fsm);
             lastActivityTime = lastSysTime;
         }
 
@@ -277,6 +289,10 @@ static void receiverTask(__attribute__((unused)) void *parameters)
                                                 ManualControlSettingsChannelNeutralToArray(settings.ChannelNeutral)[n]);
             }
         }
+
+        /* Read signal quality from the group used for the throttle */
+        (void)updateRcvrStatus(&activity_fsm,
+                               settings.ChannelGroups.Throttle);
 
         // Sanity Check Throttle and Yaw
         if (settings.ChannelGroups.Yaw >= MANUALCONTROLSETTINGS_CHANNELGROUPS_NONE
@@ -434,7 +450,7 @@ static void receiverTask(__attribute__((unused)) void *parameters)
                 cmd.FlightModeSwitchPosition = settings.FlightModeNumber - 1;
             }
 
-            float deadband_checked = settings.Deadband;
+            uint8_t deadband_checked = settings.Deadband;
 #ifndef PIOS_EXCLUDE_ADVANCED_FEATURES
             // AssistedControl must have deadband set for pitch/roll hence
             // we default to a higher value for badly behaved TXs and also enforce a minimum value
@@ -454,7 +470,7 @@ static void receiverTask(__attribute__((unused)) void *parameters)
 #endif // PIOS_EXCLUDE_ADVANCED_FEATURES
 
             // Apply deadband for Roll/Pitch/Yaw stick inputs
-            if (deadband_checked > 0.0f) {
+            if (deadband_checked > 0) {
                 applyDeadband(&cmd.Roll, deadband_checked);
                 applyDeadband(&cmd.Pitch, deadband_checked);
                 applyDeadband(&cmd.Yaw, deadband_checked);
@@ -478,7 +494,7 @@ static void receiverTask(__attribute__((unused)) void *parameters)
                 && cmd.Channel[MANUALCONTROLSETTINGS_CHANNELGROUPS_COLLECTIVE] != (uint16_t)PIOS_RCVR_NODRIVER
                 && cmd.Channel[MANUALCONTROLSETTINGS_CHANNELGROUPS_COLLECTIVE] != (uint16_t)PIOS_RCVR_TIMEOUT) {
                 cmd.Collective = scaledChannel[MANUALCONTROLSETTINGS_CHANNELGROUPS_COLLECTIVE];
-                if (settings.Deadband > 0.0f) {
+                if (settings.Deadband > 0) {
                     applyDeadband(&cmd.Collective, settings.Deadband);
                 }
 #ifdef USE_INPUT_LPF
@@ -568,6 +584,12 @@ static void resetRcvrActivity(struct rcvr_activity_fsm *fsm)
     fsm->sample_count = 0;
 }
 
+static void resetRcvrStatus(struct rcvr_activity_fsm *fsm)
+{
+    /* Reset the state */
+    fsm->quality = 0;
+}
+
 static void updateRcvrActivitySample(uint32_t rcvr_id, uint16_t samples[], uint8_t max_channels)
 {
     for (uint8_t channel = 1; channel <= max_channels; channel++) {
@@ -612,6 +634,9 @@ static bool updateRcvrActivityCompare(uint32_t rcvr_id, struct rcvr_activity_fsm
             case MANUALCONTROLSETTINGS_CHANNELGROUPS_SBUS:
                 group = RECEIVERACTIVITY_ACTIVEGROUP_SBUS;
                 break;
+            case MANUALCONTROLSETTINGS_CHANNELGROUPS_SRXL:
+                group = RECEIVERACTIVITY_ACTIVEGROUP_SRXL;
+                break;
             case MANUALCONTROLSETTINGS_CHANNELGROUPS_GCS:
                 group = RECEIVERACTIVITY_ACTIVEGROUP_GCS;
                 break;
@@ -638,6 +663,7 @@ static bool updateRcvrActivity(struct rcvr_activity_fsm *fsm)
     if (fsm->group >= MANUALCONTROLSETTINGS_CHANNELGROUPS_NONE) {
         /* We're out of range, reset things */
         resetRcvrActivity(fsm);
+        resetRcvrStatus(fsm);
     }
 
     extern uint32_t pios_rcvr_group_map[];
@@ -678,6 +704,32 @@ group_completed:
             fsm->sample_count++;
             break;
         }
+    }
+
+    return activity_updated;
+}
+
+/* Read signal quality from the specified group */
+static bool updateRcvrStatus(
+    struct rcvr_activity_fsm *fsm,
+    ManualControlSettingsChannelGroupsOptions group)
+{
+    extern uint32_t pios_rcvr_group_map[];
+    bool activity_updated = false;
+    int8_t quality;
+
+    quality = PIOS_RCVR_GetQuality(pios_rcvr_group_map[group]);
+
+    /* If no driver is detected or any other error then return */
+    if (quality < 0) {
+        return activity_updated;
+    }
+
+    /* Compare with previous sample */
+    if (quality != fsm->quality) {
+        fsm->quality     = quality;
+        ReceiverStatusQualitySet(&fsm->quality);
+        activity_updated = true;
     }
 
     return activity_updated;
@@ -738,14 +790,16 @@ bool validInputRange(int16_t min, int16_t max, uint16_t value)
 /**
  * @brief Apply deadband to Roll/Pitch/Yaw channels
  */
-static void applyDeadband(float *value, float deadband)
+static void applyDeadband(float *value, uint8_t deadband)
 {
-    if (fabsf(*value) < deadband) {
+    float floatDeadband = ((float)deadband) * 0.01f;
+
+    if (fabsf(*value) < floatDeadband) {
         *value = 0.0f;
     } else if (*value > 0.0f) {
-        *value -= deadband;
+        *value = (*value - floatDeadband) / (1.0f - floatDeadband);
     } else {
-        *value += deadband;
+        *value = (*value + floatDeadband) / (1.0f - floatDeadband);
     }
 }
 
@@ -753,16 +807,17 @@ static void applyDeadband(float *value, float deadband)
 /**
  * @brief Apply Low Pass Filter to Throttle/Roll/Pitch/Yaw or Accessory channel
  */
-static void applyLPF(float *value, ManualControlSettingsResponseTimeElem channel, ManualControlSettingsResponseTimeData *responseTime, float deadband, float dT)
+static void applyLPF(float *value, ManualControlSettingsResponseTimeElem channel, ManualControlSettingsResponseTimeData *responseTime, uint8_t deadband, float dT)
 {
     float rt = (float)ManualControlSettingsResponseTimeToArray((*responseTime))[channel];
 
     if (rt > 0.0f) {
         inputFiltered[channel] = ((rt * inputFiltered[channel]) + (dT * (*value))) / (rt + dT);
 
+        float floatDeadband = ((float)deadband) * 0.01f;
         // avoid a long tail of non-zero data. if we have deadband, once the filtered result reduces to 1/10th
         // of deadband revert to 0.  We downstream rely on this to know when sticks are centered.
-        if (deadband > 0.0f && fabsf(inputFiltered[channel]) < deadband / 10.0f) {
+        if (floatDeadband > 0.0f && fabsf(inputFiltered[channel]) < floatDeadband * 0.1f) {
             inputFiltered[channel] = 0.0f;
         }
         *value = inputFiltered[channel];
