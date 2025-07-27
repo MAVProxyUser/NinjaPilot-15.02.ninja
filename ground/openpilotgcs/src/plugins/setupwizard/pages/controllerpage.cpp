@@ -148,7 +148,7 @@ void ControllerPage::setControllerType(SetupWizard::CONTROLLER_TYPE type)
     }
 }
 
-void ControllerPage::devicesChanged(QLinkedList<Core::DevListItem> devices)
+void ControllerPage::devicesChanged(std::list<Core::DevListItem> devices)
 {
     // Get the selected item before the update if any
     QString currSelectedDeviceName = ui->deviceCombo->currentIndex() != -1 ?

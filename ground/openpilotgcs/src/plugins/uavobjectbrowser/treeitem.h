@@ -32,7 +32,6 @@
 #include "uavmetaobject.h"
 #include "uavobjectfield.h"
 #include <QtCore/QList>
-#include <QtCore/QLinkedList>
 #include <QtCore/QMap>
 #include <QtCore/QVariant>
 #include <QtCore/QTime>

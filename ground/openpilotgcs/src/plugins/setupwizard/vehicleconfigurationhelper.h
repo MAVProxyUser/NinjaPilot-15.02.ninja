@@ -73,7 +73,7 @@ signals:
     void saveProgress(int total, int current, QString description);
 
 private:
-    static const float DEFAULT_ENABLED_ACCEL_TAU = 0.1;
+    static constexpr float DEFAULT_ENABLED_ACCEL_TAU = 0.1;
 
     VehicleConfigurationSource *m_configSource;
     UAVObjectManager *m_uavoManager;

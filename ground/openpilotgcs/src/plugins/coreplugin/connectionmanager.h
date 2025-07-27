@@ -35,7 +35,7 @@
 #include <QWidget>
 #include <QtCore/QVector>
 #include <QtCore/QIODevice>
-#include <QtCore/QLinkedList>
+#include <list>
 #include <QPushButton>
 #include <QComboBox>
 #include <QMessageBox>
@@ -90,7 +90,7 @@ public:
     }
     DevListItem findDevice(const QString &devName);
 
-    QLinkedList<DevListItem> getAvailableDevices()
+    std::list<DevListItem> getAvailableDevices()
     {
         return m_devList;
     }
@@ -116,7 +116,7 @@ signals:
     void deviceConnected(QIODevice *device);
     void deviceAboutToDisconnect();
     void deviceDisconnected();
-    void availableDevicesChanged(const QLinkedList<Core::DevListItem> devices);
+    void availableDevicesChanged(const std::list<Core::DevListItem> devices);
 
 public slots:
     void telemetryConnected();
@@ -138,7 +138,7 @@ private slots:
 protected:
     QComboBox *m_availableDevList;
     QPushButton *m_connectBtn;
-    QLinkedList<DevListItem> m_devList;
+    std::list<DevListItem> m_devList;
     QList<IConnection *> m_connectionsList;
 
     // currently connected connection plugin

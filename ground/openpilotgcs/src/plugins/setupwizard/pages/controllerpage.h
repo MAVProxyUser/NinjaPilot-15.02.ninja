@@ -59,7 +59,7 @@ private:
     TelemetryManager *m_telemtryManager;
 
 private slots:
-    void devicesChanged(QLinkedList<Core::DevListItem> devices);
+    void devicesChanged(std::list<Core::DevListItem> devices);
     void connectionStatusChanged();
     void connectDisconnect();
 };

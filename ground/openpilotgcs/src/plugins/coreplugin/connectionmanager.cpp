@@ -37,6 +37,7 @@
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QComboBox>
+#include <algorithm>
 #include <QEventLoop>
 
 namespace Core {
@@ -380,7 +381,7 @@ void ConnectionManager::updateConnectionList(IConnection *connection)
     // Go through the list of connections of that type.  If they are not in the
     // available device list then remove them.  If they are connected, then
     // disconnect them.
-    for (QLinkedList<DevListItem>::iterator iter = m_devList.begin(); iter != m_devList.end();) {
+    for (std::list<DevListItem>::iterator iter = m_devList.begin(); iter != m_devList.end();) {
         if (iter->connection != connection) {
             ++iter;
             continue;
@@ -402,7 +403,8 @@ void ConnectionManager::updateConnectionList(IConnection *connection)
 
     // Add any back to list that don't exist
     foreach(IConnection::device dev, availableDev) {
-        bool found = m_devList.contains(DevListItem(connection, dev));
+        DevListItem searchItem(connection, dev);
+        bool found = std::find(m_devList.begin(), m_devList.end(), searchItem) != m_devList.end();
 
         if (!found) {
             registerDevice(connection, dev);
@@ -420,7 +422,7 @@ void ConnectionManager::registerDevice(IConnection *conn, IConnection::device de
 {
     DevListItem d(conn, device);
 
-    m_devList.append(d);
+    m_devList.push_back(d);
 }
 
 /**
@@ -458,7 +460,7 @@ void ConnectionManager::devChanged(IConnection *connection)
         NonccWarningClosed = true;
     }
 
-    qDebug() << "# devices " << m_devList.count();
+    qDebug() << "# devices " << m_devList.size();
     emit availableDevicesChanged(m_devList);
 
 
