@@ -125,7 +125,7 @@ uint32_t PIOS_SYS_getCPUFlashSize(void)
  * (12 bytes returned for STM32)
  * return < 0 if feature not supported
  */
-int32_t PIOS_SYS_SerialNumberGetBinary(uint8_t *array)
+int32_t PIOS_SYS_SerialNumberGetBinary(uint8_t array[PIOS_SYS_SERIAL_NUM_BINARY_LEN])
 {
     int i;
 
@@ -146,7 +146,7 @@ int32_t PIOS_SYS_SerialNumberGetBinary(uint8_t *array)
  * (24 digits returned for STM32)
  * return < 0 if feature not supported
  */
-int32_t PIOS_SYS_SerialNumberGet(char *str)
+int32_t PIOS_SYS_SerialNumberGet(char str[PIOS_SYS_SERIAL_NUM_ASCII_LEN + 1])
 {
     int i;
 

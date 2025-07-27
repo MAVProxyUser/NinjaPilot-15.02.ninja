@@ -107,11 +107,12 @@ struct UAVOBase {
 struct UAVOMeta {
     struct UAVOBase base;
     UAVObjMetadata  instance0;
-} __attribute__((packed));
+} __attribute__((packed, aligned(4)));
 
 /* Shared data structure for all data-carrying UAVObjects (UAVOSingle and UAVOMulti) */
 struct UAVOData {
     struct UAVOBase base;
+    uint8_t _pad[3];  /* Ensure metaObj is 4-byte aligned */
     uint32_t id;
     /*
      * Embed the Meta object as another complete UAVO
@@ -130,7 +131,7 @@ struct UAVOSingle {
      * Additional space will be malloc'd here to hold the
      * the data for this instance.
      */
-} __attribute__((packed));
+} __attribute__((packed, aligned(4)));
 
 /* Part of a linked list of instances chained off of a multi instance UAVO. */
 struct UAVOMultiInst {
@@ -151,7 +152,7 @@ struct UAVOMulti {
      * Additional space will be malloc'd here to hold the
      * the data for instance 0.
      */
-} __attribute__((packed));
+} __attribute__((packed, aligned(4)));
 
 /** all information about a metaobject are hardcoded constants **/
 #define MetaNumBytes sizeof(UAVObjMetadata)

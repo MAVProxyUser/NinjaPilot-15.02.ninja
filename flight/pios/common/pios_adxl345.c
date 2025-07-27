@@ -355,7 +355,7 @@ int8_t PIOS_ADXL345_ReadAndAccumulateSamples(struct pios_adxl345_data *data, uin
     PIOS_Instrumentation_TimeStart(counterUpd);
 #endif
     for (uint8_t i = 0; i < samples; i++) {
-        uint8_t buf[7] = { 0 };
+        uint8_t buf[8] = { 0 };
         uint8_t *rec   = &buf[1];
         PIOS_SPI_RC_PinSet(dev->spi_id, dev->slave_num, 0);
         buf[0] = ADXL_X0_ADDR | ADXL_MULTI_BIT | ADXL_READ_BIT; // Multibyte read starting at X0

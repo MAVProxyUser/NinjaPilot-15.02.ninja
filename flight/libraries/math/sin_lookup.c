@@ -101,9 +101,6 @@ int sin_lookup_initalize()
  */
 float sin_lookup_deg(float angle)
 {
-    if (sin_table == NULL) {
-        return 0;
-    }
 
     // <bug, was> int i_ang = ((int32_t)angle) % 360;
     // 1073741760 is a multiple of 360 that is close to 0x3fffffff

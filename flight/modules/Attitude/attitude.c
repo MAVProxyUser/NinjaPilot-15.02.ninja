@@ -406,7 +406,8 @@ static int32_t updateSensors(AccelStateData *accelState, GyroStateData *gyros)
         accelState->x = vec_out[0];
         accelState->y = vec_out[1];
         accelState->z = vec_out[2];
-        rot_mult(R, &gyros->x, vec_out);
+        float gyro_vec[3] = {gyros->x, gyros->y, gyros->z};
+        rot_mult(R, gyro_vec, vec_out);
         gyros->x = vec_out[0];
         gyros->y = vec_out[1];
         gyros->z = vec_out[2];
@@ -608,9 +609,9 @@ __attribute__((optimize("O3"))) static void updateAttitude(AccelStateData *accel
 {
     float dT      = PIOS_DELTATIME_GetAverageSeconds(&dtconfig);
 
-    // Bad practice to assume structure order, but saves memory
-    float *gyros  = &gyrosData->x;
-    float *accels = &accelStateData->x;
+    // Copy to local arrays to avoid packed member address issues
+    float gyros[3] = {gyrosData->x, gyrosData->y, gyrosData->z};
+    float accels[3] = {accelStateData->x, accelStateData->y, accelStateData->z};
 
     float grot[3];
     float accel_err[3];
@@ -705,10 +706,19 @@ __attribute__((optimize("O3"))) static void updateAttitude(AccelStateData *accel
     AttitudeStateData attitudeState;
     AttitudeStateGet(&attitudeState);
 
-    quat_copy(q, &attitudeState.q1);
+    float quat_temp[4] = {attitudeState.q1, attitudeState.q2, attitudeState.q3, attitudeState.q4};
+    quat_copy(q, quat_temp);
+    attitudeState.q1 = quat_temp[0];
+    attitudeState.q2 = quat_temp[1];
+    attitudeState.q3 = quat_temp[2];
+    attitudeState.q4 = quat_temp[3];
 
     // Convert into eueler degrees (makes assumptions about RPY order)
-    Quaternion2RPY(&attitudeState.q1, &attitudeState.Roll);
+    float rpy_temp[3];
+    Quaternion2RPY(quat_temp, rpy_temp);
+    attitudeState.Roll = rpy_temp[0];
+    attitudeState.Pitch = rpy_temp[1];
+    attitudeState.Yaw = rpy_temp[2];
 
     AttitudeStateSet(&attitudeState);
 }

@@ -235,8 +235,8 @@ static void stabilizationInnerloopTask()
     ActuatorDesiredGet(&actuator);
     StabilizationStatusInnerLoopGet(&enabled);
     FlightStatusControlChainGet(&cchain);
-    float *rate = &rateDesired.Roll;
-    float *actuatorDesiredAxis = &actuator.Roll;
+    float rate[4] = {rateDesired.Roll, rateDesired.Pitch, rateDesired.Yaw, rateDesired.Thrust};
+    float actuatorDesiredAxis[4] = {actuator.Roll, actuator.Pitch, actuator.Yaw, actuator.Thrust};
     int t;
     float dT;
     dT = PIOS_DELTATIME_GetAverageSeconds(&timeval);
@@ -265,6 +265,7 @@ static void stabilizationInnerloopTask()
                 }
             // IMPORTANT: deliberately no "break;" here, execution continues with regular RATE control loop to avoid code duplication!
             // keep order as it is, RATE must follow!
+            __attribute__((fallthrough));
             case STABILIZATIONSTATUS_INNERLOOP_RATE:
                 // limit rate to maximum configured limits (once here instead of 5 times in outer loop)
                 rate[t] = boundf(rate[t],
@@ -311,6 +312,12 @@ static void stabilizationInnerloopTask()
         actuatorDesiredAxis[t] = boundf(actuatorDesiredAxis[t], -1.0f, 1.0f);
     }
 
+    // Copy arrays back to structs
+    actuator.Roll = actuatorDesiredAxis[0];
+    actuator.Pitch = actuatorDesiredAxis[1];
+    actuator.Yaw = actuatorDesiredAxis[2];
+    actuator.Thrust = actuatorDesiredAxis[3];
+    
     actuator.UpdateTime = dT * 1000;
 
     if (cchain.Stabilization == FLIGHTSTATUS_CONTROLCHAIN_TRUE) {

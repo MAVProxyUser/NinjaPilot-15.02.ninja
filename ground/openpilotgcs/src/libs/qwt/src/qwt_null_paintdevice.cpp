@@ -10,6 +10,7 @@
 #include "qwt_null_paintdevice.h"
 #include <qpaintengine.h>
 #include <qpixmap.h>
+#include <qpainterpath.h>
 
 class QwtNullPaintDevice::PrivateData
 {

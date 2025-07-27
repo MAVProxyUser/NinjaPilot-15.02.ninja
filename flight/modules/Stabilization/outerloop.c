@@ -100,8 +100,8 @@ static void stabilizationOuterloopTask()
     StabilizationDesiredGet(&stabilizationDesired);
     RateDesiredGet(&rateDesired);
     StabilizationStatusOuterLoopGet(&enabled);
-    float *stabilizationDesiredAxis = &stabilizationDesired.Roll;
-    float *rateDesiredAxis = &rateDesired.Roll;
+    float stabilizationDesiredAxis[3] = {stabilizationDesired.Roll, stabilizationDesired.Pitch, stabilizationDesired.Yaw};
+    float rateDesiredAxis[3] = {rateDesired.Roll, rateDesired.Pitch, rateDesired.Yaw};
     int t;
     float dT = PIOS_DELTATIME_GetAverageSeconds(&timeval);
 
@@ -262,6 +262,11 @@ static void stabilizationOuterloopTask()
         }
     }
 
+    // Copy arrays back to structs
+    rateDesired.Roll = rateDesiredAxis[0];
+    rateDesired.Pitch = rateDesiredAxis[1];
+    rateDesired.Yaw = rateDesiredAxis[2];
+    
     RateDesiredSet(&rateDesired);
     {
         uint8_t armed;

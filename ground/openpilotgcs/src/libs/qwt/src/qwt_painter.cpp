@@ -18,6 +18,7 @@
 #include <qrect.h>
 #include <qpainter.h>
 #include <qpalette.h>
+#include <qpainterpath.h>
 #include <qpaintdevice.h>
 #include <qpixmap.h>
 #include <qstyle.h>
