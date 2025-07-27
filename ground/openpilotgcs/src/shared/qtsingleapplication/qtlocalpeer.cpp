@@ -30,6 +30,7 @@
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QTime>
+#include <QtCore/QDataStream>
 
 #if defined(Q_OS_WIN)
 #include <QtCore/QLibrary>

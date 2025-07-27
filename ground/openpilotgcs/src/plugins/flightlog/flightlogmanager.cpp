@@ -229,13 +229,15 @@ void FlightLogManager::retrieveLogs(int flightToRetrieve)
                         // cycle until there is space for another object
                         while (start + header_len + 1 < data_len) {
                             memset(&fields, 0xFF, total_len);
-                            memcpy(&fields, &logEntry->getData().Data[start], header_len);
+                            auto logData = logEntry->getData();
+                            const quint8 *dataPtr = logData.Data;
+                            memcpy(&fields, dataPtr + start, header_len);
                             // check wether a packed object is found
                             // note that empty data blocks are set as 0xFF in flight side to minimize flash wearing
                             // thus as soon as this read outside of used area, the test will fail as lenght would be 0xFFFF
                             quint32 toread = header_len + fields.Size;
                             if (!(toread + start > data_len)) {
-                                memcpy(&fields, &logEntry->getData().Data[start], toread);
+                                memcpy(&fields, dataPtr + start, toread);
                                 ExtendedDebugLogEntry *subEntry = new ExtendedDebugLogEntry();
                                 subEntry->setData(fields, m_objectManager);
                                 m_logEntries << subEntry;

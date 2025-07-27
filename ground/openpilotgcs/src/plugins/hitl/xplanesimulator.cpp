@@ -60,6 +60,7 @@
 #include "extensionsystem/pluginmanager.h"
 #include <coreplugin/icore.h>
 #include <coreplugin/threadmanager.h>
+#include <QDataStream>
 #include <math.h>
 
 void TraceBuf(const char *buf, int len);
