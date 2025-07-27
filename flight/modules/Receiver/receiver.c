@@ -33,6 +33,7 @@
  */
 
 #include <openpilot.h>
+#include <string.h>
 #include <accessorydesired.h>
 #include <manualcontrolsettings.h>
 #include <manualcontrolcommand.h>
@@ -455,11 +456,19 @@ static void receiverTask(__attribute__((unused)) void *parameters)
 
             // Apply deadband for Roll/Pitch/Yaw stick inputs
             if (deadband_checked > 0.0f) {
-                applyDeadband(&cmd.Roll, deadband_checked);
-                applyDeadband(&cmd.Pitch, deadband_checked);
-                applyDeadband(&cmd.Yaw, deadband_checked);
+                float roll = cmd.Roll;
+                float pitch = cmd.Pitch;
+                float yaw = cmd.Yaw;
+                applyDeadband(&roll, deadband_checked);
+                applyDeadband(&pitch, deadband_checked);
+                applyDeadband(&yaw, deadband_checked);
+                cmd.Roll = roll;
+                cmd.Pitch = pitch;
+                cmd.Yaw = yaw;
                 if (frameType == FRAME_TYPE_GROUND) { // assumes reversible motors
-                    applyDeadband(&cmd.Throttle, deadband_checked);
+                    float throttle = cmd.Throttle;
+                    applyDeadband(&throttle, deadband_checked);
+                    cmd.Throttle = throttle;
                 }
             }
 #ifdef USE_INPUT_LPF
@@ -470,19 +479,29 @@ static void receiverTask(__attribute__((unused)) void *parameters)
                        (float)UPDATE_PERIOD_MS;
             lastSysTimeLPF = thisSysTime;
 
-            applyLPF(&cmd.Roll, MANUALCONTROLSETTINGS_RESPONSETIME_ROLL, &settings.ResponseTime, deadband_checked, dT);
-            applyLPF(&cmd.Pitch, MANUALCONTROLSETTINGS_RESPONSETIME_PITCH, &settings.ResponseTime, deadband_checked, dT);
-            applyLPF(&cmd.Yaw, MANUALCONTROLSETTINGS_RESPONSETIME_YAW, &settings.ResponseTime, deadband_checked, dT);
+            float roll = cmd.Roll;
+            float pitch = cmd.Pitch;
+            float yaw = cmd.Yaw;
+            applyLPF(&roll, MANUALCONTROLSETTINGS_RESPONSETIME_ROLL, &settings.ResponseTime, deadband_checked, dT);
+            applyLPF(&pitch, MANUALCONTROLSETTINGS_RESPONSETIME_PITCH, &settings.ResponseTime, deadband_checked, dT);
+            applyLPF(&yaw, MANUALCONTROLSETTINGS_RESPONSETIME_YAW, &settings.ResponseTime, deadband_checked, dT);
+            cmd.Roll = roll;
+            cmd.Pitch = pitch;
+            cmd.Yaw = yaw;
 #endif // USE_INPUT_LPF
             if (cmd.Channel[MANUALCONTROLSETTINGS_CHANNELGROUPS_COLLECTIVE] != (uint16_t)PIOS_RCVR_INVALID
                 && cmd.Channel[MANUALCONTROLSETTINGS_CHANNELGROUPS_COLLECTIVE] != (uint16_t)PIOS_RCVR_NODRIVER
                 && cmd.Channel[MANUALCONTROLSETTINGS_CHANNELGROUPS_COLLECTIVE] != (uint16_t)PIOS_RCVR_TIMEOUT) {
                 cmd.Collective = scaledChannel[MANUALCONTROLSETTINGS_CHANNELGROUPS_COLLECTIVE];
                 if (settings.Deadband > 0.0f) {
-                    applyDeadband(&cmd.Collective, settings.Deadband);
+                    float collective = cmd.Collective;
+                    applyDeadband(&collective, settings.Deadband);
+                    cmd.Collective = collective;
                 }
 #ifdef USE_INPUT_LPF
-                applyLPF(&cmd.Collective, MANUALCONTROLSETTINGS_RESPONSETIME_COLLECTIVE, &settings.ResponseTime, settings.Deadband, dT);
+                float collective = cmd.Collective;
+                applyLPF(&collective, MANUALCONTROLSETTINGS_RESPONSETIME_COLLECTIVE, &settings.ResponseTime, settings.Deadband, dT);
+                cmd.Collective = collective;
 #endif // USE_INPUT_LPF
             }
 
@@ -537,11 +556,13 @@ static void receiverTask(__attribute__((unused)) void *parameters)
 
 #if defined(PIOS_INCLUDE_USB_RCTX)
         if (pios_usb_rctx_id) {
+            uint16_t channels[MANUALCONTROLCOMMAND_CHANNEL_NUMELEM];
+            memcpy(channels, cmd.Channel, sizeof(channels));
             PIOS_USB_RCTX_Update(pios_usb_rctx_id,
-                                 cmd.Channel,
+                                 channels,
                                  ManualControlSettingsChannelMinToArray(settings.ChannelMin),
                                  ManualControlSettingsChannelMaxToArray(settings.ChannelMax),
-                                 NELEMENTS(cmd.Channel));
+                                 NELEMENTS(channels));
         }
 #endif /* PIOS_INCLUDE_USB_RCTX */
     }
