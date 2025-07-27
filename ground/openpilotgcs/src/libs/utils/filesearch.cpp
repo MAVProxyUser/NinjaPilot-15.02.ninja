@@ -33,11 +33,10 @@
 #include <QtCore/QBuffer>
 #include <QtCore/QFile>
 #include <QtCore/QFutureInterface>
-#include <qtconcurrent/qtconcurrentrun.h>
 #include <QtCore/QRegExp>
 #include <QtCore/QCoreApplication>
 
-#include <qtconcurrent/runextensions.h>
+#include "qtconcurrent/runextensions.h"
 
 using namespace Utils;
 

@@ -32,6 +32,7 @@
 
 
 #include <openpilot.h>
+#include <string.h>
 
 #include "accessorydesired.h"
 #include "actuator.h"
@@ -299,7 +300,13 @@ static void actuatorTask(__attribute__((unused)) void *parameters)
         // Interpolate curve 1 from throttleDesired as input.
         // assume reversible motor/mixer initially. We can later reverse this. The difference is simply that -ve throttleDesired values
         // map differently
-        curve1 = MixerCurveFullRangeProportional(throttleDesired, mixerSettings.ThrottleCurve1, MIXERSETTINGS_THROTTLECURVE1_NUMELEM);
+        // Copy packed struct arrays to local variables to avoid alignment warnings
+        float throttleCurve1[MIXERSETTINGS_THROTTLECURVE1_NUMELEM];
+        float throttleCurve2[MIXERSETTINGS_THROTTLECURVE2_NUMELEM];
+        memcpy(throttleCurve1, mixerSettings.ThrottleCurve1, sizeof(throttleCurve1));
+        memcpy(throttleCurve2, mixerSettings.ThrottleCurve2, sizeof(throttleCurve2));
+        
+        curve1 = MixerCurveFullRangeProportional(throttleDesired, throttleCurve1, MIXERSETTINGS_THROTTLECURVE1_NUMELEM);
 
         // The source for the secondary curve is selectable
         AccessoryDesiredData accessory;
@@ -307,24 +314,24 @@ static void actuatorTask(__attribute__((unused)) void *parameters)
         switch (curve2Source) {
         case MIXERSETTINGS_CURVE2SOURCE_THROTTLE:
             // assume reversible motor/mixer initially
-            curve2 = MixerCurveFullRangeProportional(throttleDesired, mixerSettings.ThrottleCurve2, MIXERSETTINGS_THROTTLECURVE2_NUMELEM);
+            curve2 = MixerCurveFullRangeProportional(throttleDesired, throttleCurve2, MIXERSETTINGS_THROTTLECURVE2_NUMELEM);
             break;
         case MIXERSETTINGS_CURVE2SOURCE_ROLL:
             // Throttle curve contribution the same for +ve vs -ve roll
-            curve2 = MixerCurveFullRangeAbsolute(desired.Roll, mixerSettings.ThrottleCurve2, MIXERSETTINGS_THROTTLECURVE2_NUMELEM);
+            curve2 = MixerCurveFullRangeAbsolute(desired.Roll, throttleCurve2, MIXERSETTINGS_THROTTLECURVE2_NUMELEM);
             break;
         case MIXERSETTINGS_CURVE2SOURCE_PITCH:
             // Throttle curve contribution the same for +ve vs -ve pitch
-            curve2 = MixerCurveFullRangeAbsolute(desired.Pitch, mixerSettings.ThrottleCurve2,
+            curve2 = MixerCurveFullRangeAbsolute(desired.Pitch, throttleCurve2,
                                                  MIXERSETTINGS_THROTTLECURVE2_NUMELEM);
             break;
         case MIXERSETTINGS_CURVE2SOURCE_YAW:
             // Throttle curve contribution the same for +ve vs -ve yaw
-            curve2 = MixerCurveFullRangeAbsolute(desired.Yaw, mixerSettings.ThrottleCurve2, MIXERSETTINGS_THROTTLECURVE2_NUMELEM);
+            curve2 = MixerCurveFullRangeAbsolute(desired.Yaw, throttleCurve2, MIXERSETTINGS_THROTTLECURVE2_NUMELEM);
             break;
         case MIXERSETTINGS_CURVE2SOURCE_COLLECTIVE:
             // assume reversible motor/mixer initially
-            curve2 = MixerCurveFullRangeProportional(collectiveDesired, mixerSettings.ThrottleCurve2,
+            curve2 = MixerCurveFullRangeProportional(collectiveDesired, throttleCurve2,
                                                      MIXERSETTINGS_THROTTLECURVE2_NUMELEM);
             break;
         case MIXERSETTINGS_CURVE2SOURCE_ACCESSORY0:
@@ -335,7 +342,7 @@ static void actuatorTask(__attribute__((unused)) void *parameters)
         case MIXERSETTINGS_CURVE2SOURCE_ACCESSORY5:
             if (AccessoryDesiredInstGet(mixerSettings.Curve2Source - MIXERSETTINGS_CURVE2SOURCE_ACCESSORY0, &accessory) == 0) {
                 // Throttle curve contribution the same for +ve vs -ve accessory....maybe not want we want.
-                curve2 = MixerCurveFullRangeAbsolute(accessory.AccessoryVal, mixerSettings.ThrottleCurve2, MIXERSETTINGS_THROTTLECURVE2_NUMELEM);
+                curve2 = MixerCurveFullRangeAbsolute(accessory.AccessoryVal, throttleCurve2, MIXERSETTINGS_THROTTLECURVE2_NUMELEM);
             } else {
                 curve2 = 0.0f;
             }
