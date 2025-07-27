@@ -38,6 +38,7 @@
 #include <QtCore/QTextStream>
 #include <QtCore/QWriteLocker>
 #include <QtDebug>
+#include <algorithm>
 #ifdef WITH_TESTS
 #include <QTest>
 #endif
@@ -730,7 +731,7 @@ void PluginManagerPrivate::readPluginPaths()
     }
     resolveDependencies();
     // ensure deterministic plugin load order by sorting
-    qSort(pluginSpecs.begin(), pluginSpecs.end(), lessThanByPluginName);
+    std::sort(pluginSpecs.begin(), pluginSpecs.end(), lessThanByPluginName);
     emit q->pluginsChanged();
 }
 
