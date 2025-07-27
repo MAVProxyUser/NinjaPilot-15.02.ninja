@@ -21,7 +21,7 @@
 /**********************************************************************/
 #include "sdlgamepad.h"
 
-#include <SDL/SDL.h>
+#include <SDL2/SDL.h>
 // #undef main
 
 class SDLGamepadPrivate {
@@ -30,11 +30,11 @@ public:
     {}
 
     /**
-     * SDL_Joystick object.
+     * SDL_GameController object.
      *
-     * This represents the currently opened SDL_Joystick object.
+     * This represents the currently opened SDL_GameController object.
      */
-    SDL_Joystick *gamepad;
+    SDL_GameController *gamepad;
 };
 
 /**********************************************************************/
@@ -54,7 +54,7 @@ SDLGamepad::~SDLGamepad()
     loop = false;
 
     if (priv->gamepad) {
-        SDL_JoystickClose(priv->gamepad);
+        SDL_GameControllerClose(priv->gamepad);
     }
 
     SDL_Quit();
@@ -65,12 +65,19 @@ SDLGamepad::~SDLGamepad()
 /**********************************************************************/
 bool SDLGamepad::init()
 {
-    if (SDL_Init(SDL_INIT_JOYSTICK) < 0) {
+    if (SDL_Init(SDL_INIT_GAMECONTROLLER) < 0) {
         return false;
     }
 
-    if (SDL_NumJoysticks() > 0) {
-        emit gamepads(SDL_NumJoysticks());
+    int numControllers = 0;
+    for (int i = 0; i < SDL_NumJoysticks(); i++) {
+        if (SDL_IsGameController(i)) {
+            numControllers++;
+        }
+    }
+
+    if (numControllers > 0) {
+        emit gamepads(numControllers);
 
         if (!setGamepad(0)) {
             return false;
@@ -101,30 +108,51 @@ void SDLGamepad::run()
 bool SDLGamepad::setGamepad(qint16 index)
 {
     if (index != this->index) {
-        if (SDL_JoystickOpened(this->index)) {
-            SDL_JoystickClose(priv->gamepad);
+        if (priv->gamepad) {
+            SDL_GameControllerClose(priv->gamepad);
         }
 
-        priv->gamepad = SDL_JoystickOpen(index);
+        // Find the index-th game controller
+        int controllerIndex = -1;
+        int controllerCount = 0;
+        for (int i = 0; i < SDL_NumJoysticks(); i++) {
+            if (SDL_IsGameController(i)) {
+                if (controllerCount == index) {
+                    controllerIndex = i;
+                    break;
+                }
+                controllerCount++;
+            }
+        }
 
-        if (priv->gamepad) {
-            buttons = SDL_JoystickNumButtons(priv->gamepad);
-            axes    = SDL_JoystickNumAxes(priv->gamepad);
+        if (controllerIndex >= 0) {
+            priv->gamepad = SDL_GameControllerOpen(controllerIndex);
 
-            if (axes >= 4) {
-                this->index = index;
-                return true;
+            if (priv->gamepad) {
+                SDL_Joystick *joystick = SDL_GameControllerGetJoystick(priv->gamepad);
+                buttons = SDL_JoystickNumButtons(joystick);
+                axes    = SDL_JoystickNumAxes(joystick);
+
+                if (axes >= 4) {
+                    this->index = index;
+                    return true;
+                } else {
+                    buttons     = -1;
+                    axes        = -1;
+                    this->index = -1;
+                    qCritical("Gamepad has less than 4 axes");
+                }
             } else {
                 buttons     = -1;
                 axes        = -1;
                 this->index = -1;
-                qCritical("Gamepad has less than 4 axes");
+                qCritical("Unable to open Gamepad!");
             }
         } else {
             buttons     = -1;
             axes        = -1;
             this->index = -1;
-            qCritical("Unable to open Gamepad!");
+            qCritical("Invalid gamepad index!");
         }
     }
 
@@ -142,10 +170,11 @@ void SDLGamepad::updateAxes()
 {
     if (priv->gamepad) {
         QListInt16 values;
-        SDL_JoystickUpdate();
+        SDL_GameControllerUpdate();
 
+        SDL_Joystick *joystick = SDL_GameControllerGetJoystick(priv->gamepad);
         for (qint8 i = 0; i < axes; i++) {
-            qint16 value = SDL_JoystickGetAxis(priv->gamepad, i);
+            qint16 value = SDL_JoystickGetAxis(joystick, i);
 
             if (value > -NULL_RANGE && value < NULL_RANGE) {
                 value = 0;
@@ -162,10 +191,11 @@ void SDLGamepad::updateAxes()
 void SDLGamepad::updateButtons()
 {
     if (priv->gamepad) {
-        SDL_JoystickUpdate();
+        SDL_GameControllerUpdate();
 
+        SDL_Joystick *joystick = SDL_GameControllerGetJoystick(priv->gamepad);
         for (qint8 i = 0; i < buttons; i++) {
-            qint16 state = SDL_JoystickGetButton(priv->gamepad, i);
+            qint16 state = SDL_JoystickGetButton(joystick, i);
 
             if (buttonStates.at(i) != state) {
                 if (state > 0) {

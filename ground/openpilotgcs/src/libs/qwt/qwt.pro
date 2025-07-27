@@ -1,29 +1,28 @@
-#################################################################
+################################################################
 # Qwt Widget Library
 # Copyright (C) 1997   Josef Wilgen
 # Copyright (C) 2002   Uwe Rathmann
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the Qwt License, Version 1.0
-#################################################################
-#
-# Adaptations made by:
-# The OpenPilot Team, http://www.openpilot.org Copyright (C) 2014.
-#
-#################################################################
+################################################################
+
+lessThan(QT_MAJOR_VERSION, 5) {
+
+    lessThan(QT_MINOR_VERSION, 8) {
+        error(Qt >= 4.8 required.)
+    }
+}
 
 include( qwtconfig.pri )
 
 TEMPLATE = subdirs
 CONFIG   += ordered
 
-# disable all warnings (no need for warnings as qwt sources are imported)
-CONFIG += warn_off
-
 SUBDIRS = \
     src \
-#    textengines \
-#    doc
+    classincludes \
+    doc
 
 contains(QWT_CONFIG, QwtDesigner ) {
     SUBDIRS += designer 
@@ -37,8 +36,12 @@ contains(QWT_CONFIG, QwtPlayground ) {
     SUBDIRS += playground 
 }
  
-# qwtspec.files  = qwtconfig.pri qwtfunctions.pri qwt.prf
-# qwtspec.path  = $${QWT_INSTALL_FEATURES}
+contains(QWT_CONFIG, QwtTests ) {
+    SUBDIRS += tests 
+}
 
-# INSTALLS += qwtspec
+qwtspec.files  = qwtconfig.pri qwtfunctions.pri qwt.prf
+qwtspec.path  = $${QWT_INSTALL_FEATURES}
+
+INSTALLS += qwtspec
 

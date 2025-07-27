@@ -1,44 +1,41 @@
-#################################################################
+################################################################
 # Qwt Widget Library
 # Copyright (C) 1997   Josef Wilgen
 # Copyright (C) 2002   Uwe Rathmann
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the Qwt License, Version 1.0
-#################################################################
-#
-# Adaptations made by:
-# The OpenPilot Team, http://www.openpilot.org Copyright (C) 2014.
-#
-#################################################################
+################################################################
 
 # qmake project file for building the qwt libraries
 
 QWT_ROOT = $${PWD}/..
 include( $${QWT_ROOT}/qwtconfig.pri )
-# include( $${QWT_ROOT}/qwtbuild.pri )
-# include( $${QWT_ROOT}/qwtfunctions.pri )
+include( $${QWT_ROOT}/qwtbuild.pri )
+include( $${QWT_ROOT}/qwtfunctions.pri )
 
-# QWT_OUT_ROOT = $${OUT_PWD}/..
+QWT_OUT_ROOT = $${OUT_PWD}/..
 
 TEMPLATE          = lib
-# TARGET            = $$qwtLibraryTarget(qwt)
-TARGET            = Qwt
-QT                += printsupport
-DEFINES           += QWT_LIBRARY
+TARGET            = $$qwtLibraryTarget(qwt)
 
-# DESTDIR           = $${QWT_OUT_ROOT}/lib
-
-# NOTE: The include below must come AFTER the TARGET is
-# defined.  Otherwise the debug version of the library
-# will not have the 'd' suffix it needs.
-#
-include(../../../openpilotgcslibrary.pri)
+DESTDIR           = $${QWT_OUT_ROOT}/lib
 
 contains(QWT_CONFIG, QwtDll) {
 
     CONFIG += dll
     win32|symbian: DEFINES += QT_DLL QWT_DLL QWT_MAKEDLL
+
+    unix:!macx:!android {
+        !isEmpty( QMAKE_LFLAGS_SONAME ) {
+    
+            # we increase the SONAME for every minor number
+
+            QWT_SONAME=libqwt.so.$${VER_MAJ}.$${VER_MIN}
+            QMAKE_LFLAGS *= $${QMAKE_LFLAGS_SONAME}$${QWT_SONAME}
+            QMAKE_LFLAGS_SONAME=
+        }
+    }
 }
 else {
     CONFIG += staticlib
@@ -53,8 +50,8 @@ include ( $${PWD}/src.pri )
 
 # Install directives
 
-# target.path    = $${QWT_INSTALL_LIBS}
-# INSTALLS       = target
+target.path    = $${QWT_INSTALL_LIBS}
+INSTALLS       = target 
 
 CONFIG(lib_bundle) {
 
