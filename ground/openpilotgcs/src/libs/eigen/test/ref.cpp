@@ -12,31 +12,26 @@
 #undef EIGEN_DEFAULT_TO_ROW_MAJOR
 #endif
 
-static int nb_temporaries;
-
-inline void on_temporary_creation(int size) {
-  // here's a great place to set a breakpoint when debugging failures in this test!
-  if(size!=0) nb_temporaries++;
-}
-  
-
-#define EIGEN_DENSE_STORAGE_CTOR_PLUGIN { on_temporary_creation(size); }
-
+#define TEST_ENABLE_TEMPORARY_TRACKING
+#define TEST_CHECK_STATIC_ASSERTIONS
 #include "main.h"
-
-#define VERIFY_EVALUATION_COUNT(XPR,N) {\
-    nb_temporaries = 0; \
-    XPR; \
-    if(nb_temporaries!=N) std::cerr << "nb_temporaries == " << nb_temporaries << "\n"; \
-    VERIFY( (#XPR) && nb_temporaries==N ); \
-  }
-
 
 // test Ref.h
 
+// Deal with i387 extended precision
+#if EIGEN_ARCH_i386 && !(EIGEN_ARCH_x86_64)
+
+#if EIGEN_COMP_GNUC_STRICT && EIGEN_GNUC_AT_LEAST(4,4)
+#pragma GCC optimize ("-ffloat-store")
+#else
+#undef VERIFY_IS_EQUAL
+#define VERIFY_IS_EQUAL(X,Y) VERIFY_IS_APPROX(X,Y)
+#endif
+
+#endif
+
 template<typename MatrixType> void ref_matrix(const MatrixType& m)
 {
-  typedef typename MatrixType::Index Index;
   typedef typename MatrixType::Scalar Scalar;
   typedef typename MatrixType::RealScalar RealScalar;
   typedef Matrix<Scalar,Dynamic,Dynamic,MatrixType::Options> DynMatrixType;
@@ -71,7 +66,6 @@ template<typename MatrixType> void ref_matrix(const MatrixType& m)
   rm2 = m2.block(i,j,brows,bcols);
   VERIFY_IS_EQUAL(m1, m2);
   
-  
   ConstRefDynMat rm3 = m1.block(i,j,brows,bcols);
   m1.block(i,j,brows,bcols) *= 2;
   m2.block(i,j,brows,bcols) *= 2;
@@ -85,7 +79,6 @@ template<typename MatrixType> void ref_matrix(const MatrixType& m)
 
 template<typename VectorType> void ref_vector(const VectorType& m)
 {
-  typedef typename VectorType::Index Index;
   typedef typename VectorType::Scalar Scalar;
   typedef typename VectorType::RealScalar RealScalar;
   typedef Matrix<Scalar,Dynamic,1,VectorType::Options> DynMatrixType;
@@ -109,10 +102,14 @@ template<typename VectorType> void ref_vector(const VectorType& m)
   Index i = internal::random<Index>(0,size-1);
   Index bsize = internal::random<Index>(1,size-i);
   
-  RefMat rm0 = v1;
-  VERIFY_IS_EQUAL(rm0, v1);
-  RefDynMat rv1 = v1;
-  VERIFY_IS_EQUAL(rv1, v1);
+  { RefMat    rm0 = v1;                   VERIFY_IS_EQUAL(rm0, v1); }
+  { RefMat    rm0 = v1.block(0,0,size,1); VERIFY_IS_EQUAL(rm0, v1); }
+  { RefDynMat rv1 = v1;                   VERIFY_IS_EQUAL(rv1, v1); }
+  { RefDynMat rv1 = v1.block(0,0,size,1); VERIFY_IS_EQUAL(rv1, v1); }
+  { VERIFY_RAISES_ASSERT( RefMat    rm0 = v1.block(0, 0, size, 0); EIGEN_UNUSED_VARIABLE(rm0); ); }
+  if(VectorType::SizeAtCompileTime!=1)
+  { VERIFY_RAISES_ASSERT( RefDynMat rv1 = v1.block(0, 0, size, 0); EIGEN_UNUSED_VARIABLE(rv1); ); }
+
   RefDynMat rv2 = v1.segment(i,bsize);
   VERIFY_IS_EQUAL(rv2, v1.segment(i,bsize));
   rv2.setOnes();
@@ -144,6 +141,69 @@ template<typename VectorType> void ref_vector(const VectorType& m)
   VERIFY_IS_APPROX(mat1, mat2);
 }
 
+template<typename Scalar, int Rows, int Cols>
+void ref_vector_fixed_sizes()
+{
+  typedef Matrix<Scalar,Rows,Cols,RowMajor> RowMajorMatrixType;
+  typedef Matrix<Scalar,Rows,Cols,ColMajor> ColMajorMatrixType;
+  typedef Matrix<Scalar,1,Cols> RowVectorType;
+  typedef Matrix<Scalar,Rows,1> ColVectorType;
+  typedef Matrix<Scalar,Cols,1> RowVectorTransposeType;
+  typedef Matrix<Scalar,1,Rows> ColVectorTransposeType;
+  typedef Stride<Dynamic, Dynamic> DynamicStride;
+
+  RowMajorMatrixType mr = RowMajorMatrixType::Random();
+  ColMajorMatrixType mc = ColMajorMatrixType::Random();
+
+  Index i = internal::random<Index>(0,Rows-1);
+  Index j = internal::random<Index>(0,Cols-1);
+
+  // Reference ith row.
+  Ref<RowVectorType, 0, DynamicStride> mr_ri = mr.row(i);
+  VERIFY_IS_EQUAL(mr_ri, mr.row(i));
+  Ref<RowVectorType, 0, DynamicStride> mc_ri = mc.row(i);
+  VERIFY_IS_EQUAL(mc_ri, mc.row(i));
+
+  // Reference jth col.
+  Ref<ColVectorType, 0, DynamicStride> mr_cj = mr.col(j);
+  VERIFY_IS_EQUAL(mr_cj, mr.col(j));
+  Ref<ColVectorType, 0, DynamicStride> mc_cj = mc.col(j);
+  VERIFY_IS_EQUAL(mc_cj, mc.col(j));
+
+  // Reference the transpose of row i.
+  Ref<RowVectorTransposeType, 0, DynamicStride> mr_rit = mr.row(i);
+  VERIFY_IS_EQUAL(mr_rit, mr.row(i).transpose());
+  Ref<RowVectorTransposeType, 0, DynamicStride> mc_rit = mc.row(i);
+  VERIFY_IS_EQUAL(mc_rit, mc.row(i).transpose());
+
+  // Reference the transpose of col j.
+  Ref<ColVectorTransposeType, 0, DynamicStride> mr_cjt = mr.col(j);
+  VERIFY_IS_EQUAL(mr_cjt, mr.col(j).transpose());
+  Ref<ColVectorTransposeType, 0, DynamicStride> mc_cjt = mc.col(j);
+  VERIFY_IS_EQUAL(mc_cjt, mc.col(j).transpose());
+  
+  // Const references without strides.
+  Ref<const RowVectorType> cmr_ri = mr.row(i);
+  VERIFY_IS_EQUAL(cmr_ri, mr.row(i));
+  Ref<const RowVectorType> cmc_ri = mc.row(i);
+  VERIFY_IS_EQUAL(cmc_ri, mc.row(i));
+
+  Ref<const ColVectorType> cmr_cj = mr.col(j);
+  VERIFY_IS_EQUAL(cmr_cj, mr.col(j));
+  Ref<const ColVectorType> cmc_cj = mc.col(j);
+  VERIFY_IS_EQUAL(cmc_cj, mc.col(j));
+
+  Ref<const RowVectorTransposeType> cmr_rit = mr.row(i);
+  VERIFY_IS_EQUAL(cmr_rit, mr.row(i).transpose());
+  Ref<const RowVectorTransposeType> cmc_rit = mc.row(i);
+  VERIFY_IS_EQUAL(cmc_rit, mc.row(i).transpose());
+
+  Ref<const ColVectorTransposeType> cmr_cjt = mr.col(j);
+  VERIFY_IS_EQUAL(cmr_cjt, mr.col(j).transpose());
+  Ref<const ColVectorTransposeType> cmc_cjt = mc.col(j);
+  VERIFY_IS_EQUAL(cmc_cjt, mc.col(j).transpose());
+}
+
 template<typename PlainObjectType> void check_const_correctness(const PlainObjectType&)
 {
   // verify that ref-to-const don't have LvalueBit
@@ -154,62 +214,124 @@ template<typename PlainObjectType> void check_const_correctness(const PlainObjec
   VERIFY( !(Ref<ConstPlainObjectType, Aligned>::Flags & LvalueBit) );
 }
 
-EIGEN_DONT_INLINE void call_ref_1(Ref<VectorXf> ) { }
-EIGEN_DONT_INLINE void call_ref_2(const Ref<const VectorXf>& ) { }
-EIGEN_DONT_INLINE void call_ref_3(Ref<VectorXf,0,InnerStride<> > ) { }
-EIGEN_DONT_INLINE void call_ref_4(const Ref<const VectorXf,0,InnerStride<> >& ) { }
-EIGEN_DONT_INLINE void call_ref_5(Ref<MatrixXf,0,OuterStride<> > ) { }
-EIGEN_DONT_INLINE void call_ref_6(const Ref<const MatrixXf,0,OuterStride<> >& ) { }
+template<typename B>
+EIGEN_DONT_INLINE void call_ref_1(Ref<VectorXf> a, const B &b) { VERIFY_IS_EQUAL(a,b); }
+template<typename B>
+EIGEN_DONT_INLINE void call_ref_2(const Ref<const VectorXf>& a, const B &b) { VERIFY_IS_EQUAL(a,b); }
+template<typename B>
+EIGEN_DONT_INLINE void call_ref_3(Ref<VectorXf,0,InnerStride<> > a, const B &b) { VERIFY_IS_EQUAL(a,b); }
+template<typename B>
+EIGEN_DONT_INLINE void call_ref_4(const Ref<const VectorXf,0,InnerStride<> >& a, const B &b) { VERIFY_IS_EQUAL(a,b); }
+template<typename B>
+EIGEN_DONT_INLINE void call_ref_5(Ref<MatrixXf,0,OuterStride<> > a, const B &b) { VERIFY_IS_EQUAL(a,b); }
+template<typename B>
+EIGEN_DONT_INLINE void call_ref_6(const Ref<const MatrixXf,0,OuterStride<> >& a, const B &b) { VERIFY_IS_EQUAL(a,b); }
+template<typename B>
+EIGEN_DONT_INLINE void call_ref_7(Ref<Matrix<float,Dynamic,3> > a, const B &b) { VERIFY_IS_EQUAL(a,b); }
 
 void call_ref()
 {
-  VectorXcf ca(10);
-  VectorXf a(10);
+  VectorXcf ca  = VectorXcf::Random(10);
+  VectorXf a    = VectorXf::Random(10);
+  RowVectorXf b = RowVectorXf::Random(10);
+  MatrixXf A    = MatrixXf::Random(10,10);
+  RowVector3f c = RowVector3f::Random();
   const VectorXf& ac(a);
   VectorBlock<VectorXf> ab(a,0,3);
-  MatrixXf A(10,10);
   const VectorBlock<VectorXf> abc(a,0,3);
+  
 
-  VERIFY_EVALUATION_COUNT( call_ref_1(a), 0);
-  //call_ref_1(ac);           // does not compile because ac is const
-  VERIFY_EVALUATION_COUNT( call_ref_1(ab), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_1(a.head(4)), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_1(abc), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_1(A.col(3)), 0);
-  // call_ref_1(A.row(3));    // does not compile because innerstride!=1
-  VERIFY_EVALUATION_COUNT( call_ref_3(A.row(3)), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_4(A.row(3)), 0);
-  //call_ref_1(a+a);          // does not compile for obvious reason
+  VERIFY_EVALUATION_COUNT( call_ref_1(a,a), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_1(b,b.transpose()), 0);
+//   call_ref_1(ac,a<c);           // does not compile because ac is const
+  VERIFY_EVALUATION_COUNT( call_ref_1(ab,ab), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_1(a.head(4),a.head(4)), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_1(abc,abc), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_1(A.col(3),A.col(3)), 0);
+//   call_ref_1(A.row(3),A.row(3));    // does not compile because innerstride!=1
+  VERIFY_EVALUATION_COUNT( call_ref_3(A.row(3),A.row(3).transpose()), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_4(A.row(3),A.row(3).transpose()), 0);
+//   call_ref_1(a+a, a+a);          // does not compile for obvious reason
 
-  VERIFY_EVALUATION_COUNT( call_ref_2(A*A.col(1)), 1);     // evaluated into a temp
-  VERIFY_EVALUATION_COUNT( call_ref_2(ac.head(5)), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_2(ac), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_2(a), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_2(ab), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_2(a.head(4)), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_2(a+a), 1);            // evaluated into a temp
-  VERIFY_EVALUATION_COUNT( call_ref_2(ca.imag()), 1);      // evaluated into a temp
+  MatrixXf tmp = A*A.col(1);
+  VERIFY_EVALUATION_COUNT( call_ref_2(A*A.col(1), tmp), 1);     // evaluated into a temp
+  VERIFY_EVALUATION_COUNT( call_ref_2(ac.head(5),ac.head(5)), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_2(ac,ac), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_2(a,a), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_2(ab,ab), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_2(a.head(4),a.head(4)), 0);
+  tmp = a+a;
+  VERIFY_EVALUATION_COUNT( call_ref_2(a+a,tmp), 1);            // evaluated into a temp
+  VERIFY_EVALUATION_COUNT( call_ref_2(ca.imag(),ca.imag()), 1);      // evaluated into a temp
 
-  VERIFY_EVALUATION_COUNT( call_ref_4(ac.head(5)), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_4(a+a), 1);           // evaluated into a temp
-  VERIFY_EVALUATION_COUNT( call_ref_4(ca.imag()), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_4(ac.head(5),ac.head(5)), 0);
+  tmp = a+a;
+  VERIFY_EVALUATION_COUNT( call_ref_4(a+a,tmp), 1);           // evaluated into a temp
+  VERIFY_EVALUATION_COUNT( call_ref_4(ca.imag(),ca.imag()), 0);
 
-  VERIFY_EVALUATION_COUNT( call_ref_5(a), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_5(a.head(3)), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_5(A), 0);
-  // call_ref_5(A.transpose());   // does not compile
-  VERIFY_EVALUATION_COUNT( call_ref_5(A.block(1,1,2,2)), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_5(a,a), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_5(a.head(3),a.head(3)), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_5(A,A), 0);
+//   call_ref_5(A.transpose(),A.transpose());   // does not compile because storage order does not match
+  VERIFY_EVALUATION_COUNT( call_ref_5(A.block(1,1,2,2),A.block(1,1,2,2)), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_5(b,b), 0);             // storage order do not match, but this is a degenerate case that should work
+  VERIFY_EVALUATION_COUNT( call_ref_5(a.row(3),a.row(3)), 0);
 
-  VERIFY_EVALUATION_COUNT( call_ref_6(a), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_6(a.head(3)), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_6(A.row(3)), 1);           // evaluated into a temp thouth it could be avoided by viewing it as a 1xn matrix
-  VERIFY_EVALUATION_COUNT( call_ref_6(A+A), 1);                // evaluated into a temp
-  VERIFY_EVALUATION_COUNT( call_ref_6(A), 0);
-  VERIFY_EVALUATION_COUNT( call_ref_6(A.transpose()), 1);      // evaluated into a temp because the storage orders do not match
-  VERIFY_EVALUATION_COUNT( call_ref_6(A.block(1,1,2,2)), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_6(a,a), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_6(a.head(3),a.head(3)), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_6(A.row(3),A.row(3)), 1);           // evaluated into a temp thouth it could be avoided by viewing it as a 1xn matrix
+  tmp = A+A;
+  VERIFY_EVALUATION_COUNT( call_ref_6(A+A,tmp), 1);                // evaluated into a temp
+  VERIFY_EVALUATION_COUNT( call_ref_6(A,A), 0);
+  VERIFY_EVALUATION_COUNT( call_ref_6(A.transpose(),A.transpose()), 1);      // evaluated into a temp because the storage orders do not match
+  VERIFY_EVALUATION_COUNT( call_ref_6(A.block(1,1,2,2),A.block(1,1,2,2)), 0);
+  
+  VERIFY_EVALUATION_COUNT( call_ref_7(c,c), 0);
 }
 
-void test_ref()
+typedef Matrix<double,Dynamic,Dynamic,RowMajor> RowMatrixXd;
+int test_ref_overload_fun1(Ref<MatrixXd> )       { return 1; }
+int test_ref_overload_fun1(Ref<RowMatrixXd> )    { return 2; }
+int test_ref_overload_fun1(Ref<MatrixXf> )       { return 3; }
+
+int test_ref_overload_fun2(Ref<const MatrixXd> ) { return 4; }
+int test_ref_overload_fun2(Ref<const MatrixXf> ) { return 5; }
+
+void test_ref_ambiguous(const Ref<const ArrayXd> &A, Ref<ArrayXd> B)
+{
+  B = A;
+  B = A - A;
+}
+
+// See also bug 969
+void test_ref_overloads()
+{
+  MatrixXd Ad, Bd;
+  RowMatrixXd rAd, rBd;
+  VERIFY( test_ref_overload_fun1(Ad)==1 );
+  VERIFY( test_ref_overload_fun1(rAd)==2 );
+  
+  MatrixXf Af, Bf;
+  VERIFY( test_ref_overload_fun2(Ad)==4 );
+  VERIFY( test_ref_overload_fun2(Ad+Bd)==4 );
+  VERIFY( test_ref_overload_fun2(Af+Bf)==5 );
+  
+  ArrayXd A, B;
+  test_ref_ambiguous(A, B);
+}
+
+void test_ref_fixed_size_assert()
+{
+  Vector4f v4 = Vector4f::Random();
+  VectorXf vx = VectorXf::Random(10);
+  VERIFY_RAISES_STATIC_ASSERT( Ref<Vector3f> y = v4; (void)y; );
+  VERIFY_RAISES_STATIC_ASSERT( Ref<Vector3f> y = vx.head<4>(); (void)y; );
+  VERIFY_RAISES_STATIC_ASSERT( Ref<const Vector3f> y = v4; (void)y; );
+  VERIFY_RAISES_STATIC_ASSERT( Ref<const Vector3f> y = vx.head<4>(); (void)y; );
+  VERIFY_RAISES_STATIC_ASSERT( Ref<const Vector3f> y = 2*v4; (void)y; );
+}
+
+EIGEN_DECLARE_TEST(ref)
 {
   for(int i = 0; i < g_repeat; i++) {
     CALL_SUBTEST_1( ref_vector(Matrix<float, 1, 1>()) );
@@ -228,5 +350,11 @@ void test_ref()
     CALL_SUBTEST_4( ref_matrix(Matrix<std::complex<double>,10,15>()) );
     CALL_SUBTEST_5( ref_matrix(MatrixXi(internal::random<int>(1,10),internal::random<int>(1,10))) );
     CALL_SUBTEST_6( call_ref() );
+
+    CALL_SUBTEST_8( (ref_vector_fixed_sizes<float,3,5>()) );
+    CALL_SUBTEST_8( (ref_vector_fixed_sizes<float,15,10>()) );
   }
+  
+  CALL_SUBTEST_7( test_ref_overloads() );
+  CALL_SUBTEST_7( test_ref_fixed_size_assert() );
 }

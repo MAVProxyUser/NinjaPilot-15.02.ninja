@@ -10,6 +10,7 @@
 #include "main.h"
 
 #include <Eigen/Core>
+#include "AnnoyingScalar.h"
 
 using namespace Eigen;
 
@@ -17,7 +18,6 @@ template <typename Scalar, int Storage>
 void run_matrix_tests()
 {
   typedef Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, Storage> MatrixType;
-  typedef typename MatrixType::Index Index;
 
   MatrixType m, n;
 
@@ -60,25 +60,37 @@ void run_matrix_tests()
 template <typename Scalar>
 void run_vector_tests()
 {
-  typedef Matrix<Scalar, 1, Eigen::Dynamic> MatrixType;
+  typedef Matrix<Scalar, 1, Eigen::Dynamic> VectorType;
 
-  MatrixType m, n;
+  VectorType m, n;
 
   // boundary cases ...
-  m = n = MatrixType::Random(50);
+  m = n = VectorType::Random(50);
   m.conservativeResize(1);
   VERIFY_IS_APPROX(m, n.segment(0,1));
 
-  m = n = MatrixType::Random(50);
+  m = n = VectorType::Random(50);
   m.conservativeResize(50);
+  VERIFY_IS_APPROX(m, n.segment(0,50));
+  
+  m = n = VectorType::Random(50);
+  m.conservativeResize(m.rows(),1);
+  VERIFY_IS_APPROX(m, n.segment(0,1));
+
+  m = n = VectorType::Random(50);
+  m.conservativeResize(m.rows(),50);
   VERIFY_IS_APPROX(m, n.segment(0,50));
 
   // random shrinking ...
   for (int i=0; i<50; ++i)
   {
     const int size = internal::random<int>(1,50);
-    m = n = MatrixType::Random(50);
+    m = n = VectorType::Random(50);
     m.conservativeResize(size);
+    VERIFY_IS_APPROX(m, n.segment(0,size));
+    
+    m = n = VectorType::Random(50);
+    m.conservativeResize(m.rows(), size);
     VERIFY_IS_APPROX(m, n.segment(0,size));
   }
 
@@ -86,14 +98,45 @@ void run_vector_tests()
   for (int i=0; i<50; ++i)
   {
     const int size = internal::random<int>(50,100);
-    m = n = MatrixType::Random(50);
-    m.conservativeResizeLike(MatrixType::Zero(size));
+    m = n = VectorType::Random(50);
+    m.conservativeResizeLike(VectorType::Zero(size));
+    VERIFY_IS_APPROX(m.segment(0,50), n);
+    VERIFY( size<=50 || m.segment(50,size-50).sum() == Scalar(0) );
+    
+    m = n = VectorType::Random(50);
+    m.conservativeResizeLike(Matrix<Scalar,Dynamic,Dynamic>::Zero(1,size));
     VERIFY_IS_APPROX(m.segment(0,50), n);
     VERIFY( size<=50 || m.segment(50,size-50).sum() == Scalar(0) );
   }
 }
 
-void test_conservative_resize()
+// Basic memory leak check with a non-copyable scalar type
+template<int> void noncopyable()
+{
+  typedef Eigen::Matrix<AnnoyingScalar,Dynamic,1> VectorType;
+  typedef Eigen::Matrix<AnnoyingScalar,Dynamic,Dynamic> MatrixType;
+
+  {
+#ifndef EIGEN_TEST_ANNOYING_SCALAR_DONT_THROW
+    AnnoyingScalar::dont_throw = true;
+#endif
+    int n = 50;
+    VectorType v0(n), v1(n);
+    MatrixType m0(n,n), m1(n,n), m2(n,n);
+    v0.setOnes(); v1.setOnes();
+    m0.setOnes(); m1.setOnes(); m2.setOnes();
+    VERIFY(m0==m1);
+    m0.conservativeResize(2*n,2*n);
+    VERIFY(m0.topLeftCorner(n,n) == m1);
+    
+    VERIFY(v0.head(n) == v1);
+    v0.conservativeResize(2*n);
+    VERIFY(v0.head(n) == v1);
+  }
+  VERIFY(AnnoyingScalar::instances==0 && "global memory leak detected in noncopyable");
+}
+
+EIGEN_DECLARE_TEST(conservative_resize)
 {
   for(int i=0; i<g_repeat; ++i)
   {
@@ -106,12 +149,19 @@ void test_conservative_resize()
     CALL_SUBTEST_4((run_matrix_tests<std::complex<float>, Eigen::RowMajor>()));
     CALL_SUBTEST_4((run_matrix_tests<std::complex<float>, Eigen::ColMajor>()));
     CALL_SUBTEST_5((run_matrix_tests<std::complex<double>, Eigen::RowMajor>()));
-    CALL_SUBTEST_6((run_matrix_tests<std::complex<double>, Eigen::ColMajor>()));
+    CALL_SUBTEST_5((run_matrix_tests<std::complex<double>, Eigen::ColMajor>()));
+    CALL_SUBTEST_1((run_matrix_tests<int, Eigen::RowMajor | Eigen::DontAlign>()));
 
     CALL_SUBTEST_1((run_vector_tests<int>()));
     CALL_SUBTEST_2((run_vector_tests<float>()));
     CALL_SUBTEST_3((run_vector_tests<double>()));
     CALL_SUBTEST_4((run_vector_tests<std::complex<float> >()));
     CALL_SUBTEST_5((run_vector_tests<std::complex<double> >()));
+
+#ifndef EIGEN_TEST_ANNOYING_SCALAR_DONT_THROW
+    AnnoyingScalar::dont_throw = true;
+#endif
+    CALL_SUBTEST_6(( run_vector_tests<AnnoyingScalar>() ));
+    CALL_SUBTEST_6(( noncopyable<0>() ));
   }
 }

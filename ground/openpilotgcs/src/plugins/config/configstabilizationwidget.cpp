@@ -40,6 +40,7 @@
 #include <QToolButton>
 #include <QMenu>
 #include <QAction>
+#include <vector>
 
 #include <extensionsystem/pluginmanager.h>
 #include <coreplugin/generalsettings.h>
@@ -439,9 +440,9 @@ void ConfigStabilizationWidget::resetStabBank(int bank)
 
     if (stabBankObject) {
         UAVDataObject *defaultStabBankObject = stabBankObject->dirtyClone();
-        quint8 data[stabBankObject->getNumBytes()];
-        defaultStabBankObject->pack(data);
-        stabBankObject->unpack(data);
+        std::vector<quint8> data(stabBankObject->getNumBytes());
+        defaultStabBankObject->pack(data.data());
+        stabBankObject->unpack(data.data());
     }
 }
 
@@ -482,13 +483,13 @@ void ConfigStabilizationWidget::copyCurrentStabBank()
     UAVObject *fromStabBankObject = getStabBankObject(m_currentStabSettingsBank);
 
     if (fromStabBankObject) {
-        quint8 fromStabBankObjectData[fromStabBankObject->getNumBytes()];
-        fromStabBankObject->pack(fromStabBankObjectData);
+        std::vector<quint8> fromStabBankObjectData(fromStabBankObject->getNumBytes());
+        fromStabBankObject->pack(fromStabBankObjectData.data());
         for (int i = 0; i < m_stabSettingsBankCount; i++) {
             if (i != m_currentStabSettingsBank) {
                 UAVObject *toStabBankObject = getStabBankObject(i);
                 if (toStabBankObject) {
-                    toStabBankObject->unpack(fromStabBankObjectData);
+                    toStabBankObject->unpack(fromStabBankObjectData.data());
                 }
             }
         }
@@ -501,9 +502,9 @@ void ConfigStabilizationWidget::copyFromBankToBank(int fromBank, int toBank)
     UAVObject *toStabBankObject   = getStabBankObject(toBank);
 
     if (fromStabBankObject && toStabBankObject) {
-        quint8 data[fromStabBankObject->getNumBytes()];
-        fromStabBankObject->pack(data);
-        toStabBankObject->unpack(data);
+        std::vector<quint8> data(fromStabBankObject->getNumBytes());
+        fromStabBankObject->pack(data.data());
+        toStabBankObject->unpack(data.data());
     }
 }
 
@@ -523,12 +524,12 @@ void ConfigStabilizationWidget::swapBankAndCurrent(int bank)
     UAVObject *toStabBankObject   = getStabBankObject(bank);
 
     if (fromStabBankObject && toStabBankObject) {
-        quint8 fromStabBankObjectData[fromStabBankObject->getNumBytes()];
-        quint8 toStabBankObjectData[toStabBankObject->getNumBytes()];
-        fromStabBankObject->pack(fromStabBankObjectData);
-        toStabBankObject->pack(toStabBankObjectData);
-        toStabBankObject->unpack(fromStabBankObjectData);
-        fromStabBankObject->unpack(toStabBankObjectData);
+        std::vector<quint8> fromStabBankObjectData(fromStabBankObject->getNumBytes());
+        std::vector<quint8> toStabBankObjectData(toStabBankObject->getNumBytes());
+        fromStabBankObject->pack(fromStabBankObjectData.data());
+        toStabBankObject->pack(toStabBankObjectData.data());
+        toStabBankObject->unpack(fromStabBankObjectData.data());
+        fromStabBankObject->unpack(toStabBankObjectData.data());
     }
 }
 

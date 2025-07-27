@@ -69,7 +69,7 @@ void GCSControlGadgetOptionsPage::gamepads(quint8 count)
     /*options_page->AvailableControllerList->clear();
        for (int i=0;i<count;i++)
        {
-       options_page->AvailableControllerList->addItem(QString().sprintf("%d",i));//SDL_JoystickName(i));
+       options_page->AvailableControllerList->addItem(QString("%1").arg(i));//SDL_JoystickName(i));
        }*/
 }
 

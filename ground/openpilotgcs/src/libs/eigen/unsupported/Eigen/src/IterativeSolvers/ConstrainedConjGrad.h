@@ -31,13 +31,13 @@
 #ifndef EIGEN_CONSTRAINEDCG_H
 #define EIGEN_CONSTRAINEDCG_H
 
-#include <Eigen/Core>
+#include "../../../../Eigen/Core"
 
 namespace Eigen { 
 
 namespace internal {
 
-/** \ingroup IterativeSolvers_Module
+/** \ingroup IterativeLinearSolvers_Module
   * Compute the pseudo inverse of the non-square matrix C such that
   * \f$ CINV = (C * C^T)^{-1} * C \f$ based on a conjugate gradient method.
   *
@@ -58,7 +58,9 @@ void pseudo_inverse(const CMatrix &C, CINVMatrix &CINV)
   Scalar rho, rho_1, alpha;
   d.setZero();
 
-  CINV.startFill(); // FIXME estimate the number of non-zeros
+  typedef Triplet<double> T;
+  std::vector<T> tripletList;
+    
   for (Index i = 0; i < rows; ++i)
   {
     d[i] = 1.0;
@@ -84,25 +86,27 @@ void pseudo_inverse(const CMatrix &C, CINVMatrix &CINV)
     // FIXME add a generic "prune/filter" expression for both dense and sparse object to sparse
     for (Index j=0; j<l.size(); ++j)
       if (l[j]<1e-15)
-        CINV.fill(i,j) = l[j];
+	tripletList.push_back(T(i,j,l(j)));
 
+	
     d[i] = 0.0;
   }
-  CINV.endFill();
+  CINV.setFromTriplets(tripletList.begin(), tripletList.end());
 }
 
 
 
-/** \ingroup IterativeSolvers_Module
+/** \ingroup IterativeLinearSolvers_Module
   * Constrained conjugate gradient
   *
-  * Computes the minimum of \f$ 1/2((Ax).x) - bx \f$ under the contraint \f$ Cx \le f \f$
+  * Computes the minimum of \f$ 1/2((Ax).x) - bx \f$ under the constraint \f$ Cx \le f \f$
   */
 template<typename TMatrix, typename CMatrix,
          typename VectorX, typename VectorB, typename VectorF>
 void constrained_cg(const TMatrix& A, const CMatrix& C, VectorX& x,
                        const VectorB& b, const VectorF& f, IterationController &iter)
 {
+  using std::sqrt;
   typedef typename TMatrix::Scalar Scalar;
   typedef typename TMatrix::Index Index;
   typedef Matrix<Scalar,Dynamic,1>  TmpVec;
@@ -154,8 +158,6 @@ void constrained_cg(const TMatrix& A, const CMatrix& C, VectorX& x,
     rho = r.dot(z);
 
     if (iter.finished(rho)) break;
-
-    if (iter.noiseLevel() > 0 && transition) std::cerr << "CCG: transition\n";
     if (transition || iter.first()) gamma = 0.0;
     else gamma = (std::max)(0.0, (rho - old_z.dot(z)) / rho_1);
     p = z + gamma*p;

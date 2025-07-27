@@ -329,7 +329,7 @@ void MixerCurve::UpdateSettingsTable()
     for (int i = 0; i < ptCnt; i++) {
         QTableWidgetItem *item = m_settings->item(i, 0);
         if (item) {
-            item->setText(QString().sprintf("%.2f", points.at((ptCnt - 1) - i)));
+            item->setText(QString("%1").arg(points.at((ptCnt - 1) - i), 0, 'f', 2));
         }
     }
 }

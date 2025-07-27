@@ -67,18 +67,18 @@ void GpsDisplayWidget::setSpeedHeading(double speed, double heading)
 {
     QString str;
 
-    speed_value->setText(str.sprintf("%.02f m/s", speed));
-    bear_value->setText(str.sprintf("%.02f deg", heading));
+    speed_value->setText(QString("%1 m/s").arg(speed, 0, 'f', 2));
+    bear_value->setText(QString("%1 deg").arg(heading, 0, 'f', 2));
 }
 
 void GpsDisplayWidget::setDateTime(double date, double time)
 {
     QString dstring1, dstring2;
 
-    dstring1.sprintf("%06.0f", date);
+    dstring1 = QString("%1").arg(date, 6, 'f', 0, '0');
     dstring1.insert(dstring1.length() - 2, ".");
     dstring1.insert(dstring1.length() - 5, ".");
-    dstring2.sprintf("%06.0f", time);
+    dstring2 = QString("%1").arg(time, 6, 'f', 0, '0');
     dstring2.insert(dstring2.length() - 2, ":");
     dstring2.insert(dstring2.length() - 5, ":");
     time_value->setText(dstring1 + "    " + dstring2 + " GMT");
@@ -124,7 +124,7 @@ void GpsDisplayWidget::setDOP(double hdop, double vdop, double pdop)
 {
     QString str;
 
-    str.sprintf("%.2f / %.2f / %.2f", hdop, vdop, pdop);
+    str = QString("%1 / %2 / %3").arg(hdop, 0, 'f', 2).arg(vdop, 0, 'f', 2).arg(pdop, 0, 'f', 2);
     dop_value->setText(str);
 }
 
@@ -136,7 +136,7 @@ void GpsDisplayWidget::setPosition(double lat, double lon, double alt)
     double min = (fabs(lat) - deg) * 60;
     QString str1;
 
-    str1.sprintf("%.0f%c%.3f' ", deg, 0x00b0, min);
+    str1 = QString("%1%2%3' ").arg(deg, 0, 'f', 0).arg(QChar(0x00b0)).arg(min, 0, 'f', 3);
     if (lat > 0) {
         str1.append("N");
     } else {
@@ -146,7 +146,7 @@ void GpsDisplayWidget::setPosition(double lat, double lon, double alt)
     deg = floor(fabs(lon));
     min = (fabs(lon) - deg) * 60;
     QString str2;
-    str2.sprintf("%.0f%c%.3f' ", deg, 0x00b0, min);
+    str2 = QString("%1%2%3' ").arg(deg, 0, 'f', 0).arg(QChar(0x00b0)).arg(min, 0, 'f', 3);
     if (lon > 0) {
         str2.append("E");
     } else {
@@ -154,7 +154,7 @@ void GpsDisplayWidget::setPosition(double lat, double lon, double alt)
     }
     coord_value_2->setText(str2);
     QString str3;
-    str3.sprintf("%.2f m", alt);
+    str3 = QString("%1 m").arg(alt, 0, 'f', 2);
     coord_value_3->setText(str3);
 
     // Now place the marker:

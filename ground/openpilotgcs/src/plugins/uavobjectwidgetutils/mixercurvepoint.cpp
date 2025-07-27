@@ -82,7 +82,7 @@ QPainterPath MixerNode::shape() const
 
 void MixerNode::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *)
 {
-    QString text = QString().sprintf("%.2f", value());
+    QString text = QString("%1").arg(value(), 0, 'f', 2);
 
     painter->setFont(m_graph->font());
     if (m_drawNode) {

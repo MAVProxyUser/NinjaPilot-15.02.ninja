@@ -42,10 +42,9 @@ template<typename ExpressionType, unsigned int Added, unsigned int Removed> clas
   public:
 
     typedef MatrixBase<Flagged> Base;
-    
     EIGEN_DENSE_PUBLIC_INTERFACE(Flagged)
     typedef typename internal::conditional<internal::must_nest_by_value<ExpressionType>::ret,
-        ExpressionType, const ExpressionType&>::type ExpressionTypeNested;
+        ExpressionType, ExpressionType&>::type ExpressionTypeNested;
     typedef typename ExpressionType::InnerIterator InnerIterator;
 
     inline Flagged(const ExpressionType& matrix) : m_matrix(matrix) {}
@@ -55,24 +54,14 @@ template<typename ExpressionType, unsigned int Added, unsigned int Removed> clas
     inline Index outerStride() const { return m_matrix.outerStride(); }
     inline Index innerStride() const { return m_matrix.innerStride(); }
 
-    inline CoeffReturnType coeff(Index row, Index col) const
+    inline const Scalar coeff(Index row, Index col) const
     {
       return m_matrix.coeff(row, col);
     }
 
-    inline CoeffReturnType coeff(Index index) const
+    inline const Scalar coeff(Index index) const
     {
       return m_matrix.coeff(index);
-    }
-    
-    inline const Scalar& coeffRef(Index row, Index col) const
-    {
-      return m_matrix.const_cast_derived().coeffRef(row, col);
-    }
-
-    inline const Scalar& coeffRef(Index index) const
-    {
-      return m_matrix.const_cast_derived().coeffRef(index);
     }
 
     inline Scalar& coeffRef(Index row, Index col)
@@ -115,7 +104,7 @@ template<typename ExpressionType, unsigned int Added, unsigned int Removed> clas
     typename ExpressionType::PlainObject solveTriangular(const MatrixBase<OtherDerived>& other) const;
 
     template<typename OtherDerived>
-    void solveTriangularInPlace(const MatrixBase<OtherDerived>& other) const;
+    void solveTriangularInPlace(MatrixBase<OtherDerived>& other) const;
 
   protected:
     ExpressionTypeNested m_matrix;
@@ -123,14 +112,17 @@ template<typename ExpressionType, unsigned int Added, unsigned int Removed> clas
 
 /** \returns an expression of *this with added and removed flags
   *
-  * This is mostly for internal use.
+  * This is mostly useful to control automatic evaluation and especially automatic unrolling.
   *
-  * \sa class Flagged
+  * Example: \include MatrixBase_flagged.cpp
+  * Output: \verbinclude MatrixBase_flagged.out
+  *
+  * \sa class Flagged, extract(), part()
   */
 template<typename Derived>
 template<unsigned int Added,unsigned int Removed>
 inline const Flagged<Derived, Added, Removed>
-DenseBase<Derived>::flagged() const
+MatrixBase<Derived>::flagged() const
 {
   return derived();
 }

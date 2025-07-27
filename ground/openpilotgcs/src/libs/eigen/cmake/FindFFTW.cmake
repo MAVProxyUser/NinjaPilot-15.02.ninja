@@ -22,7 +22,8 @@ if( NOT FFTW_ROOT AND ENV{FFTWDIR} )
 endif()
 
 # Check if we can use PkgConfig
-find_package(PkgConfig)
+include(CMakeFindDependencyMacro)
+find_dependency(PkgConfig)
 
 #Determine from PKG
 if( PKG_CONFIG_FOUND AND NOT FFTW_ROOT )
@@ -101,7 +102,7 @@ else()
     PATHS ${PKG_FFTW_INCLUDE_DIRS} ${INCLUDE_INSTALL_DIR}
   )
 
-endif( FFTW_ROOT )
+endif()
 
 set(FFTW_LIBRARIES ${FFTW_LIB} ${FFTWF_LIB})
 
@@ -115,5 +116,5 @@ include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(FFTW DEFAULT_MSG
                                   FFTW_INCLUDES FFTW_LIBRARIES)
 
-mark_as_advanced(FFTW_INCLUDES FFTW_LIBRARIES)
+mark_as_advanced(FFTW_INCLUDES FFTW_LIBRARIES FFTW_LIB FFTWF_LIB FFTWL_LIB)
 

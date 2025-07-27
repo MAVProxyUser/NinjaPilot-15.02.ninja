@@ -359,7 +359,7 @@ void DialGadgetWidget::setDialFile(QString dfn, QString bg, QString fg, QString 
 
         // Check whether the dial also wants display the numeric value:
         if (m_renderer->elementExists(n1 + "-text")) {
-            QMatrix textMatrix = m_renderer->matrixForElement(n1 + "-text");
+            QTransform textMatrix = m_renderer->transformForElement(n1 + "-text");
             qreal startX = textMatrix.mapRect(m_renderer->boundsOnElement(n1 + "-text")).x();
             qreal startY = textMatrix.mapRect(m_renderer->boundsOnElement(n1 + "-text")).y();
             QTransform matrix;
@@ -380,7 +380,7 @@ void DialGadgetWidget::setDialFile(QString dfn, QString bg, QString fg, QString 
             m_needle2->setTransformOriginPoint(rectN.width() / 2, rectN.height() / 2);
             // Check whether the dial also wants display the numeric value:
             if (m_renderer->elementExists(n2 + "-text")) {
-                QMatrix textMatrix = m_renderer->matrixForElement(n2 + "-text");
+                QTransform textMatrix = m_renderer->transformForElement(n2 + "-text");
                 qreal startX = textMatrix.mapRect(m_renderer->boundsOnElement(n2 + "-text")).x();
                 qreal startY = textMatrix.mapRect(m_renderer->boundsOnElement(n2 + "-text")).y();
                 QTransform matrix;
@@ -399,7 +399,7 @@ void DialGadgetWidget::setDialFile(QString dfn, QString bg, QString fg, QString 
             m_needle3->setTransformOriginPoint(rectN.width() / 2, rectN.height() / 2);
             // Check whether the dial also wants display the numeric value:
             if (m_renderer->elementExists(n3 + "-text")) {
-                QMatrix textMatrix = m_renderer->matrixForElement(n3 + "-text");
+                QTransform textMatrix = m_renderer->transformForElement(n3 + "-text");
                 qreal startX = textMatrix.mapRect(m_renderer->boundsOnElement(n3 + "-text")).x();
                 qreal startY = textMatrix.mapRect(m_renderer->boundsOnElement(n3 + "-text")).y();
                 QTransform matrix;
@@ -494,7 +494,7 @@ void DialGadgetWidget::setNeedle1(double value)
     }
     if (m_text1) {
         QString s;
-        s.sprintf("%.2f", value * n1Factor);
+        s = QString("%1").arg(value * n1Factor, 0, 'f', 2);
         m_text1->setPlainText(s);
     }
 }
@@ -515,7 +515,7 @@ void DialGadgetWidget::setNeedle2(double value)
     }
     if (m_text2) {
         QString s;
-        s.sprintf("%.2f", value * n2Factor);
+        s = QString("%1").arg(value * n2Factor, 0, 'f', 2);
         m_text2->setPlainText(s);
     }
 }
@@ -536,7 +536,7 @@ void DialGadgetWidget::setNeedle3(double value)
     }
     if (m_text3) {
         QString s;
-        s.sprintf("%.2f", value * n3Factor);
+        s = QString("%1").arg(value * n3Factor, 0, 'f', 2);
         m_text3->setPlainText(s);
     }
 }

@@ -40,6 +40,7 @@
 #include <QTimer>
 #include <QTime>
 #include <QVector>
+#include <QPen>
 #include <uavdataobject.h>
 
 /*!

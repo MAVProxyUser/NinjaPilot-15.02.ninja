@@ -31,6 +31,7 @@ using namespace std;
 #define MAX_PACKET_BUF_SIZE (1 + 1 + MAX_PACKET_DATA_LEN + 2)
 
 namespace OP_DFU {
+Q_NAMESPACE
 enum TransferTypes {
     FW,
     Descript

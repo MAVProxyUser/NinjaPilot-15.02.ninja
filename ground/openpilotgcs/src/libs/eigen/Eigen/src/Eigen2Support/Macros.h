@@ -1,20 +1,16 @@
 // This file is part of Eigen, a lightweight C++ template library
 // for linear algebra.
 //
-// Copyright (C) 2011 Benoit Jacob <jacob.benoit.1@gmail.com>
-//
 // This Source Code Form is subject to the terms of the Mozilla
 // Public License v. 2.0. If a copy of the MPL was not distributed
 // with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-#ifndef EIGEN2_MACROS_H
-#define EIGEN2_MACROS_H
+// Eigen2 compatibility header - functionality integrated into main Eigen in 3.4+
 
-#define ei_assert eigen_assert
-#define ei_internal_assert eigen_internal_assert
+#ifndef EIGEN_EIGEN2SUPPORT_FILE_H
+#define EIGEN_EIGEN2SUPPORT_FILE_H
 
-#define EIGEN_ALIGN_128 EIGEN_ALIGN16
+// Most Eigen2 functionality is now available directly in the main Eigen namespace
+// This header provides minimal compatibility shims
 
-#define EIGEN_ARCH_WANTS_ALIGNMENT EIGEN_ALIGN_STATICALLY
-
-#endif // EIGEN2_MACROS_H
+#endif // EIGEN_EIGEN2SUPPORT_FILE_H

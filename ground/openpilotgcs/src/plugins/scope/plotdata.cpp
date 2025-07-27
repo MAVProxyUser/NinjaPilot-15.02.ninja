@@ -122,7 +122,7 @@ bool PlotData::hasData() const
 QString PlotData::lastDataAsString()
 {
     if (!m_isEnumPlot) {
-        return QString().sprintf("%3.10g", m_yDataEntries.last());
+        return QString("%1").arg(m_yDataEntries.last(), 0, 'g', 10);
     } else {
         return m_enumMarkerList.last()->title().text();
     }
