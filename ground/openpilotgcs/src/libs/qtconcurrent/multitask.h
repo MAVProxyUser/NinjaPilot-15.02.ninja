@@ -36,7 +36,10 @@
 #include <QtCore/QList>
 #include <QtCore/QEventLoop>
 #include <QtCore/QFutureWatcher>
-#include <QtConcurrent/QtConcurrentRun>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnonportable-include-path"
+#include <qtconcurrent/qtconcurrentrun.h>
+#pragma GCC diagnostic pop
 #include <QtCore/QThreadPool>
 
 #include <QtDebug>

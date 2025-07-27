@@ -47,7 +47,7 @@ class QTCREATOR_UTILS_EXPORT FancyLineEdit : public QLineEdit {
     Q_DISABLE_COPY(FancyLineEdit)
     Q_OBJECT Q_ENUMS(Side)
     Q_PROPERTY(QPixmap pixmap READ pixmap WRITE setPixmap DESIGNABLE true)
-    Q_PROPERTY(Side side READ side WRITE setSide DESIGNABLE isSideStored STORED isSideStored)
+    Q_PROPERTY(Side side READ side WRITE setSide DESIGNABLE true STORED true)
     Q_PROPERTY(bool useLayoutDirection READ useLayoutDirection WRITE setUseLayoutDirection DESIGNABLE true)
     Q_PROPERTY(bool menuTabFocusTrigger READ hasMenuTabFocusTrigger WRITE setMenuTabFocusTrigger DESIGNABLE true)
     Q_PROPERTY(QString hintText READ hintText WRITE setHintText DESIGNABLE true)

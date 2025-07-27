@@ -33,7 +33,7 @@
 #include <QtCore/QBuffer>
 #include <QtCore/QFile>
 #include <QtCore/QFutureInterface>
-#include <QtConcurrent/QtConcurrentRun>
+#include <qtconcurrent/qtconcurrentrun.h>
 #include <QtCore/QRegExp>
 #include <QtCore/QCoreApplication>
 

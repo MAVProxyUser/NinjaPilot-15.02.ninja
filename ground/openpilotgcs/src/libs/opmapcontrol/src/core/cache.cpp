@@ -53,7 +53,7 @@ QString Cache::CacheLocation()
 }
 Cache::Cache()
 {
-    if (cache.isNull() | cache.isEmpty()) {
+    if (cache.isNull() || cache.isEmpty()) {
         cache = Utils::PathUtils().GetStoragePath() + "mapscache" + QDir::separator();
         setCacheLocation(cache);
     }
@@ -63,7 +63,7 @@ QString Cache::GetGeocoderFromCache(const QString &urlEnd)
 #ifdef DEBUG_GetGeocoderFromCache
     qDebug() << "Entered GetGeocoderFromCache";
 #endif
-    QString ret = QString::null;
+    QString ret = QString();
     QString filename = geoCache + QString(urlEnd) + ".geo";
 #ifdef DEBUG_GetGeocoderFromCache
     qDebug() << "GetGeocoderFromCache: Does file exist?:" << filename;
@@ -87,7 +87,7 @@ QString Cache::GetGeocoderFromCache(const QString &urlEnd)
 }
 void Cache::CacheGeocoder(const QString &urlEnd, const QString &content)
 {
-    QString ret = QString::null;
+    QString ret = QString();
     QString filename = geoCache + QString(urlEnd) + ".geo";
 
 #ifdef DEBUG_CACHE
@@ -127,7 +127,7 @@ QString Cache::GetPlacemarkFromCache(const QString &urlEnd)
 #ifdef DEBUG_CACHE
     qDebug() << "Entered GetPlacemarkFromCache";
 #endif // DEBUG_CACHE
-    QString ret = QString::null;
+    QString ret = QString();
     QString filename = placemarkCache + QString(urlEnd) + ".plc";
 #ifdef DEBUG_CACHE
     qDebug() << "GetPlacemarkFromCache: Does file exist?:" << filename;
@@ -151,7 +151,7 @@ QString Cache::GetPlacemarkFromCache(const QString &urlEnd)
 }
 void Cache::CachePlacemark(const QString &urlEnd, const QString &content)
 {
-    QString ret = QString::null;
+    QString ret = QString();
     QString filename = placemarkCache + QString(urlEnd) + ".plc";
 
 #ifdef DEBUG_CACHE

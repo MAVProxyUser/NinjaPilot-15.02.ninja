@@ -160,7 +160,7 @@ bool PureImageCache::CreateEmptyDB(const QString &file)
 }
 bool PureImageCache::PutImageToCache(const QByteArray &tile, const MapType::Types &type, const Point &pos, const int &zoom)
 {
-    if (gtilecache.isEmpty() | gtilecache.isNull()) {
+    if (gtilecache.isEmpty() || gtilecache.isNull()) {
         return false;
     }
     lock.lockForRead();
@@ -205,7 +205,7 @@ QByteArray PureImageCache::GetImageFromCache(MapType::Types type, Point pos, int
 {
     lock.lockForRead();
     QByteArray ar;
-    if (gtilecache.isEmpty() | gtilecache.isNull()) {
+    if (gtilecache.isEmpty() || gtilecache.isNull()) {
         return ar;
     }
     QString dir  = gtilecache;
@@ -244,7 +244,7 @@ QByteArray PureImageCache::GetImageFromCache(MapType::Types type, Point pos, int
 }
 void PureImageCache::deleteOlderTiles(int const & days)
 {
-    if (gtilecache.isEmpty() | gtilecache.isNull()) {
+    if (gtilecache.isEmpty() || gtilecache.isNull()) {
         return;
     }
     QList<long> add;

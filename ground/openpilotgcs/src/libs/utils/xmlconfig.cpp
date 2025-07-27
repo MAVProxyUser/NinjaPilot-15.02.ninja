@@ -33,6 +33,7 @@
 #include <QtDebug>
 #include <QStringList>
 #include <QRegExp>
+#include <QDataStream>
 
 #include <QVariant>
 #include <QRect>

@@ -362,19 +362,19 @@ QString UrlFactory::MakeImageUrl(const MapType::Types &type, const Point &pos, c
     case MapType::BingMap:
     {
         QString key = TileXYToQuadKey(pos.X(), pos.Y(), zoom);
-        return QString("http://ecn.t%1.tiles.virtualearth.net/tiles/r%2.png?g=%3&mkt=%4%5").arg(GetServerNum(pos, 4)).arg(key).arg(VersionBingMaps).arg(language).arg(!(BingMapsClientToken.isNull() | BingMapsClientToken.isEmpty()) ? "&token=" + BingMapsClientToken : QString(""));
+        return QString("http://ecn.t%1.tiles.virtualearth.net/tiles/r%2.png?g=%3&mkt=%4%5").arg(GetServerNum(pos, 4)).arg(key).arg(VersionBingMaps).arg(language).arg(!(BingMapsClientToken.isNull() || BingMapsClientToken.isEmpty()) ? "&token=" + BingMapsClientToken : QString(""));
     }
     break;
     case MapType::BingSatellite:
     {
         QString key = TileXYToQuadKey(pos.X(), pos.Y(), zoom);
-        return QString("http://ecn.t%1.tiles.virtualearth.net/tiles/a%2.jpeg?g=%3&mkt=%4%5").arg(GetServerNum(pos, 4)).arg(key).arg(VersionBingMaps).arg(language).arg(!(BingMapsClientToken.isNull() | BingMapsClientToken.isEmpty()) ? "&token=" + BingMapsClientToken : QString(""));
+        return QString("http://ecn.t%1.tiles.virtualearth.net/tiles/a%2.jpeg?g=%3&mkt=%4%5").arg(GetServerNum(pos, 4)).arg(key).arg(VersionBingMaps).arg(language).arg(!(BingMapsClientToken.isNull() || BingMapsClientToken.isEmpty()) ? "&token=" + BingMapsClientToken : QString(""));
     }
     break;
     case MapType::BingHybrid:
     {
         QString key = TileXYToQuadKey(pos.X(), pos.Y(), zoom);
-        return QString("http://ecn.t%1.tiles.virtualearth.net/tiles/h%2.jpeg?g=%3&mkt=%4%5").arg(GetServerNum(pos, 4)).arg(key).arg(VersionBingMaps).arg(language).arg(!(BingMapsClientToken.isNull() | BingMapsClientToken.isEmpty()) ? "&token=" + BingMapsClientToken : QString(""));
+        return QString("http://ecn.t%1.tiles.virtualearth.net/tiles/h%2.jpeg?g=%3&mkt=%4%5").arg(GetServerNum(pos, 4)).arg(key).arg(VersionBingMaps).arg(language).arg(!(BingMapsClientToken.isNull() || BingMapsClientToken.isEmpty()) ? "&token=" + BingMapsClientToken : QString(""));
     }
 
     case MapType::ArcGIS_Map:
@@ -477,7 +477,7 @@ QString UrlFactory::MakeImageUrl(const MapType::Types &type, const Point &pos, c
         break;
     }
 
-    return QString::null;
+    return QString();
 }
 void UrlFactory::GetSecGoogleWords(const Point &pos, QString &sec1, QString &sec2)
 {
@@ -523,7 +523,7 @@ internals::PointLatLng UrlFactory::GetLatLngFromGeocoderUrl(const QString &url, 
 
     QString geo = useCache ? Cache::Instance()->GetGeocoderFromCache(urlEnd) : "";
 
-    if (geo.isNull() | geo.isEmpty()) {
+    if (geo.isNull() || geo.isEmpty()) {
 #ifdef DEBUG_URLFACTORY
         qDebug() << "GetLatLngFromGeocoderUrl:Not in cache going internet";
 #endif // DEBUG_URLFACTORY
@@ -545,7 +545,7 @@ internals::PointLatLng UrlFactory::GetLatLngFromGeocoderUrl(const QString &url, 
 #ifdef DEBUG_URLFACTORY
         qDebug() << "Finished?" << reply->error() << " abort?" << (time.elapsed() > Timeout * 6);
 #endif // DEBUG_URLFACTORY
-        if ((reply->error() != QNetworkReply::NoError) | (time.elapsed() > Timeout * 6)) {
+        if ((reply->error() != QNetworkReply::NoError) || (time.elapsed() > Timeout * 6)) {
 #ifdef DEBUG_URLFACTORY
             qDebug() << "GetLatLngFromGeocoderUrl::Network error";
 #endif // DEBUG_URLFACTORY
@@ -614,7 +614,7 @@ Placemark UrlFactory::GetPlacemarkFromReverseGeocoderUrl(const QString &url, con
 
     QString reverse = useCache ? Cache::Instance()->GetPlacemarkFromCache(urlEnd) : "";
 
-    if (reverse.isNull() | reverse.isEmpty()) {
+    if (reverse.isNull() || reverse.isEmpty()) {
 #ifdef DEBUG_URLFACTORY
         qDebug() << "GetLatLngFromGeocoderUrl:Not in cache going internet";
 #endif // DEBUG_URLFACTORY
@@ -636,7 +636,7 @@ Placemark UrlFactory::GetPlacemarkFromReverseGeocoderUrl(const QString &url, con
 #ifdef DEBUG_URLFACTORY
         qDebug() << "Finished?" << reply->error() << " abort?" << (time.elapsed() > Timeout * 6);
 #endif // DEBUG_URLFACTORY
-        if ((reply->error() != QNetworkReply::NoError) | (time.elapsed() > Timeout * 6)) {
+        if ((reply->error() != QNetworkReply::NoError) || (time.elapsed() > Timeout * 6)) {
 #ifdef DEBUG_URLFACTORY
             qDebug() << "GetLatLngFromGeocoderUrl::Network error";
 #endif // DEBUG_URLFACTORY

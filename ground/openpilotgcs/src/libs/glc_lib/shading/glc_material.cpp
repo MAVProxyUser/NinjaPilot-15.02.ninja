@@ -477,25 +477,25 @@ void GLC_Material::glLoadTexture(QGLContext* pContext)
 void GLC_Material::glExecute()
 {
 
-	GLfloat pAmbientColor[4]= {ambientColor().redF(),
-								ambientColor().greenF(),
-								ambientColor().blueF(),
-								ambientColor().alphaF()};
+	GLfloat pAmbientColor[4]= {static_cast<GLfloat>(ambientColor().redF()),
+								static_cast<GLfloat>(ambientColor().greenF()),
+								static_cast<GLfloat>(ambientColor().blueF()),
+								static_cast<GLfloat>(ambientColor().alphaF())};
 
-	GLfloat pDiffuseColor[4]= {diffuseColor().redF(),
-								diffuseColor().greenF(),
-								diffuseColor().blueF(),
-								diffuseColor().alphaF()};
+	GLfloat pDiffuseColor[4]= {static_cast<GLfloat>(diffuseColor().redF()),
+								static_cast<GLfloat>(diffuseColor().greenF()),
+								static_cast<GLfloat>(diffuseColor().blueF()),
+								static_cast<GLfloat>(diffuseColor().alphaF())};
 
-	GLfloat pSpecularColor[4]= {specularColor().redF(),
-								specularColor().greenF(),
-								specularColor().blueF(),
-								specularColor().alphaF()};
+	GLfloat pSpecularColor[4]= {static_cast<GLfloat>(specularColor().redF()),
+								static_cast<GLfloat>(specularColor().greenF()),
+								static_cast<GLfloat>(specularColor().blueF()),
+								static_cast<GLfloat>(specularColor().alphaF())};
 
-	GLfloat pLightEmission[4]= {emissiveColor().redF(),
-								emissiveColor().greenF(),
-								emissiveColor().blueF(),
-								emissiveColor().alphaF()};
+	GLfloat pLightEmission[4]= {static_cast<GLfloat>(emissiveColor().redF()),
+								static_cast<GLfloat>(emissiveColor().greenF()),
+								static_cast<GLfloat>(emissiveColor().blueF()),
+								static_cast<GLfloat>(emissiveColor().alphaF())};
 
 	const bool textureIsEnable= glIsEnabled(GL_TEXTURE_2D);
 	if (m_pTexture != NULL)
@@ -550,24 +550,24 @@ void GLC_Material::glExecute()
 // Execute OpenGL Material
 void GLC_Material::glExecute(float overwriteTransparency)
 {
-	GLfloat pAmbientColor[4]= {ambientColor().redF(),
-								ambientColor().greenF(),
-								ambientColor().blueF(),
+	GLfloat pAmbientColor[4]= {static_cast<GLfloat>(ambientColor().redF()),
+								static_cast<GLfloat>(ambientColor().greenF()),
+								static_cast<GLfloat>(ambientColor().blueF()),
 								overwriteTransparency};
 
-	GLfloat pDiffuseColor[4]= {diffuseColor().redF(),
-								diffuseColor().greenF(),
-								diffuseColor().blueF(),
+	GLfloat pDiffuseColor[4]= {static_cast<GLfloat>(diffuseColor().redF()),
+								static_cast<GLfloat>(diffuseColor().greenF()),
+								static_cast<GLfloat>(diffuseColor().blueF()),
 								overwriteTransparency};
 
-	GLfloat pSpecularColor[4]= {specularColor().redF(),
-								specularColor().greenF(),
-								specularColor().blueF(),
+	GLfloat pSpecularColor[4]= {static_cast<GLfloat>(specularColor().redF()),
+								static_cast<GLfloat>(specularColor().greenF()),
+								static_cast<GLfloat>(specularColor().blueF()),
 								overwriteTransparency};
 
-	GLfloat pLightEmission[4]= {emissiveColor().redF(),
-								emissiveColor().greenF(),
-								emissiveColor().blueF(),
+	GLfloat pLightEmission[4]= {static_cast<GLfloat>(emissiveColor().redF()),
+								static_cast<GLfloat>(emissiveColor().greenF()),
+								static_cast<GLfloat>(emissiveColor().blueF()),
 								overwriteTransparency};
 
 	const bool textureIsEnable= glIsEnabled(GL_TEXTURE_2D);
