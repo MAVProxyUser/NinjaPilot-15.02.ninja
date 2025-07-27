@@ -107,7 +107,7 @@ void DialGadgetWidget::connectNeedles(QString object1, QString nfield1,
             // qDebug() << "Connected Object 1 (" << object1 << ").";
             connect(obj1, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(updateNeedle1(UAVObject *)));
             if (nfield1.contains("-")) {
-                QStringList fieldSubfield = nfield1.split("-", QString::SkipEmptyParts);
+                QStringList fieldSubfield = nfield1.split("-", Qt::SkipEmptyParts);
                 field1        = fieldSubfield.at(0);
                 subfield1     = fieldSubfield.at(1);
                 haveSubField1 = true;
@@ -127,7 +127,7 @@ void DialGadgetWidget::connectNeedles(QString object1, QString nfield1,
             // qDebug() << "Connected Object 2 (" << object2 << ").";
             connect(obj2, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(updateNeedle2(UAVObject *)));
             if (nfield2.contains("-")) {
-                QStringList fieldSubfield = nfield2.split("-", QString::SkipEmptyParts);
+                QStringList fieldSubfield = nfield2.split("-", Qt::SkipEmptyParts);
                 field2        = fieldSubfield.at(0);
                 subfield2     = fieldSubfield.at(1);
                 haveSubField2 = true;
@@ -147,7 +147,7 @@ void DialGadgetWidget::connectNeedles(QString object1, QString nfield1,
             // qDebug() << "Connected Object 3 (" << object3 << ").";
             connect(obj3, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(updateNeedle3(UAVObject *)));
             if (nfield3.contains("-")) {
-                QStringList fieldSubfield = nfield3.split("-", QString::SkipEmptyParts);
+                QStringList fieldSubfield = nfield3.split("-", Qt::SkipEmptyParts);
                 field3        = fieldSubfield.at(0);
                 subfield3     = fieldSubfield.at(1);
                 haveSubField3 = true;

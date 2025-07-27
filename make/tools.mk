@@ -98,12 +98,12 @@ endif
 
 GTEST_URL := http://www.ratemode.ninja/gtest-1.6.0.zip
 
-# When changing PYTHON_DIR, you must also update it in ground/openpilotgcs/src/python.pri
+# Python 2 is no longer supported - we use system python3
 # When changing SDL_DIR or OPENSSL_DIR, you must also update them in ground/openpilotgcs/openpilotgcs.pri
 ARM_SDK_DIR     := $(TOOLS_DIR)/gcc-arm-none-eabi-4_9-2014q4
 QT_SDK_DIR      := $(TOOLS_DIR)/qt-5.4.0
 MINGW_DIR       := $(QT_SDK_DIR)/Tools/mingw491_32
-PYTHON_DIR      := $(QT_SDK_DIR)/Tools/mingw491_32/opt/bin
+# PYTHON_DIR      := $(QT_SDK_DIR)/Tools/mingw491_32/opt/bin
 NSIS_DIR        := $(TOOLS_DIR)/nsis-2.46-unicode
 SDL_DIR         := $(TOOLS_DIR)/SDL-1.2.15
 OPENSSL_DIR     := $(TOOLS_DIR)/openssl-1.0.1e-win32
@@ -199,7 +199,7 @@ else
 endif
 
 # Command to extract version info data from the repository and source tree
-export VERSION_INFO = $(PYTHON) $(ROOT_DIR)/make/scripts/version-info.py --path=$(ROOT_DIR)
+export VERSION_INFO = $(PYTHON) -B $(ROOT_DIR)/make/scripts/version-info.py --path=$(ROOT_DIR)
 
 ##############################
 #
@@ -678,18 +678,8 @@ gcc_version:
 #
 ##############################
 
-ifeq ($(shell [ -d "$(PYTHON_DIR)" ] && $(ECHO) "exists"), exists)
-    export PYTHON := $(PYTHON_DIR)/python
-    export PATH   := $(PYTHON_DIR):$(PATH)
-else
-    # not installed, hope it's in the path...
-    # $(info $(EMPTY) WARNING     $(call toprel, $(PYTHON_DIR)) not found, using system PATH)
-    ifeq ($(findstring Python 2,$(shell python --version 2>&1)), Python 2)
-        export PYTHON := python
-    else
-        export PYTHON := python2
-    endif
-endif
+# Always use python3 - Python 2 is no longer supported
+export PYTHON := python3
 
 .PHONY: python_version
 python_version:

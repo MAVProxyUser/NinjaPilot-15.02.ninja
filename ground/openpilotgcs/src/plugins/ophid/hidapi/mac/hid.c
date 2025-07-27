@@ -47,6 +47,7 @@ typedef struct pthread_barrier {
 
 static int pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t *attr, unsigned int count)
 {
+	(void)attr; // Unused parameter
 	if(count == 0) {
 		errno = EINVAL;
 		return -1;
@@ -291,6 +292,7 @@ static int get_string_property_utf8(IOHIDDeviceRef device, CFStringRef prop, cha
 			(UInt8*)buf,
 			len,
 			&used_buf_len);
+		(void)chars_copied; // Variable set but not used
 
 		if (used_buf_len == len)
 			buf[len] = 0; /* len is decremented above */
@@ -410,7 +412,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 	struct hid_device_info *root = NULL; /* return object */
 	struct hid_device_info *cur_dev = NULL;
 	CFIndex num_devices;
-	int i;
+	CFIndex i;
 
 	/* Set up the HID Manager if it hasn't been done */
 	if (hid_init() < 0)
@@ -552,6 +554,8 @@ static void hid_device_removal_callback(void *context, IOReturn result,
                                         void *sender)
 {
 	/* Stop the Run Loop for this device. */
+	(void)result; // Unused parameter
+	(void)sender; // Unused parameter
 	hid_device *d = context;
 
 	d->disconnected = 1;
@@ -565,6 +569,10 @@ static void hid_report_callback(void *context, IOReturn result, void *sender,
                          IOHIDReportType report_type, uint32_t report_id,
                          uint8_t *report, CFIndex report_length)
 {
+	(void)result; // Unused parameter
+	(void)sender; // Unused parameter
+	(void)report_type; // Unused parameter
+	(void)report_id; // Unused parameter
 	struct input_report *rpt;
 	hid_device *dev = context;
 
@@ -683,7 +691,7 @@ static void *read_thread(void *param)
 
 hid_device * HID_API_EXPORT hid_open_path(const char *path)
 {
-	int i;
+	CFIndex i;
 	hid_device *dev = NULL;
 	CFIndex num_devices;
 
@@ -1030,6 +1038,10 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *s
 int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen)
 {
 	/* TODO: */
+	(void)dev; // Unused parameter
+	(void)string_index; // Unused parameter
+	(void)string; // Unused parameter
+	(void)maxlen; // Unused parameter
 
 	return 0;
 }
@@ -1076,7 +1088,7 @@ static int get_transport(IOHIDDeviceRef device, wchar_t *buf, size_t len)
 int main(void)
 {
 	IOHIDManagerRef mgr;
-	int i;
+	CFIndex i;
 
 	mgr = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
 	IOHIDManagerSetDeviceMatching(mgr, NULL);

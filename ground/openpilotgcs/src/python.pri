@@ -1,24 +1,16 @@
-# We use python to extract git version info and generate some other files,
-# but it may be installed locally. The expected python version should be
-# kept in sync with make/tools.mk.
-PYTHON_DIR = qt-5.4.0/Tools/mingw491_32/opt/bin
+# We use python3 to extract git version info and generate some other files.
+# Python 2 is no longer supported.
 
-# Search the python using environment override first
-OPENPILOT_TOOLS_DIR = $$(OPENPILOT_TOOLS_DIR)
-!isEmpty(OPENPILOT_TOOLS_DIR):exists($$OPENPILOT_TOOLS_DIR/$$PYTHON_DIR/python*) {
-    PYTHON = \"$$OPENPILOT_TOOLS_DIR/$$PYTHON_DIR/python\"
+# Try python3 first, then python if it's Python 3
+PYTHON_VER = "$$system(python3 --version 2>&1)"
+!isEmpty(PYTHON_VER):contains(PYTHON_VER, "Python 3.*") {
+    PYTHON = \"python3\"
 } else {
-    # If not found, search the predefined tools path
-    exists($$ROOT_DIR/tools/$$PYTHON_DIR/python*) {
-        PYTHON = \"$$ROOT_DIR/tools/$$PYTHON_DIR/python\"
+    PYTHON_VER = "$$system(python --version 2>&1)"
+    contains(PYTHON_VER, "Python 3.*") {
+        PYTHON = \"python\"
     } else {
-        # not found, hope it's in the path...
-        PYTHON_VER = "$$system(python --version 2>&1)"
-        contains(PYTHON_VER, "Python 2.*") {
-            PYTHON = \"python\"
-        } else {
-            PYTHON = \"python2\"
-        }
+        error(No Python 3 found. Please install python3.)
     }
 }
 

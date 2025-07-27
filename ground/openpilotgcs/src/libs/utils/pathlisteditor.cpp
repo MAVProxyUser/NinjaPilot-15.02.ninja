@@ -182,7 +182,7 @@ QStringList PathListEditor::pathList() const
         return QStringList();
     }
     // trim each line
-    QStringList rc = text.split(QLatin1Char('\n'), QString::SkipEmptyParts);
+    QStringList rc = text.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
     const QStringList::iterator end = rc.end();
     for (QStringList::iterator it = rc.begin(); it != end; ++it) {
         *it = it->trimmed();
@@ -200,7 +200,7 @@ void PathListEditor::setPathList(const QString &pathString)
     if (pathString.isEmpty()) {
         clear();
     } else {
-        setPathList(pathString.split(separator(), QString::SkipEmptyParts));
+        setPathList(pathString.split(separator(), Qt::SkipEmptyParts));
     }
 }
 

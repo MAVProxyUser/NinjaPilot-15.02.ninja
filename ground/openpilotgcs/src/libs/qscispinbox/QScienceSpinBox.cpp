@@ -517,7 +517,7 @@ bool QScienceSpinBox::isIntermediateValueHelper(qint64 num, qint64 min, qint64 m
         digits[0] = 0;
     } else {
         tmp = qAbs(num);
-        for (int i = 0; tmp > 0; ++i) {
+        while (tmp > 0) {
             digits[numDigits++] = tmp % 10;
             tmp /= 10;
         }

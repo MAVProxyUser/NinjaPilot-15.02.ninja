@@ -138,6 +138,9 @@ all: uavobjects all_ground all_flight
 all_clean:
 	@$(ECHO) " CLEAN      $(call toprel, $(BUILD_DIR))"
 	$(V1) [ ! -d "$(BUILD_DIR)" ] || $(RM) -rf "$(BUILD_DIR)"
+	@$(ECHO) " CLEAR      shell command cache"
+	$(V1) hash -r 2>/dev/null || true
+	$(V1) $(PYTHON) -B -O -c "import sys; sys.dont_write_bytecode=True" 2>/dev/null || true
 
 .PONY: clean
 clean: all_clean

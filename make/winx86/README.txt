@@ -32,7 +32,7 @@ Arm compiler packages required to build the OpenPilot.
 It is expected that you have the following tools installed into the listed
 locations (but any other locations are fine as well):
 
- - Python            in C:\Python27
+ - Python 3          in C:\Python3x
  - QtSDK             in C:\QtSDK (depending on SDK version)
  - CodeSourcery G++  in %ProgramFiles%\CodeSourcery\Sourcery G++ Lite
  - msysGit           in %ProgramFiles%\Git

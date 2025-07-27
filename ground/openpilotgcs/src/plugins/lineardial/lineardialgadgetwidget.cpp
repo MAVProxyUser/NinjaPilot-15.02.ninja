@@ -91,7 +91,7 @@ void LineardialGadgetWidget::connectInput(QString object1, QString nfield1)
         if (obj1 != NULL) {
             connect(obj1, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(updateIndex(UAVObject *)));
             if (nfield1.contains("-")) {
-                QStringList fieldSubfield = nfield1.split("-", QString::SkipEmptyParts);
+                QStringList fieldSubfield = nfield1.split("-", Qt::SkipEmptyParts);
                 field1        = fieldSubfield.at(0);
                 subfield1     = fieldSubfield.at(1);
                 haveSubField1 = true;

@@ -73,8 +73,10 @@ void ControllerPage::initializePage()
 
 bool ControllerPage::isComplete() const
 {
-    return m_telemtryManager->isConnected() && ui->boardTypeCombo->currentIndex() > 0 &&
-           m_connectionManager->getCurrentDevice().getConName().startsWith("USB:", Qt::CaseInsensitive);
+    QString connName = m_connectionManager->getCurrentDevice().getConName();
+    bool isValidConnection = connName.startsWith("USB:", Qt::CaseInsensitive) || 
+                            connName.startsWith("Serial:", Qt::CaseInsensitive);
+    return m_telemtryManager->isConnected() && ui->boardTypeCombo->currentIndex() > 0 && isValidConnection;
 }
 
 bool ControllerPage::validatePage()
@@ -163,7 +165,8 @@ void ControllerPage::devicesChanged(QLinkedList<Core::DevListItem> devices)
         ui->deviceCombo->addItem(deviceItem.getConName());
         QString deviceName = (const QString)deviceItem.getConName();
         ui->deviceCombo->setItemData(ui->deviceCombo->count() - 1, deviceName, Qt::ToolTipRole);
-        if (!deviceName.startsWith("USB:", Qt::CaseInsensitive)) {
+        if (!deviceName.startsWith("USB:", Qt::CaseInsensitive) && 
+            !deviceName.startsWith("Serial:", Qt::CaseInsensitive)) {
             ui->deviceCombo->setItemData(ui->deviceCombo->count() - 1, QVariant(0), Qt::UserRole - 1);
         }
         if (currSelectedDeviceName != "" && currSelectedDeviceName == deviceName) {

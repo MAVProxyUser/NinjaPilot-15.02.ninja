@@ -26,6 +26,7 @@
 
 #include "uavobjectparser.h"
 #include <QDebug>
+#include <algorithm>
 /**
  * Constructor
  */
@@ -211,10 +212,10 @@ QString UAVObjectParser::parseXML(QString & xml, QString & filename)
         }
 
         // Sort all fields according to size
-        qStableSort(info->fields.begin(), info->fields.end(), fieldTypeLessThan);
+        std::stable_sort(info->fields.begin(), info->fields.end(), fieldTypeLessThan);
 
         // Sort all fields according to size
-        qStableSort(info->fields.begin(), info->fields.end(), fieldTypeLessThan);
+        std::stable_sort(info->fields.begin(), info->fields.end(), fieldTypeLessThan);
 
         // Make sure that required elements were found
         if (!fieldFound) {
@@ -485,7 +486,7 @@ QString UAVObjectParser::processObjectFields(QDomNode & childNode, ObjectInfo *i
     elemAttr = elemAttributes.namedItem("elementnames");
     if (!elemAttr.isNull()) {
         // Get element names
-        QStringList names = elemAttr.nodeValue().split(",", QString::SkipEmptyParts);
+        QStringList names = elemAttr.nodeValue().split(",", Qt::SkipEmptyParts);
         for (int n = 0; n < names.length(); ++n) {
             names[n] = names[n].trimmed();
         }
@@ -528,7 +529,7 @@ QString UAVObjectParser::processObjectFields(QDomNode & childNode, ObjectInfo *i
         // Look for options attribute
         elemAttr = elemAttributes.namedItem("options");
         if (!elemAttr.isNull()) {
-            QStringList options = elemAttr.nodeValue().split(",", QString::SkipEmptyParts);
+            QStringList options = elemAttr.nodeValue().split(",", Qt::SkipEmptyParts);
             for (int n = 0; n < options.length(); ++n) {
                 options[n] = options[n].trimmed();
             }
@@ -559,7 +560,7 @@ QString UAVObjectParser::processObjectFields(QDomNode & childNode, ObjectInfo *i
         }
         field->defaultValues = QStringList();
     } else {
-        QStringList defaults = elemAttr.nodeValue().split(",", QString::SkipEmptyParts);
+        QStringList defaults = elemAttr.nodeValue().split(",", Qt::SkipEmptyParts);
         for (int n = 0; n < defaults.length(); ++n) {
             defaults[n] = defaults[n].trimmed();
         }

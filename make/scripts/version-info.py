@@ -9,7 +9,7 @@
 
 from subprocess import Popen, PIPE
 from re import search, MULTILINE
-from datetime import datetime
+from datetime import datetime, timezone
 from string import Template
 import optparse
 import hashlib
@@ -29,15 +29,15 @@ class Repo:
 
     Example:
         r = Repo('/path/to/git/repository')
-        print "path:       ", r.path()
-        print "origin:     ", r.origin()
-        print "hash:       ", r.hash()
-        print "short hash: ", r.hash(8)
-        print "Unix time:  ", r.time()
-        print "commit date:", r.time("%Y%m%d")
-        print "commit tag: ", r.tag()
-        print "branch:     ", r.branch()
-        print "release tag:", r.reltag()
+        print("path:       ", r.path())
+        print("origin:     ", r.origin())
+        print("hash:       ", r.hash())
+        print("short hash: ", r.hash(8))
+        print("Unix time:  ", r.time())
+        print("commit date:", r.time("%Y%m%d"))
+        print("commit tag: ", r.tag())
+        print("branch:     ", r.branch())
+        print("release tag:", r.reltag())
     """
 
     def _exec(self, cmd):
@@ -46,6 +46,10 @@ class Repo:
         git = Popen(self._git + " " + cmd, cwd = self._path,
                     shell = True, stdout = PIPE, stderr = PIPE)
         self._out, self._err = git.communicate()
+        if isinstance(self._out, bytes):
+            self._out = self._out.decode('utf-8')
+        if isinstance(self._err, bytes):
+            self._err = self._err.decode('utf-8')
         self._rc = git.poll()
 
     def _get_origin(self):
@@ -161,7 +165,7 @@ class Repo:
             if format == None:
                 return self._time
             else:
-                return datetime.utcfromtimestamp(float(self._time)).strftime(format)
+                return datetime.fromtimestamp(float(self._time), timezone.utc).strftime(format)
 
     def tag(self, none = None):
         """Return git tag for the HEAD commit or given string if none"""
@@ -206,17 +210,17 @@ class Repo:
 
     def info(self):
         """Print some repository info"""
-        print "path:       ", self.path()
-        print "origin:     ", self.origin()
-        print "Unix time:  ", self.time()
-        print "commit date:", self.time("%Y%m%d")
-        print "hash:       ", self.hash()
-        print "short hash: ", self.hash(8)
-        print "branch:     ", self.branch()
-        print "commit tag: ", self.tag('')
-        print "dirty:      ", self.dirty('yes', 'no')
-        print "label:      ", self.label()
-        print "revision:   ", self.revision()
+        print("path:       ", self.path())
+        print("origin:     ", self.origin())
+        print("Unix time:  ", self.time())
+        print("commit date:", self.time("%Y%m%d"))
+        print("hash:       ", self.hash())
+        print("short hash: ", self.hash(8))
+        print("branch:     ", self.branch())
+        print("commit tag: ", self.tag(''))
+        print("dirty:      ", self.dirty('yes', 'no'))
+        print("label:      ", self.label())
+        print("revision:   ", self.revision())
 
     def save_to_json(self, path):
         """Saves the repo data to version-info.json"""
@@ -268,8 +272,16 @@ def file_from_template(tpl_name, out_name, dict):
     tpl = tf.read()
     tf.close()
 
+    # Convert bytes to string for Python 3 compatibility
+    if isinstance(tpl, bytes):
+        tpl = tpl.decode('utf-8')
+
     # Replace placeholders using dictionary
     out = Template(tpl).substitute(dict)
+    
+    # Convert string back to bytes for file operations
+    if isinstance(out, str):
+        out = out.encode('utf-8')
 
     # Check if output file already exists
     try:
@@ -297,7 +309,7 @@ def sha1(file):
         with open(file, 'rb') as f:
             for chunk in iter(lambda: f.read(8192), ''):
                 sha1.update(chunk)
-        hex_stream = lambda s:",".join(['0x'+hex(ord(c))[2:].zfill(2) for c in s])
+        hex_stream = lambda s:",".join(['0x'+hex(c if isinstance(c, int) else ord(c))[2:].zfill(2) for c in s])
         return hex_stream(sha1.digest())
 
 def xtrim(string, suffix, length):
@@ -331,7 +343,7 @@ def get_hash_of_dirs(directory, verbose = 0, raw = 0, n = 40):
 
             for names in files:
                 if verbose == 1:
-                    print 'Hashing', names
+                    print('Hashing', names)
                 filepath = os.path.join(root, names)
                 try:
                     f1 = open(filepath, 'rU')
@@ -350,7 +362,7 @@ def get_hash_of_dirs(directory, verbose = 0, raw = 0, n = 40):
                 f1.close()
 
                 if verbose == 1:
-                    print 'Hash is', f1hash.hexdigest()
+                    print('Hash is', f1hash.hexdigest())
 
                 # Append the hex representation of the current file's hash into the cumulative hash
                 SHAhash.update(f1hash.hexdigest())
@@ -362,12 +374,12 @@ def get_hash_of_dirs(directory, verbose = 0, raw = 0, n = 40):
         return -2
 
     if verbose == 1:
-        print 'Final hash is', SHAhash.hexdigest()
+        print('Final hash is', SHAhash.hexdigest())
 
     if raw == 1:
         return SHAhash.hexdigest()[:n]
     else:
-        hex_stream = lambda s:",".join(['0x'+hex(ord(c))[2:].zfill(2) for c in s])
+        hex_stream = lambda s:",".join(['0x'+hex(c if isinstance(c, int) else ord(c))[2:].zfill(2) for c in s])
         return hex_stream(SHAhash.digest())
 
 def main():
@@ -478,7 +490,7 @@ string given.
         r.info()
 
     if args.format != None:
-        print Template(args.format).substitute(dictionary)
+        print(Template(args.format).substitute(dictionary))
 
     if args.outfile != None:
         file_from_template(args.template, args.outfile, dictionary)

@@ -339,7 +339,7 @@ void ScopeGadgetWidget::addCurvePlot(QString objectName, QString fieldPlusSubFie
     int element = 0;
 
     if (fieldPlusSubField.contains("-")) {
-        QStringList fieldSubfield = fieldName.split("-", QString::SkipEmptyParts);
+        QStringList fieldSubfield = fieldName.split("-", Qt::SkipEmptyParts);
         fieldName   = fieldSubfield.at(0);
         elementName = fieldSubfield.at(1);
     }

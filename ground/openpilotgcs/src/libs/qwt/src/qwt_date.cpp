@@ -171,6 +171,8 @@ static inline QDateTime qwtToTimeSpec(
     return dt.toTimeSpec( spec );
 }
 
+// Unused function commented out to fix compiler warning
+#if 0
 static inline double qwtToJulianDay( int year, int month, int day )
 {
     // code from QDate but using doubles to avoid overflows
@@ -183,7 +185,10 @@ static inline double qwtToJulianDay( int year, int month, int day )
     return ::floor( ( 1461.0 * ( year + 4800 + m1 ) ) / 4 ) + m2
             - ::floor( ( 3 * y1 ) / 4 ) + day - 32075;
 }
+#endif
 
+// Unused function commented out to fix compiler warning
+#if 0
 static inline qint64 qwtFloorDiv64( qint64 a, int b )
 {
     if ( a < 0 )
@@ -191,14 +196,18 @@ static inline qint64 qwtFloorDiv64( qint64 a, int b )
 
     return a / b;
 }
+#endif
 
+// Unused function commented out to fix compiler warning
+#if 0
 static inline qint64 qwtFloorDiv( int a, int b )
 {
     if ( a < 0 )
         a -= b - 1;
         
     return a / b;
-}   
+}
+#endif   
 
 static inline QDate qwtToDate( int year, int month = 1, int day = 1 )
 {

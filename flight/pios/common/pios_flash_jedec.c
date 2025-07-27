@@ -595,7 +595,7 @@ static int32_t PIOS_Flash_Jedec_ReadData(uintptr_t flash_id, uint32_t addr, uint
         }
     } else {
         uint8_t cmdlen = flash_dev->cfg->fast_read_dummy_bytes + 4;
-        uint8_t out[cmdlen];
+        uint8_t out[260]; // Fixed size array to avoid VLA (max cmdlen = 255 + 4 = 259)
         memset(out, 0x0, cmdlen);
         out[0] = flash_dev->cfg->fast_read;
         out[1] = (addr >> 16) & 0xff;

@@ -62,7 +62,7 @@ call :which MSYSGIT       "%ProgramFiles%\Git\bin"                              
 call :which QTMINGW       "C:\QtSDK\mingw\bin"                                  mingw32-make.exe
 call :which QTSDK         "C:\QtSDK\Desktop\Qt\4.8.1\mingw\bin"                 qmake.exe
 call :which ARMGCC        "C:\OpenPilot\gcc-arm-none-eabi-4_6-2012q4\bin"       arm-none-eabi-gcc.exe
-call :which PYTHON        "C:\Python27"                                         python.exe
+call :which PYTHON        "C:\Python3"                                          python.exe
 call :which UNSIS         "%ProgramFiles%\NSIS\Unicode"                         makensis.exe
 
 if "%NOT_FOUND%" == "" goto set_path
