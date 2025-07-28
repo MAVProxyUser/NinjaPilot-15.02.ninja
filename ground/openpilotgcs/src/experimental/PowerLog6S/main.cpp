@@ -81,7 +81,7 @@ public:
         buf[0] = 2;
         buf[1] = 0;
 
-        cout << "Interval,Current,Volt,Cap,Cell1,Cell2,Cell3,Cell4,Cell5,Cell6,RPM,Temp1,Temp2,Temp3,Temp4,Period,Pulse" << endl;
+        cout << "Interval,Current,Volt,Cap,Cell1,Cell2,Cell3,Cell4,Cell5,Cell6,RPM,Temp1,Temp2,Temp3,Temp4,Period,Pulse" << Qt::endl;
 
         while (int received = hidHandle.receive(0, buf, BUF_LEN, 3500)) {
             ShowInf(buf);

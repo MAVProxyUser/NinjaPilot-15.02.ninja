@@ -123,7 +123,7 @@ bool XmlConfig::writeXmlFile(QIODevice &device, const QSettings::SettingsMap &ma
     QMapIterator<QString, QVariant> iter(map);
     while (iter.hasNext()) {
         iter.next();
-// qDebug() << "Entry: " << iter.key() << ": " << iter.value().toString() << endl;
+// qDebug() << "Entry: " << iter.key() << ": " << iter.value().toString() << Qt::endl;
         QDomNode node = outDocument.firstChild();
         foreach(QString elem, iter.key().split('/')) {
             if (elem == "") {

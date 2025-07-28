@@ -550,7 +550,7 @@ int ScopeGadgetWidget::csvLoggingInsertHeader()
                 ts << "." << plotData2->elementName();
             }
         }
-        ts << endl;
+        ts << Qt::endl;
         m_csvLoggingFile.close();
     }
     return 0;
@@ -583,7 +583,7 @@ int ScopeGadgetWidget::csvLoggingAddData()
             m_csvLoggingDataValid = true;
         }
     }
-    ss << endl;
+    ss << Qt::endl;
     if (m_csvLoggingDataValid) {
         QTextStream ts(&m_csvLoggingBuffer);
         ts << tempString;

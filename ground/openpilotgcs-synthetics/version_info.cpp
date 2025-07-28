@@ -34,12 +34,12 @@ QString VersionInfo::origin()
 
 QString VersionInfo::revision()
 {
-    return "claude:b84687f7-dirty 20250728 00:48";
+    return "claude:55f7242a-dirty 20250728 03:15";
 }
 
 QString VersionInfo::hash()
 {
-    return "b84687f7e1881c53675c8fcdc52ec88ef689cee4";
+    return "55f7242ae66ce8f53f564e03d8ae4b6ffd5f294f";
 }
 
 QString VersionInfo::uavoHash()
@@ -54,7 +54,7 @@ QString VersionInfo::uavoHashArray()
 
 QString VersionInfo::label()
 {
-    return "NinjaPilot-BETA-15.02.ninja+r28-gb84687f-dirty";
+    return "NinjaPilot-BETA-15.02.ninja+r30-g55f7242-dirty";
 }
 
 QString VersionInfo::tag()
@@ -69,12 +69,12 @@ QString VersionInfo::tagOrBranch()
 
 QString VersionInfo::tagOrHash8()
 {
-    return "b84687f7";
+    return "55f7242a";
 }
 
 QString VersionInfo::hash8()
 {
-    return "b84687f7";
+    return "55f7242a";
 }
 
 QString VersionInfo::fwTag()
@@ -84,12 +84,12 @@ QString VersionInfo::fwTag()
 
 QString VersionInfo::unixTime()
 {
-    return "1753663690";
+    return "1753672518";
 }
 
 QString VersionInfo::dateTime()
 {
-    return "20250728 00:48";
+    return "20250728 03:15";
 }
 
 QString VersionInfo::date()
@@ -114,12 +114,12 @@ QString VersionInfo::year()
 
 QString VersionInfo::hour()
 {
-    return "00";
+    return "03";
 }
 
 QString VersionInfo::minute()
 {
-    return "48";
+    return "15";
 }
 
 QString VersionInfo::dirty()

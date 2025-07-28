@@ -18,7 +18,7 @@
 #include "delay.h"
 #include <QtSerialPort/QSerialPort>
 #include <QtSerialPort/QSerialPortInfo>
-#include <QTime>
+#include <QElapsedTimer>
 #include <QTimer>
 #include "SSP/qssp.h"
 #include "SSP/port.h"

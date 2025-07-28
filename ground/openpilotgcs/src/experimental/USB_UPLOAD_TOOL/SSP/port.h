@@ -29,7 +29,7 @@
 #include <stdint.h>
 #include <QtSerialPort/QSerialPort>
 #include <QtSerialPort/QSerialPortInfo>
-#include <QTime>
+#include <QElapsedTimer>
 #include <QDebug>
 #include "common.h"
 
@@ -71,7 +71,7 @@ private:
     QByteArray rxDebugBuff;
     QByteArray txDebugBuff;
     portstatus mstatus;
-    QTime timer;
+    QElapsedTimer timer;
     QSerialPort *sport;
 };
 

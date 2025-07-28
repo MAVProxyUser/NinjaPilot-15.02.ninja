@@ -231,3 +231,5 @@ win32 {
     # The ((packet)) pragma is used in uav metadata struct and other places
     QMAKE_CXXFLAGS += -mno-ms-bitfields
 }
+
+include(src/fix_linker_warnings.pri)

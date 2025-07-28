@@ -15,7 +15,8 @@ int main(int argc, char *argv[])
     bool use_serial   = false;
     bool verify;
     bool debug = false;
-    bool umodereset   = false;
+    bool umodereset   = false; // TODO: Implement user mode reset functionality
+    Q_UNUSED(umodereset);
     OP_DFU::Actions action;
     QString file;
     QString serialport;
@@ -29,7 +30,7 @@ int main(int argc, char *argv[])
     if (args.contains("-ur")) {
         umodereset = true;
     }
-    standardOutput << "OpenPilot serial firmware uploader tool." << endl;
+    standardOutput << "OpenPilot serial firmware uploader tool." << Qt::endl;
     if (args.indexOf(PROGRAMFW) + 1 < args.length()) {
         file = args[args.indexOf(PROGRAMFW) + 1];
     }
@@ -57,17 +58,12 @@ int main(int argc, char *argv[])
         }
         action = OP_DFU::actionProgram;
     } else if (args.contains(COMPARECRC) || args.contains(COMPAREALL)) {
-        int index;
         if (args.contains(COMPARECRC)) {
-            index  = args.indexOf(COMPARECRC);
             action = OP_DFU::actionCompareCrc;
         } else {
-            index  = args.indexOf(COMPAREALL);
             action = OP_DFU::actionCompareAll;
         }
     } else if (args.contains(DOWNLOAD)) {
-        int index;
-        index  = args.indexOf(DOWNLOAD);
         action = OP_DFU::actionDownload;
     } else if (args.contains(STATUSREQUEST)) {
         action = OP_DFU::actionStatusReq;
@@ -89,26 +85,26 @@ int main(int argc, char *argv[])
         }
     }
     if (debug) {
-        qDebug() << "Action=" << (int)action << endl;
-        qDebug() << "File=" << file << endl;
-        qDebug() << "Device=" << device << endl;
-        qDebug() << "Action=" << action << endl;
-        qDebug() << "Desctription" << description << endl;
-        qDebug() << "Use Serial port" << use_serial << endl;
+        qDebug() << "Action=" << (int)action << Qt::endl;
+        qDebug() << "File=" << file << Qt::endl;
+        qDebug() << "Device=" << device << Qt::endl;
+        qDebug() << "Action=" << action << Qt::endl;
+        qDebug() << "Desctription" << description << Qt::endl;
+        qDebug() << "Use Serial port" << use_serial << Qt::endl;
         if (use_serial) {
-            qDebug() << "Port Name" << serialport << endl;
+            qDebug() << "Port Name" << serialport << Qt::endl;
         }
     }
     if (use_serial) {
         if (args.contains(NO_COUNTDOWN)) {} else {
-            standardOutput << "Connect the board" << endl;
+            standardOutput << "Connect the board" << Qt::endl;
             label = "";
             for (int i = 0; i < 6; i++) {
                 progressUpdated(i * 100 / 5);
                 QThread::msleep(500);
             }
         }
-        standardOutput << endl << "Connect the board NOW" << endl;
+        standardOutput << Qt::endl << "Connect the board NOW" << Qt::endl;
         QThread::msleep(1000);
     }
     ///////////////////////////////////ACTIONS START///////////////////////////////////////////////////
@@ -122,7 +118,7 @@ int main(int argc, char *argv[])
     }
     dfu.AbortOperation();
     if (!dfu.enterDFU(0)) {
-        standardOutput << "Could not enter DFU mode\n" << endl;
+        standardOutput << "Could not enter DFU mode\n" << Qt::endl;
         return -1;
     }
     if (debug) {
@@ -132,45 +128,45 @@ int main(int argc, char *argv[])
     if (!(action == OP_DFU::actionStatusReq || action == OP_DFU::actionReset || action == OP_DFU::actionJump)) {
         dfu.findDevices();
         if (action == OP_DFU::actionListDevs) {
-            standardOutput << "Found " << dfu.numberOfDevices << "\n" << endl;
+            standardOutput << "Found " << dfu.numberOfDevices << "\n" << Qt::endl;
             for (int x = 0; x < dfu.numberOfDevices; ++x) {
-                standardOutput << "Device #" << x << "\n" << endl;
-                standardOutput << "Device ID=" << dfu.devices[x].ID << "\n" << endl;
-                standardOutput << "Device Readable=" << dfu.devices[x].Readable << "\n" << endl;
-                standardOutput << "Device Writable=" << dfu.devices[x].Writable << "\n" << endl;
-                standardOutput << "Device SizeOfCode=" << dfu.devices[x].SizeOfCode << "\n" << endl;
-                standardOutput << "BL Version=" << dfu.devices[x].BL_Version << "\n" << endl;
-                standardOutput << "Device SizeOfDesc=" << dfu.devices[x].SizeOfDesc << "\n" << endl;
+                standardOutput << "Device #" << x << "\n" << Qt::endl;
+                standardOutput << "Device ID=" << dfu.devices[x].ID << "\n" << Qt::endl;
+                standardOutput << "Device Readable=" << dfu.devices[x].Readable << "\n" << Qt::endl;
+                standardOutput << "Device Writable=" << dfu.devices[x].Writable << "\n" << Qt::endl;
+                standardOutput << "Device SizeOfCode=" << dfu.devices[x].SizeOfCode << "\n" << Qt::endl;
+                standardOutput << "BL Version=" << dfu.devices[x].BL_Version << "\n" << Qt::endl;
+                standardOutput << "Device SizeOfDesc=" << dfu.devices[x].SizeOfDesc << "\n" << Qt::endl;
                 standardOutput << "FW CRC=" << dfu.devices[x].FW_CRC << "\n";
 
                 int size = ((OP_DFU::device)dfu.devices[x]).SizeOfDesc;
                 dfu.enterDFU(x);
-                standardOutput << "Description:" << dfu.DownloadDescription(size).toLatin1().data() << "\n" << endl;
+                standardOutput << "Description:" << dfu.DownloadDescription(size).toLatin1().data() << "\n" << Qt::endl;
                 standardOutput << "\n";
             }
             return 0;
         }
         if (device > dfu.numberOfDevices - 1) {
-            standardOutput << "Error:Invalid Device" << endl;
+            standardOutput << "Error:Invalid Device" << Qt::endl;
             return -1;
         }
         if (dfu.numberOfDevices == 1) {
             dfu.use_delay = false;
         }
         if (!dfu.enterDFU(device)) {
-            standardOutput << "Error:Could not enter DFU mode\n" << endl;
+            standardOutput << "Error:Could not enter DFU mode\n" << Qt::endl;
             return -1;
         }
         if (action == OP_DFU::actionProgram) {
             if (((OP_DFU::device)dfu.devices[device]).Writable == false) {
-                standardOutput << "ERROR device not Writable\n" << endl;
-                return false;
+                standardOutput << "ERROR device not Writable\n" << Qt::endl;
+                return -1;
             }
-            standardOutput << "Uploading..." << endl;
+            standardOutput << "Uploading..." << Qt::endl;
             bool retstatus = dfu.UploadFirmware(file.toLatin1(), verify, device);
 
             if (!retstatus) {
-                standardOutput << "Upload failed with code:" << retstatus << endl;
+                standardOutput << "Upload failed with code:" << retstatus << Qt::endl;
                 return -1;
             }
             while (!dfu.isFinished()) {
@@ -180,33 +176,33 @@ int main(int argc, char *argv[])
                 QByteArray firmware;
                 QFile fwfile(file);
                 if (!fwfile.open(QIODevice::ReadOnly)) {
-                    standardOutput << "Cannot open file " << file << endl;
+                    standardOutput << "Cannot open file " << file << Qt::endl;
                     return -1;
                 }
                 firmware = fwfile.readAll();
                 QByteArray desc = firmware.right(100);
                 OP_DFU::Status status = dfu.UploadDescription(desc);
                 if (status != OP_DFU::Last_operation_Success) {
-                    standardOutput << "Upload failed with code:" << retstatus << endl;
+                    standardOutput << "Upload failed with code:" << retstatus << Qt::endl;
                     return -1;
                 }
             } else if (!description.isEmpty()) {
-                retstatus = dfu.UploadDescription(description);
-                if (retstatus != OP_DFU::Last_operation_Success) {
-                    standardOutput << "Upload failed with code:" << retstatus << endl;
+                OP_DFU::Status status = dfu.UploadDescription(description);
+                if (status != OP_DFU::Last_operation_Success) {
+                    standardOutput << "Upload failed with code:" << status << Qt::endl;
                     return -1;
                 }
             }
             while (!dfu.isFinished()) {
                 QThread::msleep(500);
             }
-            standardOutput << "Uploading Succeded!\n" << endl;
+            standardOutput << "Uploading Succeded!\n" << Qt::endl;
         } else if (action == OP_DFU::actionDownload) {
             if (((OP_DFU::device)dfu.devices[device]).Readable == false) {
-                standardOutput << "ERROR device not readable\n" << endl;
-                return false;
+                standardOutput << "ERROR device not readable\n" << Qt::endl;
+                return -1;
             }
-            qint32 size = ((OP_DFU::device)dfu.devices[device]).SizeOfCode;
+            // qint32 size = ((OP_DFU::device)dfu.devices[device]).SizeOfCode; // Unused
             QByteArray fw;
             dfu.DownloadFirmware(&fw, 0);
             bool ret    = dfu.SaveByteArrayToFile(file.toLatin1(), fw);
@@ -216,14 +212,14 @@ int main(int argc, char *argv[])
             return 1;
         } else if (action == OP_DFU::actionCompareAll) {
             if (((OP_DFU::device)dfu.devices[device]).Readable == false) {
-                standardOutput << "ERROR device not readable\n" << endl;
-                return false;
+                standardOutput << "ERROR device not readable\n" << Qt::endl;
+                return -1;
             }
             dfu.CompareFirmware(file.toLatin1(), OP_DFU::bytetobytecompare, device);
             return 1;
         }
     } else if (action == OP_DFU::actionStatusReq) {
-        standardOutput << "Current device status=" << dfu.StatusToString(dfu.StatusRequest()).toLatin1().data() << "\n" << endl;
+        standardOutput << "Current device status=" << dfu.StatusToString(dfu.StatusRequest()).toLatin1().data() << "\n" << Qt::endl;
     } else if (action == OP_DFU::actionReset) {
         dfu.ResetDevice();
     } else if (action == OP_DFU::actionJump) {
@@ -238,7 +234,7 @@ void showProgress(QString status)
 {
     QTextStream standardOutput(stdout);
 
-    standardOutput << status << endl;
+    standardOutput << status << Qt::endl;
     label = status;
 }
 
@@ -294,10 +290,10 @@ void usage(QTextStream *standardOutput)
     *standardOutput << "|                                                                        |\n";
     // *standardOutput  << "| *requires valid user space firmwares already running                   |\n";
     *standardOutput << "|________________________________________________________________________|\n";
-    *standardOutput << endl;
+    *standardOutput << Qt::endl;
 }
 
 void howToUsage(QTextStream *standardOutput)
 {
-    *standardOutput << "run the tool with -? for more informations" << endl;
+    *standardOutput << "run the tool with -? for more informations" << Qt::endl;
 }

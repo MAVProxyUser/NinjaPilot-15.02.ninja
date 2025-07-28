@@ -30,7 +30,7 @@
 
 #include <QObject>
 #include <QtCore>
-#include <QTime>
+#include <QElapsedTimer>
 #include <QTemporaryDir>
 #include <QTextStream>
 
@@ -234,8 +234,8 @@ private:
     bool m_acquiring;
     bool m_forceStopAcquisition;
 
-    QTime m_startTime;
-    QTime m_lastCheckpointTime;
+    QElapsedTimer m_startTime;
+    qint64 m_lastCheckpointTime;
     float m_lastCheckpointTemp;
 
     float m_temperature;

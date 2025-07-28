@@ -30,10 +30,12 @@
 #define QTCOLORBUTTON_H
 
 #include "utils_global.h"
+#include "qtcolorbutton_p.h"
 
 #include <QToolButton>
 
 namespace Utils {
+
 class QTCREATOR_UTILS_EXPORT QtColorButton : public QToolButton {
     Q_OBJECT Q_PROPERTY(bool backgroundCheckered READ isBackgroundCheckered WRITE setBackgroundCheckered)
     Q_PROPERTY(bool alphaAllowed READ isAlphaAllowed WRITE setAlphaAllowed)
@@ -64,13 +66,12 @@ protected:
     void dropEvent(QDropEvent *event);
 #endif
 private:
-    class QtColorButtonPrivate *d_ptr;
+    QtColorButtonPrivate *d_ptr;
     friend class QtColorButtonPrivate;
     Q_DISABLE_COPY(QtColorButton)
     Q_PRIVATE_SLOT(d_ptr, void slotEditColor())
 };
 } // namespace Utils
 
-#include "qtcolorbutton_p.h"
 
 #endif // QTCOLORBUTTON_H

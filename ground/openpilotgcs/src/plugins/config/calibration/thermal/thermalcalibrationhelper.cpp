@@ -190,7 +190,8 @@ void ThermalCalibrationHelper::initAcquisition()
     m_results.baroCalibrated  = false;
 
     // retrieve current temperature/time as initial checkpoint.
-    m_startTime            = m_lastCheckpointTime = QTime::currentTime();
+    m_startTime.start();
+    m_lastCheckpointTime = m_startTime.elapsed();
     m_temperature          = getTemperature();
     m_lastCheckpointTemp   = m_temperature;
     m_minTemperature       = m_temperature;
@@ -224,7 +225,7 @@ void ThermalCalibrationHelper::collectSample(UAVObject *sample)
                       << "\t" << QDateTime::currentDateTime().toString("hh.mm.ss.zzz")
                       << "\t" << m_accelSamples.last().x
                       << "\t" << m_accelSamples.last().y
-                      << "\t" << m_accelSamples.last().z << endl;
+                      << "\t" << m_accelSamples.last().z << Qt::endl;
         break;
 
     case GyroSensor::OBJID:
@@ -233,7 +234,7 @@ void ThermalCalibrationHelper::collectSample(UAVObject *sample)
                       << "\t" << QDateTime::currentDateTime().toString("hh.mm.ss.zzz")
                       << "\t" << m_gyroSamples.last().x
                       << "\t" << m_gyroSamples.last().y
-                      << "\t" << m_gyroSamples.last().z << endl;
+                      << "\t" << m_gyroSamples.last().z << Qt::endl;
         break;
 
     case BaroSensor::OBJID:
@@ -248,7 +249,7 @@ void ThermalCalibrationHelper::collectSample(UAVObject *sample)
         m_debugStream << "BARO:: " << m_baroSamples.last().Temperature
                       << "\t" << QDateTime::currentDateTime().toString("hh.mm.ss.zzz")
                       << "\t" << m_baroSamples.last().Pressure
-                      << "\t" << m_baroSamples.last().Altitude << endl;
+                      << "\t" << m_baroSamples.last().Altitude << Qt::endl;
         // must be done last as this call might end acquisition and close the debug log file
         updateTemperature(temp);
         break;
@@ -259,7 +260,7 @@ void ThermalCalibrationHelper::collectSample(UAVObject *sample)
         m_debugStream << "MAG:: " << "\t" << QDateTime::currentDateTime().toString("hh.mm.ss.zzz")
                       << "\t" << m_magSamples.last().x
                       << "\t" << m_magSamples.last().y
-                      << "\t" << m_magSamples.last().z << endl;
+                      << "\t" << m_magSamples.last().z << Qt::endl;
         break;
 
     default:
@@ -270,7 +271,7 @@ void ThermalCalibrationHelper::collectSample(UAVObject *sample)
 float ThermalCalibrationHelper::getTemperature()
 {
 #ifdef SIMULATE
-    float t = m_startTime.msecsTo(QTime::currentTime()) / 1000.0f;
+    float t = m_startTime.elapsed() / 1000.0f;
     // Simulate a temperature rise using Newton's law of cooling
     // See http://en.wikipedia.org/wiki/Newton%27s_law_of_cooling#Newton.27s_law_of_cooling
     // Initial temp : 20
@@ -391,8 +392,8 @@ void ThermalCalibrationHelper::calculate()
 /* helper methods */
 void ThermalCalibrationHelper::updateTemperature(float temp)
 {
-    int elapsed = m_startTime.secsTo(QTime::currentTime());
-    int secondsSinceLastCheck = m_lastCheckpointTime.secsTo(QTime::currentTime());
+    int elapsed = m_startTime.elapsed() / 1000;
+    int secondsSinceLastCheck = (m_startTime.elapsed() - m_lastCheckpointTime) / 1000;
 
     // temperature is low pass filtered
     m_temperature = m_temperature * 0.95f + temp * 0.05f;
@@ -417,9 +418,9 @@ void ThermalCalibrationHelper::updateTemperature(float temp)
         emit temperatureGradientChanged(gradient());
 
         qDebug() << "Temp Gradient " << gradient() << " Elapsed" << elapsed;
-        m_debugStream << "INFO::Trace Temp Gradient " << gradient() << " Elapsed" << elapsed << endl;
+        m_debugStream << "INFO::Trace Temp Gradient " << gradient() << " Elapsed" << elapsed << Qt::endl;
 
-        m_lastCheckpointTime = QTime::currentTime();
+        m_lastCheckpointTime = m_startTime.elapsed();
         m_lastCheckpointTemp = m_temperature;
     }
     // at least a checkpoint has been reached
@@ -445,7 +446,7 @@ void ThermalCalibrationHelper::updateTemperature(float temp)
             QString str = QStringLiteral("INFO::Trace gradient : %1, elapsed : %2 initial gradient : %3, target : %4")
                           .arg(m_gradient).arg(elapsed).arg(m_initialGradient).arg(m_targetduration);
             qDebug() << str;
-            m_debugStream << str << endl;
+            m_debugStream << str << Qt::endl;
         }
 
         if ((m_gradient < TargetGradient) || m_forceStopAcquisition) {
@@ -494,18 +495,18 @@ void ThermalCalibrationHelper::createDebugLog()
 
         m_debugStream << "INFO::Hardware" << " type:" << QString().setNum(board.boardType, 16)
                       << " revision:" << QString().setNum(board.boardRevision, 16)
-                      << " serial:" << QString(utilMngr->getBoardCPUSerial().toHex()) << endl;
+                      << " serial:" << QString(utilMngr->getBoardCPUSerial().toHex()) << Qt::endl;
 
         QString uavo = board.uavoHash.toHex();
         m_debugStream << "INFO::firmware tag:" << board.gitTag
                       << " date:" << board.gitDate
                       << " hash:" << board.gitHash
-                      << " uavo:" << uavo.left(8) << endl;
+                      << " uavo:" << uavo.left(8) << Qt::endl;
 
         m_debugStream << "INFO::gcs tag:" << VersionInfo::tagOrBranch() + VersionInfo::dirty()
                       << " date:" << VersionInfo::dateTime()
                       << " hash:" << VersionInfo::hash().left(8)
-                      << " uavo:" << VersionInfo::uavoHash().left(8) << endl;
+                      << " uavo:" << VersionInfo::uavoHash().left(8) << Qt::endl;
     }
 }
 

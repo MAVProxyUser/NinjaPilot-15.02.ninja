@@ -53,11 +53,11 @@ void myQDebugHandler(QtMsgType type, const QMessageLogContext &context, const QS
     QTime time;
 
     if (firstRun) {
-        ts << endl << endl;
+        ts << Qt::endl << Qt::endl;
         firstRun = false;
     }
 
-    ts << time.currentTime().toString("hh:mm:ss.zzz") << " " << txt << endl;
+    ts << time.currentTime().toString("hh:mm:ss.zzz") << " " << txt << Qt::endl;
 
     if (type == QtFatalMsg) {
         abort();

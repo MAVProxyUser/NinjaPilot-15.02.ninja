@@ -72,7 +72,7 @@ void AntennaTrackWidget::setPosition(double lat, double lon, double alt)
     double min = (fabs(lat) - deg) * 60;
     QString str1;
 
-    str1.sprintf("%.0f%c%.3f' ", deg, 0x00b0, min);
+    str1.asprintf("%.0f%c%.3f' ", deg, 0x00b0, min);
     if (lat > 0) {
         str1.append("N");
     } else {
@@ -82,7 +82,7 @@ void AntennaTrackWidget::setPosition(double lat, double lon, double alt)
     deg = floor(fabs(lon));
     min = (fabs(lon) - deg) * 60;
     QString str2;
-    str2.sprintf("%.0f%c%.3f' ", deg, 0x00b0, min);
+    str2.asprintf("%.0f%c%.3f' ", deg, 0x00b0, min);
     if (lon > 0) {
         str2.append("E");
     } else {
@@ -90,7 +90,7 @@ void AntennaTrackWidget::setPosition(double lat, double lon, double alt)
     }
     coord_value_2->setText(str2);
     QString str3;
-    str3.sprintf("%.2f m", alt);
+    str3.asprintf("%.2f m", alt);
     coord_value_3->setText(str3);
     TrackData.Latitude  = lat;
     TrackData.Longitude = lon;
@@ -106,7 +106,7 @@ void AntennaTrackWidget::setHomePosition(double lat, double lon, double alt)
     double min = (fabs(lat) - deg) * 60;
     QString str1;
 
-    str1.sprintf("%.0f%c%.3f' ", deg, 0x00b0, min);
+    str1.asprintf("%.0f%c%.3f' ", deg, 0x00b0, min);
     if (lat > 0) {
         str1.append("N");
     } else {
@@ -116,7 +116,7 @@ void AntennaTrackWidget::setHomePosition(double lat, double lon, double alt)
     deg = floor(fabs(lon));
     min = (fabs(lon) - deg) * 60;
     QString str2;
-    str2.sprintf("%.0f%c%.3f' ", deg, 0x00b0, min);
+    str2.asprintf("%.0f%c%.3f' ", deg, 0x00b0, min);
     if (lon > 0) {
         str2.append("E");
     } else {
@@ -124,7 +124,7 @@ void AntennaTrackWidget::setHomePosition(double lat, double lon, double alt)
     }
     bear_label->setText(str2);
     QString str3;
-    str3.sprintf("%.2f m", alt);
+    str3.asprintf("%.2f m", alt);
     bear_value->setText(str3);
     TrackData.HomeLatitude  = lat;
     TrackData.HomeLongitude = lon;
@@ -190,10 +190,10 @@ void AntennaTrackWidget::calcAntennaPosition(void)
     // ! TODO: sanity check
 
     QString str3;
-    str3.sprintf("%.0f deg", azimuth);
+    str3.asprintf("%.0f deg", azimuth);
     azimuth_value->setText(str3);
 
-    str3.sprintf("%.0f deg", elevation);
+    str3.asprintf("%.0f deg", elevation);
     elevation_value->setText(str3);
 
     // servo value 2000-4000
@@ -201,7 +201,7 @@ void AntennaTrackWidget::calcAntennaPosition(void)
     int stepper = (int)(400.0 / 360 * (azimuth - azimuth_old));
 
     // send azimuth and elevation to tracker hardware
-    str3.sprintf("move %d 2000 2000 2000 %d\r", stepper, servo);
+    str3.asprintf("move %d 2000 2000 2000 %d\r", stepper, servo);
     if (port->isOpen()) {
         if (azimuth_old != azimuth || elevation != elevation_old) {
             port->write(str3.toLatin1());

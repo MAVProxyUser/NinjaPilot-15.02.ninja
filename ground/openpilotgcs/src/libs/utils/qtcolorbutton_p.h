@@ -1,17 +1,19 @@
 #ifndef QTCOLORBUTTON_P_H
 #define QTCOLORBUTTON_P_H
 
-#include "qtcolorbutton.h"
 #include <QColor>
 #include <QPoint>
-#include <QPixmap>
+
+class QPixmap;
 
 namespace Utils {
 
-class QtColorButtonPrivate {
-    QtColorButton *q_ptr;
-    Q_DECLARE_PUBLIC(QtColorButton)
+class QtColorButton;
+
+class QtColorButtonPrivate
+{
 public:
+    QtColorButton *q_ptr;
     QColor m_color;
 #ifndef QT_NO_DRAGANDDROP
     QColor m_dragColor;

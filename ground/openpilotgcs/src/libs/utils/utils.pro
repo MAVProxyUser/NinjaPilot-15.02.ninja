@@ -129,3 +129,14 @@ FORMS += filewizardpage.ui \
 	checkablemessagebox.ui
 
 RESOURCES += utils.qrc
+
+# For .cpp files with Q_OBJECT classes, we need to explicitly tell qmake to generate MOC files
+# This ensures proper MOC generation for classes defined in .cpp files rather than headers
+CONFIG += depend_includepath
+
+# Custom rule to generate MOC files for Q_OBJECT classes defined in .cpp files
+submiteditorwidget_moc.target = submiteditorwidget.moc
+submiteditorwidget_moc.depends = $$PWD/submiteditorwidget.cpp
+submiteditorwidget_moc.commands = moc $$PWD/submiteditorwidget.cpp -o submiteditorwidget.moc
+QMAKE_EXTRA_TARGETS += submiteditorwidget_moc
+PRE_TARGETDEPS += submiteditorwidget.moc
