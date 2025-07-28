@@ -90,7 +90,7 @@ bool FGSimulator::setupProcess()
     qDebug() << "setupProcess Thread: " << mainThread;
 
     simProcess = new QProcess();
-    simProcess->setReadChannelMode(QProcess::MergedChannels);
+    simProcess->setProcessChannelMode(QProcess::MergedChannels);
     connect(simProcess, SIGNAL(readyReadStandardOutput()), this, SLOT(processReadyRead()));
     // Note: Only tested on windows 7
 #if defined(Q_WS_WIN)
@@ -100,7 +100,7 @@ bool FGSimulator::setupProcess()
 #endif
 
     // Start shell (Note: Could not start FG directly on Windows, only through terminal!)
-    simProcess->start(cmdShell);
+    simProcess->start(cmdShell, QStringList());
     if (simProcess->waitForStarted() == false) {
         emit processOutput("Error:" + simProcess->errorString());
         return false;

@@ -56,7 +56,7 @@
 
 #include <QObject>
 #include <QUdpSocket>
-#include <QTime>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QProcess>
 #include <qmath.h>
@@ -312,7 +312,7 @@ protected:
     static const float RAD2DEG;
 
     QProcess *simProcess;
-    QTime *time;
+    QElapsedTimer *time;
     QUdpSocket *inSocket; // (new QUdpSocket());
     QUdpSocket *outSocket;
 

@@ -32,7 +32,7 @@
 #include "manualcontrolcommand.h"
 #include "gcscontrolgadgetconfiguration.h"
 #include "sdlgamepad/sdlgamepad.h"
-#include <QTime>
+#include <QElapsedTimer>
 #include "gcscontrolplugin.h"
 #include <QUdpSocket>
 #include <QHostAddress>
@@ -71,7 +71,7 @@ public:
 private:
     ManualControlCommand *getManualControlCommand();
     double constrain(double value);
-    QTime joystickTime;
+    QElapsedTimer joystickTime;
     QWidget *m_widget;
     QList<int> m_context;
     UAVObject::Metadata mccInitialData;

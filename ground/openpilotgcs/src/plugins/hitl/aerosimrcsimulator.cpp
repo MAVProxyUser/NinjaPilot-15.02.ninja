@@ -215,7 +215,7 @@ void AeroSimRCSimulator::processUpdate(const QByteArray &data)
     // rotate gravity
     QVector3D acc = QVector3D(accY, accX, -accZ); // accel (X,Y,Z) -> (+Y,+X,-Z)
     QVector3D gee = QVector3D(0.0, 0.0, -GEE);
-    QQuaternion qWorld = quat.conjugate();
+    QQuaternion qWorld = quat.conjugated();
     gee  = qWorld.rotatedVector(gee);
     acc += gee;
 

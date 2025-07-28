@@ -421,7 +421,7 @@ bool UAVObjectTreeModel::setData(const QModelIndex &index, const QVariant & valu
 Qt::ItemFlags UAVObjectTreeModel::flags(const QModelIndex &index) const
 {
     if (!index.isValid()) {
-        return 0;
+        return Qt::ItemFlags();
     }
 
     if (index.column() == TreeItem::DATA_COLUMN) {

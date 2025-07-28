@@ -209,7 +209,7 @@ void Simulator::onStart()
     simTimer->start();
 
     // setup time
-    time = new QTime();
+    time = new QElapsedTimer();
     time->start();
     current.T = 0;
     current.i = 0;

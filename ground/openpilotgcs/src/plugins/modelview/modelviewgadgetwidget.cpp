@@ -213,7 +213,7 @@ void ModelViewGadgetWidget::CreateScene()
 
 void ModelViewGadgetWidget::wheelEvent(QWheelEvent *e)
 {
-    double delta = m_GlView.cameraHandle()->distEyeTarget() - (e->delta() / 4);
+    double delta = m_GlView.cameraHandle()->distEyeTarget() - (e->angleDelta().y() / 4);
 
     m_GlView.cameraHandle()->setDistEyeTarget(delta);
     m_GlView.setDistMinAndMax(m_World.boundingBox());

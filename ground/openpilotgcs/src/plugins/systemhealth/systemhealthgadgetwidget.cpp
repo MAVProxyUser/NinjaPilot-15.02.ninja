@@ -97,7 +97,7 @@ void SystemHealthGadgetWidget::updateAlarms(UAVObject *systemAlarm)
         delete item; // removeItem does _not_ delete the item.
     }
 
-    QMatrix backgroundMatrix = (m_renderer->matrixForElement(background->elementId())).inverted();
+    QTransform backgroundMatrix = (m_renderer->transformForElement(background->elementId())).inverted();
 
     QString alarm = systemAlarm->getName();
     foreach(UAVObjectField * field, systemAlarm->getFields()) {
@@ -111,7 +111,7 @@ void SystemHealthGadgetWidget::updateAlarms(UAVObject *systemAlarm)
                         if (m_renderer->elementExists(element2)) {
                             // element2 is in global coordinates
                             // transform its matrix into the coordinates of background
-                            QMatrix blockMatrix   = backgroundMatrix * m_renderer->matrixForElement(element2);
+                            QTransform blockMatrix   = backgroundMatrix * m_renderer->transformForElement(element2);
                             // use this composed projection to get the position in background coordinates
                             QRectF rectProjected  = blockMatrix.mapRect(m_renderer->boundsOnElement(element2));
 

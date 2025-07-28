@@ -82,18 +82,13 @@ WelcomeMode::WelcomeMode() :
 
     QNetworkAccessManager *networkAccessManager = new QNetworkAccessManager;
 
-    // Only attempt to request our version info if the network is accessible
-    if (networkAccessManager->networkAccessible() == QNetworkAccessManager::Accessible) {
-        connect(networkAccessManager, SIGNAL(finished(QNetworkReply *)), this, SLOT(networkResponseReady(QNetworkReply *)));
+    // Only attempt to request our version info (network accessibility check removed for Qt5.15+)
+    connect(networkAccessManager, SIGNAL(finished(QNetworkReply *)), this, SLOT(networkResponseReady(QNetworkReply *)));
 
-        // This will delete the network access manager instance when we're done
-        connect(networkAccessManager, SIGNAL(finished(QNetworkReply *)), networkAccessManager, SLOT(deleteLater()));
+    // This will delete the network access manager instance when we're done
+    connect(networkAccessManager, SIGNAL(finished(QNetworkReply *)), networkAccessManager, SLOT(deleteLater()));
 
-        networkAccessManager->get(QNetworkRequest(QUrl("http://www.openpilot.org/opver")));
-    } else {
-        // No network, can delete this now as we don't need it.
-        delete networkAccessManager;
-    }
+    networkAccessManager->get(QNetworkRequest(QUrl("http://www.openpilot.org/opver")));
 }
 
 WelcomeMode::~WelcomeMode()

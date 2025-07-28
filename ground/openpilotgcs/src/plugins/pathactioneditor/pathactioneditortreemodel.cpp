@@ -347,7 +347,7 @@ bool PathActionEditorTreeModel::setData(const QModelIndex &index, const QVariant
 Qt::ItemFlags PathActionEditorTreeModel::flags(const QModelIndex &index) const
 {
     if (!index.isValid()) {
-        return 0;
+        return Qt::ItemFlags();
     }
 
     if (index.column() == TreeItem::dataColumn) {

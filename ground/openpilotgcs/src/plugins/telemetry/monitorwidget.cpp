@@ -25,7 +25,7 @@ QGraphicsSvgItem *createSvgItem(QGraphicsSvgItem *parent, QString elementId)
     item->setElementId(elementId);
 
     // move item to its location
-    QMatrix elementMatrix = renderer->matrixForElement(elementId);
+    QTransform elementMatrix = renderer->transformForElement(elementId);
     QRectF elementRect    = elementMatrix.mapRect(renderer->boundsOnElement(elementId));
     item->setPos(elementRect.x(), elementRect.y());
 
@@ -55,7 +55,7 @@ QGraphicsTextItem *createTextItem(QGraphicsSvgItem *parent, QString elementId, Q
     QSvgRenderer *renderer  = parent->renderer();
 
     // move new text item to location of rectangle element
-    QMatrix elementMatrix   = renderer->matrixForElement(elementId);
+    QTransform elementMatrix   = renderer->transformForElement(elementId);
     QRectF elementRect = elementMatrix.mapRect(renderer->boundsOnElement(elementId));
 
     qreal fontPointSizeF    = elementRect.height();

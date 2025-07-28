@@ -30,7 +30,7 @@
 
 #include <QWidget>
 #include <QUdpSocket>
-#include <QTime>
+#include <QElapsedTimer>
 #include <qmath.h>
 #include <QVector3D>
 #include <QMatrix4x4>
@@ -67,7 +67,7 @@ private slots:
 private:
     Ui::Widget *ui;
 
-    QTime screenTimeout;
+    QElapsedTimer screenTimeout;
     QUdpSocket *inSocket;
     QUdpSocket *outSocket;
     QHostAddress outHost;
