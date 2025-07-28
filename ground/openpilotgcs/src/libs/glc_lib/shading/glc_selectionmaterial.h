@@ -33,7 +33,9 @@
 
 #include "../glc_config.h"
 
+QT_BEGIN_NAMESPACE
 class QGLContext;
+QT_END_NAMESPACE
 class GLC_Material;
 
 //////////////////////////////////////////////////////////////////////
@@ -56,9 +58,14 @@ public:
 	//! Use the given material as selection material
 	static void useMaterial(GLC_Material* pMaterial);
 
+	//! Use selection material?
+	static void setUseSelectionMaterial(bool useSelectionMaterial);
+
 	//! Use the default selection color
 	/*! if a selection material is used, unused it*/
 	static void useDefautSelectionColor();
+
+    static void useSelectionColor(const QColor& color);
 
 //@}
 
@@ -70,11 +77,11 @@ public:
 	//! Execute OpenGL Material
 	static void glExecute();
 	//! Init shader
-	static void initShader(const QGLContext* pContext);
+    static void initShader(QOpenGLContext* pContext);
 	//! delete shader
-	static void deleteShader(const QGLContext* pContext);
+    static void deleteShader(QOpenGLContext* pContext);
 	//! Set shader
-	static void setShaders(QFile& vertex, QFile& fragment, const QGLContext* pContext);
+    static void setShaders(QFile& vertex, QFile& fragment, QOpenGLContext* pContext);
 	//! Use shader
 	static void useShader();
 	//! Unused shader
@@ -87,21 +94,33 @@ public:
 //////////////////////////////////////////////////////////////////////
 private:
 	//! Return the sharing context of the given context
-	static QGLContext* sharingContext(const QGLContext* pContext);
+    static QOpenGLContext* sharingContext(QOpenGLContext* pContext);
 
 //////////////////////////////////////////////////////////////////////
 // Private members
 //////////////////////////////////////////////////////////////////////
 
 private:
-		//! Selection Shader
-		static QHash<const QGLContext*, GLC_Shader*> m_SelectionShaderHash;
+    //! Selection Shader
+    static QHash<QOpenGLContext*, GLC_Shader*> m_SelectionShaderHash;
 
-		//! Selection material id
-		static GLC_uint m_SelectionMaterialId;
+    //! Selection material id
+    static GLC_uint m_SelectionMaterialId;
 
-		//! Material of this selection material
-		static GLC_Material* m_pMaterial;
+    //! Material of this selection material
+    static GLC_Material* m_pMaterial;
+
+    //! Don't use selection material
+    static bool m_NoSelectionMaterial;
+
+    //! Selection Color
+    static GLfloat m_DefaultRedComponent;
+    static GLfloat m_DefaultGreenComponent;
+    static GLfloat m_DefaultBlueComponent;
+
+    static GLfloat m_RedComponent;
+    static GLfloat m_GreenComponent;
+    static GLfloat m_BlueComponent;
 
 };
 

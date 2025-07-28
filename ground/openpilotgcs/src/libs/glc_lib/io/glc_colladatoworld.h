@@ -33,12 +33,11 @@
 
 #include "../shading/glc_material.h"
 #include "../geometry/glc_mesh.h"
-#include "../sceneGraph/glc_structoccurence.h"
+#include "../sceneGraph/glc_structoccurrence.h"
 
 #include "../glc_config.h"
 
 class GLC_World;
-class QGLContext;
 
 //////////////////////////////////////////////////////////////////////
 //! \class GLC_ColladaToWorld
@@ -108,7 +107,7 @@ private:
 		, m_Datas(3)
 		, m_Mapping()
 		, m_Index()
-		, m_FreeIndex(0)
+        , m_FreeIndex(0)
 		{}
 
 		~MeshInfo() {delete m_pMesh;}
@@ -123,7 +122,7 @@ private:
 		// Next index Position
 		GLuint m_FreeIndex;
 		// QHash containing material id and associated offset and size
-		QHash<QString, MatOffsetSize> m_Materials;
+        QMultiHash<QString, MatOffsetSize> m_Materials;
 	};
 
 	// The collada Node
@@ -177,7 +176,7 @@ public:
 
 	//! Get the list of attached files
 	inline QStringList listOfAttachedFileName() const
-	{return m_ListOfAttachedFileName.toList();}
+    {return m_ListOfAttachedFileName.values();}
 
 //@}
 
@@ -301,8 +300,12 @@ private:
 	//! Load triangles
 	void loadTriangles();
 
+    void loadLineStrips();
+
 	//! Add the triangles to current mesh
 	void addTrianglesToCurrentMesh(const QList<InputData>&, const QList<int>&, const QString&);
+
+    void addLineStripsToCurrentMesh(const InputData& inputData, const QList<int> lineStripsIndexList);
 
 	//! Load the library nodes
 	void loadLibraryNodes();
@@ -352,8 +355,8 @@ private:
 	//! Create the scene graph struct
 	void createSceneGraph();
 
-	//! Create Occurence tree from node tree
-	GLC_StructOccurence* createOccurenceFromNode(ColladaNode*);
+	//! Create Occurrence tree from node tree
+	GLC_StructOccurrence* createOccurrenceFromNode(ColladaNode*);
 
 	//! Update progress bar
 	void updateProgressBar();

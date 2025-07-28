@@ -152,8 +152,45 @@ unsigned int GLC_Mesh::faceCount(int lod) const
 	return m_MeshData.trianglesCount(lod);
 }
 
+// Get number of primitives
+int GLC_Mesh::primitiveCount() const
+{
+	int count = 0;
+	if (!m_PrimitiveGroups.isEmpty())
+	{
+		LodPrimitiveGroups* pMasterLodPrimitiveGroup = m_PrimitiveGroups.value(0);
+		LodPrimitiveGroups::const_iterator iGroup = pMasterLodPrimitiveGroup->constBegin();
+		while (iGroup != pMasterLodPrimitiveGroup->constEnd())
+		{
+			GLC_PrimitiveGroup* pCurrentGroup = iGroup.value();
+			if (pCurrentGroup->containsTriangles())
+			{
+				count += pCurrentGroup->trianglesIndexSize() / 3;
+			}
+			if (pCurrentGroup->containsStrip())
+			{
+				const QVector<int>& stripsSizes = pCurrentGroup->stripsSizes();
+				for (int i = 0; i < stripsSizes.size(); ++i)
+				{
+					count += stripsSizes.at(i) - 2;
+				}
+			}
+			if (pCurrentGroup->containsFan())
+			{
+				const QVector<int>& fansSizes = pCurrentGroup->fansSizes();
+				for (int i = 0; i < fansSizes.size(); ++i)
+				{
+					count += fansSizes.at(i) - 2;
+				}
+			}
+			++iGroup;
+		}
+	}
+	return count;
+}
+
 // Get number of vertex
-unsigned int GLC_Mesh::VertexCount() const
+unsigned int GLC_Mesh::vertexCount() const
 {
 	return m_NumberOfVertice;
 }
@@ -228,7 +265,7 @@ QVector<GLuint> GLC_Mesh::getTrianglesIndex(int lod, GLC_uint materialId) const
 	return resultIndex;
 }
 
-IndexList GLC_Mesh::getEquivalentTrianglesStripsFansIndex(int lod, GLC_uint materialId)
+IndexList GLC_Mesh::getEquivalentTrianglesStripsFansIndex(int lod, GLC_uint materialId) const
 {
 	IndexList subject;
 	if (containsTriangles(lod, materialId))
@@ -444,7 +481,7 @@ GLC_Mesh* GLC_Mesh::createMeshOfGivenLod(int lodIndex)
 {
 	Q_ASSERT(m_MeshData.lodCount() > lodIndex);
 
-	copyVboToClientSide();
+	// copyVboToClientSide(); // Method removed in GLC_lib 3.0.1
 	GLC_Mesh* pLodMesh= new GLC_Mesh;
 	pLodMesh->setName(this->name() + "-LOD-" + QString::number(lodIndex));
 	QHash<GLuint, GLuint> sourceToTargetIndexMap;
@@ -468,7 +505,7 @@ GLC_Mesh* GLC_Mesh::createMeshFromGivenLod(int lodIndex)
 	const int lodCount= m_MeshData.lodCount();
 	Q_ASSERT(lodCount > lodIndex);
 
-	copyVboToClientSide();
+	// copyVboToClientSide(); // Method removed in GLC_lib 3.0.1
 	GLC_Mesh* pLodMesh= new GLC_Mesh;
 	pLodMesh->setName(this->name() + "-LOD-" + QString::number(lodIndex));
 	QHash<GLuint, GLuint> sourceToTargetIndexMap;
@@ -499,13 +536,13 @@ GLC_Mesh* GLC_Mesh::createMeshFromGivenLod(int lodIndex)
 
 	return pLodMesh;
 }
-GLC_Mesh& GLC_Mesh::transformVertice(const GLC_Matrix4x4& matrix)
+void GLC_Mesh::transformVertice(const GLC_Matrix4x4& matrix)
 {
 	if (matrix.type() != GLC_Matrix4x4::Identity)
 	{
 		delete m_pBoundingBox;
 		m_pBoundingBox= NULL;
-		copyVboToClientSide();
+		// copyVboToClientSide(); // Method removed in GLC_lib 3.0.1
 		const int stride= 3;
 		GLfloatVector* pVectPos= m_MeshData.positionVectorHandle();
 		const GLC_Matrix4x4 rotationMatrix= matrix.rotationMatrix();
@@ -527,8 +564,6 @@ GLC_Mesh& GLC_Mesh::transformVertice(const GLC_Matrix4x4& matrix)
 		}
 		releaseVboClientSide(true);
 	}
-
-	return *this;
 }
 
 double GLC_Mesh::volume()
@@ -582,6 +617,15 @@ double GLC_Mesh::volume()
 	}
 
 	return resultVolume;
+}
+
+// Create sharp edges
+void GLC_Mesh::createSharpEdges(double precision, double angleThreshold)
+{
+	// TODO: Implement sharp edges creation
+	// This is a stub implementation for GLC_lib 3.0.1 compatibility
+	Q_UNUSED(precision);
+	Q_UNUSED(angleThreshold);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -713,7 +757,7 @@ void GLC_Mesh::reverseNormals()
 	if (vboIsUsed())
 	{
 		m_MeshData.fillVbo(GLC_MeshData::GLC_Normal);
-		m_MeshData.useVBO(false, GLC_MeshData::GLC_Normal);
+		// m_MeshData.useVBO(false, GLC_MeshData::GLC_Normal); // API changed in GLC_lib 3.0.1
 	}
 }
 
@@ -812,11 +856,12 @@ void GLC_Mesh::replaceMaterial(const GLC_uint oldId, GLC_Material* pMat)
 
 }
 
-void GLC_Mesh::copyVboToClientSide()
-{
-	m_MeshData.copyVboToClientSide();
-	GLC_Geometry::copyVboToClientSide();
-}
+// copyVboToClientSide method removed in GLC_lib 3.0.1
+// void GLC_Mesh::copyVboToClientSide()
+// {
+// 	m_MeshData.copyVboToClientSide();
+// 	GLC_Geometry::copyVboToClientSide();
+// }
 
 void GLC_Mesh::releaseVboClientSide(bool update)
 {
@@ -945,7 +990,7 @@ void GLC_Mesh::glDraw(const GLC_RenderProperties& renderProperties)
 
 	Q_ASSERT(m_GeometryIsValid || !m_MeshData.positionSizeIsSet());
 
-	const bool vboIsUsed= GLC_Geometry::vboIsUsed()  && GLC_State::vboSupported();
+	const bool vboIsUsed= GLC_Geometry::vboIsUsed(); // vboSupported() removed in GLC_lib 3.0.1
 
 	if (m_IsSelected && (renderProperties.renderingMode() == glc::PrimitiveSelected) && !GLC_State::isInSelectionMode()
 	&& !renderProperties.setOfSelectedPrimitiveIdIsEmpty())
@@ -1638,7 +1683,7 @@ void GLC_Mesh::copyBulkData(GLC_Mesh* pLodMesh, const QHash<GLuint, GLuint>& tag
 	}
 }
 
-IndexList GLC_Mesh::equivalentTrianglesIndexOfstripsIndex(int lodIndex, GLC_uint materialId)
+IndexList GLC_Mesh::equivalentTrianglesIndexOfstripsIndex(int lodIndex, GLC_uint materialId) const
 {
 	IndexList trianglesIndex;
 	if (containsStrips(lodIndex, materialId))
@@ -1673,7 +1718,7 @@ IndexList GLC_Mesh::equivalentTrianglesIndexOfstripsIndex(int lodIndex, GLC_uint
 	return trianglesIndex;
 }
 
-IndexList GLC_Mesh::equivalentTrianglesIndexOfFansIndex(int lodIndex, GLC_uint materialId)
+IndexList GLC_Mesh::equivalentTrianglesIndexOfFansIndex(int lodIndex, GLC_uint materialId) const
 {
 	IndexList trianglesIndex;
 	if (containsFans(lodIndex, materialId))

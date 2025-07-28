@@ -32,7 +32,6 @@
 #include "../glc_config.h"
 
 typedef QHash<GLC_uint, GLC_Material*> MaterialHash;
-typedef QHash<GLC_uint, GLC_uint> MaterialHashMap;
 
 //////////////////////////////////////////////////////////////////////
 //! \class GLC_Geometry
@@ -71,7 +70,7 @@ public:
 	GLC_Geometry(const QString &name, const bool type);
 
 	//! Copy constructor
-	GLC_Geometry(const GLC_Geometry& sourceGeom);
+    GLC_Geometry(const GLC_Geometry& other);
 
 	//! Overload "=" operator
 	GLC_Geometry& operator=(const GLC_Geometry& sourceGeom);
@@ -85,6 +84,9 @@ public:
 //@{
 //////////////////////////////////////////////////////////////////////
 public:
+    //! Return the number of primitive of this geometry
+    virtual int primitiveCount() const;
+
 	//! Get Object ID
 	inline GLC_uint id() const
 	{return m_Id;}
@@ -117,11 +119,14 @@ public:
 
 	//! Return the specified mesh sub material
 	inline GLC_Material* material(const GLC_uint key) const
-	{return m_MaterialHash[key];}
+    {return m_MaterialHash.value(key);}
+
+    MaterialHash materialHash() const
+    { return m_MaterialHash;}
 
 	//! Get materials Set
-	inline QSet<GLC_Material*> materialSet() const
-	{return m_MaterialHash.values().toSet();}
+    inline QSet<GLC_Material*> materialSet() const
+    {return QSet<GLC_Material*>(m_MaterialHash.begin(), m_MaterialHash.end());}
 
 	//! Get materials ID List
 	inline QList<GLC_uint> materialIds() const
@@ -161,7 +166,7 @@ public:
 	virtual unsigned int faceCount(int lod=0) const;
 
 	//! Get the number of vertex
-	virtual unsigned int VertexCount() const;
+    virtual unsigned int vertexCount() const;
 
 	//! Return the line width
 	GLfloat lineWidth() const
@@ -198,6 +203,9 @@ public:
 	inline bool vboIsUsed() const
 	{return m_UseVbo;}
 
+    const GLC_WireData& wireData() const
+    {return m_WireData;}
+
 //@}
 
 //////////////////////////////////////////////////////////////////////
@@ -206,11 +214,20 @@ public:
 //////////////////////////////////////////////////////////////////////
 public:
 
+    //! return true if update process modify geometry
+    virtual bool update()
+    {return false;}
+
 	//! Clear the content of the geometry and makes it empty
 	virtual void clear();
 
 	//! Replace the Master material
 	virtual void replaceMasterMaterial(GLC_Material*);
+
+    //! Replace the material specified by id with another one
+    virtual void replaceMaterial(const GLC_uint id, GLC_Material* pMat);
+
+    virtual void updateMaterialId(GLC_uint oldId, GLC_uint newId);
 
 	//! Add material to the geometry
 	void addMaterial(GLC_Material *);
@@ -247,6 +264,10 @@ public:
 	inline GLC_uint addVerticeGroup(const GLfloatVector& vector)
 	{return m_WireData.addVerticeGroup(vector);}
 
+    void addVerticeGroups(const GLC_Geometry& other, const GLC_Matrix4x4& matrix);
+
+    void addVerticeGroups(const GLC_WireData& wireData, const GLC_Matrix4x4& matrix);
+
 	//! Set Line width
 	inline void setLineWidth(GLfloat lineWidth)
 	{m_LineWidth= lineWidth;}
@@ -254,14 +275,21 @@ public:
 	//! Set this geometry wire color
 	void setWireColor(const QColor& color);
 
-	//! Copy VBO to the Client Side
-	virtual void copyVboToClientSide();
-
 	//! Release client VBO
 	virtual void releaseVboClientSide(bool update= false);
 
 	//! Set VBO usage
 	virtual void setVboUsage(bool usage);
+
+	//! Clear the wire data and the bounding box of this geometry
+	inline void clearBoundingBox()
+	{
+		delete m_pBoundingBox;
+		m_pBoundingBox= NULL;
+	}
+
+    //! Transform vertice by the given matrix
+    virtual void transformVertice(const GLC_Matrix4x4& matrix);
 
 //@}
 //////////////////////////////////////////////////////////////////////
@@ -312,6 +340,7 @@ private:
 	//! Clear the content of this object and makes it empty
 	void clearGeometry();
 
+    void innerCopy(const GLC_Geometry& other);
 //@}
 
 //////////////////////////////////////////////////////////////////////

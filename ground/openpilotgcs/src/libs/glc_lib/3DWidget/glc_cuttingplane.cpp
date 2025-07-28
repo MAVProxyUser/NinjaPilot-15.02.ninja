@@ -81,23 +81,26 @@ GLC_CuttingPlane::~GLC_CuttingPlane()
 	delete m_pCurrentManipulator;
 }
 
-GLC_CuttingPlane& GLC_CuttingPlane::operator=(const GLC_CuttingPlane& cuttingPlane)
+GLC_CuttingPlane& GLC_CuttingPlane::operator=(const GLC_CuttingPlane& other)
 {
-	GLC_3DWidget::operator=(cuttingPlane);
+    if (this != &other)
+    {
+        GLC_3DWidget::operator=(other);
 
-	m_Center= cuttingPlane.m_Center;
-	m_Normal= cuttingPlane.m_Normal;
-	m_CompMatrix= cuttingPlane.m_CompMatrix;
-	m_L1= cuttingPlane.m_L1;
-	m_L2= cuttingPlane.m_L2;
-	m_Color= cuttingPlane.m_Color;
-	m_Opacity= cuttingPlane.m_Opacity;
-	m_CurrentNavigatorPosition= cuttingPlane.m_CurrentNavigatorPosition;
-	delete m_pCurrentManipulator;
-	if (NULL != cuttingPlane.m_pCurrentManipulator)
-	{
-		m_pCurrentManipulator= cuttingPlane.m_pCurrentManipulator->clone();
-	}
+        m_Center= other.m_Center;
+        m_Normal= other.m_Normal;
+        m_CompMatrix= other.m_CompMatrix;
+        m_L1= other.m_L1;
+        m_L2= other.m_L2;
+        m_Color= other.m_Color;
+        m_Opacity= other.m_Opacity;
+        m_CurrentNavigatorPosition= other.m_CurrentNavigatorPosition;
+        delete m_pCurrentManipulator;
+        if (NULL != other.m_pCurrentManipulator)
+        {
+            m_pCurrentManipulator= other.m_pCurrentManipulator->clone();
+        }
+    }
 
 	return *this;
 }
@@ -146,40 +149,37 @@ glc::WidgetEventFlag GLC_CuttingPlane::select(const GLC_Point3d& pos, GLC_uint)
 	return glc::BlockedEvent;
 }
 
-glc::WidgetEventFlag GLC_CuttingPlane::mousePressed(const GLC_Point3d& pos, Qt::MouseButton button, GLC_uint id)
+glc::WidgetEventFlag GLC_CuttingPlane::pressed(const GLC_Point3d& pos, GLC_uint id)
 {
 	glc::WidgetEventFlag returnFlag= glc::IgnoreEvent;
-	if (button == Qt::LeftButton)
-	{
-		const int selectedInstanceIndex= GLC_3DWidget::indexOfIntsanceId(id);
-		if (selectedInstanceIndex > 0)
-		{
-			m_SelectionIndex= selectedInstanceIndex;
-			if (m_CurrentManipulator == RotationManipulator)
-			{
-				delete m_pCurrentManipulator;
-				m_pCurrentManipulator= rotationNavigator(selectedInstanceIndex);
-			}
-			m_pCurrentManipulator->enterManipulateState(pos);
-		}
-		else
-		{
-			if (NULL != m_pCurrentManipulator)
-			{
-				if (m_CurrentManipulator == RotationManipulator)
-				{
-					delete m_pCurrentManipulator;
-					m_pCurrentManipulator= NULL;
-				}
-				else
-				{
-					m_pCurrentManipulator->enterManipulateState(pos);
-				}
+    const int selectedInstanceIndex= GLC_3DWidget::indexOfIntsanceId(id);
+    if (selectedInstanceIndex > 0)
+    {
+        m_SelectionIndex= selectedInstanceIndex;
+        if (m_CurrentManipulator == RotationManipulator)
+        {
+            delete m_pCurrentManipulator;
+            m_pCurrentManipulator= rotationNavigator(selectedInstanceIndex);
+        }
+        m_pCurrentManipulator->enterManipulateState(pos);
+    }
+    else
+    {
+        if (NULL != m_pCurrentManipulator)
+        {
+            if (m_CurrentManipulator == RotationManipulator)
+            {
+                delete m_pCurrentManipulator;
+                m_pCurrentManipulator= NULL;
+            }
+            else
+            {
+                m_pCurrentManipulator->enterManipulateState(pos);
+            }
 
-			}
-			m_CurrentNavigatorPosition= pos;
-			updateWidgetRep();
-		}
+        }
+        m_CurrentNavigatorPosition= pos;
+        updateWidgetRep();
 
 		returnFlag= glc::BlockedEvent;
 	}
@@ -187,12 +187,11 @@ glc::WidgetEventFlag GLC_CuttingPlane::mousePressed(const GLC_Point3d& pos, Qt::
 	return returnFlag;
 }
 
-glc::WidgetEventFlag GLC_CuttingPlane::mouseReleased(Qt::MouseButton button)
+glc::WidgetEventFlag GLC_CuttingPlane::released()
 {
 	glc::WidgetEventFlag returnFlag= glc::IgnoreEvent;
-	if ((button == Qt::LeftButton) && (m_SelectionIndex != -1))
+    if (m_SelectionIndex != -1)
 	{
-
 		// get selected instance index
 
 		if (m_CurrentManipulator == TranslationManipulator)
@@ -238,42 +237,39 @@ glc::WidgetEventFlag GLC_CuttingPlane::unselect(const GLC_Point3d&, GLC_uint)
 	return glc::AcceptEvent;
 }
 
-glc::WidgetEventFlag GLC_CuttingPlane::mouseMove(const GLC_Point3d& pos, Qt::MouseButtons button, GLC_uint)
+glc::WidgetEventFlag GLC_CuttingPlane::move(const GLC_Point3d& pos, GLC_uint)
 {
 	glc::WidgetEventFlag returnFlag= glc::IgnoreEvent;
-	if (button & Qt::LeftButton)
-	{
-		if (NULL != m_pCurrentManipulator)
-		{
-			if (m_SelectionIndex != -1)
-			{
-				moveManipulatorRep(m_CurrentNavigatorPosition);
-				m_SelectionIndex= -1;
-			}
-			GLC_Matrix4x4 moveMatrix(m_pCurrentManipulator->manipulate(pos));
+    if (NULL != m_pCurrentManipulator)
+    {
+        if (m_SelectionIndex != -1)
+        {
+            moveManipulatorRep(m_CurrentNavigatorPosition);
+            m_SelectionIndex= -1;
+        }
+        GLC_Matrix4x4 moveMatrix(m_pCurrentManipulator->manipulate(pos));
 
-			// Update plane normal
-			if (m_CurrentManipulator == RotationManipulator)
-			{
-				m_Normal= moveMatrix.rotationMatrix() * m_Normal;
-			}
-			m_CompMatrix= moveMatrix * m_CompMatrix;
-			m_Center= moveMatrix * m_Center;
-			m_CurrentNavigatorPosition= moveMatrix * m_CurrentNavigatorPosition;
+        // Update plane normal
+        if (m_CurrentManipulator == RotationManipulator)
+        {
+            m_Normal= moveMatrix.rotationMatrix() * m_Normal;
+        }
+        m_CompMatrix= moveMatrix * m_CompMatrix;
+        m_Center= moveMatrix * m_Center;
+        m_CurrentNavigatorPosition= moveMatrix * m_CurrentNavigatorPosition;
 
-			// Update the instance
-			for (int i= 0; i < 5; ++i)
-			{
-				GLC_3DWidget::instanceHandle(i)->multMatrix(moveMatrix);
-			}
+        // Update the instance
+        for (int i= 0; i < 5; ++i)
+        {
+            GLC_3DWidget::instanceHandle(i)->multMatrix(moveMatrix);
+        }
 
-			// Plane throw intersection and plane normal and camera up vector
-			m_pCurrentManipulator->enterManipulateState(m_pCurrentManipulator->previousPosition());
+        // Plane throw intersection and plane normal and camera up vector
+        m_pCurrentManipulator->enterManipulateState(m_pCurrentManipulator->previousPosition());
 
-			emit asChanged();
-			returnFlag= glc::AcceptEvent;
-		}
-	}
+        emit asChanged();
+        returnFlag= glc::AcceptEvent;
+    }
 
 	return returnFlag;
 }

@@ -28,8 +28,11 @@
 #include <QVector>
 #include <QQuaternion>
 #include <QPair>
+#include <QMetaType>
+#include <QMatrix4x4>
 
 #include "glc_vector3d.h"
+#include "glc_plane.h"
 
 #include "../glc_config.h"
 
@@ -87,12 +90,21 @@ public:
 	inline GLC_Matrix4x4(const GLC_Vector3d &Vect1, const GLC_Vector3d &Vect2);
 
 	//! Construct translation matrix from a 3d vector
-	inline GLC_Matrix4x4(const GLC_Vector3d &Vect)
+    inline explicit GLC_Matrix4x4(const GLC_Vector3d &Vect)
 	{setMatTranslate(Vect);}
 
 	//! Construct translation matrix from coordinates in double
 	inline GLC_Matrix4x4(const double Tx, const double Ty, const double Tz)
 	{setMatTranslate(Tx, Ty, Tz);}
+//@}
+
+//////////////////////////////////////////////////////////////////////
+/*! @name Static method */
+//@{
+//////////////////////////////////////////////////////////////////////
+public:
+    static GLC_Matrix4x4 frustumMatrix(double left, double right, double bottom, double top, double nearVal, double farVal);
+    static GLC_Matrix4x4 orthonormalMatrix(double left, double right, double bottom, double top, double nearVal, double farVal);
 //@}
 
 //////////////////////////////////////////////////////////////////////
@@ -115,6 +127,9 @@ public:
 	//! Return true if this matrix is not equal to the given matrix
 	inline bool operator!=(const GLC_Matrix4x4& mat) const
 	{return !operator==(mat);}
+
+    //! Return the result of transforming the given plane by this matrix
+    GLC_Plane operator *(const GLC_Plane& plane) const;
 
 //@}
 
@@ -190,6 +205,13 @@ public:
 	//! Return the rotation vector and angle of this matrix
 	QPair<GLC_Vector3d, double> rotationVectorAndAngle() const;
 
+    GLC_Vector3d getXvector() const;
+    GLC_Vector3d getYvector() const;
+    GLC_Vector3d getZvector() const;
+    GLC_Vector3d getWvector() const;
+
+    inline QMatrix4x4 qMatrix() const;
+
 //@}
 
 //////////////////////////////////////////////////////////////////////
@@ -237,18 +259,6 @@ public:
 //////////////////////////////////////////////////////////////////////
 private:
 
-	//! Return true if the index (argument) is in the diagonal of this matrix
-	inline bool isInDiagonal(const int index) const
-	{
-		if ((index == 0) || (index == 5) || (index == 10) || (index == 15))
-			return true;
-		else
-			return false;
-	}
-
-	//! Return the determinant of this matrix cell given from 2 int
-	inline double getDeterminantLC(const int, const int) const;
-
 	//! Compute Sub 3X3 matrix given by 2 int and set the given double pointeur
 	inline void getSubMat(const int, const int, double *) const;
 
@@ -291,6 +301,7 @@ the matrix :
 
 };
 
+Q_DECLARE_METATYPE(GLC_Matrix4x4)
 
 //////////////////////////////////////////////////////////////////////
 // Constructor/Destructor
@@ -380,24 +391,23 @@ GLC_Matrix4x4& GLC_Matrix4x4::operator = (const GLC_Matrix4x4 &matrix)
 
 GLC_Vector3d GLC_Matrix4x4::operator * (const GLC_Vector3d &Vect) const
 {
-	double ValInt;
 	int i;
 	GLC_Vector3d VectResult;
 	double mat[4];
 
 	for (int Index= 0; Index < DIMMAT4X4; Index++)
 	{
-		ValInt= 0.0;
+        double valInt= 0.0;
 		for (i= 0; i < DIMMAT4X4 - 1; i++)
 		{
-			ValInt+= m_Matrix[(i * DIMMAT4X4) + Index] * Vect.m_Vector[i];
+            valInt+= m_Matrix[(i * DIMMAT4X4) + Index] * Vect.m_Vector[i];
 		}
-		ValInt+= m_Matrix[(3 * DIMMAT4X4) + Index];
-		mat[Index]= ValInt;
+        valInt+= m_Matrix[(3 * DIMMAT4X4) + Index];
+        mat[Index]= valInt;
 	}
 
 	double invW= 1.0;
-	if (fabs(mat[3]) > 0.00001)
+    if (qAbs(mat[3]) > 0.00001)
 	{
 		invW/= mat[3];
 	}
@@ -471,18 +481,28 @@ GLC_Matrix4x4 GLC_Matrix4x4::isometricMatrix() const
 	return result;
 }
 
+QMatrix4x4 GLC_Matrix4x4::qMatrix() const
+{
+    QMatrix4x4 subject(m_Matrix[0], m_Matrix[4], m_Matrix[8], m_Matrix[12]
+                     , m_Matrix[1], m_Matrix[5], m_Matrix[9], m_Matrix[13]
+                     , m_Matrix[2], m_Matrix[6], m_Matrix[10], m_Matrix[14]
+                     , m_Matrix[3], m_Matrix[7], m_Matrix[11], m_Matrix[15]);
+
+    return subject;
+}
+
 GLC_Matrix4x4& GLC_Matrix4x4::setMatRot(const GLC_Vector3d &Vect, const double &dAngleRad)
 {
-	// Normalize the vector
-	GLC_Vector3d VectRot(Vect);
-	VectRot.normalize();
+    // Normalize the vector
+    GLC_Vector3d VectRot(Vect);
+    VectRot.normalize();
 
-	// Code optimisation
-	const double SinAngleSur2= sin(dAngleRad / 2.0);
+    // Code optimisation
+    const double SinAngleSur2= sin(dAngleRad / 2.0);
 
-	// Quaternion computation
-	const double q0= cos(dAngleRad / 2);
-	const double q1= VectRot.m_Vector[0] * SinAngleSur2;
+    // Quaternion computation
+    const double q0= cos(dAngleRad / 2);
+    const double q1= VectRot.m_Vector[0] * SinAngleSur2;
 	const double q2= VectRot.m_Vector[1] * SinAngleSur2;
 	const double q3= VectRot.m_Vector[2] * SinAngleSur2;
 
@@ -533,7 +553,7 @@ GLC_Matrix4x4& GLC_Matrix4x4::setMatRot(const GLC_Vector3d &v1, const GLC_Vector
 		{
 			// v1 == -v2
 			GLC_Vector3d otherVector(glc::Z_AXIS);
-			if ((otherVector == v1) || (otherVector == -v2))
+            if ((otherVector == v1) || (otherVector == -v1))
 			{
 				otherVector= glc::Y_AXIS;
 			}
@@ -637,11 +657,11 @@ GLC_Matrix4x4& GLC_Matrix4x4::transpose(void)
 GLC_Matrix4x4& GLC_Matrix4x4::optimise(bool force)
 {
 	if (force || (m_Type == General))
-	{
-		bool identityVal= (m_Matrix[0] == 1.0f) && (m_Matrix[4] == 0.0f) && (m_Matrix[8] ==  0.0f) && (m_Matrix[12] == 0.0f);
-		identityVal= identityVal && (m_Matrix[1] == 0.0f) && (m_Matrix[5] == 1.0f) && (m_Matrix[9] ==  0.0f) && (m_Matrix[13] == 0.0);
-		identityVal= identityVal && (m_Matrix[2] == 0.0f) && (m_Matrix[6] == 0.0f) && (m_Matrix[10] == 1.0f) && (m_Matrix[14] == 0.0);
-		identityVal= identityVal && (m_Matrix[3] == 0.0f) && (m_Matrix[7] == 0.0f) && (m_Matrix[11] == 0.0f) && (m_Matrix[15] == 1.0f);
+    {
+        bool identityVal= qFuzzyCompare(m_Matrix[0], 1.0) && qFuzzyIsNull(m_Matrix[4]) && qFuzzyIsNull(m_Matrix[8]) && qFuzzyIsNull(m_Matrix[12]);
+        identityVal= identityVal && qFuzzyIsNull(m_Matrix[1]) && qFuzzyCompare(m_Matrix[5], 1.0) && qFuzzyIsNull(m_Matrix[9]) && qFuzzyIsNull(m_Matrix[13]);
+        identityVal= identityVal && qFuzzyIsNull(m_Matrix[2]) && qFuzzyIsNull(m_Matrix[6]) && qFuzzyCompare(m_Matrix[10], 1.0) && qFuzzyIsNull(m_Matrix[14]);
+        identityVal= identityVal && qFuzzyIsNull(m_Matrix[3]) && qFuzzyIsNull(m_Matrix[7]) && qFuzzyIsNull(m_Matrix[11]) && qFuzzyCompare(m_Matrix[15], 1.0);
 		if (identityVal)
 		{
 			m_Type= Identity;
@@ -675,21 +695,6 @@ double GLC_Matrix4x4::determinant(void) const
 
 	return Determinant;
 
-}
-
-double GLC_Matrix4x4::getDeterminantLC(const int Ligne, const int Colonne) const
-{
-	double Mat3x3[9];
-	double Determinant;
-
-	getSubMat(Ligne, Colonne, Mat3x3);
-
-	if ( 0 == ((Ligne + Colonne) % 2)) // Even number
-		Determinant= m_Matrix[(Colonne + DIMMAT4X4) + Ligne] * getDeterminant3x3(Mat3x3);
-	else
-		Determinant= - m_Matrix[(Colonne + DIMMAT4X4) + Ligne] * getDeterminant3x3(Mat3x3);
-
-	return Determinant;
 }
 
 void GLC_Matrix4x4::getSubMat(const int Ligne, const int Colonne, double *ResultMat) const

@@ -89,6 +89,15 @@ namespace glc
 		BlockedEvent
 	};
 
+    enum WidgetEvenType
+    {
+        WidgetNoneEvent,
+        WidgetPressEvent,
+        WidgetMoveEvent,
+        WidgetReleaseEvent,
+        WidgetOverEvent
+    };
+
 	//! Return GLC_lib Archive prefix string
 	GLC_LIB_EXPORT const QString archivePrefix();
 
@@ -120,10 +129,10 @@ namespace glc
 	GLC_LIB_EXPORT QString archiveEntryFileName(const QString& archiveString);
 
 	// GLC_Lib version
-    const QString version("2.5.0");
-	const QString description("GLC_lib is a Open Source C++ class library that enables the quick creation of an OpenGL application based on QT4.");
+    const QString version("3.0.1");
+    const QString description("GLC_lib is a Open Source C++ class library that enables the quick creation of an OpenGL application based on QT5.");
 
-};
+}
 
 // Return the GLC_uint decoded ID from RGBA encoded ID
 GLC_uint glc::decodeRgbId(const GLubyte* pcolorId)

@@ -30,29 +30,35 @@
 #include "glc_pullmanipulator.h"
 
 GLC_Axis::GLC_Axis(const GLC_Point3d& center, GLC_3DWidgetManagerHandle*  pWidgetManagerHandle)
-: GLC_3DWidget(pWidgetManagerHandle)
-, m_Center(center)
-, m_ScaleFactor(1.0)
-, m_CurrentManipulator(NoneManipulator)
-, m_pCurrentManipulator(NULL)
-, m_AxisLength(1.0)
-, m_AxisRadiusRatio(0.03)
+    : GLC_3DWidget(pWidgetManagerHandle)
+    , m_Center(center)
+    , m_OrientationMatrix()
+    , m_ScaleFactor(1.0)
+    , m_CurrentManipulator(NoneManipulator)
+    , m_pCurrentManipulator(nullptr)
+    , m_AxisLength(1.0)
+    , m_AxisRadiusRatio(0.02)
+    , m_MoveStep(0.0)
+    , m_Offset()
 {
 
 }
 
-GLC_Axis::GLC_Axis(const GLC_Axis& axis)
-: GLC_3DWidget(axis)
-, m_Center(axis.m_Center)
-, m_ScaleFactor(axis.m_ScaleFactor)
-, m_CurrentManipulator(axis.m_CurrentManipulator)
-, m_pCurrentManipulator(NULL)
-, m_AxisLength(axis.m_AxisLength)
-, m_AxisRadiusRatio(axis.m_AxisRadiusRatio)
+GLC_Axis::GLC_Axis(const GLC_Axis& other)
+    : GLC_3DWidget(other)
+    , m_Center(other.m_Center)
+    , m_OrientationMatrix(other.m_OrientationMatrix)
+    , m_ScaleFactor(other.m_ScaleFactor)
+    , m_CurrentManipulator(other.m_CurrentManipulator)
+    , m_pCurrentManipulator(nullptr)
+    , m_AxisLength(other.m_AxisLength)
+    , m_AxisRadiusRatio(other.m_AxisRadiusRatio)
+    , m_MoveStep(0.0)
+    ,  m_Offset(other.m_Offset)
 {
-	if (NULL != axis.m_pCurrentManipulator)
+    if (nullptr != other.m_pCurrentManipulator)
 	{
-		m_pCurrentManipulator= axis.m_pCurrentManipulator->clone();
+        m_pCurrentManipulator= other.m_pCurrentManipulator->clone();
 	}
 }
 
@@ -63,14 +69,18 @@ GLC_Axis::~GLC_Axis()
 
 GLC_Axis& GLC_Axis::operator=(const GLC_Axis& axis)
 {
-	GLC_3DWidget::operator=(axis);
+    if (this != &axis)
+    {
+        GLC_3DWidget::operator=(axis);
 
-	m_Center= axis.m_Center;
-	delete m_pCurrentManipulator;
-	if (NULL != axis.m_pCurrentManipulator)
-	{
-		m_pCurrentManipulator= axis.m_pCurrentManipulator->clone();
-	}
+        m_Center= axis.m_Center;
+        m_OrientationMatrix= axis.m_OrientationMatrix;
+        delete m_pCurrentManipulator;
+        if (nullptr != axis.m_pCurrentManipulator)
+        {
+            m_pCurrentManipulator= axis.m_pCurrentManipulator->clone();
+        }
+    }
 
 	return *this;
 }
@@ -93,19 +103,36 @@ void GLC_Axis::setAxisLength(double length)
 	{
 		GLC_3DWidget::remove3DViewInstance();
 		create3DviewInstance();
-	}
+    }
+}
+
+void GLC_Axis::setAxisRadiusLengthRatio(double value)
+{
+    m_AxisRadiusRatio= value;
+    if (!GLC_3DWidget::isEmpty())
+    {
+        GLC_3DWidget::remove3DViewInstance();
+        create3DviewInstance();
+    }
 }
 
 void GLC_Axis::setCenter(const GLC_Point3d& newCenter)
 {
 	m_Center= newCenter;
-	moveManipulatorRep(m_Center);
+    m_Offset= GLC_Vector3d();
+    moveManipulatorRep(m_Center);
+}
+
+void GLC_Axis::setOrientation(const GLC_Matrix4x4& matrix)
+{
+    m_OrientationMatrix= matrix;
+    moveManipulatorRep(m_Center);
 }
 
 glc::WidgetEventFlag GLC_Axis::select(const GLC_Point3d& pos, GLC_uint id)
 {
 	//qDebug() << "GLC_Axis::select";
-	Q_ASSERT(NULL == m_pCurrentManipulator);
+    Q_ASSERT(nullptr == m_pCurrentManipulator);
 	Q_ASSERT(NoneManipulator == m_CurrentManipulator);
 
 	const int selectedInstanceIndex= GLC_3DWidget::indexOfIntsanceId(id);
@@ -113,20 +140,20 @@ glc::WidgetEventFlag GLC_Axis::select(const GLC_Point3d& pos, GLC_uint id)
 	GLC_Viewport* pViewport= GLC_3DWidget::widgetManagerHandle()->viewport();
 	if (selectedInstanceIndex < 2)
 	{
-		m_pCurrentManipulator= new GLC_PullManipulator(pViewport, glc::X_AXIS);
+        m_pCurrentManipulator= new GLC_PullManipulator(pViewport, m_OrientationMatrix * glc::X_AXIS);
 		m_CurrentManipulator= X_AxisManipulator;
 		GLC_3DWidget::instanceHandle(0)->geomAt(0)->firstMaterial()->setDiffuseColor(Qt::yellow);
 	}
 	else if (selectedInstanceIndex < 4)
 	{
-		m_pCurrentManipulator= new GLC_PullManipulator(pViewport, glc::Y_AXIS);
+        m_pCurrentManipulator= new GLC_PullManipulator(pViewport, m_OrientationMatrix * glc::Y_AXIS);
 		m_CurrentManipulator= Y_AxisManipulator;
 		GLC_3DWidget::instanceHandle(2)->geomAt(0)->firstMaterial()->setDiffuseColor(Qt::yellow);
 	}
 	else
 	{
 		Q_ASSERT((selectedInstanceIndex < 6) && (selectedInstanceIndex >= 4));
-		m_pCurrentManipulator= new GLC_PullManipulator(pViewport, glc::Z_AXIS);
+        m_pCurrentManipulator= new GLC_PullManipulator(pViewport, m_OrientationMatrix * glc::Z_AXIS);
 		m_CurrentManipulator= Z_AxisManipulator;
 		GLC_3DWidget::instanceHandle(4)->geomAt(0)->firstMaterial()->setDiffuseColor(Qt::yellow);
 	}
@@ -138,91 +165,84 @@ glc::WidgetEventFlag GLC_Axis::select(const GLC_Point3d& pos, GLC_uint id)
 	return glc::BlockedEvent;
 }
 
-glc::WidgetEventFlag GLC_Axis::mousePressed(const GLC_Point3d& pos, Qt::MouseButton button, GLC_uint id)
+glc::WidgetEventFlag GLC_Axis::pressed(const GLC_Point3d& pos, GLC_uint id)
 {
-	//qDebug() << "GLC_Axis::mousePressed";
-	glc::WidgetEventFlag returnFlag= glc::IgnoreEvent;
-	if (button == Qt::LeftButton)
-	{
-		returnFlag= select(pos, id);
-	}
+    glc::WidgetEventFlag returnFlag= select(pos, id);
 
 	return returnFlag;
 }
 
-glc::WidgetEventFlag GLC_Axis::mouseReleased(Qt::MouseButton button)
+glc::WidgetEventFlag GLC_Axis::released()
 {
-	//qDebug() << "GLC_Axis::mouseReleased";
-	glc::WidgetEventFlag returnFlag= glc::IgnoreEvent;
-	if (button == Qt::LeftButton)
-	{
+    // get selected instance index
+    if (m_CurrentManipulator == X_AxisManipulator)
+    {
+        GLC_3DWidget::instanceHandle(0)->geomAt(0)->firstMaterial()->setDiffuseColor(Qt::red);
+    }
+    else if (m_CurrentManipulator == Y_AxisManipulator)
+    {
+        GLC_3DWidget::instanceHandle(2)->geomAt(0)->firstMaterial()->setDiffuseColor(Qt::green);
+    }
+    else if (m_CurrentManipulator == Z_AxisManipulator)
+    {
+        GLC_3DWidget::instanceHandle(4)->geomAt(0)->firstMaterial()->setDiffuseColor(Qt::blue);
+    }
 
-		// get selected instance index
+    m_CurrentManipulator= NoneManipulator;
+    delete m_pCurrentManipulator;
+    m_pCurrentManipulator= nullptr;
 
-		if (m_CurrentManipulator == X_AxisManipulator)
-		{
-			GLC_3DWidget::instanceHandle(0)->geomAt(0)->firstMaterial()->setDiffuseColor(Qt::red);
-		}
-		else if (m_CurrentManipulator == Y_AxisManipulator)
-		{
-			GLC_3DWidget::instanceHandle(2)->geomAt(0)->firstMaterial()->setDiffuseColor(Qt::green);
-		}
-		else if (m_CurrentManipulator == Z_AxisManipulator)
-		{
-			GLC_3DWidget::instanceHandle(4)->geomAt(0)->firstMaterial()->setDiffuseColor(Qt::blue);
-		}
-
-		m_CurrentManipulator= NoneManipulator;
-		delete m_pCurrentManipulator;
-		m_pCurrentManipulator= NULL;
-
-		returnFlag= glc::BlockedEvent;
-	}
-	return returnFlag;
+    return glc::BlockedEvent;;
 }
 
 glc::WidgetEventFlag GLC_Axis::unselect(const GLC_Point3d&, GLC_uint)
 {
 	//qDebug() << "GLC_Axis::unselect";
 	delete m_pCurrentManipulator;
-	m_pCurrentManipulator= NULL;
+    m_pCurrentManipulator= nullptr;
 
 	m_CurrentManipulator= NoneManipulator;
 
 	return glc::AcceptEvent;
 }
 
-glc::WidgetEventFlag GLC_Axis::mouseMove(const GLC_Point3d& pos, Qt::MouseButtons button, GLC_uint)
+glc::WidgetEventFlag GLC_Axis::move(const GLC_Point3d& pos, GLC_uint)
 {
-	glc::WidgetEventFlag returnFlag= glc::IgnoreEvent;
-	if (button & Qt::LeftButton)
-	{
-		if (NULL != m_pCurrentManipulator)
-		{
-			GLC_Matrix4x4 moveMatrix(m_pCurrentManipulator->manipulate(pos));
-			m_Center= moveMatrix * m_Center;
-			// Update the instance
-			for (int i= 0; i < 6; ++i)
-			{
-				GLC_3DWidget::instanceHandle(i)->multMatrix(moveMatrix);
-			}
+    Q_ASSERT(m_MoveStep >= 0.0);
 
-			// Plane throw intersection and plane normal and camera up vector
-			m_pCurrentManipulator->enterManipulateState(m_pCurrentManipulator->previousPosition());
+    glc::WidgetEventFlag returnFlag= glc::IgnoreEvent;
+    if (nullptr != m_pCurrentManipulator)
+    {
+        GLC_Matrix4x4 moveMatrix(m_pCurrentManipulator->manipulate(pos));
+        const GLC_Point3d newPos= moveMatrix * m_Center;
+        m_Offset= (newPos - m_Center);
+        if (m_Offset.length() >= m_MoveStep)
+        {
+            const double newLength= glc::round(m_Offset.length(), m_MoveStep);
+            m_Offset.setLength(newLength);
+            m_Center= m_Center + m_Offset;
+            // Update the instance
+            for (int i= 0; i < 6; ++i)
+            {
+                GLC_3DWidget::instanceHandle(i)->multMatrix(moveMatrix);
+            }
 
-			emit asChanged();
-			returnFlag= glc::AcceptEvent;
-		}
-	}
+            // Plane throw intersection and plane normal and camera up vector
+            m_pCurrentManipulator->enterManipulateState(m_pCurrentManipulator->previousPosition());
 
-	return returnFlag;
+            emit asChanged();
+        }
+        returnFlag= glc::AcceptEvent;
+    }
+
+    return returnFlag;
 }
 void GLC_Axis::create3DviewInstance()
 {
 	Q_ASSERT(GLC_3DWidget::isEmpty());
 	const double axisRadius= m_AxisLength * m_AxisRadiusRatio;
 	const double arrowLength= m_AxisLength * 0.3;
-	const double arrowFactor= 2.5;
+    const double arrowFactor= 3.0;
 
 	{ // Create X axis
 		// The X axis material
@@ -234,7 +254,7 @@ void GLC_Axis::create3DviewInstance()
 		arrowInstance.representation().geomAt(0)->replaceMasterMaterial(pMaterial);
 		arrowInstance.translate(0.0, 0.0, m_AxisLength);
 		// Rotate the axis
-		GLC_Matrix4x4 rotation(glc::Y_AXIS, glc::PI / 2);
+        GLC_Matrix4x4 rotation(m_OrientationMatrix * GLC_Matrix4x4(glc::Y_AXIS, glc::PI / 2));
 		axisInstance.multMatrix(rotation);
 		arrowInstance.multMatrix(rotation);
 
@@ -251,7 +271,7 @@ void GLC_Axis::create3DviewInstance()
 		arrowInstance.representation().geomAt(0)->replaceMasterMaterial(pMaterial);
 		arrowInstance.translate(0.0, 0.0, m_AxisLength);
 		// Rotate the axis
-		GLC_Matrix4x4 rotation(glc::X_AXIS, - glc::PI / 2);
+        GLC_Matrix4x4 rotation(m_OrientationMatrix * GLC_Matrix4x4(glc::X_AXIS, - glc::PI / 2));
 		axisInstance.multMatrix(rotation);
 		arrowInstance.multMatrix(rotation);
 
@@ -267,6 +287,10 @@ void GLC_Axis::create3DviewInstance()
 		GLC_3DViewInstance arrowInstance= GLC_Factory::instance()->createCone(arrowFactor * axisRadius, arrowLength);
 		arrowInstance.representation().geomAt(0)->replaceMasterMaterial(pMaterial);
 		arrowInstance.translate(0.0, 0.0, m_AxisLength);
+        // Rotate the axis
+        GLC_Matrix4x4 rotation(m_OrientationMatrix);
+        axisInstance.multMatrix(rotation);
+        arrowInstance.multMatrix(rotation);
 
 		GLC_3DWidget::add3DViewInstance(axisInstance);
 		GLC_3DWidget::add3DViewInstance(arrowInstance);
@@ -290,7 +314,7 @@ void GLC_Axis::moveManipulatorRep(const GLC_Point3d& pos)
 		GLC_Matrix4x4 intTranslation;
 		if (i < 2)
 		{
-			rotationMatrix.setMatRot(glc::Y_AXIS, glc::PI / 2);
+            rotationMatrix= (GLC_Matrix4x4(glc::Y_AXIS, glc::PI / 2));
 			if (i == 1)
 			{
 				intTranslation.setMatTranslate(0.0, 0.0, m_AxisLength);
@@ -298,7 +322,7 @@ void GLC_Axis::moveManipulatorRep(const GLC_Point3d& pos)
 		}
 		else if (i < 4)
 		{
-			rotationMatrix.setMatRot(glc::X_AXIS, - glc::PI / 2);
+            rotationMatrix= (GLC_Matrix4x4(glc::X_AXIS, - glc::PI / 2));
 			if (i == 3)
 			{
 				intTranslation.setMatTranslate(0.0, 0.0, m_AxisLength);
@@ -310,6 +334,7 @@ void GLC_Axis::moveManipulatorRep(const GLC_Point3d& pos)
 			intTranslation.setMatTranslate(0.0, 0.0, m_AxisLength);
 		}
 
-		GLC_3DWidget::instanceHandle(i)->setMatrix(translationMatrix * scaleMatrix * rotationMatrix * intTranslation);
+        rotationMatrix= m_OrientationMatrix * rotationMatrix;
+        GLC_3DWidget::instanceHandle(i)->setMatrix(translationMatrix * scaleMatrix * rotationMatrix* intTranslation);
 	}
 }

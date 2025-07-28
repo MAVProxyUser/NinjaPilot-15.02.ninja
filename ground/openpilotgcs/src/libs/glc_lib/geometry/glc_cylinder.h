@@ -67,7 +67,7 @@ public:
 	//! Return the class Chunk ID
 	static quint32 chunckID();
 
-	//! Get Lenght of the Cylinder
+	//! Get Length of the Cylinder
 	inline double length(void) const
 	{return m_Length;}
 
@@ -95,6 +95,8 @@ public:
 //@{
 //////////////////////////////////////////////////////////////////////
 public:
+    virtual bool update();
+
 	//! Set Cylinder length
 	/*! Length must be > 0*/
 	void setLength(double Length);

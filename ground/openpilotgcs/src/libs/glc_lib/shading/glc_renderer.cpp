@@ -25,13 +25,14 @@
 #include <QtDebug>
 
 #include "../sceneGraph/glc_3dviewcollection.h"
+#include "../sceneGraph/glc_world.h"
+#include "../sceneGraph/glc_structoccurrence.h"
 
 #include "glc_renderer.h"
 
 GLC_Renderer::GLC_Renderer()
 : m_pCollection(NULL)
 , m_IdToRenderProperties()
-, m_IsCurrent(false)
 {
 
 }
@@ -39,7 +40,6 @@ GLC_Renderer::GLC_Renderer()
 GLC_Renderer::GLC_Renderer(GLC_3DViewCollection* pCollection)
 : m_pCollection(pCollection)
 , m_IdToRenderProperties()
-, m_IsCurrent(false)
 {
 
 }
@@ -47,7 +47,6 @@ GLC_Renderer::GLC_Renderer(GLC_3DViewCollection* pCollection)
 GLC_Renderer::GLC_Renderer(const GLC_Renderer& other)
 : m_pCollection(other.m_pCollection)
 , m_IdToRenderProperties(other.m_IdToRenderProperties)
-, m_IsCurrent(false)
 {
 
 }
@@ -65,7 +64,28 @@ bool GLC_Renderer::instanceRenderPropertiesIsAvailable(GLC_uint id) const
 const GLC_RenderProperties& GLC_Renderer::renderPropertiesOfInstance(GLC_uint id) const
 {
 	Q_ASSERT(m_IdToRenderProperties.contains(id));
-	return m_IdToRenderProperties.find(id).value();
+    return m_IdToRenderProperties.find(id).value();
+}
+
+bool GLC_Renderer::operator==(const GLC_Renderer &other) const
+{
+    bool subject= (this == &other);
+    if (!subject)
+    {
+        subject= subject && (m_pCollection == other.m_pCollection);
+        subject= subject && (m_IdToRenderProperties == other.m_IdToRenderProperties);
+
+        // Current flag is not tested
+    }
+
+    return subject;
+}
+
+bool GLC_Renderer::isEmpty() const
+{
+    bool subject= m_IdToRenderProperties.isEmpty();
+
+    return subject;
 }
 
 void GLC_Renderer::clear()
@@ -90,17 +110,15 @@ void GLC_Renderer::setCollection(GLC_3DViewCollection* pCollection)
 {
 	if (pCollection != m_pCollection)
 	{
-		clear();
+        if (m_pCollection != NULL) clear();
 		m_pCollection= pCollection;
 	}
 }
 
-void GLC_Renderer::setCurrent()
+void GLC_Renderer::apply()
 {
 	if (NULL != m_pCollection)
 	{
-        Q_ASSERT(!m_IsCurrent);
-        m_IsCurrent= true;
 		QHash<GLC_uint, GLC_RenderProperties>::const_iterator iRender= m_IdToRenderProperties.constBegin();
 		while (iRender != m_IdToRenderProperties.constEnd())
 		{
@@ -110,30 +128,108 @@ void GLC_Renderer::setCurrent()
 			}
 			++iRender;
 		}
-		m_IdToRenderProperties.clear();
 	}
 }
 
-void GLC_Renderer::unSetCurrent()
+void GLC_Renderer::save()
 {
 	if (NULL != m_pCollection)
 	{
-        Q_ASSERT(m_IdToRenderProperties.isEmpty());
-        Q_ASSERT(m_IsCurrent);
-        m_IsCurrent= false;
+        m_IdToRenderProperties.clear();
 		QList<GLC_3DViewInstance*> instances= m_pCollection->instancesHandle();
 		const int count= instances.count();
 		for (int i= 0; i < count; ++i)
 		{
 			GLC_3DViewInstance* pInstance= instances.at(i);
-			m_IdToRenderProperties.insert(pInstance->id(), *(pInstance->renderPropertiesHandle()));
+            GLC_RenderProperties renderProperties= *(pInstance->renderPropertiesHandle());
+            renderProperties.unselect();
+            m_IdToRenderProperties.insert(pInstance->id(), renderProperties);
 		}
-	}
+    }
+}
+
+void GLC_Renderer::updateMissingInstances()
+{
+    if (NULL != m_pCollection)
+    {
+        QList<GLC_3DViewInstance*> instances= m_pCollection->instancesHandle();
+        const int count= instances.count();
+        for (int i= 0; i < count; ++i)
+        {
+            GLC_3DViewInstance* pInstance= instances.at(i);
+            if (!m_IdToRenderProperties.contains(pInstance->id()))
+            {
+                GLC_RenderProperties renderProperties= *(pInstance->renderPropertiesHandle());
+                renderProperties.unselect();
+                m_IdToRenderProperties.insert(pInstance->id(), renderProperties);
+            }
+        }
+    }
+}
+
+void GLC_Renderer::bind(GLC_World &world)
+{
+    if (m_pCollection == world.collection())
+    {
+        QList<GLC_uint> idList= m_IdToRenderProperties.keys();
+        const int count= idList.count();
+        for (int i= 0; i < count; ++i)
+        {
+            const GLC_uint id= idList.at(i);
+            if (world.containsOccurrence(id))
+            {
+                GLC_StructOccurrence* pOcc= world.occurrence(id);
+                if (!pOcc->has3DViewInstance())
+                {
+                    const GLC_RenderProperties renderProperties= m_IdToRenderProperties.value(id);
+                    bool apply= false;
+                    if (pOcc->renderPropertiesHandle() != NULL)
+                    {
+                        apply= pOcc->renderPropertiesHandle()->fuzzyEquals(renderProperties);
+                        if (apply) pOcc->removeRenderProperties();
+                    }
+
+                    propagateRenderProperties(pOcc, renderProperties, apply);
+                }
+            }
+            else
+            {
+                m_IdToRenderProperties.remove(id);
+            }
+        }
+    }
 }
 
 void GLC_Renderer::addRenderPropertiesOfInstanceId(GLC_uint id)
 {
 	Q_ASSERT(NULL != m_pCollection);
 	Q_ASSERT(m_pCollection->contains(id));
-	m_IdToRenderProperties.insert(id, *(m_pCollection->instanceHandle(id)->renderPropertiesHandle()));
+    GLC_RenderProperties renderProperties= *(m_pCollection->instanceHandle(id)->renderPropertiesHandle());
+    renderProperties.unselect();
+    m_IdToRenderProperties.insert(id, renderProperties);
+}
+
+void GLC_Renderer::setRenderProperties(GLC_uint id, const GLC_RenderProperties &renderProperies)
+{
+    m_IdToRenderProperties.insert(id, renderProperies);
+}
+
+void GLC_Renderer::propagateRenderProperties(GLC_StructOccurrence *pOcc, const GLC_RenderProperties &properties, bool apply)
+{
+    if (pOcc->has3DViewInstance())
+    {
+        m_IdToRenderProperties.insert(pOcc->id(), properties);
+        if (apply)
+        {
+            pOcc->worldHandle()->collection()->instanceHandle(pOcc->id())->setRenderProperties(properties);
+        }
+    }
+    else if (pOcc->hasChild())
+    {
+        const int count= pOcc->childCount();
+        for (int i= 0; i < count; ++i)
+        {
+            propagateRenderProperties(pOcc->child(i), properties, apply);
+        }
+    }
 }

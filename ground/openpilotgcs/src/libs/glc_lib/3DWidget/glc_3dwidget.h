@@ -29,6 +29,7 @@
 #include "../glc_global.h"
 #include "glc_3dwidgetmanagerhandle.h"
 
+class QInputEvent;
 class GLC_3DViewInstance;
 
 //////////////////////////////////////////////////////////////////////
@@ -50,7 +51,7 @@ class GLC_LIB_EXPORT GLC_3DWidget : public QObject
 //////////////////////////////////////////////////////////////////////
 public:
 	//! Construct a 3d widget with the given 3DWidget manager handle
-	GLC_3DWidget(GLC_3DWidgetManagerHandle*  pWidgetManagerHandle= NULL);
+    GLC_3DWidget(GLC_3DWidgetManagerHandle*  pWidgetManagerHandle= nullptr);
 
 	//! Construct a 3d widget form the given 3d widget
 	GLC_3DWidget(const GLC_3DWidget& widget);
@@ -81,11 +82,24 @@ public:
 
 	//! Return true if this widget has a 3DWidgetManager
 	inline bool has3DWidgetManager() const
-	{return (NULL == m_pWidgetManagerHandle);}
+    {return (nullptr != m_pWidgetManagerHandle);}
 
 	//! Return true if otho is used
 	inline bool useOrtho() const
 	{return m_pWidgetManagerHandle->useOrtho();}
+
+    //! Return true if the 3DViewInstance of this widget is visible
+    bool isVisible() const;
+
+    //! Return this 3DWidget type
+    int type() const
+    {return m_Type;}
+
+    int instanceCount() const
+    {return m_InstanceIdList.count();}
+
+    QInputEvent* inputEvent() const
+    {return m_pInputEvent;}
 
 //@}
 
@@ -101,10 +115,18 @@ public:
 	void setWidgetManager(GLC_3DWidgetManagerHandle* pWidgetManagerHandle);
 
 	//! Update widget representation
-	virtual void updateWidgetRep(){};
+    virtual void updateWidgetRep(){}
 
 	//! Set the visibility of 3DView Instance of this widget
+    /*! This method must be called from GLC_3DWidgetManagerHandle*/
 	void setVisible(bool visible);
+
+    //! Set this 3DWidget type
+    void setType(int type)
+    {m_Type= type;}
+
+    void setInputEvent(QInputEvent* pInputEvent)
+    {m_pInputEvent= pInputEvent;}
 //@}
 
 //////////////////////////////////////////////////////////////////////
@@ -120,16 +142,16 @@ public:
 	virtual glc::WidgetEventFlag unselect(const GLC_Point3d&, GLC_uint id);
 
 	//! The mouse is over this widget
-	virtual glc::WidgetEventFlag mouseOver(const GLC_Point3d&, GLC_uint id);
+    virtual glc::WidgetEventFlag over(const GLC_Point3d&, GLC_uint id);
 
 	//! The mouse is over this widget and a mousse button is pressed
-	virtual glc::WidgetEventFlag mousePressed(const GLC_Point3d&, Qt::MouseButton, GLC_uint id);
+    virtual glc::WidgetEventFlag pressed(const GLC_Point3d&, GLC_uint id);
 
 	//! The mouse is over this widget and a mousse button is released
-	virtual glc::WidgetEventFlag mouseReleased(Qt::MouseButton);
+    virtual glc::WidgetEventFlag released();
 
 	//! This widget is selected and the mousse move with a pressed buttons
-	virtual glc::WidgetEventFlag mouseMove(const GLC_Point3d&, Qt::MouseButtons, GLC_uint id);
+    virtual glc::WidgetEventFlag move(const GLC_Point3d&, GLC_uint id);
 
 //@}
 
@@ -186,6 +208,11 @@ private:
 
 	//! The List of this widget instance id
 	QList<GLC_uint> m_InstanceIdList;
+
+    //! The type of this 3DWidget
+    int m_Type;
+
+    QInputEvent* m_pInputEvent;
 
 };
 

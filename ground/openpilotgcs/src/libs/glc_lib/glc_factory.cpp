@@ -2,7 +2,7 @@
 
  This file is part of the GLC-lib library.
  Copyright (C) 2005-2008 Laurent Ribon (laumaya@users.sourceforge.net)
- Copyright (C) 2011 JŽr™me Forrissier
+ Copyright (C) 2011 Jerome Forrissier
  http://glc-lib.sourceforge.net
 
  GLC-lib is free software; you can redistribute it and/or modify
@@ -23,6 +23,12 @@
 
 //! \file glc_factory.cpp implementation of the GLC_Factory class.
 
+
+#include <QColor>
+#include <QFont>
+
+#include "geometry/glc_disc.h"
+
 #include "glc_factory.h"
 #include "io/glc_fileloader.h"
 #include "io/glc_3dxmltoworld.h"
@@ -40,6 +46,8 @@
 #include "viewport/glc_tsrmover.h"
 #include "maths/glc_line3d.h"
 #include "maths/glc_geomtools.h"
+
+#include "geometry/glc_text.h"
 
 #include "glc_fileformatexception.h"
 
@@ -152,7 +160,23 @@ GLC_3DViewInstance GLC_Factory::createBox(const GLC_BoundingBox& boundingBox) co
 	GLC_3DViewInstance newBox(pBox);
 	newBox.translate(boundingBox.center().x(), boundingBox.center().y()
 					, boundingBox.center().z());
-	return newBox;
+    return newBox;
+}
+
+GLC_StructInstance* GLC_Factory::createBox(const GLC_BoundingBox &boundingBox, const QString name, GLC_Material *pMaterial) const
+{
+    const double lx= boundingBox.upperCorner().x() - boundingBox.lowerCorner().x();
+    const double ly= boundingBox.upperCorner().y() - boundingBox.lowerCorner().y();
+    const double lz= boundingBox.upperCorner().z() - boundingBox.lowerCorner().z();
+    GLC_Box* pBox= new GLC_Box(lx, ly, lz);
+    pBox->addMaterial(pMaterial);
+    pBox->boundingBox();
+    GLC_StructReference* pStructRef= new GLC_StructReference(new GLC_3DRep(pBox));
+    pStructRef->setName(name);
+
+    GLC_StructInstance* pSubject= new GLC_StructInstance(pStructRef);
+    pSubject->translate(boundingBox.center().x(), boundingBox.center().y(), boundingBox.center().z());
+    return pSubject;
 }
 
 GLC_3DRep GLC_Factory::createCylinder(double radius, double length) const
@@ -177,7 +201,19 @@ GLC_3DRep GLC_Factory::createSphere(double radius) const
 GLC_3DRep GLC_Factory::createRectangle(double l1, double l2)
 {
 	GLC_3DRep newRectangle(new GLC_Rectangle(l1, l2));
-	return newRectangle;
+    return newRectangle;
+}
+
+GLC_3DRep GLC_Factory::createDisc(double radius)
+{
+    GLC_3DRep subject(new GLC_Disc(radius));
+    return subject;
+}
+
+GLC_3DRep GLC_Factory::createText(const QString &text, const QColor& color, const QFont& font)
+{
+    GLC_3DRep subject(new GLC_Text(text, color, font));
+    return subject;
 }
 
 GLC_3DViewInstance GLC_Factory::createRectangle(const GLC_Point3d& point, const GLC_Vector3d& normal, double l1, double l2)
@@ -190,7 +226,20 @@ GLC_3DViewInstance GLC_Factory::createRectangle(const GLC_Point3d& point, const 
 	// Vector from origin to the plane
 	rectangleInstance.setMatrix(GLC_Matrix4x4(point) * rotationMatrix);
 
-	return rectangleInstance;
+    return rectangleInstance;
+}
+
+GLC_3DViewInstance GLC_Factory::createDisc(const GLC_Point3d &point, const GLC_Vector3d &normal, double radius)
+{
+    // Create the disc to (0,0) and  z normal
+    GLC_3DViewInstance subject(createDisc(radius));
+
+    // Create the plane rotation matrix
+    const GLC_Matrix4x4 rotationMatrix(glc::Z_AXIS, normal);
+    // Vector from origin to the plane
+    subject.setMatrix(GLC_Matrix4x4(point) * rotationMatrix);
+
+    return subject;
 }
 
 GLC_3DViewInstance GLC_Factory::createCuttingPlane(const GLC_Point3d& point, const GLC_Vector3d& normal, double l1, double l2, GLC_Material* pMat)
@@ -244,7 +293,7 @@ GLC_World GLC_Factory::createWorldStructureFrom3dxml(QFile &file, bool GetExtRef
 	return resulWorld;
 }
 
-GLC_3DRep GLC_Factory::create3DRepFromFile(const QString& fileName) const
+GLC_3DRep GLC_Factory::create3DRepFromFile(const QString& fileName, bool useZipMutex) const
 {
 	GLC_3DRep rep;
 
@@ -252,7 +301,7 @@ GLC_3DRep GLC_Factory::create3DRepFromFile(const QString& fileName) const
 	{
 		GLC_3dxmlToWorld d3dxmlToWorld;
 		connect(&d3dxmlToWorld, SIGNAL(currentQuantum(int)), this, SIGNAL(currentQuantum(int)));
-		rep= d3dxmlToWorld.create3DrepFrom3dxmlRep(fileName);
+        rep= d3dxmlToWorld.create3DrepFrom3dxmlRep(fileName, useZipMutex);
 	}
 
 	return rep;
@@ -407,7 +456,8 @@ void GLC_Factory::loadPlugins()
 	         if (pWorldReader)
 	         {
 	        	 m_WorldReaderPluginList.append(pWorldReader);
-	        	 m_SupportedExtensionSet.unite(QSet<QString>::fromList(pWorldReader->keys()));
+                 const QList<QString> keys(pWorldReader->keys());
+                 m_SupportedExtensionSet.unite(QSet<QString>(keys.begin(), keys.end()));
 	         }
 		}
 	}
@@ -436,7 +486,7 @@ bool GLC_Factory::canBeLoaded(const QString& extension)
 
 GLC_WorldReaderHandler* GLC_Factory::loadingHandler(const QString& fileName)
 {
-	if (NULL == m_pFactory)
+    if (nullptr == m_pFactory)
 	{
 		instance();
 	}
@@ -451,8 +501,7 @@ GLC_WorldReaderHandler* GLC_Factory::loadingHandler(const QString& fileName)
 				return pPlugin->readerHandler();
 			}
 		}
-	}
-	return NULL;
+    }
+    return nullptr;
 }
-
 

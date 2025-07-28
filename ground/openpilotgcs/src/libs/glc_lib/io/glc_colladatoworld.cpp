@@ -633,10 +633,10 @@ void GLC_ColladaToWorld::loadTransparency(const QString& name)
 				}
 				else
 				{
-					alpha= 1.0f - alphaString.toFloat(&stringToFloatOk);
+                    alpha= alphaString.toFloat(&stringToFloatOk);
 				}
 				// A material mustn't be invisible (no sense)
-				if (qFuzzyCompare(alpha, 0.0f)) alpha= 1.0f;
+				if (glc::fuzzyCompare(alpha, 0.0f)) alpha= 1.0f;
 
 				m_pCurrentMaterial->setOpacity(alpha);
 				if (!stringToFloatOk) throwException("Error while trying to convert :" + alphaString + " to float");
@@ -789,6 +789,7 @@ void GLC_ColladaToWorld::loadMesh()
 			else if (currentElementName == "polylist") loadPolylist();
 			else if (currentElementName == "polygons") loadPolygons();
 			else if (currentElementName == "triangles") loadTriangles();
+            else if (currentElementName == "linestrips") loadLineStrips();
 			//else if (currentElementName == "trifans") loadTriFans();
 			//else if (currentElementName == "tristrips") loadTriStrip();
 		}
@@ -1153,7 +1154,7 @@ void GLC_ColladaToWorld::addPolylistToCurrentMesh(const QList<InputData>& inputD
 		// Triangulate the current polygon if the polygon as more than 3 vertice
 		if (polygonSize > 3)
 		{
-			glc::triangulatePolygon(&onePolygonIndex, m_pMeshInfo->m_Datas.at(VERTEX));
+            glc::triangulatePolygonClip2TRi(&onePolygonIndex, m_pMeshInfo->m_Datas.at(VERTEX));
 		}
 		// Add index to the mesh info
 		//Q_ASSERT(not onePolygonIndex.isEmpty());
@@ -1198,28 +1199,26 @@ void GLC_ColladaToWorld::computeNormalOfCurrentPrimitiveOfCurrentMesh(int indexO
 	}
 	// Compute the normals and add them to the current mesh info
 	const int size= m_pMeshInfo->m_Index.size() - indexOffset;
-	double xn, yn, zn;
-
 
 	for (int i= indexOffset; i < size; i+=3)
 	{
 		// Vertex 1
-		xn= pData->at(m_pMeshInfo->m_Index.at(i) * 3);
-		yn= pData->at(m_pMeshInfo->m_Index.at(i) * 3 + 1);
-		zn= pData->at(m_pMeshInfo->m_Index.at(i) * 3 + 2);
-		const GLC_Vector3d vect1(xn, yn, zn);
+        const double xn1= pData->at(m_pMeshInfo->m_Index.at(i) * 3);
+        const double yn1= pData->at(m_pMeshInfo->m_Index.at(i) * 3 + 1);
+        const double zn1= pData->at(m_pMeshInfo->m_Index.at(i) * 3 + 2);
+        const GLC_Vector3d vect1(xn1, yn1, zn1);
 
 		// Vertex 2
-		xn= pData->at(m_pMeshInfo->m_Index.at(i + 1) * 3);
-		yn= pData->at(m_pMeshInfo->m_Index.at(i + 1) * 3  + 1);
-		zn= pData->at(m_pMeshInfo->m_Index.at(i + 1) * 3 + 2);
-		const GLC_Vector3d vect2(xn, yn, zn);
+        const double xn2= pData->at(m_pMeshInfo->m_Index.at(i + 1) * 3);
+        const double yn2= pData->at(m_pMeshInfo->m_Index.at(i + 1) * 3  + 1);
+        const double zn2= pData->at(m_pMeshInfo->m_Index.at(i + 1) * 3 + 2);
+        const GLC_Vector3d vect2(xn2, yn2, zn2);
 
 		// Vertex 3
-		xn= pData->at(m_pMeshInfo->m_Index.at(i + 2) * 3);
-		yn= pData->at(m_pMeshInfo->m_Index.at(i + 2) * 3 + 1);
-		zn= pData->at(m_pMeshInfo->m_Index.at(i + 2) * 3 + 2);
-		const GLC_Vector3d vect3(xn, yn, zn);
+        const double xn3= pData->at(m_pMeshInfo->m_Index.at(i + 2) * 3);
+        const double yn3= pData->at(m_pMeshInfo->m_Index.at(i + 2) * 3 + 1);
+        const double zn3= pData->at(m_pMeshInfo->m_Index.at(i + 2) * 3 + 2);
+        const GLC_Vector3d vect3(xn3, yn3, zn3);
 
 		const GLC_Vector3d edge1(vect3 - vect2);
 		const GLC_Vector3d edge2(vect1 - vect2);
@@ -1299,6 +1298,61 @@ void  GLC_ColladaToWorld::loadTriangles()
 	addTrianglesToCurrentMesh(inputDataList, trianglesIndexList, materialId);
 
 	updateProgressBar();
+
+}
+
+void GLC_ColladaToWorld::loadLineStrips()
+{
+    // Offsets and data source list
+    InputData inputData;
+
+    // triangle index list
+    QList<int> lineStripsIndexList;
+
+    while (endElementNotReached(m_pStreamReader, "linestrips"))
+    {
+        if (QXmlStreamReader::StartElement == m_pStreamReader->tokenType())
+        {
+            const QStringRef currentElementName= m_pStreamReader->name();
+            if ((currentElementName == "input") && lineStripsIndexList.isEmpty())
+            {
+                // Get input data offset
+                inputData.m_Offset= readAttribute("offset", true).toInt();
+                // Get input data semantic
+                const QString semantic= readAttribute("semantic", true);
+                if (semantic == "VERTEX") inputData.m_Semantic= VERTEX;
+                else throwException("Source semantic :" + semantic + "Not supported");
+                // Get input data source id
+                inputData.m_Source= readAttribute("source", true).remove('#');
+
+                // Bypasss vertices indirection
+                if (m_VerticesSourceHash.contains(inputData.m_Source))
+                {
+                    inputData.m_Source= m_VerticesSourceHash.value(inputData.m_Source);
+                }
+            }
+            else if ((currentElementName == "p") && lineStripsIndexList.isEmpty())
+            {
+                { // Fill index List
+                    QString pString= getContent("p");
+                    QStringList pStringList= pString.split(' ');
+                    bool toIntOK;
+                    const int size= pStringList.size();
+                    for (int i= 0; i < size; ++i)
+                    {
+                        lineStripsIndexList.append(pStringList.at(i).toInt(&toIntOK));
+                        if (!toIntOK) throwException("Unable to convert string :" + pStringList.at(i) + " To int");
+                    }
+                }
+
+            }
+        }
+        m_pStreamReader->readNext();
+    }
+
+    addLineStripsToCurrentMesh(inputData, lineStripsIndexList);
+
+    updateProgressBar();
 
 }
 
@@ -1408,8 +1462,30 @@ void GLC_ColladaToWorld::addTrianglesToCurrentMesh(const QList<InputData>& input
 	MatOffsetSize matInfo;
 	matInfo.m_Offset= indexOffset;
 	matInfo.m_size= m_pMeshInfo->m_Index.size() - indexOffset;
-	m_pMeshInfo->m_Materials.insertMulti(materialId, matInfo);
+    m_pMeshInfo->m_Materials.insert(materialId, matInfo);
 
+}
+
+void GLC_ColladaToWorld::addLineStripsToCurrentMesh(const GLC_ColladaToWorld::InputData& inputData, const QList<int> lineStripsIndexList)
+{
+    const int indexCount= lineStripsIndexList.size();
+
+    if ( !m_BulkDataHash.contains(inputData.m_Source))
+    {
+        throwException(" Source : " + inputData.m_Source + " Not found");
+    }
+
+    GLC_Mesh* pMesh= m_pMeshInfo->m_pMesh;
+    BulkDataHash::const_iterator iBulkHash= m_BulkDataHash.find(inputData.m_Source);
+    const int stride= 3;
+    GLfloatVector verticeGroup(indexCount * stride);
+    for (int i= 0; i < indexCount; ++i)
+    {
+        verticeGroup[i * stride]= iBulkHash.value().at(lineStripsIndexList.at(i + inputData.m_Offset) * stride);
+        verticeGroup[i * stride + 1]= iBulkHash.value().at(lineStripsIndexList.at(i + inputData.m_Offset) * stride + 1);
+        verticeGroup[i * stride + 2]= iBulkHash.value().at(lineStripsIndexList.at(i + inputData.m_Offset) * stride + 2);
+    }
+    pMesh->addVerticeGroup(verticeGroup);
 }
 
 // Load the library nodes
@@ -1929,24 +2005,24 @@ void GLC_ColladaToWorld::createSceneGraph()
 		//qDebug() << "Top level node is : " << pCurrentColladaNode->m_Id;
 		if (NULL != pCurrentColladaNode)
 		{
-			GLC_StructOccurence* pOccurence= createOccurenceFromNode(pCurrentColladaNode);
-			m_pWorld->rootOccurence()->addChild(pOccurence);
+			GLC_StructOccurrence* pOccurrence= createOccurrenceFromNode(pCurrentColladaNode);
+			m_pWorld->rootOccurrence()->addChild(pOccurrence);
 		}
 	}
 
 	// Update position
-	m_pWorld->rootOccurence()->removeEmptyChildren();
-	m_pWorld->rootOccurence()->updateChildrenAbsoluteMatrix();
+	m_pWorld->rootOccurrence()->removeEmptyChildren();
+	m_pWorld->rootOccurrence()->updateChildrenAbsoluteMatrix();
 
 }
 
-// Create Occurence tree from node tree
-GLC_StructOccurence* GLC_ColladaToWorld::createOccurenceFromNode(ColladaNode* pNode)
+// Create Occurrence tree from node tree
+GLC_StructOccurrence* GLC_ColladaToWorld::createOccurrenceFromNode(ColladaNode* pNode)
 {
-	//qDebug() << "GLC_ColladaToWorld::createOccurenceFromNode";
+	//qDebug() << "GLC_ColladaToWorld::createOccurrenceFromNode";
 	Q_ASSERT(NULL != pNode);
 	GLC_StructInstance* pInstance= NULL;
-	GLC_StructOccurence* pOccurence= NULL;
+	GLC_StructOccurrence* pOccurrence= NULL;
 	if (!pNode->m_InstanceGeometryIDs.isEmpty())
 	{
 		if (m_StructInstanceHash.contains(pNode->m_Id))
@@ -1954,7 +2030,7 @@ GLC_StructOccurence* GLC_ColladaToWorld::createOccurenceFromNode(ColladaNode* pN
 			pInstance= new GLC_StructInstance(m_StructInstanceHash.value(pNode->m_Id));
 			pInstance->move(pNode->m_Matrix);
 			//qDebug() << "Instance move with this matrix :" << pNode->m_Matrix.toString();
-			pOccurence= new GLC_StructOccurence(pInstance);
+			pOccurrence= new GLC_StructOccurrence(pInstance);
 		}
 		else
 		{
@@ -1974,7 +2050,6 @@ GLC_StructOccurence* GLC_ColladaToWorld::createOccurenceFromNode(ColladaNode* pN
 			}
 			if (NULL != pRep)
 			{
-				GLC_StructReference* pStructRef= NULL;
 				if (pRep->isEmpty())
 				{
 					QStringList stringList(m_FileName);
@@ -1985,7 +2060,7 @@ GLC_StructOccurence* GLC_ColladaToWorld::createOccurenceFromNode(ColladaNode* pN
 				}
 				else
 				{
-					pStructRef= new GLC_StructReference(pRep);
+                    GLC_StructReference* pStructRef= new GLC_StructReference(pRep);
 					pInstance= new GLC_StructInstance(pStructRef);
 
 					// Save instance in instance hash Table
@@ -1993,7 +2068,7 @@ GLC_StructOccurence* GLC_ColladaToWorld::createOccurenceFromNode(ColladaNode* pN
 
 					pInstance->move(pNode->m_Matrix);
 					//qDebug() << "Instance move with this matrix :" << pNode->m_Matrix.toString();
-					pOccurence= new GLC_StructOccurence(pInstance);
+					pOccurrence= new GLC_StructOccurrence(pInstance);
 				}
 
 			}
@@ -2007,7 +2082,7 @@ GLC_StructOccurence* GLC_ColladaToWorld::createOccurenceFromNode(ColladaNode* pN
 	}
 	if (!pNode->m_ChildNodes.isEmpty())
 	{
-		if (NULL == pOccurence) //  The node hasn't geometry -> Create an occurence
+		if (NULL == pOccurrence) //  The node hasn't geometry -> Create an occurrence
 		{
 			if (m_StructInstanceHash.contains(pNode->m_Id))
 			{
@@ -2020,7 +2095,7 @@ GLC_StructOccurence* GLC_ColladaToWorld::createOccurenceFromNode(ColladaNode* pN
 			}
 
 			pInstance->move(pNode->m_Matrix);
-			pOccurence= new GLC_StructOccurence(pInstance);
+			pOccurrence= new GLC_StructOccurrence(pInstance);
 		}
 
 		const int size= pNode->m_ChildNodes.size();
@@ -2028,13 +2103,13 @@ GLC_StructOccurence* GLC_ColladaToWorld::createOccurenceFromNode(ColladaNode* pN
 		{
 			if (NULL != pNode->m_ChildNodes.at(i))
 			{
-				pOccurence->addChild(createOccurenceFromNode(pNode->m_ChildNodes.at(i)));
+				pOccurrence->addChild(createOccurrenceFromNode(pNode->m_ChildNodes.at(i)));
 			}
 		}
 	}
 	if (!pNode->m_InstanceOffNodeIds.isEmpty())
 	{
-		if (NULL == pOccurence) //  The node hasn't geometry and childs -> Create an occurence
+		if (NULL == pOccurrence) //  The node hasn't geometry and childs -> Create an occurrence
 		{
 			if (m_StructInstanceHash.contains(pNode->m_Id))
 			{
@@ -2047,7 +2122,7 @@ GLC_StructOccurence* GLC_ColladaToWorld::createOccurenceFromNode(ColladaNode* pN
 			}
 
 			pInstance->move(pNode->m_Matrix);
-			pOccurence= new GLC_StructOccurence(pInstance);
+			pOccurrence= new GLC_StructOccurrence(pInstance);
 		}
 
 		const int size= pNode->m_InstanceOffNodeIds.size();
@@ -2055,7 +2130,7 @@ GLC_StructOccurence* GLC_ColladaToWorld::createOccurenceFromNode(ColladaNode* pN
 		{
 			if (m_ColladaNodeHash.contains(pNode->m_InstanceOffNodeIds.at(i)))
 			{
-				pOccurence->addChild(createOccurenceFromNode(m_ColladaNodeHash.value(pNode->m_InstanceOffNodeIds.at(i))));
+				pOccurrence->addChild(createOccurrenceFromNode(m_ColladaNodeHash.value(pNode->m_InstanceOffNodeIds.at(i))));
 			}
 			else
 			{
@@ -2064,7 +2139,7 @@ GLC_StructOccurence* GLC_ColladaToWorld::createOccurenceFromNode(ColladaNode* pN
 			}
 		}
 	}
-	if (NULL == pOccurence)
+	if (NULL == pOccurrence)
 	{
 		if (m_StructInstanceHash.contains(pNode->m_Id))
 		{
@@ -2077,10 +2152,10 @@ GLC_StructOccurence* GLC_ColladaToWorld::createOccurenceFromNode(ColladaNode* pN
 		}
 
 		pInstance->move(pNode->m_Matrix);
-		pOccurence= new GLC_StructOccurence(pInstance);
+		pOccurrence= new GLC_StructOccurrence(pInstance);
 	}
 
-	return pOccurence;
+	return pOccurrence;
 }
 
 // Update progress bar

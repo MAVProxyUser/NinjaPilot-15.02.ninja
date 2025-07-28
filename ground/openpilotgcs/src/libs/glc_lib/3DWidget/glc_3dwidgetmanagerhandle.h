@@ -28,7 +28,7 @@
 #include "../sceneGraph/glc_3dviewcollection.h"
 #include "../viewport/glc_viewport.h"
 
-class GLC_3DVIewInstance;
+class GLC_3DViewInstance;
 class GLC_3DWidget;
 
 class GLC_LIB_EXPORT GLC_3DWidgetManagerHandle
@@ -63,6 +63,13 @@ public:
 	inline bool hasAnActiveWidget() const
 	{return 0 != m_Active3DWidgetId;}
 
+    GLC_uint active3DWidgetId() const
+    {return m_Active3DWidgetId;}
+
+    //! Return true if this 3DWidget manager has visible widget
+    inline bool hasVisibleWidget() const
+    {return m_Collection.hasVisibleInstance();}
+
 	//! Return an handle to the camera of the viewport of this manager
 	inline const GLC_Camera* cameraHandle() const
 	{return m_pViewport->cameraHandle();}
@@ -94,6 +101,9 @@ public:
 	//! Return true if this 3DWidget manager is empty
 	inline bool isEmpty() const
 	{return m_3DWidgetHash.isEmpty();}
+
+    bool useOrderRendering() const
+    {return m_Collection.useOrderRendering();}
 
 //@}
 
@@ -130,8 +140,17 @@ public:
 	//! Remove all 3D view instance from this manager
 	void clear();
 
+    //! Remove all 3D view instance of the given type from this manager
+    void clear(int type);
+
 	//! Set the visibility of the given 3D widget id
 	void setWidgetVisible(GLC_uint id, bool visible);
+
+    //! Update all 3dwidget
+    void update();
+
+    void setOrderRenderingUsage(bool use)
+    {m_Collection.setOrderRenderingUsage(use);}
 
 //@}
 //////////////////////////////////////////////////////////////////////
@@ -139,17 +158,14 @@ public:
 //@{
 //////////////////////////////////////////////////////////////////////
 public:
-	//! Recieve Mouse double click event with the given instance id Return true if the event is catch
-	glc::WidgetEventFlag mouseDoubleClickEvent(QMouseEvent * pEvent);
-
 	//! Recieve Mouse move event with the given instance id Return true if the event is catch
-	glc::WidgetEventFlag mouseMoveEvent(QMouseEvent * pEvent);
+    glc::WidgetEventFlag moveEvent(GLC_uint selectedId, const GLC_Point3d &pos, QInputEvent* pInputEvent);
 
 	//! Recieve Mouse press event with the given instance id Return true if the event is catch
-	glc::WidgetEventFlag mousePressEvent(QMouseEvent * pEvent);
+    glc::WidgetEventFlag pressEvent(GLC_uint selectedId, const GLC_Point3d &pos, QInputEvent* pInputEvent);
 
 	//! Recieve Mouse release event with the given instance id Return true if the event is catch
-	glc::WidgetEventFlag mouseReleaseEvent(QMouseEvent * pEvent);
+    glc::WidgetEventFlag releaseEvent(QInputEvent* pInputEvent);
 
 //@}
 
@@ -167,8 +183,6 @@ public:
 // Private services function
 //////////////////////////////////////////////////////////////////////
 private:
-	//! Make selection according to the given mouse event
-	QPair<GLC_uint, GLC_Point3d> select(QMouseEvent* event);
 
 //////////////////////////////////////////////////////////////////////
 // Private Member

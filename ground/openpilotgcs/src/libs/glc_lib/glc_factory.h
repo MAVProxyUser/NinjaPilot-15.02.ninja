@@ -2,7 +2,7 @@
 
  This file is part of the GLC-lib library.
  Copyright (C) 2005-2008 Laurent Ribon (laumaya@users.sourceforge.net)
- Copyright (C) 2011 JŽr™me Forrissier
+ Copyright (C) 2011 JÃ©rome Forrissier
  http://glc-lib.sourceforge.net
 
  GLC-lib is free software; you can redistribute it and/or modify
@@ -56,6 +56,8 @@
 
 class GLC_WorldReaderHandler;
 class GLC_WorldReaderPlugin;
+class QColor;
+class QFont;
 
 #include "glc_config.h"
 //////////////////////////////////////////////////////////////////////
@@ -111,6 +113,8 @@ public:
 
 	GLC_3DViewInstance createBox(const GLC_BoundingBox& boundingBox) const;
 
+    GLC_StructInstance *createBox(const GLC_BoundingBox& boundingBox, const QString name, GLC_Material* pMaterial) const;
+
 	//! Create a GLC_Cylinder
 	GLC_3DRep createCylinder(double radius, double length) const;
 
@@ -123,10 +127,19 @@ public:
 	//!Create a GLC_Rectangle
 	GLC_3DRep createRectangle(double, double);
 
-	//! Create a GLC_Rectangle from the given 3d point, normal and the given lenght
+    //!Create a GLC_Rectangle
+    GLC_3DRep createDisc(double radius);
+
+    //! Create a GLC_Text
+    GLC_3DRep createText(const QString& text, const QColor &color= Qt::black, const QFont &font= QFont());
+
+	//! Create a GLC_Rectangle from the given 3d point, normal and the given length
 	GLC_3DViewInstance createRectangle(const GLC_Point3d& point, const GLC_Vector3d& normal, double l1, double l2);
 
-	//! Create the representation of a cutting from the given 3d point, normal, lenght and material
+    //! Create a GLC_Rectangle from the given 3d point, normal and the given length
+    GLC_3DViewInstance createDisc(const GLC_Point3d& point, const GLC_Vector3d& normal, double radius);
+
+	//! Create the representation of a cutting from the given 3d point, normal, length and material
 	GLC_3DViewInstance createCuttingPlane(const GLC_Point3d& point, const GLC_Vector3d& normal, double l1, double l2, GLC_Material* pMat);
 
 	//! Create a GLC_World from a QFile
@@ -136,7 +149,7 @@ public:
 	GLC_World createWorldStructureFrom3dxml(QFile &file, bool GetExtRefName= false) const;
 
 	//! Create 3DRep from 3dxml or 3DRep file
-	GLC_3DRep create3DRepFromFile(const QString&) const;
+    GLC_3DRep create3DRepFromFile(const QString&, bool useZipMutex= true) const;
 
 	//! Create a GLC_FileLoader
 	GLC_FileLoader* createFileLoader() const;

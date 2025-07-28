@@ -60,10 +60,18 @@ GLC_3DRep& GLC_3DRep::operator=(const GLC_Rep& rep)
 	Q_ASSERT(NULL != p3DRep);
 	if (this != &rep)
 	{
-        clear3DRepGeom();
-		GLC_Rep::operator=(rep);
+        if (isTheLast())
+        {
+            clear3DRepGeom();
+            delete m_pGeomList;
+            m_pGeomList= NULL;
+            delete m_pType;
+            m_pType= NULL;
+        }
+        GLC_Rep::operator=(rep);
+
 		m_pGeomList= p3DRep->m_pGeomList;
-		m_pType= p3DRep->m_pType;
+		m_pType= p3DRep->m_pType;        
 	}
 
 	return *this;
@@ -113,7 +121,24 @@ quint32 GLC_3DRep::chunckID()
 
 int GLC_3DRep::type() const
 {
-	return (*m_pType);
+    return (*m_pType);
+}
+
+GLC_Geometry *GLC_3DRep::geomOfId(GLC_uint id) const
+{
+    GLC_Geometry* pSubject= NULL;
+    const int count= m_pGeomList->count();
+    for (int i= 0; i < count; ++i)
+    {
+        GLC_Geometry* pCurrentGeom= m_pGeomList->at(i);
+        if (pCurrentGeom->id() == id)
+        {
+            pSubject= pCurrentGeom;
+            break;
+        }
+    }
+
+    return pSubject;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -167,7 +192,7 @@ unsigned int GLC_3DRep::vertexCount() const
 		const int size= m_pGeomList->size();
 		for (int i= 0; i < size; ++i)
 		{
-			result+= m_pGeomList->at(i)->VertexCount();
+			result+= m_pGeomList->at(i)->vertexCount();
 		}
 	}
 
@@ -213,7 +238,21 @@ double GLC_3DRep::volume() const
 		resultVolume+= m_pGeomList->at(i)->volume();
 	}
 
-	return resultVolume;
+    return resultVolume;
+}
+
+QList<GLC_Geometry*> GLC_3DRep::takeGeometry()
+{
+    QList<GLC_Geometry*> subject(*m_pGeomList);
+    m_pGeomList->clear();
+    *m_pIsLoaded= false;
+
+    return subject;
+}
+
+void GLC_3DRep::clear()
+{
+    clear3DRepGeom();
 }
 
 void GLC_3DRep::clean()
@@ -221,9 +260,8 @@ void GLC_3DRep::clean()
 	QList<GLC_Geometry*>::iterator iGeomList= m_pGeomList->begin();
 	while(iGeomList != m_pGeomList->constEnd())
 	{
-		if ((*iGeomList)->VertexCount() == 0)
+		if ((*iGeomList)->vertexCount() == 0)
 		{
-			qDebug() << "Delete empty geom--------------------";
 			delete (*iGeomList);
 			iGeomList= m_pGeomList->erase(iGeomList);
 		}
@@ -341,16 +379,6 @@ void GLC_3DRep::take(GLC_3DRep* pSource)
 	pSource->m_pGeomList->clear();
 }
 
-void GLC_3DRep::copyVboToClientSide()
-{
-	// Get the number of geometry of pRep
-	const int pRepSize= m_pGeomList->size();
-	for (int i= 0; i < pRepSize; ++i)
-	{
-		geomAt(i)->copyVboToClientSide();
-	}
-}
-
 void GLC_3DRep::releaseVboClientSide(bool update)
 {
 	// Get the number of geometry of pRep
@@ -377,12 +405,20 @@ void GLC_3DRep::transformSubGeometries(const GLC_Matrix4x4& matrix)
 
 void GLC_3DRep::setVboUsage(bool usage)
 {
-	// Get the number of geometry of pRep
 	const int repCount= m_pGeomList->size();
 	for (int i= 0; i < repCount; ++i)
 	{
 		m_pGeomList->at(i)->setVboUsage(usage);
-	}
+    }
+}
+
+void GLC_3DRep::setMeshWireColorAndLineWidth(const QColor& color, GLfloat lineWidth)
+{
+    for (GLC_Geometry* pGeom : *m_pGeomList)
+    {
+        pGeom->setWireColor(color);
+        pGeom->setLineWidth(lineWidth);
+    }
 }
 
 bool GLC_3DRep::unload()
@@ -424,6 +460,7 @@ void GLC_3DRep::clear3DRepGeom()
         delete (*m_pGeomList)[i];
     }
     m_pGeomList->clear();
+    *m_pIsLoaded= false;
 }
 
 // Non Member methods
@@ -437,7 +474,7 @@ QDataStream &operator<<(QDataStream & stream, const GLC_3DRep & rep)
 
 	// Save the list of 3DRep materials
 	QList<GLC_Material> materialsList;
-	QList<GLC_Material*> sourceMaterialsList= rep.materialSet().toList();
+    QList<GLC_Material*> sourceMaterialsList= rep.materialSet().values();
 	const int materialNumber= sourceMaterialsList.size();
 	for (int i= 0; i < materialNumber; ++i)
 	{

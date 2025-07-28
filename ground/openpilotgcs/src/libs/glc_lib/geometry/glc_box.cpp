@@ -36,7 +36,7 @@ GLC_Box::GLC_Box(double dLx, double dLy, double dlz)
 , m_dLgY(dLy)
 , m_dLgZ(dlz)
 {
-	createMeshAndWire();
+
 }
 // Copy constructor
 GLC_Box::GLC_Box(const GLC_Box& box)
@@ -45,7 +45,7 @@ GLC_Box::GLC_Box(const GLC_Box& box)
 , m_dLgY(box.m_dLgY)
 , m_dLgZ(box.m_dLgZ)
 {
-	createMeshAndWire();
+
 }
 GLC_Box::~GLC_Box()
 {
@@ -69,13 +69,28 @@ const GLC_BoundingBox& GLC_Box::boundingBox(void)
 // Return a copy of the current geometry
 GLC_Geometry* GLC_Box::clone() const
 {
-	return new GLC_Box(*this);
+    return new GLC_Box(*this);
 }
-
 
 //////////////////////////////////////////////////////////////////////
 // Set Functions
 //////////////////////////////////////////////////////////////////////
+
+bool GLC_Box::update()
+{
+    bool subject;
+    if (GLC_Mesh::isEmpty())
+    {
+        createMeshAndWire();
+        subject= true;
+    }
+    else
+    {
+        subject= false;
+    }
+
+    return subject;
+}
 
 // Set X length
 void GLC_Box::setLgX(double LgX)

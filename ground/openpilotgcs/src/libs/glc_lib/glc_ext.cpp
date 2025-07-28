@@ -23,10 +23,10 @@
 
 #include "glc_ext.h"
 #include <QString>
-#include <QGLContext>
+#include <QOpenGLContext>
 #include <QDebug>
 #include <QGLShaderProgram>
-#include <QGLBuffer>
+#include <QOpenGLBuffer>
 
 #if !defined(Q_OS_MAC)
 
@@ -47,7 +47,7 @@ bool glc::extensionIsSupported(const QString& extension)
 // Return true if VBO extension is succesfully loaded
 bool glc::loadVboExtension()
 {
-	QGLBuffer buffer;
+	QOpenGLBuffer buffer;
 	bool result= buffer.create();
 	buffer.destroy();
     return result;
@@ -63,11 +63,11 @@ bool glc::loadGlSlExtension()
 bool glc::loadPointSpriteExtension()
 {
 	bool result= true;
-#if !defined(Q_OS_MAC) && !defined(Q_OS_LINUX)
-	const QGLContext* pContext= QGLContext::currentContext();
-	glPointParameterf				= (PFNGLPOINTPARAMETERFARBPROC)pContext->getProcAddress(QLatin1String("glPointParameterf"));
+#if !defined(Q_OS_MAC)
+    const QOpenGLContext* pContext= QOpenGLContext::currentContext();
+    glPointParameterf				= (PFNGLPOINTPARAMETERFARBPROC)pContext->getProcAddress("glPointParameterf");
 	if (!glPointParameterf) qDebug() << "not glPointParameterf";
-	glPointParameterfv				= (PFNGLPOINTPARAMETERFVARBPROC)pContext->getProcAddress(QLatin1String("glPointParameterfv"));
+    glPointParameterfv				= (PFNGLPOINTPARAMETERFVARBPROC)pContext->getProcAddress("glPointParameterfv");
 	if (!glPointParameterfv) qDebug() << "not glPointParameterfv";
 
 	result= glPointParameterf && glPointParameterfv;

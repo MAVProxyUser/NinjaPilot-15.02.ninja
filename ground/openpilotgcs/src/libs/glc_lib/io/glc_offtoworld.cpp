@@ -28,11 +28,10 @@
 #include "../glc_fileformatexception.h"
 #include "../sceneGraph/glc_structreference.h"
 #include "../sceneGraph/glc_structinstance.h"
-#include "../sceneGraph/glc_structoccurence.h"
+#include "../sceneGraph/glc_structoccurrence.h"
 
 #include <QTextStream>
 #include <QFileInfo>
-#include <QGLContext>
 
 GLC_OffToWorld::GLC_OffToWorld()
 : m_pWorld(NULL)
@@ -222,7 +221,7 @@ GLC_World* GLC_OffToWorld::CreateWorldFromOff(QFile &file)
 	m_pCurrentMesh->finish();
 	GLC_3DRep* pRep= new GLC_3DRep(m_pCurrentMesh);
 	m_pCurrentMesh= NULL;
-	m_pWorld->rootOccurence()->addChild(new GLC_StructOccurence(pRep));
+	m_pWorld->rootOccurrence()->addChild(new GLC_StructOccurrence(pRep));
 
 	return m_pWorld;
 }
@@ -509,28 +508,26 @@ void GLC_OffToWorld::computeNormal()
 	}
 	// Compute the normals and add them to the current mesh info
 	const int size= m_IndexList.size();
-	double xn, yn, zn;
-
 
 	for (int i= 0; i < size; i+=3)
 	{
 		// Vertex 1
-		xn= pData->at(m_IndexList.at(i) * 3);
-		yn= pData->at(m_IndexList.at(i) * 3 + 1);
-		zn= pData->at(m_IndexList.at(i) * 3 + 2);
-		const GLC_Vector3d vect1(xn, yn, zn);
+        const double xn1= pData->at(m_IndexList.at(i) * 3);
+        const double yn1= pData->at(m_IndexList.at(i) * 3 + 1);
+        const double zn1= pData->at(m_IndexList.at(i) * 3 + 2);
+        const GLC_Vector3d vect1(xn1, yn1, zn1);
 
 		// Vertex 2
-		xn= pData->at(m_IndexList.at(i + 1) * 3);
-		yn= pData->at(m_IndexList.at(i + 1) * 3  + 1);
-		zn= pData->at(m_IndexList.at(i + 1) * 3 + 2);
-		const GLC_Vector3d vect2(xn, yn, zn);
+        const double xn2= pData->at(m_IndexList.at(i + 1) * 3);
+        const double yn2= pData->at(m_IndexList.at(i + 1) * 3  + 1);
+        const double zn2= pData->at(m_IndexList.at(i + 1) * 3 + 2);
+        const GLC_Vector3d vect2(xn2, yn2, zn2);
 
 		// Vertex 3
-		xn= pData->at(m_IndexList.at(i + 2) * 3);
-		yn= pData->at(m_IndexList.at(i + 2) * 3 + 1);
-		zn= pData->at(m_IndexList.at(i + 2) * 3 + 2);
-		const GLC_Vector3d vect3(xn, yn, zn);
+        const double xn3= pData->at(m_IndexList.at(i + 2) * 3);
+        const double yn3= pData->at(m_IndexList.at(i + 2) * 3 + 1);
+        const double zn3= pData->at(m_IndexList.at(i + 2) * 3 + 2);
+        const GLC_Vector3d vect3(xn3, yn3, zn3);
 
 		const GLC_Vector3d edge1(vect3 - vect2);
 		const GLC_Vector3d edge2(vect1 - vect2);

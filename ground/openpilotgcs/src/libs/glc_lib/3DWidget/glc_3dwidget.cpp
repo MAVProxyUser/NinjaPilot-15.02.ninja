@@ -25,19 +25,21 @@
 
 
 GLC_3DWidget::GLC_3DWidget(GLC_3DWidgetManagerHandle*  pWidgetManagerHandle)
-: QObject()
-, m_Uid(glc::GLC_Gen3DWidgetID())
-, m_pWidgetManagerHandle(pWidgetManagerHandle)
-, m_InstanceIdList()
+    : QObject()
+    , m_Uid(glc::GLC_Gen3DWidgetID())
+    , m_pWidgetManagerHandle(pWidgetManagerHandle)
+    , m_InstanceIdList()
+    , m_Type(0)
 {
 
 }
 
 GLC_3DWidget::GLC_3DWidget(const GLC_3DWidget& widget)
-: QObject()
-, m_Uid(glc::GLC_Gen3DWidgetID())
-, m_pWidgetManagerHandle(widget.m_pWidgetManagerHandle)
-, m_InstanceIdList()
+    : QObject()
+    , m_Uid(glc::GLC_Gen3DWidgetID())
+    , m_pWidgetManagerHandle(widget.m_pWidgetManagerHandle)
+    , m_InstanceIdList()
+    , m_Type(widget.m_Type)
 {
 	// Copy the 3Dview instance of the widget
 	const int size= widget.m_InstanceIdList.size();
@@ -57,7 +59,23 @@ GLC_3DWidget::~GLC_3DWidget()
 
 bool GLC_3DWidget::operator==(const GLC_3DWidget& widget) const
 {
-	return this == &widget;
+    return this == &widget;
+}
+
+bool GLC_3DWidget::isVisible() const
+{
+    bool isVisible= false;
+    if (NULL != m_pWidgetManagerHandle)
+    {
+        const int instanceCount= m_InstanceIdList.size();
+        for (int i= 0; i < instanceCount; ++i)
+        {
+            isVisible= m_pWidgetManagerHandle->instanceHandle(m_InstanceIdList.at(i))->isVisible();
+            if (isVisible) break;
+        }
+    }
+
+    return isVisible;
 }
 
 GLC_3DWidget& GLC_3DWidget::operator=(const GLC_3DWidget& widget)
@@ -69,6 +87,7 @@ GLC_3DWidget& GLC_3DWidget::operator=(const GLC_3DWidget& widget)
 		m_Uid= widget.m_Uid;
 		m_pWidgetManagerHandle= widget.m_pWidgetManagerHandle;
 		m_InstanceIdList= widget.m_InstanceIdList;
+        m_Type= widget.m_Type;
 
 		// Copy the 3Dview instance of the widget
 		const int size= widget.m_InstanceIdList.size();
@@ -120,22 +139,22 @@ glc::WidgetEventFlag GLC_3DWidget::unselect(const GLC_Point3d&, GLC_uint)
 	return glc::IgnoreEvent;
 }
 
-glc::WidgetEventFlag GLC_3DWidget::mouseOver(const GLC_Point3d&, GLC_uint)
+glc::WidgetEventFlag GLC_3DWidget::over(const GLC_Point3d&, GLC_uint)
 {
 	return glc::IgnoreEvent;
 }
 
-glc::WidgetEventFlag GLC_3DWidget::mousePressed(const GLC_Point3d&, Qt::MouseButton, GLC_uint)
+glc::WidgetEventFlag GLC_3DWidget::pressed(const GLC_Point3d&, GLC_uint)
 {
 	return glc::IgnoreEvent;
 }
 
-glc::WidgetEventFlag GLC_3DWidget::mouseReleased(Qt::MouseButton)
+glc::WidgetEventFlag GLC_3DWidget::released()
 {
 	return glc::IgnoreEvent;
 }
 
-glc::WidgetEventFlag GLC_3DWidget::mouseMove(const GLC_Point3d&, Qt::MouseButtons, GLC_uint)
+glc::WidgetEventFlag GLC_3DWidget::move(const GLC_Point3d&, GLC_uint)
 {
 	return glc::IgnoreEvent;
 }
@@ -160,6 +179,7 @@ void GLC_3DWidget::remove3DViewInstance()
 		{
 			m_pWidgetManagerHandle->remove3DViewInstance(m_InstanceIdList.at(i));
 		}
+        m_InstanceIdList.clear();
 	}
 }
 

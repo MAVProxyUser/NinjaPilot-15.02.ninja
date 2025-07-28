@@ -68,7 +68,7 @@ void GLC_RepFlyMover::update()
 	Q_ASSERT(!m_pRepMoverInfo->m_VectorInfo.isEmpty());
 	Q_ASSERT(!m_pRepMoverInfo->m_DoubleInfo.isEmpty());
 
-	GLC_Vector3d vector(m_pRepMoverInfo->m_VectorInfo.first());
+    GLC_Vector3d vector(m_pRepMoverInfo->m_VectorInfo.constFirst());
 
 	// Rotation
 	double deltaX= vector.x();
@@ -109,16 +109,18 @@ void GLC_RepFlyMover::glDraw()
 	const double vRatio= static_cast<double>(m_pViewport->viewVSize()) / calibre;
 
 	glDisable(GL_TEXTURE_2D);
-	GLC_Context::current()->glcEnableLighting(false);
+    GLC_Context* pContext= GLC_ContextManager::instance()->currentContext();
+
+    pContext->glcEnableLighting(false);
 	glDisable(GL_DEPTH_TEST);
 
-	GLC_Context::current()->glcMatrixMode(GL_PROJECTION);
-	GLC_Context::current()->glcPushMatrix();
-	GLC_Context::current()->glcLoadIdentity();
-	GLC_Context::current()->glcOrtho(hRatio * -1.0 ,hRatio * 1.0 ,vRatio * -1.0 ,vRatio * 1.0 ,-1.0 ,1.0);
-	GLC_Context::current()->glcMatrixMode(GL_MODELVIEW);
-	GLC_Context::current()->glcPushMatrix();
-	GLC_Context::current()->glcLoadIdentity();
+    pContext->glcMatrixMode(GL_PROJECTION);
+    pContext->glcPushMatrix();
+    pContext->glcLoadIdentity();
+    pContext->glcOrtho(hRatio * -1.0 ,hRatio * 1.0 ,vRatio * -1.0 ,vRatio * 1.0 ,-1.0 ,1.0);
+    pContext->glcMatrixMode(GL_MODELVIEW);
+    pContext->glcPushMatrix();
+    pContext->glcLoadIdentity();
 
 	m_CenterCircle.render(glc::WireRenderFlag);
 	m_Hud.render(glc::WireRenderFlag);
@@ -131,21 +133,21 @@ void GLC_RepFlyMover::glDraw()
 	m_Hud.render(glc::TransparentRenderFlag);
 	m_Plane.render(glc::TransparentRenderFlag);
 
-	/*
 	// Render velocity value + text
-	QString velocity(QChar(' ') + QString::number(static_cast<int>(100.0 * m_pRepMoverInfo->m_DoubleInfo.first())));
-	QFont myFont;
-	myFont.setBold(true);
-	QFontMetrics fontmetrics(myFont);
-	int txtHeight= fontmetrics.boundingRect(velocity).height();
-	double posy= 2.0 * static_cast<double>(txtHeight) / calibre;
-	m_pViewport->qGLWidgetHandle()->renderText(- m_HudOffset.getX(), m_HudOffset.getY() - posy, 0.0, velocity, myFont);
-	*/
+    QString velocity(QChar(' ') + QString::number(static_cast<int>(100.0 * m_pRepMoverInfo->m_DoubleInfo.constFirst())));
+    QFont myFont;
+    myFont.setBold(true);
+    QFontMetrics fontmetrics(myFont);
+    int txtHeight= fontmetrics.boundingRect(velocity).height();
+    int textWidth= fontmetrics.horizontalAdvance(velocity);
+    double posy= 2.0 * static_cast<double>(txtHeight) / calibre;
+    double posx= 2.0 * static_cast<double>(textWidth / 2) / calibre + 0.02;
+    m_pViewport->renderText(GLC_Point3d(- m_HudOffset.x() + posx, m_HudOffset.y() - posy, 0.0), velocity, m_MainColor, myFont);
 
-	GLC_Context::current()->glcPopMatrix();
-	GLC_Context::current()->glcMatrixMode(GL_PROJECTION);
-	GLC_Context::current()->glcPopMatrix();
-	GLC_Context::current()->glcMatrixMode(GL_MODELVIEW);
+    pContext->glcPopMatrix();
+    pContext->glcMatrixMode(GL_PROJECTION);
+    pContext->glcPopMatrix();
+    pContext->glcMatrixMode(GL_MODELVIEW);
 
 	glEnable(GL_DEPTH_TEST);
 }

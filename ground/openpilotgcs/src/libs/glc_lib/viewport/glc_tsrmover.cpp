@@ -65,80 +65,50 @@ GLC_Mover* GLC_TsrMover::clone() const
 // Initialized the mover
 void GLC_TsrMover::init(const GLC_UserInput& userInput)
 {
-	m_PreviousVector= GLC_Point3d(userInput.normalyzeXTouchCenter(), userInput.normalyzeYTouchCenter(), 0.0);
+    m_PreviousVector= m_pViewport->mapPosMouse(static_cast<double>(userInput.x()), static_cast<double>(userInput.y()));
 }
 
 // Move the camera
 bool GLC_TsrMover::move(const GLC_UserInput& userInput)
 {
-	if (!(userInput.normalyzeXTouchCenter() < 0.0) && !(userInput.normalyzeYTouchCenter() < 0.0))
-	{
-		m_PreviousVector= GLC_Point3d(userInput.normalyzeXTouchCenter(), userInput.normalyzeYTouchCenter(), 0.0);
-	}
-	else
-	{
-		qDebug() << "Pas cool";
-		if (!userInput.translation().isNull())
-		{
-			m_PreviousVector= GLC_Vector3d(userInput.translation().x(), userInput.translation().y(), 0.0) + m_PreviousVector;			
-		}
-	}
-	
-	const double x= m_PreviousVector.x();
-	const double y= m_PreviousVector.y();
-	//GLC_Point3d center2= m_pViewport->unProject(x * m_pViewport->viewHSize(), y * m_pViewport->viewVSize());
-	
-	//qDebug() << "touch center= " << x << " , " << y;
+    const GLC_Vector3d VectCur(m_pViewport->mapPosMouse(static_cast<double>(userInput.x()), static_cast<double>(userInput.y())));
+    const GLC_Vector3d VectPan= VectCur - m_PreviousVector;	// moving Vector
 
-	
-	if (!qFuzzyCompare(userInput.scaleFactor(), 0))
-	{
-		GLC_Point dummy(m_pViewport->cameraHandle()->target());
-		m_pViewport->setDistMinAndMax(dummy.boundingBox());
+    GLC_Camera* pCamera= m_pViewport->cameraHandle();
 
-		GLC_Point2d nPos= m_pViewport->mapNormalyzeToOpenGLScreen(x, y);
-		GLC_Point3d nPos3D(nPos.x(), nPos.y(), 1.0);
-		GLC_Point3d projected= m_pViewport->compositionMatrix().inverted() * nPos3D;
+    // Pan the camera
+    pCamera->pan(-VectPan);
 
-		m_pViewport->cameraHandle()->zoom(userInput.scaleFactor());
+    // Zoom
+    //m_pViewport->reframeFromDeltaCover(userInput.scaleFactor());
+    zoom(userInput.scaleFactor());
 
-		m_pViewport->setDistMinAndMax(dummy.boundingBox());
-		GLC_Point3d projected2= m_pViewport->compositionMatrix().inverted() * nPos3D;
-		GLC_Vector3d delta= projected - projected2;
-		m_pViewport->cameraHandle()->translate(delta);
-	}
+    // Rotation
+    if (!glc::fuzzyCompare(userInput.rotationAngle(), 0.0))
+    {
+        const GLC_Point3d& unProjectedPoint= userInput.unprojectedPoint();
 
-	if (!qFuzzyCompare(userInput.rotationAngle(), 0))
-	{
-		GLC_Point dummy(m_pViewport->cameraHandle()->target());
-		m_pViewport->setDistMinAndMax(dummy.boundingBox());
+        pCamera->rotateAround(pCamera->forward(), userInput.rotationAngle(), unProjectedPoint);
+    }
 
-		GLC_Point2d nPos= m_pViewport->mapNormalyzeToOpenGLScreen(x, y);
-		GLC_Point3d nPos3D(nPos.x(), nPos.y(), 1.0);
-		GLC_Point3d center= m_pViewport->compositionMatrix().inverted() * nPos3D;
+    m_PreviousVector= VectCur;
+    return true;
+}
 
-		GLC_Vector3d axis= m_pViewport->cameraHandle()->forward();
+void GLC_TsrMover::zoom(double zoomFactor)
+{
+    const double maxZoomFactor= 3.0;
 
-		m_pViewport->cameraHandle()->rotateAround(axis, userInput.rotationAngle(), center);
-	}
+    if (zoomFactor > 0)
+    {
+        zoomFactor= (maxZoomFactor - 1.0) * zoomFactor + 1.0;
+    }
+    else
+    {
+        zoomFactor= 1.0 / ( (maxZoomFactor - 1.0) * fabs(zoomFactor) + 1.0 );
+    }
 
-	if (!userInput.translation().isNull())
-	{
-		double transX= userInput.translation().x() * m_pViewport->viewHSize();
-		double transY= userInput.translation().y() * m_pViewport->viewVSize();
+    m_pViewport->cameraHandle()->zoom(zoomFactor);
 
-		GLC_Vector3d mappedTranslation(-transX, -transY, 0.0);
-		// Compute the length of camera's field of view
-		const double ChampsVision = m_pViewport->cameraHandle()->distEyeTarget() *  m_pViewport->viewTangent();
-
-		// the side of camera's square is mapped on Vertical length of window
-		// Ratio OpenGL/Pixel = dimend GL / dimens Pixel
-		const double Ratio= ChampsVision / static_cast<double>(m_pViewport->viewVSize());
-
-		mappedTranslation= mappedTranslation * Ratio;
-		m_pViewport->cameraHandle()->pan(mappedTranslation);
-	}
-
-	return true;
 }
 

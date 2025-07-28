@@ -34,7 +34,6 @@
 
 #include "../glc_config.h"
 
-class QGLContext;
 //////////////////////////////////////////////////////////////////////
 //! \class GLC_ObjMtlLoader
 /*! \brief GLC_ObjMtlLoader : Load the mtl file associated to a OBJ File */
@@ -68,7 +67,7 @@ public:
 
 	//! Get the list of attached files
 	inline QStringList listOfAttachedFileName() const
-	{return m_ListOfAttachedFileName.toList();}
+    {return m_ListOfAttachedFileName.values();}
 
 //@}
 

@@ -62,24 +62,31 @@ GLC_Mover* GLC_SetTargetMover::clone() const
 // Initialized the mover
 void GLC_SetTargetMover::init(const GLC_UserInput& userInput)
 {
-	// Z Buffer component of selected point between 0 and 1
-	GLfloat Depth;
-	// read selected point
-	glReadPixels(userInput.x(), m_pViewport->viewVSize() - userInput.y() , 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &Depth);
-
 	// Test if there is geometry under picking point
-	if (!qFuzzyCompare(Depth, 1.0f))
+    if (!userInput.unprojectedPoint().isNull())
 	{	// Geometry find -> Update camera's target position
-		const GLC_Point3d target(m_pViewport->unProject(userInput.x(), userInput.y()));
-		m_pViewport->cameraHandle()->setTargetCam(target);
+        GLC_Camera* pCam= m_pViewport->cameraHandle();
+        if (m_pViewport->useOrtho())
+        {
+            GLC_Point3d oldTargetPos(pCam->target());
+            const GLC_Point3d& newTarget= userInput.unprojectedPoint();
+            GLC_Vector3d vectPan(newTarget - oldTargetPos);	// panning vector
+
+            pCam->setTargetCam(userInput.unprojectedPoint());
+            pCam->setEyeCam(pCam->eye() + vectPan);
+        }
+        else
+        {
+            pCam->setCam(pCam->eye(), userInput.unprojectedPoint(), pCam->upVector());
+        }
 	}
 	else
 	{	// Geometry not find -> panning
 
 		const GLC_Point3d curPos(m_pViewport->mapPosMouse(userInput.x(), userInput.y()));
 		const GLC_Point3d prevPos(m_pViewport->mapPosMouse(m_pViewport->viewHSize() / 2, m_pViewport->viewVSize() / 2));
-		const GLC_Vector3d VectPan(curPos - prevPos);	// panning vector
+        const GLC_Vector3d vectPan(curPos - prevPos);	// panning vector
 		// pan camera
-		m_pViewport->cameraHandle()->pan(VectPan);
+        m_pViewport->cameraHandle()->pan(vectPan);
 	}
 }

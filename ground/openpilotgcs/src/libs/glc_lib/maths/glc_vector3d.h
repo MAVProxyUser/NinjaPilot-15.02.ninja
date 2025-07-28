@@ -26,6 +26,8 @@
 #define GLC_VECTOR3D_H_
 
 #include <QDataStream>
+#include <QMetaType>
+#include <QVector3D>
 
 #include "glc_utils_maths.h"
 #include "glc_vector3df.h"
@@ -46,11 +48,11 @@ class GLC_LIB_EXPORT GLC_Vector3d
 	friend class GLC_Matrix4x4;
 
 	//! Overload unary "-" operator
-	inline friend GLC_Vector3d operator - (const GLC_Vector3d &Vect)
+    friend GLC_Vector3d operator - (const GLC_Vector3d &Vect)
 	{return GLC_Vector3d(-Vect.m_Vector[0], -Vect.m_Vector[1], -Vect.m_Vector[2]);}
 
 	//! Overload scalar operator
-	inline friend GLC_Vector3d operator*(double s, const GLC_Vector3d &v)
+    friend GLC_Vector3d operator*(double s, const GLC_Vector3d &v)
 	{return GLC_Vector3d(s * v.m_Vector[0], s * v.m_Vector[1], s * v.m_Vector[2]);}
 
 //////////////////////////////////////////////////////////////////////
@@ -70,7 +72,7 @@ public:
 	inline GLC_Vector3d(double x, double y, double z);
 
 	//! Construct a 3d vector from another 3d vector
-	inline GLC_Vector3d(const GLC_Vector3d &vector)
+    GLC_Vector3d(const GLC_Vector3d &vector)
 	{memcpy(m_Vector, vector.m_Vector, sizeof(double) * 3);}
 
 	//! Construct a 3d vector from another 3d float vector
@@ -78,6 +80,9 @@ public:
 
 	//! Construct a 3d vector from a 2d float vector
 	inline GLC_Vector3d(const GLC_Vector2d &vector);
+
+    //! Construct a 3d vector from a QVector3D
+    inline GLC_Vector3d(const QVector3D& qVector);
 
 //@}
 
@@ -87,48 +92,59 @@ public:
 //////////////////////////////////////////////////////////////////////
 public:
 	//! Return the x coordinate of this vector
-	inline double x() const
+    double x() const
 	{return m_Vector[0];}
 
 	//! Return the y coordinate of this vector
-	inline double y() const
+    double y() const
 	{return m_Vector[1];}
 
 	//! Return the z coordinate of this vector
-	inline double z() const
+    double z() const
 	{return m_Vector[2];}
 
 	//! Return a const pointer to this vector data
-	inline const double *data() const
+    const double *data() const
 	{return m_Vector;}
 
 	//! Return true if this vector is null
-	inline bool isNull() const
+    bool isNull() const
     {return (qAbs(m_Vector[0]) < glc::EPSILON) && (qAbs(m_Vector[1]) < glc::EPSILON) && (qAbs(m_Vector[2]) < glc::EPSILON);}
 
 	//! Return the length of this vector
-	inline double length() const
+    double length() const
 	{return sqrt(m_Vector[0] * m_Vector[0] + m_Vector[1] * m_Vector[1] + m_Vector[2] * m_Vector[2]);}
+
+    //! Return the square length of this vector
+    double squaredLength() const
+    {return (m_Vector[0] * m_Vector[0] + m_Vector[1] * m_Vector[1] + m_Vector[2] * m_Vector[2]);}
 
 	//! Return the 2D vector specified by the given mask vector
 	/*! retrieve component corresponding to mask vector NULL component*/
 	inline GLC_Vector2d toVector2d(const GLC_Vector3d& mask) const;
 
+    inline GLC_Vector3d mask(const GLC_Vector3d& other) const;
+
 	//! Return the Angle from this vector to the given vector (from 0 to PI)
-	inline double angleWithVect(GLC_Vector3d Vect) const;
+    inline double angleWithVect(GLC_Vector3d other) const;
+
+    inline double angleWithVect2(GLC_Vector3d other) const;
 
 	//! Return the signed angle from this vector to th given vector with the given direction (from 0 to -PI and 0 to PI)
-	inline double signedAngleWithVect(GLC_Vector3d Vect, const GLC_Vector3d& dir) const;
+    inline double signedAngleWithVect(GLC_Vector3d other, const GLC_Vector3d& dir) const;
 
 	//! Return the float 3D vector from this vector
-	inline GLC_Vector3df toVector3df() const
+    GLC_Vector3df toVector3df() const
 	{return GLC_Vector3df(static_cast<float>(m_Vector[0]), static_cast<float>(m_Vector[1]), static_cast<float>(m_Vector[2]));}
 
 	//! Return the string of this vector
 	inline QString toString() const;
 
+    //! Return the QVector3D of this vector
+    inline QVector3D toQVector3D() const;
+
 	//! Return the inverted vector of this vector
-	inline GLC_Vector3d inverted() const
+    GLC_Vector3d inverted() const
 	{return GLC_Vector3d(*this).invert();}
 
 //@}
@@ -139,11 +155,11 @@ public:
 //////////////////////////////////////////////////////////////////////
 public:
 	//! Return the Addition of this vector to the given vector
-	inline GLC_Vector3d operator + (const GLC_Vector3d &vector) const
+    GLC_Vector3d operator + (const GLC_Vector3d &vector) const
 	{return GLC_Vector3d(m_Vector[0] + vector.m_Vector[0], m_Vector[1] + vector.m_Vector[1], m_Vector[2] + vector.m_Vector[2]);}
 
 	//! Copy the given vector to this vector and return a reference to this vector
-	inline GLC_Vector3d& operator = (const GLC_Vector3d &vector)
+    GLC_Vector3d& operator = (const GLC_Vector3d &vector)
 	{
 		if (this != &vector) memcpy(m_Vector, vector.m_Vector, sizeof(double) * 3);
 		return *this;
@@ -152,15 +168,18 @@ public:
 	//! Copy the given float vector to this vector and return a reference to this vector
 	inline GLC_Vector3d& operator = (const GLC_Vector3df &);
 
+    //! Copy the given QVector3D to this vector and return a reference to this vector
+    inline GLC_Vector3d& operator = (const QVector3D& qVector);
+
 	//! Add this vector to the given vector and return a reference to this vector
-	inline GLC_Vector3d& operator += (const GLC_Vector3d &vector)
-	{
-		*this= *this + vector;
+    GLC_Vector3d& operator += (const GLC_Vector3d &vector)
+    {
+        this->operator=(this->operator+(vector));
 		return *this;
 	}
 
 	//! Return the substracts of the given vector to this vector
-	inline GLC_Vector3d operator - (const GLC_Vector3d &Vect) const
+    GLC_Vector3d operator - (const GLC_Vector3d &Vect) const
 	{return GLC_Vector3d(m_Vector[0] - Vect.m_Vector[0], m_Vector[1] - Vect.m_Vector[1], m_Vector[2] - Vect.m_Vector[2]);}
 
 	//! Substracts the given vector to this vector and return a reference to this vector
@@ -174,25 +193,24 @@ public:
 	inline GLC_Vector3d operator ^ (const GLC_Vector3d &vector) const;
 
 	//! Return the scalar product of this vector to the given vector
-	inline double operator * (const GLC_Vector3d &Vect) const
+    double operator * (const GLC_Vector3d &Vect) const
 	{return m_Vector[0] * Vect.m_Vector[0] + m_Vector[1] * Vect.m_Vector[1] + m_Vector[2] * Vect.m_Vector[2];}
 
 	//! Return the scalar product of this vector to the given scalar
-	inline GLC_Vector3d operator * (double Scalaire) const
+    GLC_Vector3d operator * (double Scalaire) const
 	{return GLC_Vector3d(m_Vector[0] * Scalaire, m_Vector[1] * Scalaire, m_Vector[2] * Scalaire);}
 
-
 	//! Return true if this vector is fuzzyequal to the given vector
-	inline bool operator == (const GLC_Vector3d &vector) const;
+    inline bool operator == (const GLC_Vector3d &vector) const;
 
 	//! Return true if this vector is > to the given vector
-	inline bool operator > (const GLC_Vector3d &vector) const;
+    inline bool operator > (const GLC_Vector3d &vector) const;
 
 	//! Return true if this vector is < to the given vector
-	inline bool operator < (const GLC_Vector3d &vector) const;
+    inline bool operator < (const GLC_Vector3d &vector) const;
 
 	//! Return false if this vector is fuzzyequal to the given vector
-	inline bool operator != (const GLC_Vector3d &Vect) const
+    bool operator != (const GLC_Vector3d &Vect) const
 	{return !(*this == Vect);}
 
 //@}
@@ -203,21 +221,21 @@ public:
 //////////////////////////////////////////////////////////////////////
 public:
 	//! Set x coordinate of this vector from the given x coordinate
-	inline GLC_Vector3d& setX(const double &dX)
+    GLC_Vector3d& setX(const double &dX)
 	{
 		m_Vector[0]= dX;
 		return *this;
 	}
 
 	//! Set y coordinate of this vector from the given y coordinate
-	inline GLC_Vector3d& setY(const double &dY)
+    GLC_Vector3d& setY(const double &dY)
 	{
 		m_Vector[1]= dY;
 		return *this;
 	}
 
 	//! Set z coordinate of this vector from the given z coordinate
-	inline GLC_Vector3d& setZ(const double &dZ)
+    GLC_Vector3d& setZ(const double &dZ)
 	{
 		m_Vector[2]= dZ;
 		return *this;
@@ -233,11 +251,11 @@ public:
 		return *this;
 	}
 
-	//! Set vector lenght from the given scalar and return a reference of this vector
-    inline GLC_Vector3d& setLength(double lenght);
+	//! Set vector length from the given scalar and return a reference of this vector
+    GLC_Vector3d& setLength(double length);
 
 	//! Normalize this vector and return a reference to it
-	inline GLC_Vector3d& normalize()
+    GLC_Vector3d& normalize()
 	{return setLength(1.0);}
 
 	//! Invert this vector and return a reference to it
@@ -259,6 +277,11 @@ private:
 
 }; //class GLC_Vector3d
 
+//! Define GLC_Point3D
+typedef GLC_Vector3d GLC_Point3d;
+
+Q_DECLARE_METATYPE(GLC_Vector3d)
+
 // Vector constant in glc namespace
 namespace glc
 {
@@ -274,10 +297,7 @@ namespace glc
 	/*! \var Z_AXIS
 	 *  \brief Z axis Vector*/
 	const GLC_Vector3d Z_AXIS(0.0, 0.0, 1.0);
-};
-
-//! Define GLC_Point3D
-typedef GLC_Vector3d GLC_Point3d;
+}
 
 //! Write the vector to stream
 inline QDataStream &operator<<(QDataStream & stream, const GLC_Vector3d & vector)
@@ -298,13 +318,13 @@ inline QDataStream &operator>>(QDataStream &stream, GLC_Vector3d &vector)
 //! Return the determinant of the given Matrix 3X3
 inline double getDeterminant3x3(const double *Mat3x3)
 {
-	double Determinant;
+    double subject;
 
-	Determinant= Mat3x3[0] * ( Mat3x3[4] * Mat3x3[8] - Mat3x3[7] * Mat3x3[5]);
-	Determinant+= - Mat3x3[3] * ( Mat3x3[1] * Mat3x3[8] - Mat3x3[7] * Mat3x3[2]);
-	Determinant+= Mat3x3[6] * ( Mat3x3[1] * Mat3x3[5] - Mat3x3[4] * Mat3x3[2]);
+    subject= Mat3x3[0] * ( Mat3x3[4] * Mat3x3[8] - Mat3x3[7] * Mat3x3[5]);
+    subject+= - Mat3x3[3] * ( Mat3x3[1] * Mat3x3[8] - Mat3x3[7] * Mat3x3[2]);
+    subject+= Mat3x3[6] * ( Mat3x3[1] * Mat3x3[5] - Mat3x3[4] * Mat3x3[2]);
 
-	return Determinant;
+    return subject;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -336,7 +356,14 @@ GLC_Vector3d::GLC_Vector3d(const GLC_Vector2d &vector)
 {
     m_Vector[0]= vector.x();
     m_Vector[1]= vector.y();
-	m_Vector[2]= 0.0;
+    m_Vector[2]= 0.0;
+}
+
+GLC_Vector3d::GLC_Vector3d(const QVector3D &qVector)
+{
+    m_Vector[0]= static_cast<double>(qVector.x());
+    m_Vector[1]= static_cast<double>(qVector.y());
+    m_Vector[2]= static_cast<double>(qVector.z());
 }
 
 GLC_Vector3d& GLC_Vector3d::operator = (const GLC_Vector3df &Vect)
@@ -345,7 +372,16 @@ GLC_Vector3d& GLC_Vector3d::operator = (const GLC_Vector3df &Vect)
 	m_Vector[1]= static_cast<double>(Vect.m_Vector[1]);
 	m_Vector[2]= static_cast<double>(Vect.m_Vector[2]);
 
-	return *this;
+    return *this;
+}
+
+GLC_Vector3d &GLC_Vector3d::operator =(const QVector3D &qVector)
+{
+    m_Vector[0]= static_cast<double>(qVector.x());
+    m_Vector[1]= static_cast<double>(qVector.y());
+    m_Vector[2]= static_cast<double>(qVector.z());
+
+    return *this;
 }
 
 GLC_Vector3d GLC_Vector3d::operator ^ (const GLC_Vector3d &vector) const
@@ -360,9 +396,9 @@ GLC_Vector3d GLC_Vector3d::operator ^ (const GLC_Vector3d &vector) const
 
 bool GLC_Vector3d::operator == (const GLC_Vector3d &vector) const
 {
-	bool bResult= qFuzzyCompare(m_Vector[0], vector.m_Vector[0]);
-	bResult= bResult && qFuzzyCompare(m_Vector[1], vector.m_Vector[1]);
-	bResult= bResult && qFuzzyCompare(m_Vector[2], vector.m_Vector[2]);
+    bool bResult= glc::fuzzyCompare(m_Vector[0], vector.m_Vector[0]);
+    bResult= bResult && glc::fuzzyCompare(m_Vector[1], vector.m_Vector[1]);
+    bResult= bResult && glc::fuzzyCompare(m_Vector[2], vector.m_Vector[2]);
 
 	return bResult;
 }
@@ -392,17 +428,17 @@ GLC_Vector3d& GLC_Vector3d::setVect(double x, double y, double z)
 	return *this;
 }
 
-inline GLC_Vector3d& GLC_Vector3d::setLength(double lenght)
+inline GLC_Vector3d& GLC_Vector3d::setLength(double length)
 {
-    const double currentLenght= sqrt( m_Vector[0] * m_Vector[0] + m_Vector[1] * m_Vector[1] + m_Vector[2] * m_Vector[2]);
+    const double currentLength= sqrt( m_Vector[0] * m_Vector[0] + m_Vector[1] * m_Vector[1] + m_Vector[2] * m_Vector[2]);
 
-    if (qAbs(currentLenght) > glc::EPSILON)
+    if (qAbs(currentLength) > glc::EPSILON)
 	{
-        const double Coef = lenght / currentLenght;
+        const double coef = length / currentLength;
 
-		m_Vector[0] = m_Vector[0] * Coef;
-		m_Vector[1] = m_Vector[1] * Coef;
-		m_Vector[2] = m_Vector[2] * Coef;
+        m_Vector[0] = m_Vector[0] * coef;
+        m_Vector[1] = m_Vector[1] * coef;
+        m_Vector[2] = m_Vector[2] * coef;
 	}
 	return *this;
 }
@@ -418,72 +454,88 @@ GLC_Vector3d& GLC_Vector3d::invert()
 GLC_Vector2d GLC_Vector3d::toVector2d(const GLC_Vector3d& mask) const
 {
 	GLC_Vector2d resultVect;
-	if (mask.m_Vector[0] == 0.0)
+    if (qFuzzyIsNull(mask.m_Vector[0]))
 	{
 		resultVect.setX(m_Vector[0]);
-		if (mask.m_Vector[1] == 0.0) resultVect.setY(m_Vector[1]);
+        if (qFuzzyIsNull(mask.m_Vector[1])) resultVect.setY(m_Vector[1]);
 		else resultVect.setY(m_Vector[2]);
 	}
 	else resultVect.setVect(m_Vector[1], m_Vector[2]);
 
-	return resultVect;
+    return resultVect;
 }
 
-double GLC_Vector3d::angleWithVect(GLC_Vector3d Vect) const
+inline GLC_Vector3d GLC_Vector3d::mask(const GLC_Vector3d& other) const
 {
-	GLC_Vector3d ThisVect(*this);
-	ThisVect.normalize();
-	Vect.normalize();
-	// Rotation axis
-	const GLC_Vector3d VectAxeRot(ThisVect ^ Vect);
-	// Check if the rotation axis vector is null
-	if (!VectAxeRot.isNull())
-	{
-		return acos(ThisVect * Vect);
-	}
-	else return 0.0;
+    GLC_Vector3d subject(*this);
+    subject.m_Vector[0]= subject.m_Vector[0] * other.m_Vector[0];
+    subject.m_Vector[1]= subject.m_Vector[1] * other.m_Vector[1];
+    subject.m_Vector[2]= subject.m_Vector[2] * other.m_Vector[2];
+
+    return subject;
 }
 
-double GLC_Vector3d::signedAngleWithVect(GLC_Vector3d Vect, const GLC_Vector3d& dir) const
+double GLC_Vector3d::angleWithVect(GLC_Vector3d other) const
 {
-	double angle= 0.0;
+    double subject= 0.0;
 
-	GLC_Vector3d ThisVect(*this);
-	ThisVect.normalize();
-	Vect.normalize();
-	if (Vect == ThisVect.inverted())
-	{
-		angle= glc::PI;
-	}
-	else if (Vect != ThisVect)
-	{
-		// Rotation axis
-		const GLC_Vector3d VectAxeRot(ThisVect ^ Vect);
-		// Check if the rotation axis vector is null
-		if (!VectAxeRot.isNull())
-		{
-			double mat3x3[9];
-			mat3x3[0]= ThisVect.m_Vector[0];
-			mat3x3[1]= ThisVect.m_Vector[1];
-			mat3x3[2]= ThisVect.m_Vector[2];
+    GLC_Vector3d thisVect(*this);
+    thisVect.normalize();
+    other.normalize();
 
-			mat3x3[3]= Vect.m_Vector[0];
-			mat3x3[4]= Vect.m_Vector[1];
-			mat3x3[5]= Vect.m_Vector[2];
+    // Rotation axis
+    const GLC_Vector3d dir((thisVect ^ other).normalize());
+    // Check if the rotation axis vector is null
+    if (!dir.isNull())
+    {
+        subject= atan2((thisVect ^ (other)) * dir, thisVect * (other));
+    }
 
-			mat3x3[6]= dir.m_Vector[0];
-			mat3x3[7]= dir.m_Vector[1];
-			mat3x3[8]= dir.m_Vector[2];
+    return subject;
+}
 
-			double det= getDeterminant3x3(mat3x3);
+double GLC_Vector3d::angleWithVect2(GLC_Vector3d other) const
+{
+    double subject= 0.0;
 
-			double sign= 1.0;
-			if (det != 0) sign= fabs(det) / det;
-			angle= acos(ThisVect * Vect) * sign;
-		}
-	}
+    GLC_Vector3d thisVect(*this);
+    thisVect.normalize();
+    other.normalize();
+    if (other == thisVect.inverted())
+    {
+        subject= glc::PI;
+    }
+    else if (other != thisVect)
+    {
+        // Rotation axis
+        const GLC_Vector3d dir((thisVect ^ other).normalize());
+        // Check if the rotation axis vector is null
+        if (!dir.isNull())
+        {
+            subject= atan2((thisVect ^ (other)) * dir, thisVect * (other));
+        }
+    }
 
-	return angle;
+    return subject;
+}
+
+double GLC_Vector3d::signedAngleWithVect(GLC_Vector3d other, const GLC_Vector3d& dir) const
+{
+    double subject= 0.0;
+
+    GLC_Vector3d thisVect(*this);
+    thisVect.normalize();
+    other.normalize();
+    if (other == thisVect.inverted())
+    {
+        subject= glc::PI;
+    }
+    else if (other != thisVect)
+    {
+        subject= atan2((thisVect ^ (other)) * dir, thisVect * (other));
+    }
+
+    return subject;
 }
 
 QString GLC_Vector3d::toString() const
@@ -494,7 +546,14 @@ QString GLC_Vector3d::toString() const
 	result+= QString::number(m_Vector[1]) + QString(" , ");
 	result+= QString::number(m_Vector[2]) + QString("]");
 
-	return result;
+    return result;
+}
+
+QVector3D GLC_Vector3d::toQVector3D() const
+{
+    QVector3D subject(static_cast<float>(m_Vector[0]), static_cast<float>(m_Vector[1]), static_cast<float>(m_Vector[2]));
+
+    return subject;
 }
 
 #endif /*GLC_VECTOR3D_H_*/

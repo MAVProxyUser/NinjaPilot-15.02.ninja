@@ -33,7 +33,7 @@
 #include "../maths/glc_vector3df.h"
 #include "../sceneGraph/glc_structreference.h"
 #include "../sceneGraph/glc_structinstance.h"
-#include "../sceneGraph/glc_structoccurence.h"
+#include "../sceneGraph/glc_structoccurrence.h"
 
 // Lib3ds Header
 #include "3rdparty/lib3ds/file.h"
@@ -43,7 +43,6 @@
 #include "3rdparty/lib3ds/material.h"
 
 #include <QFileInfo>
-#include <QGLContext>
 
 GLC_3dsToWorld::GLC_3dsToWorld()
 : m_pWorld(NULL)
@@ -122,7 +121,7 @@ GLC_World* GLC_3dsToWorld::CreateWorldFrom3ds(QFile &file)
 	// Create GLC_3DViewInstance with Node
 	for (Lib3dsNode *pNode=m_pLib3dsFile->nodes; pNode!=0; pNode=pNode->next)
 	{
-		createMeshes(m_pWorld->rootOccurence(), pNode);
+		createMeshes(m_pWorld->rootOccurrence(), pNode);
 	}
 
 	// Load unloaded mesh name
@@ -135,7 +134,7 @@ GLC_World* GLC_3dsToWorld::CreateWorldFrom3ds(QFile &file)
 			strcpy(pNode->name, pMesh->name);
 			pNode->parent_id= LIB3DS_NO_PARENT;
 			lib3ds_file_insert_node(m_pLib3dsFile, pNode);
-			createMeshes(m_pWorld->rootOccurence(), pNode);
+			createMeshes(m_pWorld->rootOccurrence(), pNode);
 		}
 	}
 
@@ -187,12 +186,9 @@ void GLC_3dsToWorld::clear()
 }
 
 // Create meshes from the 3ds File
-void GLC_3dsToWorld::createMeshes(GLC_StructOccurence* pProduct, Lib3dsNode* pFatherNode)
+void GLC_3dsToWorld::createMeshes(GLC_StructOccurrence* pProduct, Lib3dsNode* pFatherNode)
 {
-	GLC_StructOccurence* pChildProduct= NULL;
-	Lib3dsMesh *pMesh= NULL;
-
-	if (pFatherNode->type == LIB3DS_OBJECT_NODE)
+    if (pFatherNode->type == LIB3DS_OBJECT_NODE)
 	{
 		//qDebug() << "Node type LIB3DS_OBJECT_NODE is named : " << QString(pFatherNode->name);
 		//qDebug() << "Node Matrix :";
@@ -201,7 +197,7 @@ void GLC_3dsToWorld::createMeshes(GLC_StructOccurence* pProduct, Lib3dsNode* pFa
 		// Check if the node is a mesh or dummy
 		if (!(strcmp(pFatherNode->name,"$$$DUMMY")==0))
 		{
-	    	pMesh = lib3ds_file_mesh_by_name(m_pLib3dsFile, pFatherNode->name);
+            Lib3dsMesh* pMesh = lib3ds_file_mesh_by_name(m_pLib3dsFile, pFatherNode->name);
 		    if( pMesh != NULL )
 		    {
 		    	GLC_3DRep representation(create3DRep(pMesh));
@@ -245,7 +241,7 @@ void GLC_3dsToWorld::createMeshes(GLC_StructOccurence* pProduct, Lib3dsNode* pFa
 	// If there is a child, create a child product
 	if (NULL != pFatherNode->childs)
 	{
-		pChildProduct= new GLC_StructOccurence();
+        GLC_StructOccurrence* pChildProduct= new GLC_StructOccurrence();
 		pProduct->addChild(pChildProduct);
 
 		pChildProduct->setName(QString("Product") + QString::number(pFatherNode->node_id));
@@ -348,7 +344,7 @@ GLC_3DRep GLC_3dsToWorld::create3DRep(Lib3dsMesh* p3dsMesh)
 	}
 
 	// free normal memmory
-	delete[] normalL;
+    free(normalL);
 	// Compute loading progress
 	++m_CurrentMeshNumber;
 	m_CurrentQuantumValue = static_cast<int>((static_cast<double>(m_CurrentMeshNumber) / m_NumberOfMeshes) * (100 - m_InitQuantumValue)) + m_InitQuantumValue;

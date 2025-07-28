@@ -27,6 +27,7 @@
  */
 
 #include "qtcolorbutton.h"
+#include "qtcolorbutton_p.h"
 
 #include <QtCore/QMimeData>
 #include <QtWidgets/QApplication>
@@ -36,35 +37,16 @@
 #include <QPainter>
 
 namespace Utils {
-class QtColorButtonPrivate {
-    QtColorButton *q_ptr;
-    Q_DECLARE_PUBLIC(QtColorButton)
-public:
-    QColor m_color;
-#ifndef QT_NO_DRAGANDDROP
-    QColor m_dragColor;
-    QPoint m_dragStart;
-    bool m_dragging;
-#endif
-    bool m_backgroundCheckered;
-    bool m_alphaAllowed;
-
-    void slotEditColor();
-    QColor shownColor() const;
-    QPixmap generatePixmap() const;
-};
 
 void QtColorButtonPrivate::slotEditColor()
 {
     QColor newColor;
 
     if (m_alphaAllowed) {
-        bool ok;
-        const QRgb rgba = QColorDialog::getRgba(m_color.rgba(), &ok, q_ptr);
-        if (!ok) {
+        newColor = QColorDialog::getColor(m_color, q_ptr, QString(), QColorDialog::ShowAlphaChannel);
+        if (!newColor.isValid()) {
             return;
         }
-        newColor = QColor::fromRgba(rgba);
     } else {
         newColor = QColorDialog::getColor(m_color, q_ptr);
         if (!newColor.isValid()) {
@@ -124,11 +106,8 @@ QPixmap QtColorButtonPrivate::generatePixmap() const
 QtColorButton::QtColorButton(QWidget *parent)
     : QToolButton(parent)
 {
-    d_ptr = new QtColorButtonPrivate;
-    d_ptr->q_ptr = this;
+    d_ptr = new QtColorButtonPrivate(this);
     d_ptr->m_dragging     = false;
-    d_ptr->m_backgroundCheckered = true;
-    d_ptr->m_alphaAllowed = true;
 
     setAcceptDrops(true);
 
@@ -252,7 +231,7 @@ void QtColorButton::mouseMoveEvent(QMouseEvent *event)
         drg->setPixmap(d_ptr->generatePixmap());
         setDown(false);
         event->accept();
-        drg->start();
+        drg->exec();
         return;
     }
 #endif
@@ -293,5 +272,3 @@ void QtColorButton::dropEvent(QDropEvent *event)
 }
 #endif // ifndef QT_NO_DRAGANDDROP
 } // namespace Utils
-
-#include "moc_qtcolorbutton.cpp"

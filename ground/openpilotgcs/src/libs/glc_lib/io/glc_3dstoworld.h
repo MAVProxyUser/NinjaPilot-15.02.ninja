@@ -38,9 +38,8 @@
 #include "../glc_config.h"
 
 class GLC_World;
-class QGLContext;
 class GLC_Mesh;
-class GLC_StructOccurence;
+class GLC_StructOccurrence;
 class GLC_Material;
 
 struct Lib3dsFile;
@@ -86,7 +85,7 @@ public:
 
 	//! Get the list of attached files
 	inline QStringList listOfAttachedFileName() const
-	{return m_ListOfAttachedFileName.toList();}
+    {return m_ListOfAttachedFileName.values();}
 
 //@}
 
@@ -99,7 +98,7 @@ private:
 	void clear();
 
 	//! Create meshes from the 3ds File
-	void createMeshes(GLC_StructOccurence*, Lib3dsNode*);
+	void createMeshes(GLC_StructOccurrence*, Lib3dsNode*);
 
 	//! Create 3DRep from a Lib3dsMesh
 	GLC_3DRep create3DRep(Lib3dsMesh*);

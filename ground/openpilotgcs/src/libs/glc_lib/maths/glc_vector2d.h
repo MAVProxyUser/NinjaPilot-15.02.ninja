@@ -27,6 +27,7 @@
 
 #include <QString>
 #include <QPointF>
+#include <QMetaType>
 
 #include "glc_utils_maths.h"
 #include "glc_vector2df.h"
@@ -178,18 +179,18 @@ public:
     }
 
 	/*! Overload equality "==" operator*/
-	inline bool operator == (const GLC_Vector2d &Vect) const
+    inline bool operator == (const GLC_Vector2d &other) const
 	{
-        bool bResult= (qAbs(m_Vector[0]) - qAbs(Vect.m_Vector[0])) < glc::EPSILON;
-        bResult= bResult && ((qAbs(m_Vector[1]) - qAbs(Vect.m_Vector[1])) < glc::EPSILON);
+        bool subject= glc::fuzzyCompare(m_Vector[0], other.m_Vector[0]);
+        subject= subject && glc::fuzzyCompare(m_Vector[1], other.m_Vector[1]);
 
-		return bResult;
+        return subject;
 	}
 
 	/*! Overload "!=" operator*/
-	inline bool operator != (const GLC_Vector2d &Vect) const
+    inline bool operator != (const GLC_Vector2d &other) const
 	{
-		return !(*this == Vect);
+        return !(this->operator==(other));
 	}
 
 //@}
@@ -229,7 +230,7 @@ public:
 		return *this;
 	}
 
-	//! Set vector lenght from the given scalar and return a reference of this vector
+	//! Set vector length from the given scalar and return a reference of this vector
 	inline GLC_Vector2d& setLength(double);
 
 	//! Normalize this vector and return a reference to it
@@ -288,13 +289,15 @@ private:
 //! Define GLC_Point2D
 typedef GLC_Vector2d GLC_Point2d;
 
-inline GLC_Vector2d& GLC_Vector2d::setLength(double lenght)
-{
-    const double currentLenght= sqrt( m_Vector[0] * m_Vector[0] + m_Vector[1] * m_Vector[1]);
+Q_DECLARE_METATYPE(GLC_Vector2d)
 
-    if (currentLenght != 0.0f)
+inline GLC_Vector2d& GLC_Vector2d::setLength(double length)
+{
+    const double currentLength= sqrt( m_Vector[0] * m_Vector[0] + m_Vector[1] * m_Vector[1]);
+
+    if (currentLength != 0.0f)
 	{
-        const double Coef = lenght / currentLenght;
+        const double Coef = length / currentLength;
 
 		m_Vector[0] = m_Vector[0] * Coef;
 		m_Vector[1] = m_Vector[1] * Coef;

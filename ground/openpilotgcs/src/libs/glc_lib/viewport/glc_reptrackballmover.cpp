@@ -26,7 +26,6 @@
 #include "glc_viewport.h"
 #include "../glc_factory.h"
 #include "../glc_context.h"
-#include <QGLContext>
 
 using namespace glc;
 //! The angle of arcs
@@ -101,7 +100,7 @@ void GLC_RepTrackBallMover::init()
 	Q_ASSERT(!m_pRepMoverInfo->m_VectorInfo.isEmpty());
 	Q_ASSERT(!m_pRepMoverInfo->m_MatrixInfo.isEmpty());
 
-	GLC_Vector3d VectAngle(m_pRepMoverInfo->m_VectorInfo.first());
+    GLC_Vector3d VectAngle(m_pRepMoverInfo->m_VectorInfo.constFirst());
 	VectAngle.setZ(0);
 	VectAngle.setLength(1);
 
@@ -121,7 +120,7 @@ void GLC_RepTrackBallMover::init()
 	}
 
 	// Composition of orientation matrix and mapping matrix
-	MatRot= m_pRepMoverInfo->m_MatrixInfo.first() * MatRot;
+    MatRot= m_pRepMoverInfo->m_MatrixInfo.constFirst() * MatRot;
 
 	m_Arc1.setMatrix(MatRot * m_MatArc1);
 	m_Arc2.setMatrix(MatRot * m_MatArc2);
@@ -132,7 +131,7 @@ void GLC_RepTrackBallMover::update()
 {
 	Q_ASSERT(NULL != m_pRepMoverInfo);
 	Q_ASSERT(!m_pRepMoverInfo->m_MatrixInfo.isEmpty());
-	const GLC_Matrix4x4 matrix(m_pRepMoverInfo->m_MatrixInfo.first());
+    const GLC_Matrix4x4 matrix(m_pRepMoverInfo->m_MatrixInfo.constFirst());
 	m_Arc1.multMatrix(matrix);
 	m_Arc2.multMatrix(matrix);
 }
@@ -159,13 +158,15 @@ void GLC_RepTrackBallMover::glDraw()
 	// orbit circle must be shown
 	glDisable(GL_DEPTH_TEST);
 
-	GLC_Context::current()->glcMatrixMode(GL_PROJECTION);
-	GLC_Context::current()->glcPushMatrix();
-	GLC_Context::current()->glcLoadIdentity();
-	GLC_Context::current()->glcOrtho(aspectRatio * -1.0 ,aspectRatio * 1.0 ,-1.0 ,1.0 ,-1.0 ,1.0);
-	GLC_Context::current()->glcMatrixMode(GL_MODELVIEW);
-	GLC_Context::current()->glcPushMatrix();
-	GLC_Context::current()->glcLoadIdentity();
+    GLC_Context* pContext= GLC_ContextManager::instance()->currentContext();
+
+    pContext->glcMatrixMode(GL_PROJECTION);
+    pContext->glcPushMatrix();
+    pContext->glcLoadIdentity();
+    pContext->glcOrtho(aspectRatio * -1.0 ,aspectRatio * 1.0 ,-1.0 ,1.0 ,-1.0 ,1.0);
+    pContext->glcMatrixMode(GL_MODELVIEW);
+    pContext->glcPushMatrix();
+    pContext->glcLoadIdentity();
 
 	glDisable(GL_BLEND);
 	m_RenderProperties.setRenderingFlag(glc::WireRenderFlag);
@@ -184,10 +185,10 @@ void GLC_RepTrackBallMover::glDraw()
 	// Display base class (Main circle)
 	m_MainCircle.render(m_RenderProperties);
 
-	GLC_Context::current()->glcPopMatrix();
-	GLC_Context::current()->glcMatrixMode(GL_PROJECTION);
-	GLC_Context::current()->glcPopMatrix();
-	GLC_Context::current()->glcMatrixMode(GL_MODELVIEW);
+    pContext->glcPopMatrix();
+    pContext->glcMatrixMode(GL_PROJECTION);
+    pContext->glcPopMatrix();
+    pContext->glcMatrixMode(GL_MODELVIEW);
 
 }
 
@@ -218,7 +219,7 @@ void GLC_RepTrackBallMover::computeRadius()
 	// Circle radius in OpenGL unit = Radius(Pixel) * (dimend GL / dimens Pixel)
 	const double RayonSph= fabs((static_cast<double>(nRayonSph) * ChampsVision / winVSize));
 
-	if ((!qFuzzyCompare(RayonSph, 0.0) && !qFuzzyCompare(RayonSph - m_Radius, 0.0)) || (RayonSph < 2.0))
+	if ((!glc::fuzzyCompare(RayonSph, 0.0) && !glc::fuzzyCompare(RayonSph - m_Radius, 0.0)) || (RayonSph < 2.0))
 	{
 		// Main circle radius
 		m_MainCircle.setRadius(RayonSph);

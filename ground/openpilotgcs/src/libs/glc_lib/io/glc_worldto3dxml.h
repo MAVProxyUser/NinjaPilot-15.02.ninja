@@ -32,7 +32,9 @@
 
 class QuaZip;
 class QuaZipFile;
+QT_BEGIN_NAMESPACE
 class QFile;
+QT_END_NAMESPACE
 class GLC_Mesh;
 
 //////////////////////////////////////////////////////////////////////
@@ -48,7 +50,8 @@ public:
 	{
 		Compressed3dxml,
 		Exploded3dxml,
-		StructureOnly
+        StructureOnly,
+        CompressedNative
 	};
 //////////////////////////////////////////////////////////////////////
 /*! @name Constructor / Destructor */
@@ -67,11 +70,15 @@ public:
 	//! Save the world to the specified file name
 	bool exportTo3dxml(const QString& filename, GLC_WorldTo3dxml::ExportType exportType, bool exportMaterial= true);
 
+    bool exportTo3dxml(QIODevice* pDevice, const QString& fileName);
+
+    bool exportToNative(QIODevice* pDevice, const QString& fileName);
+
 	//! Save the given 3DRep into the given path name
 	bool exportReferenceTo3DRep(const GLC_3DRep* p3DRep, const QString& fullFileName);
 
 	//! Set the name of the 3dxml generator default is GLC_LIB
-	inline void setGeneratorName(const QString& generator)
+    void setGeneratorName(const QString& generator)
 	{m_Generator= generator;}
 
 	//! set interrupt flag adress
@@ -108,8 +115,8 @@ private:
 	//! Export the assembly structure from the list of reference
 	void exportAssemblyStructure();
 
-	//! Export assembly from the given occurence
-	void exportAssemblyFromOccurence(const GLC_StructOccurence* pOccurence);
+	//! Export assembly from the given occurrence
+	void exportAssemblyFromOccurrence(const GLC_StructOccurrence* pOccurrence);
 
 	//! Return the 3DXML string of the given matrix
 	QString matrixString(const GLC_Matrix4x4& matrix);
@@ -153,6 +160,8 @@ private:
 	//! Write all material related files in the 3dxml
 	void writeAllMaterialRelatedFilesIn3dxml();
 
+    void writeAllMaterialTextureFilesIn3dxml();
+
 	//! Write image file in 3DXML archive or folder
 	void writeImageFileIn3dxml(const QList<GLC_Material*>& materialList);
 
@@ -171,8 +180,8 @@ private:
 	//! Write extension attributes to 3DXML
 	void writeExtensionAttributes(GLC_Attributes* pAttributes);
 
-	//! Write the default view property of the given occurence
-	void writeOccurenceDefaultViewProperty(const GLC_StructOccurence* pOccurence);
+	//! Write the default view property of the given occurrence
+	void writeOccurrenceDefaultViewProperty(const GLC_StructOccurrence* pOccurrence);
 
 	//! return true if export must continu
 	bool continu();
@@ -180,8 +189,8 @@ private:
 	//! Return the simplified name of the given name
 	QString symplifyName(QString name);
 
-	//! Return the path of the given occurence
-	QList<unsigned int> instancePath(const GLC_StructOccurence* pOccurence);
+	//! Return the path of the given occurrence
+	QList<unsigned int> instancePath(const GLC_StructOccurrence* pOccurrence);
 
 //@}
 
@@ -261,8 +270,8 @@ private:
 	//! file name increment
 	unsigned int m_FileNameIncrement;
 
-	//! List of structOccurence with overload properties
-	QList<const GLC_StructOccurence*> m_ListOfOverLoadedOccurence;
+	//! List of structOccurrence with overload properties
+	QList<const GLC_StructOccurrence*> m_ListOfOverLoadedOccurrence;
 
 	//! Mutex
 	QReadWriteLock* m_pReadWriteLock;

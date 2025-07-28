@@ -32,6 +32,8 @@
 #include "../glc_config.h"
 
 class GLC_3DViewCollection;
+class GLC_World;
+class GLC_StructOccurrence;
 
 //////////////////////////////////////////////////////////////////////
 //! \class GLC_Renderer
@@ -73,9 +75,19 @@ public:
 	//! Return the renderProperties of the given instance id
 	const GLC_RenderProperties& renderPropertiesOfInstance(GLC_uint id) const;
 
-    //! Return true if this renderer is current
-    inline bool isCurrent() const
-    {return m_IsCurrent;}
+    //! Return true if this rendrer is equal to the given render
+    bool operator==(const GLC_Renderer& other) const;
+
+    //! Return true if this rendrer is not equal to the given render
+    inline bool operator!=(const GLC_Renderer& other) const
+    {return !this->operator ==(other);}
+
+    //! Return true if this render is empty
+    bool isEmpty() const;
+
+    //! Return defined render properties
+    inline QHash<GLC_uint, GLC_RenderProperties> definedRenderProperties() const
+    {return m_IdToRenderProperties;}
 
 //@}
 
@@ -93,22 +105,31 @@ public:
 	//! Set the collection to use
 	void setCollection(GLC_3DViewCollection* pCollection);
 
-	//! Set this renderer the current renderer
-	/*! Apply stored renderProperties to the attached collection*/
-	void setCurrent();
+    //! Apply stored renderProperties to the attached collection
+    void apply();
 
-	//! Unset this rendere the current rendere
-	/*! Save the render properties of all instance of the scene*/
-	void unSetCurrent();
+    //! Save the render properties of all instance of the scene
+    void save();
+
+    //! Update the render properties of missing instance
+    void updateMissingInstances();
+
+    //! Bind with world
+    void bind(GLC_World &world);
 
 	//! Add the renderProperties of the given instance id
 	void addRenderPropertiesOfInstanceId(GLC_uint id);
+
+    //! Set the given renderProperties to the given instance id
+    void setRenderProperties(GLC_uint id, const GLC_RenderProperties& renderProperies);
 //@}
 
 //////////////////////////////////////////////////////////////////////
 // Private services fonction
 //////////////////////////////////////////////////////////////////////
 private:
+    //! Propagate the render properties to chid occurrences with 3DViewInstances
+    void propagateRenderProperties(GLC_StructOccurrence* pOcc, const GLC_RenderProperties& properties, bool );
 
 //////////////////////////////////////////////////////////////////////
 // Private Members
@@ -118,8 +139,6 @@ private:
 	GLC_3DViewCollection* m_pCollection;
 
 	QHash<GLC_uint, GLC_RenderProperties> m_IdToRenderProperties;
-
-    bool m_IsCurrent;
 
 };
 

@@ -71,13 +71,11 @@ GLC_Mover* GLC_FlyMover::clone() const
 void GLC_FlyMover::init(const GLC_UserInput& userInput)
 {
 	m_PreviousVector= mapForFlying(static_cast<double>(userInput.x()), static_cast<double>(userInput.y()));
-	GLC_Point3d point= m_pViewport->unProject(userInput.x(), userInput.y());
-	const double distance= (point - m_pViewport->cameraHandle()->eye()).length();
-	m_pViewport->cameraHandle()->setDistTargetEye(distance);
+    const double distance= m_pViewport->cameraHandle()->distEyeTarget();
 	// 5 secondes to travel
 	m_Velocity= distance / 5000;
 
-	GLC_Mover::m_MoverInfo.m_DoubleInfo.first()= m_Velocity;
+    GLC_Mover::m_MoverInfo.m_DoubleInfo.first()= m_Velocity;
 
 	// Start the timer
 	m_TimerId= QObject::startTimer(m_TimerInterval);
@@ -86,9 +84,6 @@ void GLC_FlyMover::init(const GLC_UserInput& userInput)
 bool GLC_FlyMover::move(const GLC_UserInput& userInput)
 {
 	m_PreviousVector= mapForFlying(static_cast<double>(userInput.x()), static_cast<double>(userInput.y()));
-	GLC_Point3d point= m_pViewport->unProject(userInput.x(), userInput.y());
-	const double distance= (point - m_pViewport->cameraHandle()->eye()).length();
-	m_pViewport->cameraHandle()->setDistTargetEye(distance);
 
 	return false;
 }
@@ -101,13 +96,13 @@ void GLC_FlyMover::ends()
 void GLC_FlyMover::setFlyingVelocity(double velocity)
 {
 	m_Velocity= velocity;
-	GLC_Mover::m_MoverInfo.m_DoubleInfo.first()= m_Velocity;
+    GLC_Mover::m_MoverInfo.m_DoubleInfo.first()= m_Velocity;
 }
 
 void GLC_FlyMover::increaseVelocity(double factor)
 {
 	m_Velocity*= factor;
-	GLC_Mover::m_MoverInfo.m_DoubleInfo.first()= m_Velocity;
+    GLC_Mover::m_MoverInfo.m_DoubleInfo.first()= m_Velocity;
 }
 
 void GLC_FlyMover::timerEvent(QTimerEvent*)
@@ -149,7 +144,7 @@ GLC_Vector3d GLC_FlyMover::mapForFlying(double x, double y)
 	{
 		pos.normalize();
 	}
-	GLC_Mover::m_MoverInfo.m_VectorInfo.first()= pos;
+    GLC_Mover::m_MoverInfo.m_VectorInfo.first()= pos;
 	GLC_Mover::updateRepresentation();
 
 	double z= -cos(m_TurnRate) / sin(m_TurnRate);

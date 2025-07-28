@@ -31,6 +31,9 @@
 #include "../shading/glc_selectionmaterial.h"
 #include "../glc_state.h"
 #include "../sceneGraph/glc_3dviewinstance.h"
+#include "../geometry/glc_point.h"
+#include "../glc_factory.h"
+#include "../glc_context.h"
 
 #include <QtDebug>
 
@@ -40,31 +43,32 @@ using namespace glc;
 //////////////////////////////////////////////////////////////////////
 
 GLC_Viewport::GLC_Viewport()
-// Camera definition
-: m_pViewCam(new GLC_Camera())				// Camera
-, m_DistanceMax(500.0)			// Camera Maximum distance
-, m_dDistanceMini(0.01)			// Camera Minimum distance
-, m_ViewAngle(35)					// Camera angle of view
-, m_ViewTangent(tan(glc::toRadian(m_ViewAngle)))
-, m_pImagePlane(NULL)			// Background image
-// OpenGL Window size
-, m_WindowHSize(0)				// Horizontal OpenGL viewport size
-, m_WindowVSize(0)				// Vertical OpenGL viewport size
-, m_AspectRatio(1.0)
-// the default backgroundColor
-, m_BackgroundColor(Qt::black)
-, m_SelectionSquareSize(4)
-, m_ProjectionMatrix()
-, m_Frustum()
-, m_ClipPlanesHash()
-, m_UseClipPlane(false)
-, m_3DWidgetCollection()
-, m_UseParallelProjection(false)
-, m_MinimumStaticPixelSize(10)
-, m_MinimumStaticRatioSize(0.0)
-, m_MinimumDynamicRatioSize(0.0)
+    : m_pViewCam(new GLC_Camera())				// Camera
+    , m_DistanceMax(500.0)			// Camera Maximum distance
+    , m_dDistanceMini(0.01)			// Camera Minimum distance
+    , m_ViewAngle(35)					// Camera angle of view
+    , m_ViewTangent(tan(glc::toRadian(m_ViewAngle)))
+    , m_pImagePlane(NULL)			// Background image
+    // OpenGL Window size
+    , m_Width(0)				// Horizontal OpenGL viewport size
+    , m_Height(1)				// Vertical OpenGL viewport size
+    , m_AspectRatio(1.0)
+    // the default backgroundColor
+    , m_BackgroundColor(Qt::black)
+    , m_SelectionSquareSize(4)
+    , m_ProjectionMatrix()
+    , m_Frustum()
+    , m_ClipPlanesHash()
+    , m_UseClipPlane(false)
+    , m_3DWidgetCollection()
+    , m_UseParallelProjection(false)
+    , m_MinimumStaticPixelSize(10)
+    , m_MinimumStaticRatioSize(0.0)
+    , m_MinimumDynamicRatioSize(0.0)
+    , m_TextRenderingCollection()
+    , m_DevicePixelRatio(1)
 {
-	updateMinimumRatioSize();
+
 }
 
 GLC_Viewport::~GLC_Viewport()
@@ -80,37 +84,42 @@ GLC_Viewport::~GLC_Viewport()
 	{
 		delete iClip.value();
 		++iClip;
-	}
+    }
+}
+
+QSize GLC_Viewport::size() const
+{
+    return QSize(m_Width, m_Height);
 }
 
 //////////////////////////////////////////////////////////////////////
 // Get Functions
 //////////////////////////////////////////////////////////////////////
-GLC_Point2d  GLC_Viewport::normalyseMousePosition(int x, int y)
+GLC_Point2d  GLC_Viewport::normalyseMousePosition(int x, int y) const
 {
 	double nX= 0.0;
 	double nY= 0.0;
-	if (m_WindowHSize != 0)
+    if (m_Width != 0)
 	{
-		nX= static_cast<double>(x) / static_cast<double>(m_WindowHSize);
+        nX= static_cast<double>(x) / static_cast<double>(m_Width);
 	}
 
-	if (m_WindowVSize != 0)
+    if (m_Height != 0)
 	{
-		nY= static_cast<double>(y) / static_cast<double>(m_WindowVSize);
+        nY= static_cast<double>(y) / static_cast<double>(m_Height);
 	}
 
 	return GLC_Point2d(nX, nY);
 }
 
-GLC_Point2d GLC_Viewport::mapToOpenGLScreen(int x, int y)
+GLC_Point2d GLC_Viewport::mapToOpenGLScreen(int x, int y) const
 {
 	GLC_Point2d nPos= normalyseMousePosition(x, y);
 
 	return mapNormalyzeToOpenGLScreen(nPos.x(), nPos.y());
 }
 
-GLC_Point2d GLC_Viewport::mapNormalyzeToOpenGLScreen(double x, double y)
+GLC_Point2d GLC_Viewport::mapNormalyzeToOpenGLScreen(double x, double y) const
 {
 	GLC_Point2d pos(x, y);
 	pos= pos * 2.0;
@@ -122,8 +131,8 @@ GLC_Point2d GLC_Viewport::mapNormalyzeToOpenGLScreen(double x, double y)
 GLC_Vector3d GLC_Viewport::mapPosMouse( GLdouble Posx, GLdouble Posy) const
 {
 	// Change the window origin (Up Left -> centred)
-	Posx= Posx - static_cast<double>(m_WindowHSize)  / 2.0;
-	Posy= static_cast<double>(m_WindowVSize) / 2.0 - Posy;
+    Posx= Posx - static_cast<double>(m_Width)  / 2.0;
+    Posy= static_cast<double>(m_Height) / 2.0 - Posy;
 
 	GLC_Vector3d VectMouse(Posx, Posy,0);
 
@@ -132,7 +141,7 @@ GLC_Vector3d GLC_Viewport::mapPosMouse( GLdouble Posx, GLdouble Posy) const
 
 	// the side of camera's square is mapped on Vertical length of window
 	// Ratio OpenGL/Pixel = dimend GL / dimens Pixel
-	const double Ratio= ChampsVision / static_cast<double>(m_WindowVSize);
+    const double Ratio= ChampsVision / static_cast<double>(m_Height);
 
 	VectMouse= VectMouse * Ratio;
 
@@ -141,8 +150,8 @@ GLC_Vector3d GLC_Viewport::mapPosMouse( GLdouble Posx, GLdouble Posy) const
 
 GLC_Vector3d GLC_Viewport::mapNormalyzePosMouse(double Posx, double Posy) const
 {
-	double screenX= Posx * static_cast<double>(m_WindowHSize);
-	double screenY= Posy * static_cast<double>(m_WindowVSize);
+    double screenX= Posx * static_cast<double>(m_Width);
+    double screenY= Posy * static_cast<double>(m_Height);
 	return mapPosMouse(screenX, screenY);
 }
 
@@ -152,52 +161,105 @@ GLC_Vector3d GLC_Viewport::mapNormalyzePosMouse(double Posx, double Posy) const
 
 void GLC_Viewport::initGl()
 {
+    QOpenGLFunctions glFuncts(QOpenGLContext::currentContext());
+
 	glClearColor(m_BackgroundColor.redF(), m_BackgroundColor.greenF(), m_BackgroundColor.blueF(), 1.0f);
 	glClearDepth(1.0f);                                   // Depth Buffer Setup
-	glShadeModel(GL_SMOOTH);                              // Enable Smooth Shading
-	glEnable(GL_DEPTH_TEST);                              // Enables Depth Testing
-	glDepthFunc(GL_LEQUAL);                               // The Type Of Depth Testing To Do
+    glShadeModel(GL_SMOOTH);                              // Enable Smooth Shading
+
+    // Depth test
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LEQUAL);
+
 	glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST);    // Really Nice Perspective Calculation
 	glTexEnvf( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glPolygonOffset (1.0f, 1.0f);
+    glFuncts.glBlendColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glFuncts.glBlendEquation(GL_FUNC_ADD);
+
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_ALPHA_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glEnable(GL_DITHER);
+    glDisable(GL_FOG);
+    glDisable(GL_COLOR_MATERIAL);
+    glDisable(GL_INDEX_LOGIC_OP);
+    glDisable(GL_COLOR_LOGIC_OP);
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_POLYGON_OFFSET_FILL);
+
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_TRUE);
+
+    glEnable(GL_NORMALIZE);
 }
 
-void GLC_Viewport::glExecuteCam(void)
+void GLC_Viewport::glExecuteCam(const QImage& image, bool preserveRatio)
 {
-	renderImagePlane();
+    if (!image.isNull())
+    {
+        GLC_ImagePlane* pOldImagePlane= m_pImagePlane;
+        m_pImagePlane= new GLC_ImagePlane(image, preserveRatio);
+        renderImagePlane();
+        delete m_pImagePlane;
+        m_pImagePlane= pOldImagePlane;
+    }
+    else
+    {
+        renderImagePlane();
+    }
 	m_pViewCam->glExecute();
 }
 
-void GLC_Viewport::updateProjectionMat(void)
+void GLC_Viewport::updateProjectionMat(bool updateOpenGL)
 {
-	GLC_Context::current()->glcMatrixMode(GL_PROJECTION);						// select The Projection Matrix
-	GLC_Context::current()->glcLoadIdentity();									// Reset The Projection Matrix
-
 	if (m_UseParallelProjection)
 	{
-		const double ChampsVision = m_pViewCam->distEyeTarget() * m_ViewTangent;
-		const double height= ChampsVision;
-		const double with= ChampsVision * m_AspectRatio;
+        const double height= m_pViewCam->distEyeTarget() * m_ViewTangent;
+        const double with= height * m_AspectRatio;
 		const double left= -with * 0.5;
 		const double right=  -left;
 		const double bottom= - height * 0.5;
 		const double top= -bottom;
-		GLC_Context::current()->glcOrtho(left, right, bottom, top, m_dDistanceMini, m_DistanceMax);
+        if (updateOpenGL)
+        {
+            GLC_Context* pContext= GLC_ContextManager::instance()->currentContext();
+            pContext->glcMatrixMode(GL_PROJECTION);
+            pContext->glcLoadIdentity();
+
+            pContext->glcOrtho(left, right, bottom, top, m_dDistanceMini, m_DistanceMax);
+            m_ProjectionMatrix= pContext->projectionMatrix();
+            pContext->glcMatrixMode(GL_MODELVIEW);
+        }
+        else
+        {
+            m_ProjectionMatrix= GLC_Matrix4x4::orthonormalMatrix(left, right, bottom, top, m_dDistanceMini, m_DistanceMax);
+        }
+
 	}
 	else
 	{
-	    const double yMax= m_dDistanceMini * tan(m_ViewAngle * glc::PI / 360.0);
+        const double yMax= m_dDistanceMini * tan(m_ViewAngle * glc::PI / 360.0);
 	    const double yMin= -yMax;
 	    const double xMax= yMax * m_AspectRatio;
 	    const double xMin= -xMax;
-	    GLC_Context::current()->glcFrustum(xMin, xMax, yMin, yMax, m_dDistanceMini, m_DistanceMax);
+        if (updateOpenGL)
+        {
+            GLC_Context* pContext= GLC_ContextManager::instance()->currentContext();
+            pContext->glcMatrixMode(GL_PROJECTION);
+            pContext->glcLoadIdentity();
+
+            pContext->glcFrustum(xMin, xMax, yMin, yMax, m_dDistanceMini, m_DistanceMax);
+            m_ProjectionMatrix= pContext->projectionMatrix();
+            pContext->glcMatrixMode(GL_MODELVIEW);
+        }
+        else
+        {
+            m_ProjectionMatrix= GLC_Matrix4x4::frustumMatrix(xMin, xMax, yMin, yMax, m_dDistanceMini, m_DistanceMax);
+        }
 	}
-
-	// Save the projection matrix
-	m_ProjectionMatrix= GLC_Context::current()->projectionMatrix();
-
-	GLC_Context::current()->glcMatrixMode(GL_MODELVIEW);							// select The Modelview Matrix
 }
 
 void GLC_Viewport::forceAspectRatio(double ratio)
@@ -209,7 +271,7 @@ void GLC_Viewport::forceAspectRatio(double ratio)
 void GLC_Viewport::updateAspectRatio()
 {
 	// Update The Aspect Ratio Of The Window
-	m_AspectRatio= static_cast<double>(m_WindowHSize)/static_cast<double>(m_WindowVSize);
+    m_AspectRatio= static_cast<double>(m_Width)/static_cast<double>(m_Height);
 }
 GLC_Frustum GLC_Viewport::selectionFrustum(int x, int y) const
 {
@@ -248,33 +310,113 @@ GLC_Frustum GLC_Viewport::selectionFrustum(int x, int y) const
 	return selectionFrustum;
 }
 
-GLC_Point3d GLC_Viewport::unProject(int x, int y) const
+GLC_Point3d GLC_Viewport::unproject(int x, int y, GLenum buffer, bool onGeometry) const
 {
+    GLC_Point3d subject;
+
 	// Z Buffer component of the given coordinate is between 0 and 1
 	GLfloat Depth;
 	// read selected point
-	glReadPixels(x, m_WindowVSize - y , 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &Depth);
+    glReadBuffer(buffer);
+    glReadPixels(x, m_Height - y , 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &Depth);
 
-	// The current viewport opengl definition
-	GLint Viewport[4];
-	glGetIntegerv(GL_VIEWPORT, Viewport);
+    // if on geometry mode and the point is not on geometry return null point
+    if (!glc::fuzzyCompare(Depth, 1.0f) || !onGeometry)
+    {
+        // The current viewport opengl definition
+        GLint viewport[4]= {0, 0, m_Width, m_Height};
 
-	// OpenGL ccordinate of selected point
-	GLdouble pX, pY, pZ;
-	glc::gluUnProject((GLdouble) x, (GLdouble) (m_WindowVSize - y) , Depth
-		, m_pViewCam->modelViewMatrix().getData(), m_ProjectionMatrix.getData(), Viewport, &pX, &pY, &pZ);
+        // OpenGL ccordinate of selected point
+        GLdouble pX, pY, pZ;
+        glc::gluUnProject((GLdouble) x, (GLdouble) (m_Height - y) , Depth
+            , m_pViewCam->modelViewMatrix().getData(), m_ProjectionMatrix.getData(), viewport, &pX, &pY, &pZ);
 
-	return GLC_Point3d(pX, pY, pZ);
+        subject.setVect(pX, pY, pZ);
+    }
+    return subject;
 }
 
-QList<GLC_Point3d> GLC_Viewport::unproject(const QList<int>& list)const
+GLC_Point2d GLC_Viewport::project(const GLC_Point3d &point, bool useCameraMatrix) const
 {
-	const int size= list.size();
+    GLC_Matrix4x4 modelView;
+    GLC_Matrix4x4 projectionMatrix;
+
+    GLint viewport[4]= {0, 0, m_Width, m_Height};
+    if (useCameraMatrix)
+    {
+        modelView= m_pViewCam->modelViewMatrix();
+        projectionMatrix= m_ProjectionMatrix;
+    }
+    else
+    {
+        modelView= GLC_Context::current()->modelViewMatrix();
+        glGetIntegerv(GL_VIEWPORT, viewport);
+        projectionMatrix= GLC_Context::current()->projectionMatrix();
+    }
+
+    double x;
+    double y;
+    double z;
+    glc::gluProject(point.x(), point.y(), point.z(), modelView.getData(), projectionMatrix.getData(), viewport, &x, &y, &z);
+
+    GLC_Vector2d subject;
+    subject.setX(x);
+    subject.setY(y);
+
+    return subject;
+}
+
+QList<GLC_Point2d> GLC_Viewport::project(const QList<GLC_Point3d> &points, bool useCameraMatrix) const
+{
+    QList<GLC_Point2d> subject;
+
+    GLC_Matrix4x4 modelView;
+    GLC_Matrix4x4 projectionMatrix;
+
+    GLint viewport[4]= {0, 0, m_Width, m_Height};
+    if (useCameraMatrix)
+    {
+        modelView= m_pViewCam->modelViewMatrix();
+        projectionMatrix= m_ProjectionMatrix;
+    }
+    else
+    {
+        modelView= GLC_Context::current()->modelViewMatrix();
+        glGetIntegerv(GL_VIEWPORT, viewport);
+        projectionMatrix= GLC_Context::current()->projectionMatrix();
+    }
+
+    double x;
+    double y;
+    double z;
+
+    const int count= points.count();
+    for (int i= 0; i < count; ++i)
+    {
+        const GLC_Point3d point= points.at(i);
+        glc::gluProject(point.x(), point.y(), point.z(), modelView.getData(), projectionMatrix.getData(), viewport, &x, &y, &z);
+        subject.append(GLC_Point2d(x, y));
+    }
+
+    return subject;
+}
+
+GLC_Point3d GLC_Viewport::fuzzyUnproject(int x, int y, double z) const
+{
+    const GLC_Point2d position= mapToOpenGLScreen(x, y);
+    const GLC_Point3d position3d(position.x(), position.y(), z);
+    const GLC_Point3d subject= compositionMatrix().inverted() * position3d;
+
+    return subject;
+}
+
+QList<GLC_Point3d> GLC_Viewport::unproject(const QList<int>& list, GLenum buffer)const
+{
+    const int size= list.size();
 	Q_ASSERT((size % 2) == 0);
 
 	// The current viewport opengl definition
-	GLint Viewport[4];
-	glGetIntegerv(GL_VIEWPORT, Viewport);
+    GLint viewport[4]= {0, 0, m_Width, m_Height};
 
 	// Z Buffer component of the given coordinate is between 0 and 1
 	GLfloat Depth;
@@ -284,16 +426,48 @@ QList<GLC_Point3d> GLC_Viewport::unproject(const QList<int>& list)const
 	QList<GLC_Point3d> unprojectedPoints;
 	for (int i= 0; i < size; i+= 2)
 	{
-		const int x= list.at(i);
-		const int y= m_WindowVSize - list.at(i + 1);
+        const int x= list.at(i);
+        const int y= m_Height - list.at(i + 1);
+        glReadBuffer(buffer);
 		glReadPixels(x, y , 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &Depth);
 
 		glc::gluUnProject(static_cast<GLdouble>(x), static_cast<GLdouble>(y) , Depth , m_pViewCam->modelViewMatrix().getData()
-				, m_ProjectionMatrix.getData(), Viewport, &pX, &pY, &pZ);
+                , m_ProjectionMatrix.getData(), viewport, &pX, &pY, &pZ);
 		unprojectedPoints.append(GLC_Point3d(pX, pY, pZ));
 	}
 
-	return unprojectedPoints;
+    return unprojectedPoints;
+}
+
+void GLC_Viewport::renderText(const GLC_Point3d& point, const QString &text, const QColor &color, const QFont &font, int deviceRatio)
+{
+    m_TextRenderingCollection.clear();
+    if (!text.isEmpty())
+    {
+        QFontMetrics fontMetrics(font);
+        const double height= fontMetrics.height();
+
+        // Compute the ratio betwwen screen and world
+        const GLC_Matrix4x4 invertedViewMatrix(GLC_Context::current()->modelViewMatrix().rotationMatrix().invert());
+        const GLC_Vector2d projectedPoint1(project(point, false));
+        const GLC_Vector3d vector(invertedViewMatrix * GLC_Vector3d(0.0, height, 0.0));
+        const GLC_Vector2d projectedPoint2(project((point + vector), false));
+        const double ratio= height / (projectedPoint2 - projectedPoint1).length();
+
+        GLC_3DViewInstance textInstance= GLC_Factory::instance()->createText(text, color, font);
+
+        GLC_Matrix4x4 matrix;
+        matrix.setMatScaling(ratio * deviceRatio, ratio * deviceRatio, ratio * deviceRatio);
+        matrix= GLC_Matrix4x4(point) * invertedViewMatrix * matrix;
+        textInstance.setMatrix(matrix);
+        m_TextRenderingCollection.add(textInstance);
+
+        glDisable(GL_DEPTH_TEST);
+        m_TextRenderingCollection.render(0, glc::TransparentRenderFlag);
+        glEnable(GL_DEPTH_TEST);
+
+        m_TextRenderingCollection.clear();
+    }
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -302,12 +476,11 @@ QList<GLC_Point3d> GLC_Viewport::unproject(const QList<int>& list)const
 
 void GLC_Viewport::renderImagePlane()
 {
-
 	if(!GLC_State::isInSelectionMode())
 	{
 		if (m_pImagePlane != NULL)
 		{
-			m_pImagePlane->render();
+            m_pImagePlane->render(m_AspectRatio);
 		}
 	}
 }
@@ -315,36 +488,47 @@ void GLC_Viewport::renderImagePlane()
 void GLC_Viewport::render3DWidget()
 {
 	m_3DWidgetCollection.render(0, glc::WireRenderFlag);
-	m_3DWidgetCollection.render(0, glc::TransparentRenderFlag);
+    m_3DWidgetCollection.render(0, glc::TransparentRenderFlag);
+}
+
+void GLC_Viewport::setWinGLSize(int width, int height, int devicePixelRatio, bool updateOpenGL)
+{
+    m_DevicePixelRatio= devicePixelRatio;
+    m_Width= width;
+    m_Height= height;
+
+    // Prevent A Divide By Zero By
+    if (m_Height == 0)
+    {
+        m_Height= 1;
+    }
+
+    updateAspectRatio();
+    updateMinimumRatioSize();
+
+    if (updateOpenGL)
+    {
+        glViewport(0, 0, m_Width * devicePixelRatio, m_Height * devicePixelRatio);
+        updateProjectionMat();
+    }
+
 }
 //////////////////////////////////////////////////////////////////////
 // Set Functions
 //////////////////////////////////////////////////////////////////////
 
-void GLC_Viewport::setWinGLSize(int HSize, int VSize)
+void GLC_Viewport::setWinGLSize(int width, int height, bool updateOpenGL)
 {
-	if ((m_WindowHSize != HSize) || (m_WindowVSize != VSize))
-	{
-		m_WindowHSize= HSize;
-		m_WindowVSize= VSize;
-
-		// from NeHe's Tutorial 3
-		if (m_WindowVSize == 0)								// Prevent A Divide By Zero By
-		{
-			m_WindowVSize= 1;									// Making Height Equal One
-		}
-
-		glViewport(0,0,m_WindowHSize,m_WindowVSize);			// Reset The Current Viewport
-
-		updateAspectRatio();
-
-		updateProjectionMat();
-
-		updateMinimumRatioSize();
-	}
+    const int devicePixelRatio= 1;
+    setWinGLSize(width, height, devicePixelRatio, updateOpenGL);
 }
 
-GLC_uint GLC_Viewport::renderAndSelect(int x, int y)
+void GLC_Viewport::setWinGLSize(const QSize &size, bool updateOpenGL)
+{
+    setWinGLSize(size.width(), size.height(), updateOpenGL);
+}
+
+GLC_uint GLC_Viewport::renderAndSelect(int x, int y, GLenum buffer)
 {
 	const QColor clearColor(Qt::black);
 	glClearColor(clearColor.redF(), clearColor.greenF(), clearColor.blueF(), 1.0f);
@@ -353,33 +537,34 @@ GLC_uint GLC_Viewport::renderAndSelect(int x, int y)
 	emit updateOpenGL();
 	GLC_State::setSelectionMode(false);
 
-	return selectOnPreviousRender(x, y);
+    return selectOnPreviousRender(x, y, buffer);
 }
 
-GLC_uint GLC_Viewport::selectOnPreviousRender(int x, int y)
+GLC_uint GLC_Viewport::selectOnPreviousRender(int x, int y, GLenum buffer)
 {
 	GLsizei width= m_SelectionSquareSize;
 	GLsizei height= width;
 	GLint newX= x - width / 2;
-	GLint newY= (m_WindowVSize - y) - height / 2;
+    GLint newY= (m_Height - y) - height / 2;
 	if (newX < 0) newX= 0;
 	if (newY < 0) newY= 0;
-
-	return meaningfulIdInsideSquare(newX, newY, width, height);
+    return meaningfullIdInsideSquare(newX, newY, width, height, buffer);
 }
-GLC_uint GLC_Viewport::selectBody(GLC_3DViewInstance* pInstance, int x, int y)
+GLC_uint GLC_Viewport::selectBody(GLC_3DViewInstance* pInstance, int x, int y, GLenum buffer)
 {
+    GLC_Context* pContext= GLC_ContextManager::instance()->currentContext();
+
 	const QColor clearColor(Qt::black);
 	glClearColor(clearColor.redF(), clearColor.greenF(), clearColor.blueF(), 1.0f);
 	GLC_State::setSelectionMode(true);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	GLC_Context::current()->glcLoadIdentity();
+    pContext->glcLoadIdentity();
 
 	glExecuteCam();
 
 	// Draw the scene
 	glDisable(GL_BLEND);
-	GLC_Context::current()->glcEnableLighting(false);
+    pContext->glcEnableLighting(false);
 	glDisable(GL_TEXTURE_2D);
 
 	pInstance->renderForBodySelection();
@@ -388,28 +573,30 @@ GLC_uint GLC_Viewport::selectBody(GLC_3DViewInstance* pInstance, int x, int y)
 	GLsizei width= 6;
 	GLsizei height= width;
 	GLint newX= x - width / 2;
-	GLint newY= (m_WindowVSize - y) - height / 2;
+    GLint newY= (m_Height - y) - height / 2;
 	if (newX < 0) newX= 0;
 	if (newY < 0) newY= 0;
 
-	return meaningfulIdInsideSquare(newX, newY, width, height);
+    return meaningfullIdInsideSquare(newX, newY, width, height, buffer);
 }
 
-QPair<int, GLC_uint> GLC_Viewport::selectPrimitive(GLC_3DViewInstance* pInstance, int x, int y)
+QPair<int, GLC_uint> GLC_Viewport::selectPrimitive(GLC_3DViewInstance* pInstance, int x, int y, GLenum buffer)
 {
+    GLC_Context* pContext= GLC_ContextManager::instance()->currentContext();
+
 	QPair<int, GLC_uint> result;
 
 	const QColor clearColor(Qt::black);
 	glClearColor(clearColor.redF(), clearColor.greenF(), clearColor.blueF(), 1.0f);
 	GLC_State::setSelectionMode(true);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	GLC_Context::current()->glcLoadIdentity();
+    pContext->glcLoadIdentity();
 
 	glExecuteCam();
 
 	// Draw the scene
 	glDisable(GL_BLEND);
-	GLC_Context::current()->glcEnableLighting(false);
+    pContext->glcEnableLighting(false);
 	glDisable(GL_TEXTURE_2D);
 
 	pInstance->renderForBodySelection();
@@ -418,11 +605,11 @@ QPair<int, GLC_uint> GLC_Viewport::selectPrimitive(GLC_3DViewInstance* pInstance
 	GLsizei width= 6;
 	GLsizei height= width;
 	GLint newX= x - width / 2;
-	GLint newY= (m_WindowVSize - y) - height / 2;
+    GLint newY= (m_Height - y) - height / 2;
 	if (newX < 0) newX= 0;
 	if (newY < 0) newY= 0;
 
-	GLC_uint bodyId= meaningfulIdInsideSquare(newX, newY, width, height);
+    GLC_uint bodyId= meaningfullIdInsideSquare(newX, newY, width, height, buffer);
 	if (bodyId == 0)
 	{
 		result.first= -1;
@@ -433,13 +620,13 @@ QPair<int, GLC_uint> GLC_Viewport::selectPrimitive(GLC_3DViewInstance* pInstance
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		result.first= pInstance->renderForPrimitiveSelection(bodyId);
-		result.second= meaningfulIdInsideSquare(newX, newY, width, height);
+        result.second= meaningfullIdInsideSquare(newX, newY, width, height, buffer);
 	}
 	GLC_State::setSelectionMode(false);
 	return result;
 }
 
-QSet<GLC_uint> GLC_Viewport::selectInsideSquare(int x1, int y1, int x2, int y2)
+QSet<GLC_uint> GLC_Viewport::selectInsideSquare(int x1, int y1, int x2, int y2, GLenum buffer)
 {
 	if (x1 > x2)
 	{
@@ -463,20 +650,21 @@ QSet<GLC_uint> GLC_Viewport::selectInsideSquare(int x1, int y1, int x2, int y2)
 	GLsizei width= x2 - x1;
 	GLsizei height= y1 - y2;
 	GLint newX= x1;
-	GLint newY= (m_WindowVSize - y1);
+    GLint newY= (m_Height - y1);
 	if (newX < 0) newX= 0;
 	if (newY < 0) newY= 0;
 
-	return listOfIdInsideSquare(newX, newY, width, height);
+    return listOfIdInsideSquare(newX, newY, width, height, buffer);
 }
 
-GLC_uint GLC_Viewport::meaningfulIdInsideSquare(GLint x, GLint y, GLsizei width, GLsizei height)
+GLC_uint GLC_Viewport::meaningfullIdInsideSquare(GLint x, GLint y, GLsizei width, GLsizei height, GLenum buffer)
 {
 	const int squareSize= width * height;
 	const GLsizei arraySize= squareSize * 4; // 4 -> R G B A
 	QVector<GLubyte> colorId(arraySize);
 
 	// Get the array of pixels
+    glReadBuffer(buffer);
 	glReadPixels(x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, colorId.data());
 
 	// Restore Background color
@@ -517,13 +705,14 @@ GLC_uint GLC_Viewport::meaningfulIdInsideSquare(GLint x, GLint y, GLsizei width,
 	return returnId;
 }
 
-QSet<GLC_uint> GLC_Viewport::listOfIdInsideSquare(GLint x, GLint y, GLsizei width, GLsizei height)
+QSet<GLC_uint> GLC_Viewport::listOfIdInsideSquare(GLint x, GLint y, GLsizei width, GLsizei height, GLenum buffer)
 {
 	const int squareSize= width * height;
 	const GLsizei arraySize= squareSize * 4; // 4 -> R G B A
 	QVector<GLubyte> colorId(arraySize);
 
 	// Get the array of pixels
+    glReadBuffer(buffer);
 	glReadPixels(x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, colorId.data());
 
 	// Restore Background color
@@ -543,22 +732,21 @@ QSet<GLC_uint> GLC_Viewport::listOfIdInsideSquare(GLint x, GLint y, GLsizei widt
 
 void GLC_Viewport::updateMinimumRatioSize()
 {
-	int size= qMax(m_WindowHSize, m_WindowVSize);
+    int size= qMax(m_Width, m_Height);
 	m_MinimumStaticRatioSize=  static_cast<double>(m_MinimumStaticPixelSize) / static_cast<double>(size) * 100.0;
 	m_MinimumDynamicRatioSize= m_MinimumStaticRatioSize * 2.0;
-	//qDebug() << "GLC_Viewport::updateMinimumRatioSize() m_MinimumRatioSize " << m_MinimumStaticRatioSize;
 }
 
-void GLC_Viewport::loadBackGroundImage(const QString& ImageFile)
+void GLC_Viewport::loadBackGroundImage(const QString& ImageFile, bool preserveRatio)
 {
 	delete m_pImagePlane;
-	m_pImagePlane= new GLC_ImagePlane(ImageFile);
+    m_pImagePlane= new GLC_ImagePlane(ImageFile, preserveRatio);
 }
 
-void GLC_Viewport::loadBackGroundImage(const QImage& image)
+void GLC_Viewport::loadBackGroundImage(const QImage& image, bool preserveRatio)
 {
 	delete m_pImagePlane;
-	m_pImagePlane= new GLC_ImagePlane(image);
+    m_pImagePlane= new GLC_ImagePlane(image, preserveRatio);
 }
 
 void GLC_Viewport::deleteBackGroundImage()
@@ -569,7 +757,7 @@ void GLC_Viewport::deleteBackGroundImage()
 
 void GLC_Viewport::clearBackground(const QColor& color) const
 {
-	glClearColor(color.redF(), color.greenF(), color.blueF(), 1.0f);
+    glClearColor(color.redF(), color.greenF(), color.blueF(), 1.0f);
 }
 
 void GLC_Viewport::setToOrtho(bool useOrtho)
@@ -577,36 +765,66 @@ void GLC_Viewport::setToOrtho(bool useOrtho)
 	if (m_UseParallelProjection != useOrtho)
 	{
 		m_UseParallelProjection= useOrtho;
-		updateProjectionMat();
+        updateProjectionMat(false); // doesn't update OpenGL
 	}
-
 }
 
-void GLC_Viewport::reframe(const GLC_BoundingBox& box)
+void GLC_Viewport::reframe(const GLC_BoundingBox& box, double coverFactor)
 {
-	Q_ASSERT(!box.isEmpty());
-
-	// Center view on the BoundingBox
-	const GLC_Vector3d deltaVector(box.center() - m_pViewCam->target());
-	m_pViewCam->translate(deltaVector);
-
-    double cameraCover= box.boundingSphereRadius() * 2.2;
-
-	// Compute Camera distance
-	const double distance = cameraCover / m_ViewTangent;
-
-	// Update Camera position
-	m_pViewCam->setDistEyeTarget(distance);
+    GLC_Camera targetCamera= reframedCamera(box, coverFactor);
+    m_pViewCam->setCam(targetCamera);
 }
 
-bool GLC_Viewport::setDistMin(double DistMin)
+GLC_Camera GLC_Viewport::reframedCamera(const GLC_BoundingBox &box, double coverFactor) const
 {
-	DistMin= fabs(DistMin);
+    Q_ASSERT(!box.isEmpty());
+    GLC_Camera subject(*m_pViewCam);
+
+    // Center view on the BoundingBox
+    const GLC_Vector3d deltaVector(box.center() - m_pViewCam->target());
+    subject.translate(deltaVector);
+
+    if (coverFactor > 0.0) {
+        double cameraCover= box.boundingSphereRadius() * coverFactor;
+
+        // Compute Camera distance
+        const double distance = cameraCover / m_ViewTangent;
+
+        // Update Camera position
+        subject.setDistEyeTarget(distance);
+    }
+
+    return subject;
+}
+
+bool GLC_Viewport::reframeFromDeltaCover(double deltaCover)
+{
+    bool subject= false;
+    const double cameraCover = m_pViewCam->distEyeTarget() *  m_ViewTangent;
+    const double newCover= cameraCover+ deltaCover;
+
+    if (!glc::fuzzyCompare(newCover, cameraCover))
+    {
+        // Compute Camera distance
+        const double distance = newCover / m_ViewTangent;
+
+        // Update Camera position
+        m_pViewCam->setDistEyeTarget(distance);
+
+        subject= true;
+    }
+
+    return subject;
+}
+
+bool GLC_Viewport::setDistMin(double DistMin, bool updateOpenGL)
+{
+    if (!m_UseParallelProjection) DistMin= fabs(DistMin);
 	if (DistMin < m_DistanceMax)
 	{
 		m_dDistanceMini= DistMin;
 
-		updateProjectionMat();	// Update OpenGL projection matrix
+        updateProjectionMat(updateOpenGL);	// Update OpenGL projection matrix
 
 		return true;
 	}
@@ -618,15 +836,15 @@ bool GLC_Viewport::setDistMin(double DistMin)
 
 }
 
-bool GLC_Viewport::setDistMax(double DistMax)
+bool GLC_Viewport::setDistMax(double DistMax, bool updateOpenGL)
 {
-	DistMax= fabs(DistMax);
+    if (!m_UseParallelProjection) DistMax= fabs(DistMax);
 	if (DistMax > m_dDistanceMini)
 	{
 		m_DistanceMax= DistMax;
 
 		// Update OpenGL projection matrix
-		updateProjectionMat();
+        updateProjectionMat(updateOpenGL);
 
 		return true;
 	}
@@ -637,9 +855,9 @@ bool GLC_Viewport::setDistMax(double DistMax)
 	}
 }
 
-void GLC_Viewport::setDistMinAndMax(const GLC_BoundingBox& bBox)
+void GLC_Viewport::setDistMinAndMax(const GLC_BoundingBox& bBox, bool updateOpenGL)
 {
-	if(!bBox.isEmpty())
+    if(!bBox.isEmpty())
 	{
 		// The scene is not empty
 		GLC_Matrix4x4 matComp(m_pViewCam->modelViewMatrix());
@@ -651,29 +869,23 @@ void GLC_Viewport::setDistMinAndMax(const GLC_BoundingBox& bBox)
 		// Increase size of the bounding box
 		const double increaseFactor= 1.1;
 		// Convert box distance in sphere distance
-		const double center= fabs(boundingBox.center().z());
+        const double center= - boundingBox.center().z();
+
 		const double radius= boundingBox.boundingSphereRadius();
 		const double min= center - radius * increaseFactor;
 		const double max= center + radius * increaseFactor;
 
-		GLC_Point3d camEye(m_pViewCam->eye());
-		camEye= matComp * camEye;
-
-		if (min > 0.0)
+        if ((min > 0.0) || m_UseParallelProjection)
 		{
-			// Outside bounding Sphere
+            // Outside bounding Sphere or parallel projection
 			m_dDistanceMini= min;
 			m_DistanceMax= max;
-			//qDebug() << "distmin" << m_dCamDistMin;
-			//qDebug() << "distmax" << m_dCamDistMax;
 		}
 		else
 		{
-			// Inside bounding Sphere
+            // Inside bounding Sphere
 			m_dDistanceMini= qMin(0.01 * radius, m_pViewCam->distEyeTarget() / 4.0);
 			m_DistanceMax= max;
-			//qDebug() << "inside distmin" << m_dCamDistMin;
-			//qDebug() << "inside distmax" << m_dCamDistMax;
 		}
 	}
 	else
@@ -683,14 +895,13 @@ void GLC_Viewport::setDistMinAndMax(const GLC_BoundingBox& bBox)
 		m_DistanceMax= m_pViewCam->distEyeTarget();
 	}
 
-	// Update OpenGL projection matrix
-	updateProjectionMat();
+    // Update View projection matrix
+    updateProjectionMat(updateOpenGL);
 }
 
 void GLC_Viewport::setBackgroundColor(QColor setColor)
 {
 	m_BackgroundColor= setColor;
-	glClearColor(m_BackgroundColor.redF(), m_BackgroundColor.greenF(), m_BackgroundColor.blueF(), 1.0f);
 }
 
 void GLC_Viewport::addClipPlane(GLenum planeGlEnum,GLC_Plane* pPlane)
@@ -753,4 +964,9 @@ void GLC_Viewport::useClipPlane(bool flag)
 		}
 	}
 
+}
+
+void GLC_Viewport::clearBackground() const
+{
+    glClearColor(m_BackgroundColor.redF(), m_BackgroundColor.greenF(), m_BackgroundColor.blueF(), 1.0f);
 }

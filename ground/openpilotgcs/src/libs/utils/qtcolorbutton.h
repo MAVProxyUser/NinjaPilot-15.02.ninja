@@ -71,4 +71,6 @@ private:
 };
 } // namespace Utils
 
+#include "qtcolorbutton_p.h"
+
 #endif // QTCOLORBUTTON_H

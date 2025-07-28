@@ -27,6 +27,7 @@
 
 #include <QVector>
 #include <QDataStream>
+#include <QMetaType>
 
 #include "glc_utils_maths.h"
 #include "glc_vector2d.h"
@@ -50,10 +51,10 @@ class GLC_LIB_EXPORT GLC_Vector4d
 	friend class GLC_Matrix4x4;
 
 	//! Overload unary "-" operator
-	inline friend GLC_Vector4d operator - (const GLC_Vector4d &Vect)
-	{
-		return GLC_Vector4d(-Vect.vector[0], -Vect.vector[1], -Vect.vector[2]);
-	}
+    inline friend GLC_Vector4d operator - (const GLC_Vector4d &Vect)
+    {
+        return GLC_Vector4d(-Vect.vector[0], -Vect.vector[1], -Vect.vector[2]);
+    }
 
 
 //////////////////////////////////////////////////////////////////////
@@ -67,7 +68,7 @@ public:
 	* \n Y =  0.0
 	* \n Z =  0.0
 	* \n W =  1.0*/
-	inline GLC_Vector4d()
+    inline GLC_Vector4d()
 	{
 		vector[0]= 0.0;
 		vector[1]= 0.0;
@@ -334,8 +335,8 @@ public:
 	{
 		bool result;
 
-		result= qFuzzyCompare(vector[0], 0.0) && qFuzzyCompare(vector[1], 0.0)
-			&& qFuzzyCompare(vector[2], 0.0);
+		result= glc::fuzzyCompare(vector[0], 0.0) && glc::fuzzyCompare(vector[1], 0.0)
+			&& glc::fuzzyCompare(vector[2], 0.0);
 
 		return result;
 	}
@@ -383,8 +384,7 @@ private:
 
 }; //class GLC_Vector4d
 
-//! Define GLC_Point4D
-//typedef GLC_Vector4d GLC_Point4d;
+Q_DECLARE_METATYPE(GLC_Vector4d)
 
 //! Non-member stream operator
 QDataStream &operator<<(QDataStream &, const GLC_Vector4d &);

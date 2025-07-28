@@ -44,7 +44,6 @@ GLC_Cylinder::GLC_Cylinder(double dRadius, double dLength, int discretization)
 , m_EndedIsCaped(true)			// Cylinder ended are closed
 {
 	Q_ASSERT((m_Radius > 0.0) && (m_Length > 0.0));
-	createMeshAndWire();
 }
 
 GLC_Cylinder::GLC_Cylinder(const GLC_Cylinder& sourceCylinder)
@@ -54,8 +53,7 @@ GLC_Cylinder::GLC_Cylinder(const GLC_Cylinder& sourceCylinder)
 , m_Discret(sourceCylinder.m_Discret)
 , m_EndedIsCaped(sourceCylinder.m_EndedIsCaped)
 {
-	Q_ASSERT((m_Radius > 0.0) && (m_Length > 0.0) && (m_Discret > 0));
-    if (isEmpty()) createMeshAndWire();
+
 }
 
 GLC_Cylinder::~GLC_Cylinder()
@@ -85,12 +83,27 @@ const GLC_BoundingBox& GLC_Cylinder::boundingBox()
 	{
 		createMeshAndWire();
 	}
-	return GLC_Mesh::boundingBox();
+    return GLC_Mesh::boundingBox();
 }
 
 //////////////////////////////////////////////////////////////////////
 // Set Functions
 //////////////////////////////////////////////////////////////////////
+bool GLC_Cylinder::update()
+{
+    bool subject;
+    if (GLC_Mesh::isEmpty())
+    {
+        createMeshAndWire();
+        subject= true;
+    }
+    else
+    {
+        subject= false;
+    }
+
+    return subject;
+}
 
 void GLC_Cylinder::setLength(double Length)
 {
@@ -208,8 +221,8 @@ void GLC_Cylinder::createMeshAndWire()
 		verticeVector[3 * i + 1]= sinArray[i];
 		verticeVector[3 * i + 2]= 0.0f;
 
-		normalsVector[3 * i]= cosNormalArray[i];
-		normalsVector[3 * i + 1]= sinNormalArray[i];
+        normalsVector[3 * i]= cosNormalArray[i];
+        normalsVector[3 * i + 1]= sinNormalArray[i];
 		normalsVector[3 * i + 2]= 0.0f;
 
 		texelVector[2 * i]= static_cast<float>(i) / static_cast<float>(m_Discret);
@@ -225,8 +238,8 @@ void GLC_Cylinder::createMeshAndWire()
 		verticeVector[3 * i + 1 + 3 * vertexNumber]= sinArray[i];
 		verticeVector[3 * i + 2 + 3 * vertexNumber]= static_cast<float>(m_Length);
 
-		normalsVector[3 * i + 3 * vertexNumber]= cosNormalArray[i];
-		normalsVector[3 * i + 1 + 3 * vertexNumber]= sinNormalArray[i];
+        normalsVector[3 * i + 3 * vertexNumber]= cosNormalArray[i];
+        normalsVector[3 * i + 1 + 3 * vertexNumber]= sinNormalArray[i];
 		normalsVector[3 * i + 2 + 3 * vertexNumber]= 0.0f;
 
 		texelVector[2 * i + 2 * vertexNumber]= texelVector[2 * i];
@@ -289,8 +302,8 @@ void GLC_Cylinder::createMeshAndWire()
 	// Create the index
 	for (int i= 0; i < vertexNumber; ++i)
 	{
-		circumferenceStrips.append(i + vertexNumber);
-		circumferenceStrips.append(i);
+        circumferenceStrips.append(i + vertexNumber);
+        circumferenceStrips.append(i);
 	}
 	addTrianglesStrip(pCylinderMaterial, circumferenceStrips);
 

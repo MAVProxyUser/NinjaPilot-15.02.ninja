@@ -25,7 +25,7 @@
 #define GLC_WIREDATA_H_
 
 #include <QColor>
-#include <QGLBuffer>
+#include <QOpenGLBuffer>
 
 #include "../glc_global.h"
 #include "../glc_boundingbox.h"
@@ -77,13 +77,19 @@ public:
 	static quint32 chunckID();
 
 	//! Return this wire data Position Vector
-	GLfloatVector positionVector() const;
+    GLfloatVector positionVector() const
+    {return m_Positions;}
+
+    GLfloatVector* positionVectorHandle()
+    {return &m_Positions;}
 
 	//! Return the color Vector
-	GLfloatVector colorVector() const;
+    GLfloatVector colorVector() const
+    {return m_Colors; }
 
 	//! Return the unique index vector
-	QVector<GLuint> indexVector() const;
+    QVector<GLuint> indexVector() const
+    {return m_IndexVector;}
 
 	//! Return true if this wire data is empty
 	inline bool isEmpty() const
@@ -124,14 +130,13 @@ public:
 	//! Clear the content of this wire Data and makes it empty
 	void clear();
 
-	//! Copy VBO to the Client Side
-	void copyVboToClientSide();
-
 	//! Release client VBO
 	void releaseVboClientSide(bool update= false);
 
 	//! Set VBO usage
 	void setVboUsage(bool usage);
+
+    void add(const GLC_WireData& other, const GLC_Matrix4x4& matrix);
 
 //@}
 
@@ -144,7 +149,7 @@ public:
 	void finishVbo();
 
 	//! Set vbo usage of this wire data
-	void useVBO(GLC_WireData::VboType type, bool usage);
+    void useVBO(GLC_WireData::VboType type);
 
 	//! Render this wire data using Opengl
 	/*! The mode can be : GL_POINTS, GL_LINE_STRIP, GL_LINE_LOOP GL_LINES*/
@@ -163,6 +168,7 @@ private:
 
 	//! Finish offset
 	void finishOffset();
+
 //@}
 
 //////////////////////////////////////////////////////////////////////
@@ -170,7 +176,7 @@ private:
 //////////////////////////////////////////////////////////////////////
 private:
 	//! VBO ID
-	QGLBuffer m_VerticeBuffer;
+	QOpenGLBuffer m_VerticeBuffer;
 
 	//! The next primitive local id
 	GLC_uint m_NextPrimitiveLocalId;
@@ -179,13 +185,13 @@ private:
 	GLfloatVector m_Positions;
 
 	//! Color Buffer
-	QGLBuffer m_ColorBuffer;
+	QOpenGLBuffer m_ColorBuffer;
 
 	//! Color index
 	GLfloatVector m_Colors;
 
 	//! The Index Buffer
-	QGLBuffer m_IndexBuffer;
+	QOpenGLBuffer m_IndexBuffer;
 
 	//! The Index Vector
 	QVector<GLuint> m_IndexVector;

@@ -30,7 +30,7 @@
 GLC_SpacePartitioning::GLC_SpacePartitioning(GLC_3DViewCollection* pCollection)
 : m_pCollection(pCollection)
 {
-	Q_ASSERT(m_pCollection != NULL);
+    Q_ASSERT(NULL != pCollection);
 }
 
 // Copy constructor
@@ -43,4 +43,14 @@ GLC_SpacePartitioning::GLC_SpacePartitioning(const GLC_SpacePartitioning& spaceP
 GLC_SpacePartitioning::~GLC_SpacePartitioning()
 {
 
+}
+
+void GLC_SpacePartitioning::set3DViewCollection(GLC_3DViewCollection *pCollection)
+{
+    Q_ASSERT(NULL != pCollection);
+    if (pCollection != m_pCollection)
+    {
+        clear();
+        m_pCollection= pCollection;
+    }
 }

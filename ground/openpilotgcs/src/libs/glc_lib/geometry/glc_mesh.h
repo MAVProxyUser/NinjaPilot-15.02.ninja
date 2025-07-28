@@ -36,8 +36,13 @@
 #include "glc_primitivegroup.h"
 #include "../glc_state.h"
 #include "../shading/glc_selectionmaterial.h"
+#include "../glc_context.h"
+#include "../glc_contextmanager.h"
 
 #include "../glc_config.h"
+
+class GLC_Triangle;
+class SharpEdgeContainer;
 
 //////////////////////////////////////////////////////////////////////
 //! \class GLC_Mesh
@@ -64,7 +69,7 @@ public:
 	GLC_Mesh();
 
 	//! Copy constructor
-	GLC_Mesh(const GLC_Mesh&);
+    GLC_Mesh(const GLC_Mesh&other);
 
 	//! Overload "=" operator
 	GLC_Mesh& operator=(const GLC_Mesh&);
@@ -77,24 +82,27 @@ public:
 //@{
 //////////////////////////////////////////////////////////////////////
 public:
+    //! Return the number of primitive of this mesh
+    int primitiveCount() const override;
+
 	//! Return the class Chunk ID
 	static quint32 chunckID();
 
 	//! Get number of faces
-	virtual unsigned int faceCount(int lod) const;
+    unsigned int faceCount(int lod) const override;
 
 	//! Get number of vertex
-	virtual unsigned int VertexCount() const;
+    unsigned int vertexCount() const override;
 
 	//! Get number of normals
 	inline unsigned int numberOfNormals() const
 	{ return m_NumberOfNormals;}
 
 	//! return the mesh bounding box
-	virtual const GLC_BoundingBox& boundingBox(void);
+    const GLC_BoundingBox& boundingBox(void) override;
 
 	//! Return a copy of the Mesh as GLC_Geometry pointer
-	virtual GLC_Geometry* clone() const;
+    GLC_Geometry* clone() const override;
 
 	//! Return true if color pear vertex is activated
 	inline bool ColorPearVertexIsAcivated() const
@@ -105,15 +113,15 @@ public:
 	{return m_MeshData.lodCount();}
 
 	//! Return the Position Vector
-	inline GLfloatVector positionVector() const
+    const GLfloatVector& positionVector() const
 	{return m_MeshData.positionVector();}
 
 	//! Return the normal Vector
-	inline GLfloatVector normalVector() const
+    const GLfloatVector& normalVector() const
 	{return m_MeshData.normalVector();}
 
 	//! Return the texel Vector
-	inline GLfloatVector texelVector() const
+    const GLfloatVector& texelVector() const
 	{return m_MeshData.texelVector();}
 
 	//! Return true if the mesh contains triangles in the specified LOD
@@ -124,7 +132,7 @@ public:
 	QVector<GLuint> getTrianglesIndex(int lod, GLC_uint materialId) const;
 
 	//! Return the equivalent triangle index of (triangle, strip and fan)
-	IndexList getEquivalentTrianglesStripsFansIndex(int lod, GLC_uint materialId);
+    IndexList getEquivalentTrianglesStripsFansIndex(int lod, GLC_uint materialId) const;
 
 	//! Return the number of triangles in the specified LOD
 	int numberOfTriangles(int lod, GLC_uint materialId) const;
@@ -192,11 +200,11 @@ public:
 	//! Create a mesh from the given LOD index
 	GLC_Mesh* createMeshFromGivenLod(int lodIndex);
 
-	//! Transform mesh vertice by the given matrix
-	GLC_Mesh& transformVertice(const GLC_Matrix4x4& matrix);
+    //! Transform vertice by the given matrix
+    void transformVertice(const GLC_Matrix4x4& matrix) override;
 
 	//! Return the volume of this mesh
-	virtual double volume();
+    double volume() override;
 
 //@}
 //////////////////////////////////////////////////////////////////////
@@ -206,7 +214,7 @@ public:
 public:
 
 	//! Clear the content of the mesh and super class and makes them empty
-	virtual void clear();
+    void clear() override;
 
 	//! Clear only the content off the mesh and makes it empty
 	void clearMeshWireAndBoundingBox();
@@ -232,6 +240,10 @@ public:
 	//! Add Colors
 	inline void addColors(const GLfloatVector& colors)
 	{*(m_MeshData.colorVectorHandle())+= colors;}
+	
+	//! Replace colors
+	inline void setColors(const GLfloatVector& colors)
+	{*(m_MeshData.colorVectorHandle()) = colors;}
 
 	//! Add triangles
 	GLC_uint addTriangles(GLC_Material*, const IndexList&, const int lod= 0, double accuracy= 0.0);
@@ -243,7 +255,7 @@ public:
 	GLC_uint addTrianglesFan(GLC_Material*, const IndexList&, const int lod= 0, double accuracy= 0.0);
 
 	//! Reverse mesh normal
-	void reverseNormals();
+    void reverseNormals() override;
 
 	//! Set color per vertex flag to use indexed color
 	inline void setColorPearVertex(bool flag)
@@ -253,13 +265,13 @@ public:
 	void finish();
 
 	//! Set the lod Index
-	virtual void setCurrentLod(const int);
+    void setCurrentLod(const int) override;
 
 	//! Replace the Master material
-	virtual void replaceMasterMaterial(GLC_Material*);
+    void replaceMasterMaterial(GLC_Material*) override;
 
 	//! Replace the material specified by id with another one
-	void replaceMaterial(const GLC_uint, GLC_Material*);
+    void replaceMaterial(const GLC_uint, GLC_Material*) override;
 
 	//! Set the mesh next primitive local id
 	inline void setNextPrimitiveLocalId(GLC_uint id)
@@ -269,14 +281,13 @@ public:
 	inline void setWireColor(const QColor& color)
 	{m_WireColor= color;}
 
-	//! Copy VBO to the Client Side
-	virtual void copyVboToClientSide();
-
 	//! Release client VBO
-	virtual void releaseVboClientSide(bool update);
+    void releaseVboClientSide(bool update) override;
 
 	//! Set VBO usage
-	virtual void setVboUsage(bool usage);
+    void setVboUsage(bool usage) override;
+
+    void createSharpEdges(double precision, double angleThreshold);
 
 //@}
 
@@ -304,7 +315,21 @@ protected:
 
 	//! Virtual interface for OpenGL Geometry set up.
 	/*! This Virtual function is implemented here.*/
-	virtual void glDraw(const GLC_RenderProperties&);
+    void glDraw(const GLC_RenderProperties&) override;
+
+    void setClientState();
+    void restoreClientState(GLC_Context *pContext);
+    void drawMeshWire(const GLC_RenderProperties &renderProperties, GLC_Context *pContext);
+
+//@}
+
+//////////////////////////////////////////////////////////////////////
+/*! \name Protected services Functions*/
+//@{
+//////////////////////////////////////////////////////////////////////
+protected:
+    GLC_uint newMaterialIdFromOldMaterialId(GLC_uint oldMaterialId) const
+    {return m_OldToNewMaterialId.value(oldMaterialId);}
 
 //@}
 
@@ -382,6 +407,9 @@ private:
 	//! The primitive Selected render loop
 	void primitiveSelectedRenderLoop(const GLC_RenderProperties&, bool);
 
+	//! The outline silhouette render loop (draws in special colors for edge detection, passes extra data encoded in color)
+	void outlineSilhouetteRenderLoop(const GLC_RenderProperties&, bool);
+
 	//! Copy index of this mesh from the given LOD into the given mesh
 	void copyIndex(int lod, GLC_Mesh* pLodMesh, QHash<GLuint, GLuint>& sourceToTargetIndexMap, QHash<GLuint, GLuint>& tagetToSourceIndexMap, int& maxIndex, int targetLod);
 
@@ -389,11 +417,14 @@ private:
 	void copyBulkData(GLC_Mesh* pLodMesh, const QHash<GLuint, GLuint>& tagetToSourceIndexMap, int maxIndex);
 
 	//! Return the equivalent triangles index of the strips index of given LOD and material ID
-	IndexList equivalentTrianglesIndexOfstripsIndex(int lodIndex, GLC_uint materialId);
+    IndexList equivalentTrianglesIndexOfstripsIndex(int lodIndex, GLC_uint materialId) const;
 
 	//! Return the equivalent triangles index of the fan index of given LOD and material ID
-	IndexList equivalentTrianglesIndexOfFansIndex(int lodIndex, GLC_uint materialId);
+    IndexList equivalentTrianglesIndexOfFansIndex(int lodIndex, GLC_uint materialId) const;
 
+    static SharpEdgeContainer* computeSharEdgeMappedFunction(SharpEdgeContainer* pContainer);
+
+    void innerCopy(const GLC_Mesh& other);
 
 //@}
 
@@ -425,6 +456,8 @@ private:
 
 	//! The current LOD index
 	int m_CurrentLod;
+
+    QHash<GLC_uint, GLC_uint> m_OldToNewMaterialId;
 
 	//! Class chunk id
 	static quint32 m_ChunkId;
@@ -1075,30 +1108,28 @@ void GLC_Mesh::vertexArrayDrawSelectedPrimitivesGroupOf(GLC_PrimitiveGroup* pCur
 // Activate mesh VBOs and IBO of the current LOD
 void GLC_Mesh::activateVboAndIbo()
 {
+    GLC_Context* pContext= GLC_ContextManager::instance()->currentContext();
+
 	// Activate Vertices VBO
-	m_MeshData.useVBO(true, GLC_MeshData::GLC_Vertex);
-	glVertexPointer(3, GL_FLOAT, 0, 0);
-	glEnableClientState(GL_VERTEX_ARRAY);
+    m_MeshData.useVBO(GLC_MeshData::GLC_Vertex);
+    pContext->glcUseVertexPointer(0);
 
 	// Activate Normals VBO
-	m_MeshData.useVBO(true, GLC_MeshData::GLC_Normal);
-	glNormalPointer(GL_FLOAT, 0, 0);
-	glEnableClientState(GL_NORMAL_ARRAY);
+    m_MeshData.useVBO(GLC_MeshData::GLC_Normal);
+    pContext->glcUseNormalPointer(0);
 
 	// Activate texel VBO if needed
-	if (m_MeshData.useVBO(true, GLC_MeshData::GLC_Texel))
+    if (m_MeshData.useVBO(GLC_MeshData::GLC_Texel))
 	{
-		glTexCoordPointer(2, GL_FLOAT, 0, 0);
-		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        pContext->glcUseTexturePointer(0);
 	}
 
 	// Activate Color VBO if needed
-	if ((m_ColorPearVertex && !m_IsSelected && !GLC_State::isInSelectionMode()) && m_MeshData.useVBO(true, GLC_MeshData::GLC_Color))
+    if ((m_ColorPearVertex && !m_IsSelected && !GLC_State::isInSelectionMode()) && m_MeshData.useVBO(GLC_MeshData::GLC_Color))
 	{
-		glEnable(GL_COLOR_MATERIAL);
+        pContext->glcEnableColorMaterial(true);
 		glColorMaterial(GL_FRONT_AND_BACK, GL_DIFFUSE);
-		glColorPointer(4, GL_FLOAT, 0, 0);
-		glEnableClientState(GL_COLOR_ARRAY);
+        pContext->glcUseColorPointer(0);
 	}
 
 	m_MeshData.useIBO(true, m_CurrentLod);
@@ -1107,27 +1138,25 @@ void GLC_Mesh::activateVboAndIbo()
 // Activate vertex Array
 void GLC_Mesh::activateVertexArray()
 {
-	// Use Vertex Array
-	glVertexPointer(3, GL_FLOAT, 0, m_MeshData.positionVectorHandle()->data());
-	glEnableClientState(GL_VERTEX_ARRAY);
+    GLC_Context* pContext= GLC_ContextManager::instance()->currentContext();
 
-	glNormalPointer(GL_FLOAT, 0, m_MeshData.normalVectorHandle()->data());
-	glEnableClientState(GL_NORMAL_ARRAY);
+	// Use Vertex Array
+    pContext->glcUseVertexPointer(m_MeshData.positionVectorHandle()->data());
+
+    pContext->glcUseNormalPointer(m_MeshData.normalVectorHandle()->data());
 
 	// Activate texel if needed
 	if (!m_MeshData.texelVectorHandle()->isEmpty())
 	{
-		glTexCoordPointer(2, GL_FLOAT, 0, m_MeshData.texelVectorHandle()->data());
-		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        pContext->glcUseTexturePointer(m_MeshData.texelVectorHandle()->data());
 	}
 
 	// Activate Color array if needed
-	if ((m_ColorPearVertex && !m_IsSelected && !GLC_State::isInSelectionMode()) && !m_MeshData.colorVectorHandle()->isEmpty())
+    if ((m_ColorPearVertex && !m_IsSelected && !GLC_State::isInSelectionMode()) && !m_MeshData.colorVectorHandle()->isEmpty())
 	{
-		glEnable(GL_COLOR_MATERIAL);
+        pContext->glcEnableColorMaterial(true);
 		glColorMaterial(GL_FRONT_AND_BACK, GL_DIFFUSE);
-		glColorPointer(4, GL_FLOAT, 0, m_MeshData.colorVectorHandle()->data());
-		glEnableClientState(GL_COLOR_ARRAY);
+        pContext->glcUseColorPointer(m_MeshData.colorVectorHandle()->data());
 	}
 }
 

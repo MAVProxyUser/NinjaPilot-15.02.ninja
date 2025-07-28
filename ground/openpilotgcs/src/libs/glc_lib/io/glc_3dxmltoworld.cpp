@@ -34,7 +34,6 @@
 #include "../3rdparty/quazip/quazipfile.h"
 
 #include <QString>
-#include <QGLContext>
 #include <QFileInfo>
 #include <QSet>
 #include <QMutexLocker>
@@ -46,36 +45,39 @@ QMutex GLC_3dxmlToWorld::m_ZipMutex;
 static qint64 chunckSize= 10000000;
 
 GLC_3dxmlToWorld::GLC_3dxmlToWorld()
-: QObject()
-, m_pStreamReader(NULL)
-, m_FileName()
-, m_p3dxmlArchive(NULL)
-, m_pCurrentFile(NULL)
-, m_RootName()
-, m_pWorld(NULL)
-, m_ReferenceHash()
-, m_AssyLinkList()
-, m_InstanceOf()
-, m_SetOfExtRef()
-, m_InstanceOfExtRefHash()
-, m_ExternalReferenceHash()
-, m_MaterialHash()
-, m_IsInArchive(false)
-, m_ReferenceRepHash()
-, m_LocalRepLinkList()
-, m_ExternRepLinkList()
-, m_SetOfExtRep()
-, m_pCurrentMaterial(NULL)
-, m_TextureImagesHash()
-, m_LoadStructureOnly(false)
-, m_SetOfAttachedFileName()
-, m_CurrentFileName()
-, m_CurrentDateTime()
-, m_V3OccurenceAttribHash()
-, m_V4OccurenceAttribList()
-, m_GetExternalRef3DName(false)
-, m_ByteArrayList()
-, m_IsVersion3(false)
+    : QObject()
+    , m_pStreamReader(NULL)
+    , m_FileName()
+    , m_p3dxmlArchive(NULL)
+    , m_pCurrentFile(NULL)
+    , m_RootName()
+    , m_pWorld(NULL)
+    , m_ReferenceHash()
+    , m_AssyLinkList()
+    , m_InstanceOf()
+    , m_SetOfExtRef()
+    , m_InstanceOfExtRefHash()
+    , m_ExternalReferenceHash()
+    , m_MaterialHash()
+    , m_IsInArchive(false)
+    , m_ReferenceRepHash()
+    , m_LocalRepLinkList()
+    , m_ExternRepLinkList()
+    , m_SetOfExtRep()
+    , m_pCurrentMaterial(NULL)
+    , m_TextureImagesHash()
+    , m_LoadStructureOnly(false)
+    , m_SetOfAttachedFileName()
+    , m_CurrentFileName()
+    , m_CurrentDateTime()
+    , m_V3OccurrenceAttribHash()
+    , m_V4OccurrenceAttribList()
+    , m_GetExternalRef3DName(false)
+    , m_ByteArrayList()
+    , m_IsVersion3(false)
+    , m_UseZipMutex(true)
+    , m_productGroupRootId(1)
+    , m_UseNative(false)
 {
 
 }
@@ -91,17 +93,17 @@ GLC_3dxmlToWorld::~GLC_3dxmlToWorld()
 	clearMaterialHash();
 
 	// Clear specific attributes hash table
-	QHash<unsigned int, V3OccurenceAttrib*>::iterator iAttrib= m_V3OccurenceAttribHash.begin();
-	while (m_V3OccurenceAttribHash.constEnd() != iAttrib)
+	QHash<unsigned int, V3OccurrenceAttrib*>::iterator iAttrib= m_V3OccurrenceAttribHash.begin();
+	while (m_V3OccurrenceAttribHash.constEnd() != iAttrib)
 	{
 		delete iAttrib.value();
 		++iAttrib;
 	}
 
-	const int v4OccurenceAttribCount= m_V4OccurenceAttribList.count();
-	for (int i= 0; i < v4OccurenceAttribCount; ++i)
+	const int v4OccurrenceAttribCount= m_V4OccurrenceAttribList.count();
+	for (int i= 0; i < v4OccurrenceAttribCount; ++i)
 	{
-		delete m_V4OccurenceAttribList.at(i);
+		delete m_V4OccurrenceAttribList.at(i);
 	}
 }
 
@@ -120,6 +122,7 @@ GLC_World* GLC_3dxmlToWorld::createWorldFrom3dxml(QFile &file, bool structureOnl
 
 	// Create the 3dxml Zip archive
 	m_p3dxmlArchive= new QuaZip(m_FileName);
+    m_p3dxmlArchive->setFileNameCodec("UTF-8");
 	// Trying to load archive
 	if(!m_p3dxmlArchive->open(QuaZip::mdUnzip))
 	{
@@ -144,10 +147,10 @@ GLC_World* GLC_3dxmlToWorld::createWorldFrom3dxml(QFile &file, bool structureOnl
 	if (!m_LoadStructureOnly)
 	{
 		// Trying to Load CATRepImage file
-		loadCatRepImage();
+        loadCatRepImage();
 
 		// Trying to Load CATRefMaterial File
-		loadCatMaterialRef();
+        loadCatMaterialRef();
 	}
 
 	// Read the header
@@ -157,21 +160,71 @@ GLC_World* GLC_3dxmlToWorld::createWorldFrom3dxml(QFile &file, bool structureOnl
 	loadProductStructure();
 
 
-	emit currentQuantum(100);
-	return m_pWorld;
+    emit currentQuantum(100);
+    return m_pWorld;
+}
+
+GLC_World* GLC_3dxmlToWorld::createWorldFrom3dxml(QIODevice* pDevice)
+{
+    clear();
+    m_pWorld= new GLC_World();
+    m_GetExternalRef3DName= false;
+    m_LoadStructureOnly= false;
+    m_FileName.clear();
+
+    // Create the 3dxml Zip archive
+    m_p3dxmlArchive= new QuaZip(pDevice);
+    m_p3dxmlArchive->setFileNameCodec("UTF-8");
+    // Trying to load archive
+    if(!m_p3dxmlArchive->open(QuaZip::mdUnzip))
+    {
+        QString message(QString("Failed to open ioDevice 3dxml "));
+        GLC_FileFormatException fileFormatException(message, "IoDevice", GLC_FileFormatException::WrongFileFormat);
+        clear();
+        throw(fileFormatException);
+    }
+    else
+    {
+        // Get the 3DXML time stamp
+        m_CurrentDateTime= QDateTime::currentDateTime();
+
+        m_IsInArchive= true;
+
+        // Load the manifest
+        loadManifest();
+    }
+
+    // Trying to Load CATRepImage file
+    loadCatRepImage();
+
+    // Trying to Load CATRefMaterial File
+    loadCatMaterialRef();
+
+    // Read the header
+    readHeader();
+
+    // Load the product structure
+    loadProductStructure();
+
+
+    emit currentQuantum(100);
+    return m_pWorld;
 }
 
 // Create 3DRep from an 3DXML rep
-GLC_3DRep GLC_3dxmlToWorld::create3DrepFrom3dxmlRep(const QString& fileName)
+GLC_3DRep GLC_3dxmlToWorld::create3DrepFrom3dxmlRep(const QString& fileName, bool useZipMutex)
 {
+    m_UseZipMutex= useZipMutex;
+
 	GLC_3DRep resultRep;
 	if (glc::isArchiveString(fileName))
 	{
 		m_FileName= glc::archiveFileName(fileName);
 
 		// Create the 3dxml Zip archive
-		m_ZipMutex.lock();
+        if (m_UseZipMutex) m_ZipMutex.lock();
 		m_p3dxmlArchive= new QuaZip(m_FileName);
+        m_p3dxmlArchive->setFileNameCodec("UTF-8");
 		// Trying to load archive
 		if(!m_p3dxmlArchive->open(QuaZip::mdUnzip))
 		{
@@ -184,7 +237,7 @@ GLC_3DRep GLC_3dxmlToWorld::create3DrepFrom3dxmlRep(const QString& fileName)
 			// Set the file Name Codec
 			//m_p3dxmlArchive->setFileNameCodec("IBM866");
 		}
-		m_ZipMutex.unlock();
+        if (m_UseZipMutex) m_ZipMutex.unlock();
 		m_CurrentFileName= glc::archiveEntryFileName(fileName);
 
 		// Get the 3DXML time stamp
@@ -225,11 +278,9 @@ GLC_3DRep GLC_3dxmlToWorld::create3DrepFrom3dxmlRep(const QString& fileName)
 			if (setStreamReaderToFile(m_CurrentFileName, true))
 			{
 				GLC_StructReference* pStructRef = createReferenceRep(QString(), NULL);
-				GLC_3DRep* pRep = NULL;
 				if ((NULL != pStructRef) && pStructRef->hasRepresentation())
 				{
-					pRep= dynamic_cast<GLC_3DRep*> (pStructRef->representationHandle());
-
+                    GLC_3DRep* pRep= dynamic_cast<GLC_3DRep*> (pStructRef->representationHandle());
 					if (NULL != pRep)
 					{
 						resultRep = GLC_3DRep(*pRep);
@@ -392,7 +443,7 @@ void GLC_3dxmlToWorld::loadProductStructure()
 		clear();
 		throw(fileFormatException);
 	}
-
+	m_productGroupRootId = readAttribute("root", true).toUInt();
 	// Load the structure
 	while(endElementNotReached(m_pStreamReader, "ProductStructure"))
 	{
@@ -438,7 +489,7 @@ void GLC_3dxmlToWorld::loadProductStructure()
 	loadExternRepresentations();
 
 	{ // Link locals instance with reference
-		InstanceOfHash::iterator iInstance= m_InstanceOf.begin();
+        InstanceOfHash::const_iterator iInstance= m_InstanceOf.constBegin();
 		while (iInstance != m_InstanceOf.constEnd())
 		{
 			GLC_StructInstance* pInstance= iInstance.key();
@@ -462,7 +513,7 @@ void GLC_3dxmlToWorld::loadProductStructure()
 
 	{ // Link external instance with reference
 
-		InstanceOfExtRefHash::iterator iInstance= m_InstanceOfExtRefHash.begin();
+        InstanceOfExtRefHash::const_iterator iInstance= m_InstanceOfExtRefHash.constBegin();
 		while (iInstance != m_InstanceOfExtRefHash.constEnd())
 		{
 			GLC_StructInstance* pInstance= iInstance.key();
@@ -508,31 +559,31 @@ void GLC_3dxmlToWorld::loadProductStructure()
 	// Create the unfolded tree
 	createUnfoldedTree();
 
-	// Update occurence number
-	m_pWorld->rootOccurence()->updateOccurenceNumber(1);
+	// Update occurrence number
+	m_pWorld->rootOccurrence()->updateOccurrenceNumber(1);
 
-	// Change occurence attributes for 3DXML V3
-	if (! m_V3OccurenceAttribHash.isEmpty())
+	// Change occurrence attributes for 3DXML V3
+	if (! m_V3OccurrenceAttribHash.isEmpty())
 	{
-		//qDebug() << "Not visible occurence= " << m_V3OccurenceAttribHash.size();
-		QList<GLC_StructOccurence*> occurenceList= m_pWorld->listOfOccurence();
-		const int size= occurenceList.size();
+		//qDebug() << "Not visible occurrence= " << m_V3OccurrenceAttribHash.size();
+		QList<GLC_StructOccurrence*> occurrenceList= m_pWorld->listOfOccurrence();
+		const int size= occurrenceList.size();
 		for (int i= 0; i < size; ++i)
 		{
-			if (m_V3OccurenceAttribHash.contains(occurenceList.at(i)->occurenceNumber()))
+			if (m_V3OccurrenceAttribHash.contains(occurrenceList.at(i)->occurrenceNumber()))
 			{
-				V3OccurenceAttrib* pOccurenceAttrib= m_V3OccurenceAttribHash.value(occurenceList.at(i)->occurenceNumber());
-				occurenceList.at(i)->setVisibility(pOccurenceAttrib->m_IsVisible);
-				if (NULL != pOccurenceAttrib->m_pRenderProperties)
+				V3OccurrenceAttrib* pOccurrenceAttrib= m_V3OccurrenceAttribHash.value(occurrenceList.at(i)->occurrenceNumber());
+				occurrenceList.at(i)->setVisibility(pOccurrenceAttrib->m_IsVisible);
+				if (NULL != pOccurrenceAttrib->m_pRenderProperties)
 				{
-					occurenceList.at(i)->setRenderProperties(*(pOccurenceAttrib->m_pRenderProperties));
+					occurrenceList.at(i)->setRenderProperties(*(pOccurrenceAttrib->m_pRenderProperties));
 				}
 			}
 		}
 	}
 
-	// Change occurence attributes for 3DXML V4
-	if (!m_V4OccurenceAttribList.isEmpty())
+	// Change occurrence attributes for 3DXML V4
+	if (!m_V4OccurrenceAttribList.isEmpty())
 	{
 		QHash<GLC_StructInstance*, unsigned int> instanceToIdHash;
 		const int assyCount= m_AssyLinkList.count();
@@ -542,12 +593,12 @@ void GLC_3dxmlToWorld::loadProductStructure()
 			instanceToIdHash.insert(assyLink.m_pChildInstance, assyLink.m_InstanceId);
 		}
 
-		const int attribCount= m_V4OccurenceAttribList.count();
+		const int attribCount= m_V4OccurrenceAttribList.count();
 		for (int i= 0; i < attribCount; ++i)
 		{
-			V4OccurenceAttrib* pCurrentV4OccurenceAttrib= m_V4OccurenceAttribList.at(i);
-			//qDebug() << pCurrentV4OccurenceAttrib->m_Path;
-			applyV4Attribute(m_pWorld->rootOccurence(), pCurrentV4OccurenceAttrib, instanceToIdHash);
+			V4OccurrenceAttrib* pCurrentV4OccurrenceAttrib= m_V4OccurrenceAttribList.at(i);
+			//qDebug() << pCurrentV4OccurrenceAttrib->m_Path;
+			applyV4Attribute(m_pWorld->rootOccurrence(), pCurrentV4OccurrenceAttrib, instanceToIdHash);
 		}
 	}
 
@@ -556,7 +607,7 @@ void GLC_3dxmlToWorld::loadProductStructure()
 	while (m_InstanceOfExtRefHash.constEnd() != iInstance)
 	{
 		GLC_StructInstance* pInstance= iInstance.key();
-		if (!pInstance->hasStructOccurence())
+		if (!pInstance->hasStructOccurrence())
 		{
 			QStringList stringList(m_FileName);
 			stringList.append("Orphan Instance : " + pInstance->name());
@@ -565,17 +616,17 @@ void GLC_3dxmlToWorld::loadProductStructure()
 		}
 		else
 		{
-			QList<GLC_StructOccurence*> occurences= pInstance->listOfStructOccurences();
-			const int size= occurences.size();
+			QList<GLC_StructOccurrence*> occurrences= pInstance->listOfStructOccurrences();
+			const int size= occurrences.size();
 			for (int i= 0; i < size; ++i)
 			{
-				const GLC_StructOccurence* pOccurence= occurences.at(i);
-				if (pOccurence->isOrphan())
+				const GLC_StructOccurrence* pOccurrence= occurrences.at(i);
+				if (pOccurrence->isOrphan())
 				{
 					QStringList stringList(m_FileName);
-					stringList.append("Orphan occurence : " + pOccurence->name());
+					stringList.append("Orphan occurrence : " + pOccurrence->name());
 					GLC_ErrorLog::addError(stringList);
-					delete pOccurence;
+					delete pOccurrence;
 				}
 			}
 		}
@@ -583,6 +634,34 @@ void GLC_3dxmlToWorld::loadProductStructure()
 	}
 
 	m_InstanceOfExtRefHash.clear();
+
+    if (m_UseNative && (nullptr != m_pWorld))
+    {
+        const QList<GLC_Material*> materialList(m_pWorld->listOfMaterials());
+        QHash<QString, GLC_Texture*> nameToTextureHash;
+        for (GLC_Material* pMat : materialList)
+        {
+            if (pMat->hasTexture())
+            {
+                GLC_Texture* pTexture= pMat->textureHandle();
+                if (pTexture->imageOfTexture().isNull())
+                {
+                    const QString fileName(QFileInfo(pTexture->fileName()).fileName());
+                    if (!nameToTextureHash.contains(fileName))
+                    {
+                       GLC_Texture* pNewTexture= loadTexture(fileName);
+                       nameToTextureHash.insert(fileName, pNewTexture);
+                       pMat->setTexture(new GLC_Texture(*pNewTexture));
+                    }
+                    else
+                    {
+                        pMat->setTexture(new GLC_Texture(*nameToTextureHash.value(fileName)));
+                    }
+                }
+            }
+        }
+        qDeleteAll(nameToTextureHash);
+    }
 
 
 	//qDebug() << "Unfolded tree created";
@@ -596,10 +675,12 @@ void GLC_3dxmlToWorld::loadReference3D()
 	const QString refName(readAttribute("name", true));
 	GLC_StructReference* pStructReference;
 
-	if (id == 1) // This is the root reference.
+
+	//if (id == 1) // This is the root reference.
+	if (id == m_productGroupRootId) // This is the root reference.
 	{
 		m_pWorld->setRootName(refName);
-		pStructReference= m_pWorld->rootOccurence()->structInstance()->structReference();
+		pStructReference= m_pWorld->rootOccurrence()->structInstance()->structReference();
 		pStructReference->setName(refName);
 	}
 	else
@@ -713,8 +794,8 @@ void GLC_3dxmlToWorld::loadReferenceRep()
 	const unsigned int id= readAttribute("id", true).toUInt();
 	//const QString refName(readAttribute("name", true));
 	const QString format= readAttribute("format", false);
-	QString associatedFile(readAttribute("associatedFile", true));
-	if (format == "TESSELLATED")
+    QString associatedFile(readAttribute("associatedFile", true));
+    if (format == "TESSELLATED")
 	{
 		if (associatedFile.contains(local))
 		{
@@ -727,6 +808,12 @@ void GLC_3dxmlToWorld::loadReferenceRep()
 			m_ReferenceRepHash.insert(id, repId);
 		}
 	}
+    else if (format == "GLC")
+    {
+        m_UseNative= true;
+        const QString repId= associatedFile.remove(externName);
+        m_ReferenceRepHash.insert(id, repId);
+    }
 	else if (format == "UVR")
 	{
 		QString message(QString("GLC_3dxmlToWorld::loadReferenceRep in file ") + m_CurrentFileName + " format " + format + " not supported");
@@ -780,7 +867,7 @@ void GLC_3dxmlToWorld::loadExternalRef3D()
 	int currentFileIndex= 0;
 	emit currentQuantum(currentQuantumValue);
 
-	SetOfExtRef::iterator iExtRef= m_SetOfExtRef.begin();
+    SetOfExtRef::const_iterator iExtRef= m_SetOfExtRef.constBegin();
 	while (iExtRef != m_SetOfExtRef.constEnd())
 	{
 
@@ -904,8 +991,8 @@ GLC_StructReference* GLC_3dxmlToWorld::createReferenceRep(QString repId, GLC_3DR
 		}
 		checkForXmlError("Element ReferenceRep contains error");
 
-		const QString format(readAttribute("format", true));
-		if (format != "TESSELLATED")
+        const QString format(readAttribute("format", true));
+        if ((format != "TESSELLATED") || (format != "GLC"))
 		{
 			QString message(QString("GLC_3dxmlToWorld::addExtenalRef 3D rep format ") + format + " Not Supported");
 			GLC_FileFormatException fileFormatException(message, m_FileName, GLC_FileFormatException::FileNotSupported);
@@ -1070,7 +1157,7 @@ void GLC_3dxmlToWorld::createUnfoldedTree()
 	//qDebug() << "createUnfoldedTree";
 	// Run throw all link in the list of link
 
-	qSort(m_AssyLinkList.begin(), m_AssyLinkList.end());
+    std::sort(m_AssyLinkList.begin(), m_AssyLinkList.end());
 	AssyLinkList::iterator iLink= m_AssyLinkList.begin();
 	while(iLink != m_AssyLinkList.constEnd())
 	{
@@ -1084,39 +1171,39 @@ void GLC_3dxmlToWorld::createUnfoldedTree()
 		}
 		Q_ASSERT(m_ReferenceHash.contains((*iLink).m_ParentRefId));
 		GLC_StructReference* pRef= m_ReferenceHash.value((*iLink).m_ParentRefId);
-		// Attach pInstance at all Occurence of pRef
+		// Attach pInstance at all Occurrence of pRef
 		QList<GLC_StructInstance*> instanceList= pRef->listOfStructInstances();
 		const int instanceNumber= instanceList.size();
 		for (int i= 0; i < instanceNumber; ++i)
 		{
-			if (instanceList.at(i)->hasStructOccurence())
+			if (instanceList.at(i)->hasStructOccurrence())
 			{
-				QList<GLC_StructOccurence*> occurenceList= instanceList.at(i)->listOfStructOccurences();
-				const int occurenceNumber= occurenceList.size();
-				for (int j= 0; j < occurenceNumber; ++j)
+				QList<GLC_StructOccurrence*> occurrenceList= instanceList.at(i)->listOfStructOccurrences();
+				const int occurrenceNumber= occurrenceList.size();
+				for (int j= 0; j < occurrenceNumber; ++j)
 				{
-					if (pChildInstance->hasStructOccurence() && pChildInstance->firstOccurenceHandle()->isOrphan())
+					if (pChildInstance->hasStructOccurrence() && pChildInstance->firstOccurrenceHandle()->isOrphan())
 					{
-						Q_ASSERT(pChildInstance->listOfStructOccurences().size() == 1);
-						occurenceList.at(j)->addChild(pChildInstance->firstOccurenceHandle());
+						Q_ASSERT(pChildInstance->listOfStructOccurrences().size() == 1);
+						occurrenceList.at(j)->addChild(pChildInstance->firstOccurrenceHandle());
 					}
 					else
 					{
-						occurenceList.at(j)->addChild(pChildInstance);
+						occurrenceList.at(j)->addChild(pChildInstance);
 					}
 				}
 			}
 			else
 			{
-				GLC_StructOccurence* pOccurence= new GLC_StructOccurence(instanceList.at(i), m_pWorld->worldHandle());
-				if (pChildInstance->hasStructOccurence() && pChildInstance->firstOccurenceHandle()->isOrphan())
+				GLC_StructOccurrence* pOccurrence= new GLC_StructOccurrence(instanceList.at(i), m_pWorld->worldHandle());
+				if (pChildInstance->hasStructOccurrence() && pChildInstance->firstOccurrenceHandle()->isOrphan())
 				{
-					Q_ASSERT(pChildInstance->listOfStructOccurences().size() == 1);
-					pOccurence->addChild(pChildInstance->firstOccurenceHandle());
+					Q_ASSERT(pChildInstance->listOfStructOccurrences().size() == 1);
+					pOccurrence->addChild(pChildInstance->firstOccurrenceHandle());
 				}
 				else
 				{
-					pOccurence->addChild(pChildInstance);
+					pOccurrence->addChild(pChildInstance);
 				}
 			}
 		}
@@ -1124,11 +1211,12 @@ void GLC_3dxmlToWorld::createUnfoldedTree()
 		++iLink;
 	}
 
-	// Check the assembly structure occurence
+	// Check the assembly structure occurrence
 	ReferenceHash::const_iterator iRef= m_ReferenceHash.constBegin();
 	while (m_ReferenceHash.constEnd() != iRef)
 	{
-		if (iRef.key() != 1)
+//		if (iRef.key() != 1)
+		if (iRef.key() != m_productGroupRootId)
 		{
 			GLC_StructReference* pReference= iRef.value();
 			if (!pReference->hasStructInstance())
@@ -1145,7 +1233,7 @@ void GLC_3dxmlToWorld::createUnfoldedTree()
 				for (int i= 0; i < size; ++i)
 				{
 					GLC_StructInstance* pInstance= instances.at(i);
-					if (!pInstance->hasStructOccurence())
+					if (!pInstance->hasStructOccurrence())
 					{
 						QStringList stringList(m_FileName);
 						stringList.append("GLC_3dxmlToWorld::createUnfoldedTree() : Orphan Instance: " + pInstance->name());
@@ -1154,15 +1242,15 @@ void GLC_3dxmlToWorld::createUnfoldedTree()
 					}
 					else
 					{
-						QList<GLC_StructOccurence*> occurences= pInstance->listOfStructOccurences();
-						const int occurencesSize= occurences.size();
-						for (int j= 0; j < occurencesSize; ++j)
+						QList<GLC_StructOccurrence*> occurrences= pInstance->listOfStructOccurrences();
+						const int occurrencesSize= occurrences.size();
+						for (int j= 0; j < occurrencesSize; ++j)
 						{
-							GLC_StructOccurence* pOcc= occurences.at(j);
+							GLC_StructOccurrence* pOcc= occurrences.at(j);
 							if (pOcc->isOrphan())
 							{
 								QStringList stringList(m_FileName);
-								stringList.append("GLC_3dxmlToWorld::createUnfoldedTree(): Orphan occurence: " + pOcc->name());
+								stringList.append("GLC_3dxmlToWorld::createUnfoldedTree(): Orphan occurrence: " + pOcc->name());
 								GLC_ErrorLog::addError(stringList);
 								delete pOcc;
 							}
@@ -1176,7 +1264,7 @@ void GLC_3dxmlToWorld::createUnfoldedTree()
 	m_ReferenceHash.clear();
 
 	// Update position
-	m_pWorld->rootOccurence()->updateChildrenAbsoluteMatrix();
+	m_pWorld->rootOccurrence()->updateChildrenAbsoluteMatrix();
 
 }
 // Check for XML error
@@ -1406,7 +1494,7 @@ bool GLC_3dxmlToWorld::setStreamReaderToFile(QString fileName, bool test)
 	m_CurrentFileName= fileName;
 	if (m_IsInArchive)
 	{
-		QMutexLocker locker(&m_ZipMutex);
+        if (m_UseZipMutex) m_ZipMutex.lock();
 		m_ByteArrayList.clear();
 		// Create QuaZip File
 		QuaZipFile* p3dxmlFile= new QuaZipFile(m_p3dxmlArchive);
@@ -1419,9 +1507,15 @@ bool GLC_3dxmlToWorld::setStreamReaderToFile(QString fileName, bool test)
 				QString message(QString("GLC_3dxmlToWorld::setStreamReaderToFile File ") + m_FileName + " doesn't contains " + fileName);
 				GLC_FileFormatException fileFormatException(message, m_FileName, GLC_FileFormatException::WrongFileFormat);
 				clear();
+                delete p3dxmlFile;
 				throw(fileFormatException);
 			}
-			else return false;
+            else
+            {
+                if (m_UseZipMutex) m_ZipMutex.unlock();
+                delete p3dxmlFile;
+                return false;
+            }
 		}
 
 		// Open the file of the 3dxml
@@ -1453,6 +1547,7 @@ bool GLC_3dxmlToWorld::setStreamReaderToFile(QString fileName, bool test)
 		}
 		m_pStreamReader= new QXmlStreamReader(m_ByteArrayList.takeFirst());
 		delete p3dxmlFile;
+        if (m_UseZipMutex) m_ZipMutex.unlock();
 	}
 	else
 	{
@@ -1491,8 +1586,6 @@ bool GLC_3dxmlToWorld::setStreamReaderToFile(QString fileName, bool test)
 // Load the local representation
 void GLC_3dxmlToWorld::loadLocalRepresentations()
 {
-	qDebug() << "GLC_3dxmlToWorld::loadLocalRepresentations()";
-
 	if (m_LocalRepLinkList.isEmpty()) return;
 	QHash<const QString, GLC_3DRep> repHash;
 
@@ -1516,7 +1609,7 @@ void GLC_3dxmlToWorld::loadLocalRepresentations()
 	//qDebug() << "Local rep loaded";
 
 	// Attach the ref to the structure reference
-	RepLinkList::iterator iLocalRep= m_LocalRepLinkList.begin();
+    RepLinkList::const_iterator iLocalRep= m_LocalRepLinkList.constBegin();
 	while (iLocalRep != m_LocalRepLinkList.constEnd())
 	{
 		unsigned int referenceId= (*iLocalRep).m_ReferenceId;
@@ -1566,8 +1659,8 @@ void GLC_3dxmlToWorld::loadDefaultView()
 
 void GLC_3dxmlToWorld::loadV3DefaultViewProperty()
 {
-	goToElement(m_pStreamReader, "OccurenceId");
-	unsigned int occurenceId= getContent(m_pStreamReader, "OccurenceId").toUInt();
+	goToElement(m_pStreamReader, "OccurrenceId");
+	unsigned int occurrenceId= getContent(m_pStreamReader, "OccurrenceId").toUInt();
 
 	// Load the graphics properties
 	while(endElementNotReached(m_pStreamReader, "DefaultViewProperty"))
@@ -1581,13 +1674,13 @@ void GLC_3dxmlToWorld::loadV3DefaultViewProperty()
 					QString visibleString= readAttribute("visible", true);
 					if (visibleString != "true")
 					{
-						if (!m_V3OccurenceAttribHash.contains(occurenceId))
+						if (!m_V3OccurrenceAttribHash.contains(occurrenceId))
 						{
-							V3OccurenceAttrib* pOccurenceAttrib= new V3OccurenceAttrib();
-							pOccurenceAttrib->m_IsVisible= false;
-							m_V3OccurenceAttribHash.insert(occurenceId, pOccurenceAttrib);
+							V3OccurrenceAttrib* pOccurrenceAttrib= new V3OccurrenceAttrib();
+							pOccurrenceAttrib->m_IsVisible= false;
+							m_V3OccurrenceAttribHash.insert(occurrenceId, pOccurrenceAttrib);
 						}
-						else m_V3OccurenceAttribHash.value(occurenceId)->m_IsVisible= false;
+						else m_V3OccurrenceAttribHash.value(occurrenceId)->m_IsVisible= false;
 					}
 				}
 				else if ((QXmlStreamReader::StartElement == m_pStreamReader->tokenType()) && (m_pStreamReader->name() == "SurfaceAttributes"))
@@ -1615,13 +1708,13 @@ void GLC_3dxmlToWorld::loadV3DefaultViewProperty()
 						pRenderProperties->setOverwriteTransparency(static_cast<float>(alpha));
 						pRenderProperties->setRenderingMode(glc::OverwriteTransparency);
 					}
-					if (!m_V3OccurenceAttribHash.contains(occurenceId))
+					if (!m_V3OccurrenceAttribHash.contains(occurrenceId))
 					{
-						V3OccurenceAttrib* pOccurenceAttrib= new V3OccurenceAttrib();
-						pOccurenceAttrib->m_pRenderProperties= pRenderProperties;
-						m_V3OccurenceAttribHash.insert(occurenceId, pOccurenceAttrib);
+						V3OccurrenceAttrib* pOccurrenceAttrib= new V3OccurrenceAttrib();
+						pOccurrenceAttrib->m_pRenderProperties= pRenderProperties;
+						m_V3OccurrenceAttribHash.insert(occurrenceId, pOccurrenceAttrib);
 					}
-					else m_V3OccurenceAttribHash.value(occurenceId)->m_pRenderProperties= pRenderProperties;
+					else m_V3OccurrenceAttribHash.value(occurrenceId)->m_pRenderProperties= pRenderProperties;
 				}
 
 				readNext();
@@ -1645,33 +1738,33 @@ void GLC_3dxmlToWorld::loadV3DefaultViewProperty()
 
 void GLC_3dxmlToWorld::loadV4DefaultViewProperty()
 {
-	V4OccurenceAttrib* pV4OccurenceAttrib= new V4OccurenceAttrib();
+	V4OccurrenceAttrib* pV4OccurrenceAttrib= new V4OccurrenceAttrib();
 
 	while(endElementNotReached(m_pStreamReader, "DefaultViewProperty"))
 	{
-		if ((QXmlStreamReader::StartElement == m_pStreamReader->tokenType()) && (m_pStreamReader->name() == "OccurenceId"))
+		if ((QXmlStreamReader::StartElement == m_pStreamReader->tokenType()) && (m_pStreamReader->name() == "OccurrenceId"))
 		{
-			pV4OccurenceAttrib->m_Path= loadOccurencePath();
+			pV4OccurrenceAttrib->m_Path= loadOccurrencePath();
 		}
 		else if ((QXmlStreamReader::StartElement == m_pStreamReader->tokenType()) && (m_pStreamReader->name() == "RelativePosition"))
 		{
 			const QString matrix= getContent(m_pStreamReader, "RelativePosition");
-			pV4OccurenceAttrib->m_pMatrix= new GLC_Matrix4x4(loadMatrix(matrix));
+			pV4OccurrenceAttrib->m_pMatrix= new GLC_Matrix4x4(loadMatrix(matrix));
 		}
 		else if ((QXmlStreamReader::StartElement == m_pStreamReader->tokenType()) && (m_pStreamReader->name() == "GraphicProperties"))
 		{
-			loadGraphicProperties(pV4OccurenceAttrib);
+			loadGraphicProperties(pV4OccurrenceAttrib);
 		}
 		readNext();
 	}
 
-	if(!pV4OccurenceAttrib->m_Path.isEmpty())
+	if(!pV4OccurrenceAttrib->m_Path.isEmpty())
 	{
-		m_V4OccurenceAttribList.append(pV4OccurenceAttrib);
+		m_V4OccurrenceAttribList.append(pV4OccurrenceAttrib);
 	}
 	else
 	{
-		delete pV4OccurenceAttrib;
+		delete pV4OccurrenceAttrib;
 	}
 
 	// Check if an error Occur
@@ -1685,10 +1778,10 @@ void GLC_3dxmlToWorld::loadV4DefaultViewProperty()
 
 }
 
-QList<unsigned int> GLC_3dxmlToWorld::loadOccurencePath()
+QList<unsigned int> GLC_3dxmlToWorld::loadOccurrencePath()
 {
 	QList<unsigned int> path;
-	while(endElementNotReached(m_pStreamReader, "OccurenceId"))
+	while(endElementNotReached(m_pStreamReader, "OccurrenceId"))
 	{
 		if ((QXmlStreamReader::StartElement == m_pStreamReader->tokenType()) && (m_pStreamReader->name() == "id"))
 		{
@@ -1702,7 +1795,7 @@ QList<unsigned int> GLC_3dxmlToWorld::loadOccurencePath()
 	// Check if an error Occur
 	if (m_pStreamReader->hasError() || path.contains(0))
 	{
-		QString message(QString("GLC_3dxmlToWorld::loadOccurencePath An error occur in ") + m_FileName);
+		QString message(QString("GLC_3dxmlToWorld::loadOccurrencePath An error occur in ") + m_FileName);
 		GLC_FileFormatException fileFormatException(message, m_FileName, GLC_FileFormatException::WrongFileFormat);
 		clear();
 		throw(fileFormatException);
@@ -1711,7 +1804,7 @@ QList<unsigned int> GLC_3dxmlToWorld::loadOccurencePath()
 	return path;
 }
 
-void GLC_3dxmlToWorld::loadGraphicProperties(V4OccurenceAttrib* pAttrib)
+void GLC_3dxmlToWorld::loadGraphicProperties(V4OccurrenceAttrib* pAttrib)
 {
 	while(endElementNotReached(m_pStreamReader, "GraphicProperties"))
 	{
@@ -1740,8 +1833,12 @@ void GLC_3dxmlToWorld::loadGraphicProperties(V4OccurenceAttrib* pAttrib)
 				diffuseColor.setRgbF(red, green, blue, alpha);
 				GLC_Material* pMaterial= new GLC_Material();
 				pMaterial->setDiffuseColor(diffuseColor);
-				pRenderProperties->setOverwriteMaterial(pMaterial);
-				pRenderProperties->setRenderingMode(glc::OverwriteMaterial);
+                pRenderProperties->setOverwriteMaterial(pMaterial);
+                if (alpha < 1.0f)
+                {
+                    pMaterial->setOpacity(static_cast<float>(alpha));
+                }
+                pRenderProperties->setRenderingMode(glc::OverwriteMaterial);
 			}
 			else if (alpha < 1.0f)
 			{
@@ -1759,7 +1856,6 @@ void GLC_3dxmlToWorld::loadGraphicProperties(V4OccurenceAttrib* pAttrib)
 // Load the extern representation
 void GLC_3dxmlToWorld::loadExternRepresentations()
 {
-
 	if (m_ExternRepLinkList.isEmpty()) return;
 
 	QHash<const unsigned int, GLC_3DRep> repHash;
@@ -1772,7 +1868,7 @@ void GLC_3dxmlToWorld::loadExternRepresentations()
 	emit currentQuantum(currentQuantumValue);
 
 	// Load all external rep
-	ReferenceRepHash::iterator iRefRep= m_ReferenceRepHash.begin();
+    ReferenceRepHash::const_iterator iRefRep= m_ReferenceRepHash.constBegin();
 	while (iRefRep != m_ReferenceRepHash.constEnd())
 	{
 		m_CurrentFileName= iRefRep.value();
@@ -1784,14 +1880,43 @@ void GLC_3dxmlToWorld::loadExternRepresentations()
 			m_CurrentDateTime= QFileInfo(QFileInfo(m_FileName).absolutePath() + QDir::separator() + QFileInfo(m_CurrentFileName).fileName()).lastModified();
 		}
 
+        if (m_UseNative)
+        {
+            GLC_3DRep representation;
+            QuaZipFile* p3dxmlFile= new QuaZipFile(m_p3dxmlArchive);
+            // Get the file of the 3dxml
+            if (m_p3dxmlArchive->setCurrentFile(m_CurrentFileName, QuaZip::csInsensitive))
+            {
+                if(p3dxmlFile->open(QIODevice::ReadOnly))
+                {
+                    QDataStream dataStream(p3dxmlFile);
+                    dataStream >> representation;
+                    setRepresentationFileName(&representation);
+                }
+                else
+                {
+                    QString message(QString("GLC_3dxmlToWorld::setStreamReaderToFile Unable to Open ") + m_CurrentFileName);
+                    GLC_FileFormatException fileFormatException(message, m_CurrentFileName, GLC_FileFormatException::FileNotSupported);
+                    clear();
+                    delete p3dxmlFile;
+                    throw(fileFormatException);
+                }
 
-		if (!m_LoadStructureOnly && setStreamReaderToFile(m_CurrentFileName))
+                if (!representation.isEmpty())
+                {
+                    repHash.insert(id, representation);
+                }
+
+            }
+            delete p3dxmlFile;
+        }
+        else if (!m_LoadStructureOnly && setStreamReaderToFile(m_CurrentFileName))
 		{
 			GLC_3DRep representation;
-			if (GLC_State::cacheIsUsed() && GLC_State::currentCacheManager().isUsable(m_CurrentDateTime, QFileInfo(m_FileName).baseName(), m_CurrentFileName))
+            if (GLC_State::cacheIsUsed() && GLC_State::currentCacheManager().isUsable(m_CurrentDateTime, QFileInfo(m_FileName).baseName(), QFileInfo(m_CurrentFileName).fileName()))
 			{
 				GLC_CacheManager cacheManager= GLC_State::currentCacheManager();
-				GLC_BSRep binaryRep= cacheManager.binary3DRep(QFileInfo(m_FileName).baseName(), m_CurrentFileName);
+                GLC_BSRep binaryRep= cacheManager.binary3DRep(QFileInfo(m_FileName).baseName(), QFileInfo(m_CurrentFileName).fileName());
 				representation= binaryRep.loadRep();
 				setRepresentationFileName(&representation);
 			}
@@ -1822,7 +1947,7 @@ void GLC_3dxmlToWorld::loadExternRepresentations()
 			repHash.insert(id, representation);
 		}
 
-		// Progrees bar indicator
+        // Progrees bar indicator
 		++currentFileIndex;
 		currentQuantumValue = static_cast<int>((static_cast<double>(currentFileIndex) / size) * 100);
 		if (currentQuantumValue > previousQuantumValue)
@@ -1835,7 +1960,7 @@ void GLC_3dxmlToWorld::loadExternRepresentations()
 	}
 
 	// Attach the ref to the structure reference
-	RepLinkList::iterator iExtRep= m_ExternRepLinkList.begin();
+    RepLinkList::const_iterator iExtRep= m_ExternRepLinkList.constBegin();
 	while (iExtRep != m_ExternRepLinkList.constEnd())
 	{
 		unsigned int referenceId= (*iExtRep).m_ReferenceId;
@@ -2098,7 +2223,8 @@ GLC_Texture* GLC_3dxmlToWorld::loadTexture(QString fileName)
 		// Get the file of the 3dxml
 		if (!m_p3dxmlArchive->setCurrentFile(fileName, QuaZip::csInsensitive))
 		{
-			return NULL;
+            delete p3dxmlFile;
+            return nullptr;
 		}
 
 		// Open the file of the 3dxml
@@ -2178,43 +2304,44 @@ void GLC_3dxmlToWorld::checkFileValidity(QIODevice* pIODevice)
 		clear();
 		throw(fileFormatException);
 	}
-	else
-	{
-		pIODevice->seek(0);
-	}
+    else
+    {
+        pIODevice->close();
+        pIODevice->open(QIODevice::ReadOnly);
+    }
 }
 
-void GLC_3dxmlToWorld::applyV4Attribute(GLC_StructOccurence* pOccurence, V4OccurenceAttrib* pV4OccurenceAttrib, QHash<GLC_StructInstance*, unsigned int>& instanceToIdHash)
+void GLC_3dxmlToWorld::applyV4Attribute(GLC_StructOccurrence* pOccurrence, V4OccurrenceAttrib* pV4OccurrenceAttrib, QHash<GLC_StructInstance*, unsigned int>& instanceToIdHash)
 {
-	Q_ASSERT(pOccurence->hasChild() && !pV4OccurenceAttrib->m_Path.isEmpty());
-	unsigned int id= pV4OccurenceAttrib->m_Path.takeFirst();
+	Q_ASSERT(pOccurrence->hasChild() && !pV4OccurrenceAttrib->m_Path.isEmpty());
+	unsigned int id= pV4OccurrenceAttrib->m_Path.takeFirst();
 
-	const int childCount= pOccurence->childCount();
-	bool occurenceFound= false;
+	const int childCount= pOccurrence->childCount();
+	bool occurrenceFound= false;
 	int i= 0;
-	while (!occurenceFound && (i < childCount))
+	while (!occurrenceFound && (i < childCount))
 	{
-		GLC_StructOccurence* pChildOccurence= pOccurence->child(i);
-		if (instanceToIdHash.contains(pChildOccurence->structInstance()) && (instanceToIdHash.value(pChildOccurence->structInstance()) == id))
+		GLC_StructOccurrence* pChildOccurrence= pOccurrence->child(i);
+		if (instanceToIdHash.contains(pChildOccurrence->structInstance()) && (instanceToIdHash.value(pChildOccurrence->structInstance()) == id))
 		{
-			Q_ASSERT(id == instanceToIdHash.value(pChildOccurence->structInstance()));
-			occurenceFound= true;
+			Q_ASSERT(id == instanceToIdHash.value(pChildOccurrence->structInstance()));
+			occurrenceFound= true;
 
-			if (pV4OccurenceAttrib->m_Path.isEmpty())
+			if (pV4OccurrenceAttrib->m_Path.isEmpty())
 			{
-				pChildOccurence->setVisibility(pV4OccurenceAttrib->m_IsVisible);
-				if (NULL != pV4OccurenceAttrib->m_pRenderProperties)
+				pChildOccurrence->setVisibility(pV4OccurrenceAttrib->m_IsVisible);
+				if (NULL != pV4OccurrenceAttrib->m_pRenderProperties)
 				{
-					pChildOccurence->setRenderProperties(*(pV4OccurenceAttrib->m_pRenderProperties));
+					pChildOccurrence->setRenderProperties(*(pV4OccurrenceAttrib->m_pRenderProperties));
 				}
-				if (pV4OccurenceAttrib->m_pMatrix != NULL)
+				if (pV4OccurrenceAttrib->m_pMatrix != NULL)
 				{
-					pChildOccurence->makeFlexible(*(pV4OccurenceAttrib->m_pMatrix));
+					pChildOccurrence->makeFlexible(*(pV4OccurrenceAttrib->m_pMatrix));
 				}
 			}
 			else
 			{
-				applyV4Attribute(pChildOccurence, pV4OccurenceAttrib, instanceToIdHash);
+				applyV4Attribute(pChildOccurrence, pV4OccurrenceAttrib, instanceToIdHash);
 			}
 		}
 		else
@@ -2222,7 +2349,7 @@ void GLC_3dxmlToWorld::applyV4Attribute(GLC_StructOccurence* pOccurence, V4Occur
 			++i;
 		}
 	}
-	if (!occurenceFound)
+	if (!occurrenceFound)
 	{
 		qDebug() << "GLC_3dxmlToWorld::applyV4Attribute Occurrence not found" << id;
 	}
@@ -2280,7 +2407,10 @@ void GLC_3dxmlToWorld::loadRep(GLC_Mesh* pMesh)
 					if ( m_pStreamReader->name() == "Polyline")
 					{
 						loadPolyline(pMesh);
-						readNext();
+                        while (endElementNotReached(m_pStreamReader, "Polyline"))
+                        {
+                            readNext();
+                        }
 					}
 				}
 			}
@@ -2305,13 +2435,11 @@ void GLC_3dxmlToWorld::loadRep(GLC_Mesh* pMesh)
 		{
 			message= QString("Master LOD not found in file ") + m_FileName;
 		}
-		else
+        if (!vertexBufferFound)
 		{
 			message= QString("Vertex Buffer not found in file ") + m_FileName;
 		}
-		GLC_FileFormatException fileFormatException(message, m_FileName, GLC_FileFormatException::WrongFileFormat);
-		clear();
-		throw(fileFormatException);
+        GLC_ErrorLog::addError(message);
 	}
 
 
@@ -2405,11 +2533,7 @@ void GLC_3dxmlToWorld::loadVertexBuffer(GLC_Mesh* pMesh)
 
 				QStringList stringList(message);
 				GLC_ErrorLog::addError(stringList);
-
-				GLC_FileFormatException fileFormatException(message, m_FileName, GLC_FileFormatException::WrongFileFormat);
-				clear();
-				throw(fileFormatException);
-			}
+            }
 		}
 		readNext();
 	}

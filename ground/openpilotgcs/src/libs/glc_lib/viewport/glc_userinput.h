@@ -25,14 +25,20 @@
 #ifndef GLC_USERINPUT_H_
 #define GLC_USERINPUT_H_
 
+#include <QMetaType>
+
 #include "../maths/glc_vector2d.h"
+#include "../maths/glc_vector3d.h"
 
 #include "../glc_config.h"
+
+class QInputEvent;
 
 class GLC_LIB_EXPORT GLC_UserInput
 {
 public:
-	GLC_UserInput(int x= 0, int y= 0);
+    GLC_UserInput(int x= 0, int y= 0, QInputEvent* pEvent= nullptr);
+    GLC_UserInput(const GLC_UserInput& other);
 	virtual ~GLC_UserInput();
 
 
@@ -42,36 +48,45 @@ public:
 //////////////////////////////////////////////////////////////////////
 public:
 	//! return the x position
-	inline int x() const
+    int x() const
 	{return m_X;}
 
 	//! Return the y position
-	inline int y() const
+    int y() const
 	{return m_Y;}
 
 	//! Return normalyze x touch center
-	inline double normalyzeXTouchCenter() const
+    double normalyzeXTouchCenter() const
 	{return m_NormalyzeX;}
 
 	//! Return normalyze x touch center
-	inline double normalyzeYTouchCenter() const
+    double normalyzeYTouchCenter() const
 	{return m_NormalyzeX;}
 
 	//! Return the translation
-	inline GLC_Vector2d translation() const
+    GLC_Vector3d translation() const
 	{return m_Translation;}
 
 	//! Return the rotation angle
-	inline double rotationAngle() const
+    double rotationAngle() const
 	{return m_Rotation;}
 
 	//! Return the scale factor
-	inline double scaleFactor() const
+    double scaleFactor() const
 	{return m_ScaleFactor;}
 
 	//! Return true if the transformation has been set
-	inline bool transformationIsSet() const
+    bool transformationIsSet() const
 	{return m_TransformationIsSet;}
+
+    //! Return the unprojected point of this userinput
+    /*! The unprojected point must be set before*/
+    const GLC_Point3d& unprojectedPoint() const
+    {return m_UnprojectedPoint;}
+
+    QInputEvent* inputEvent() const
+    {return m_pInputEvent;}
+
 //@}
 
 //////////////////////////////////////////////////////////////////////
@@ -86,10 +101,10 @@ public:
 	void setNormalyzeTouchCenterPosition(double x, double y);
 
 	//! Set the transformation
-	void setTransformation(const GLC_Vector2d& translation, double rotation= 0.0, double scaleFactor= 1.0);
+    void setTransformation(const GLC_Vector3d& translation, double rotation= 0.0, double scaleFactor= 1.0);
 
 	//! Set translation
-	inline void setTranslation(const GLC_Vector2d& translation)
+    inline void setTranslation(const GLC_Vector3d& translation)
 	{m_Translation= translation;}
 
 	//! Set rotation
@@ -99,6 +114,10 @@ public:
 	//! Set scaling
 	inline void setScaleFactor(double scaleFactor)
 	{m_ScaleFactor= scaleFactor;}
+
+    //! Set unprojectedPoint
+    inline void setUnprojectedPoint(const GLC_Point3d& point)
+    {m_UnprojectedPoint= point;}
 //@}
 
 //////////////////////////////////////////////////////////////////////
@@ -117,7 +136,7 @@ private:
 
 	// Transformation data
 	//! Translation vector
-	GLC_Vector2d m_Translation;
+    GLC_Vector3d m_Translation;
 
 	//! Rotation angle
 	double m_Rotation;
@@ -128,6 +147,12 @@ private:
 	//! Flag to know if a transformation has been set
 	bool m_TransformationIsSet;
 
+    GLC_Point3d m_UnprojectedPoint;
+
+    QInputEvent* m_pInputEvent;
+
 };
+
+Q_DECLARE_METATYPE(GLC_UserInput)
 
 #endif /* GLC_USERINPUT_H_ */

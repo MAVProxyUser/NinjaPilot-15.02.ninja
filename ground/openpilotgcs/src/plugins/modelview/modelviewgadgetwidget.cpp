@@ -38,7 +38,7 @@
 #include <iostream>
 
 ModelViewGadgetWidget::ModelViewGadgetWidget(QWidget *parent)
-    : QGLWidget(new GLC_Context(QGLFormat(QGL::SampleBuffers)), parent)
+    : QGLWidget(QGLFormat(QGL::SampleBuffers), parent)
     , m_Light()
     , m_World()
     , m_GlView()
@@ -236,7 +236,7 @@ void ModelViewGadgetWidget::mousePressEvent(QMouseEvent *e)
     case (Qt::RightButton):
         printf("VBO enabled: %s, VBO supported: %s, VBO used: %s\n",
                vboEnable ? "yes" : "no",
-               GLC_State::vboSupported() ? "yes" : "no",
+               "yes", // VBO is always supported in modern OpenGL
                GLC_State::vboUsed() ? "yes" : "no");
         printf("Renderer - %s \n", (char *)glGetString(GL_RENDERER));
         printf("Extensions - %s\n", (char *)glGetString(GL_EXTENSIONS));
@@ -323,7 +323,7 @@ void ModelViewGadgetWidget::keyPressEvent(QKeyEvent *e) // switch between camera
 void ModelViewGadgetWidget::updateAttitude()
 {
     AttitudeState::DataFields data  = attState->getData(); // get attitude data
-    GLC_StructOccurence *rootObject = m_World.rootOccurence(); // get the full 3D model
+    GLC_StructOccurrence *rootObject = m_World.rootOccurrence(); // get the full 3D model
     double x = data.q3;
     double y = data.q2;
     double z = data.q4;

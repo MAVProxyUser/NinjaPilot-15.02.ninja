@@ -27,11 +27,10 @@
 #include "../glc_fileformatexception.h"
 #include "../sceneGraph/glc_structreference.h"
 #include "../sceneGraph/glc_structinstance.h"
-#include "../sceneGraph/glc_structoccurence.h"
+#include "../sceneGraph/glc_structoccurrence.h"
 
 #include <QTextStream>
 #include <QFileInfo>
-#include <QGLContext>
 #include <QDataStream>
 
 GLC_StlToWorld::GLC_StlToWorld()
@@ -79,7 +78,6 @@ GLC_World* GLC_StlToWorld::CreateWorldFromStl(QFile &file)
 
 	// Create Working variables
 	int currentQuantumValue= 0;
-	int previousQuantumValue= 0;
 	int numberOfLine= 0;
 
 	// Attach the stream to the file
@@ -90,11 +88,17 @@ GLC_World* GLC_StlToWorld::CreateWorldFromStl(QFile &file)
 
 	//////////////////////////////////////////////////////////////////
 	// Count the number of lines of the STL file
+    // And test if the STL file is ASCII
 	//////////////////////////////////////////////////////////////////
+    bool stlIsAscii= false;
 	while (!m_StlStream.atEnd())
 	{
 		++numberOfLine;
-		m_StlStream.readLine();
+        const QString currentLine= m_StlStream.readLine();
+        if (!stlIsAscii)
+        {
+            stlIsAscii= currentLine.contains("facet", Qt::CaseInsensitive);
+        }
 	}
 
 	//////////////////////////////////////////////////////////////////
@@ -114,10 +118,17 @@ GLC_World* GLC_StlToWorld::CreateWorldFromStl(QFile &file)
 	++m_CurrentLineNumber;
 	lineBuff= m_StlStream.readLine();
 	lineBuff= lineBuff.trimmed().toLower();
-	if (!lineBuff.startsWith("solid"))
+    if (!stlIsAscii)
 	{
 		// The STL File is not ASCII trying to load Binary STL File
 		m_pCurrentMesh= new GLC_Mesh();
+        if (lineBuff.startsWith("solid"))
+        {
+            lineBuff.remove(0, 5);
+            lineBuff= lineBuff.trimmed();
+            m_pCurrentMesh->setName(lineBuff);
+        }
+
 		file.reset();
 		LoadBinariStl(file);
 		m_pCurrentMesh->addTriangles(NULL, m_CurrentFace);
@@ -129,16 +140,21 @@ GLC_World* GLC_StlToWorld::CreateWorldFromStl(QFile &file)
 		m_pCurrentMesh->finish();
 		GLC_3DRep* pRep= new GLC_3DRep(m_pCurrentMesh);
 		m_pCurrentMesh= NULL;
-		m_pWorld->rootOccurence()->addChild(new GLC_StructOccurence(pRep));
+		m_pWorld->rootOccurrence()->addChild(new GLC_StructOccurrence(pRep));
 	}
 	else
 	{
 		// The STL File is ASCII
-		lineBuff.remove(0, 5);
-		lineBuff= lineBuff.trimmed();
 		m_pCurrentMesh= new GLC_Mesh();
-		m_pCurrentMesh->setName(lineBuff);
-		// Read the mesh facet
+        if (lineBuff.startsWith("solid"))
+        {
+            lineBuff.remove(0, 5);
+            lineBuff= lineBuff.trimmed();
+            m_pCurrentMesh->setName(lineBuff);
+        }
+        // Read the mesh facet
+        int previousQuantumValue= 0;
+
 		while (!m_StlStream.atEnd())
 		{
 			scanFacet();
@@ -195,7 +211,7 @@ void GLC_StlToWorld::scanFacet()
 		m_pCurrentMesh->finish();
 		GLC_3DRep* pRep= new GLC_3DRep(m_pCurrentMesh);
 		m_pCurrentMesh= NULL;
-		m_pWorld->rootOccurence()->addChild(new GLC_StructOccurence(pRep));
+		m_pWorld->rootOccurrence()->addChild(new GLC_StructOccurrence(pRep));
 		return;
 	}
 	// Test if this is the start of new solid
@@ -309,10 +325,6 @@ void GLC_StlToWorld::scanFacet()
 // Extract a Vector from a string
 GLC_Vector3df GLC_StlToWorld::extract3dVect(QString &line)
 {
-	float x=0.0f;
-	float y=0.0f;
-	float z=0.0f;
-
 	GLC_Vector3df vectResult;
 	QTextStream stringVecteur(&line);
 
@@ -321,9 +333,9 @@ GLC_Vector3df GLC_StlToWorld::extract3dVect(QString &line)
 	if (((stringVecteur >> xString >> yString >> zString).status() == QTextStream::Ok))
 	{
 		bool xOk, yOk, zOk;
-		x= xString.toFloat(&xOk);
-		y= yString.toFloat(&yOk);
-		z= zString.toFloat(&zOk);
+        const float x= xString.toFloat(&xOk);
+        const float y= yString.toFloat(&yOk);
+        const float z= zString.toFloat(&zOk);
 		if (!(xOk && yOk && zOk))
 		{
 			QString message= "GLC_StlToWorld::extract3dVect : failed to convert vector component to float";
@@ -346,7 +358,6 @@ GLC_Vector3df GLC_StlToWorld::extract3dVect(QString &line)
 void GLC_StlToWorld::LoadBinariStl(QFile &file)
 {
 	// Create Working variables
-	int currentQuantumValue= 0;
 	int previousQuantumValue= 0;
 
 	QDataStream stlBinFile(&file);
@@ -413,7 +424,7 @@ void GLC_StlToWorld::LoadBinariStl(QFile &file)
 			m_CurrentFace.append(m_CurrentIndex);
 			++m_CurrentIndex;
 		}
-		currentQuantumValue = static_cast<int>((static_cast<double>(i + 1) / numberOfFacet) * 100);
+        const int currentQuantumValue = static_cast<int>((static_cast<double>(i + 1) / numberOfFacet) * 100);
 		if (currentQuantumValue > previousQuantumValue)
 		{
 			emit currentQuantum(currentQuantumValue);

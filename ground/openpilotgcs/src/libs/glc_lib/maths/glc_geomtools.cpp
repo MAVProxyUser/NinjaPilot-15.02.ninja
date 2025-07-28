@@ -24,6 +24,7 @@
 
 #include "glc_geomtools.h"
 #include "glc_matrix4x4.h"
+#include "../3rdparty/clip2tri/clip2tri/clip2tri.h"
 
 #include <QtGlobal>
 
@@ -74,7 +75,7 @@ bool glc::polygonIsConvex(QList<GLuint>* pIndexList, const QList<float>& bulkLis
 		v0.setVect(bulkList.at(currentIndex * 3), bulkList.at(currentIndex * 3 + 1), bulkList.at(currentIndex * 3 + 2));
 		currentIndex= pIndexList->at((i + 1) % size);
 		v1.setVect(bulkList.at(currentIndex * 3), bulkList.at(currentIndex * 3 + 1), bulkList.at(currentIndex * 3 + 2));
-		isConvex= (v0.angleWithVect(v1) < glc::PI);
+        isConvex= (v0.angleWithVect2(v1) < glc::PI);
 		++i;
 	}
 	return isConvex;
@@ -467,7 +468,7 @@ void glc::triangulatePolygon(QList<GLuint>* pIndexList, const QList<float>& bulk
 				const int max= size / 2;
 				for (int i= 0; i < max; ++i)
 				{
-					polygon.swap(i, size - 1 -i);
+                    polygon.swapItemsAt(i, size - 1 -i);
 					int temp= face[i];
 					face[i]= face[size - 1 - i];
 					face[size - 1 - i]= temp;
@@ -505,7 +506,7 @@ bool glc::lineIntersectPlane(const GLC_Line3d& line, const GLC_Plane& plane, GLC
 	const GLC_Vector3d d= line.direction();
 
 	const double denominator= d * n;
-	if (qFuzzyCompare(fabs(denominator), 0.0))
+	if (glc::fuzzyCompare(fabs(denominator), 0.0))
 	{
 		qDebug() << " glc::lineIntersectPlane : Line parallel to the plane";
 		// The line is parallel to the plane
@@ -519,6 +520,23 @@ bool glc::lineIntersectPlane(const GLC_Line3d& line, const GLC_Plane& plane, GLC
 
 		return true;
 	}
+}
+
+bool glc::segmentIntersectPlane(const GLC_Point3d& p1, const GLC_Point3d& p2, const GLC_Plane& plane, GLC_Point3d* pPoint)
+{
+    bool subject= false;
+    GLC_Line3d line(p1, p2 - p1);
+    GLC_Point3d intersection;
+    if (lineIntersectPlane(line, plane, &intersection))
+    {
+        if (pointIsOnSegment(p1, p2, intersection))
+        {
+            pPoint->operator =(intersection);
+            subject= true;
+        }
+    }
+
+    return subject;
 }
 
 GLC_Point3d glc::project(const GLC_Point3d& point, const GLC_Line3d& line)
@@ -539,91 +557,104 @@ double glc::pointLineDistance(const GLC_Point3d& point, const GLC_Line3d& line)
 
 bool glc::pointsAreCollinear(const GLC_Point3d& p1, const GLC_Point3d& p2, const GLC_Point3d& p3)
 {
-	bool subject= false;
-	if (compare(p1, p2) || compare(p1, p3) || compare(p2, p3))
-	{
-		subject= true;
-	}
-	else
-	{
-		GLC_Vector3d p1p2= (p2 - p1).setLength(1.0);
-		GLC_Vector3d p2p3= (p3 - p2).setLength(1.0);
-		subject= (compare(p1p2, p2p3)  || compare(p1p2, p2p3.inverted()));
-	}
-	return subject;
+    bool subject= false;
+    const double p1p2Length= (p1 - p2).length();
+    const double p1p3Length= (p1 - p3).length();
+    const double p2p3Length= (p2 - p3).length();
+    QList<double> lengthList;
+    lengthList << p1p2Length << p1p3Length << p2p3Length;
+    std::sort(lengthList.begin(), lengthList.end());
+    subject= compare(lengthList.at(2), (lengthList.at(0) + lengthList.at(1)));
+    return subject;
 }
 
-bool glc::compare(double p1, double p2)
+bool glc::pointIsIncludeInSegment(const GLC_Point3d& p1, const GLC_Point3d& p2, const GLC_Point3d& p3)
 {
-	return qAbs(p1 - p2) <= comparedPrecision;
+    bool subject= false;
+    const GLC_Vector3d p1p2((p2 - p1).setLength(1.0));
+    const GLC_Vector3d p2p3((p3 - p2).setLength(1.0));
+    if (compare(p1p2, p2p3)  || compare(p1p2, p2p3.inverted()))
+    {
+        const double p1p2Length= (p1 -p2).length();
+        const double p1p3Length= (p1 -p3).length();
+        if ((p1p2Length > p1p3Length) && !glc::compare(p1p2Length, p1p3Length))
+        {
+            const double p2p3Length= (p2 -p3).length();
+            subject= (p1p2Length > p2p3Length) && !glc::compare(p1p2Length, p2p3Length);
+        }
+    }
+    return subject;
 }
 
-bool glc::compare(double p1, double p2, double accuracy)
+bool glc::pointIsOnSegment(const GLC_Point3d& p1, const GLC_Point3d& p2, const GLC_Point3d& p3)
 {
-    return qAbs(p1 - p2) <= accuracy;
+    bool subject= false;
+    const bool p1EqualP3= compare(p1, p3);
+    const bool p2EqualP3= compare(p2, p3);
+    if (p1EqualP3 || p2EqualP3)
+    {
+        subject= true;
+    }
+    else
+    {
+        const GLC_Vector3d p1p2((p2 - p1).setLength(1.0));
+        const GLC_Vector3d p2p3((p3 - p2).setLength(1.0));
+        if (compare(p1p2, p2p3)  || compare(p1p2, p2p3.inverted()))
+        {
+            const double p1p2Length= (p1 -p2).length();
+            const double p1p3Length= (p1 -p3).length();
+            if (p1p2Length > p1p3Length)
+            {
+                const double p2p3Length= (p2 -p3).length();
+                subject= (p1p2Length > p2p3Length);
+            }
+        }
+    }
+    return subject;
 }
 
-bool glc::compareAngle(double p1, double p2)
+bool glc::segmentsOverlap(const GLC_Point3d& p1, const GLC_Point3d& p2, const GLC_Point3d& p3, const GLC_Point3d& p4)
 {
-	const double anglePrecision= toRadian(comparedPrecision);
-	return qAbs(p1 - p2) <= anglePrecision;
-}
-
-bool glc::compare(const GLC_Vector3d& v1, const GLC_Vector3d& v2)
-{
-	bool compareResult= (qAbs(v1.x() - v2.x()) <= comparedPrecision);
-	compareResult= compareResult && (qAbs(v1.y() - v2.y()) <= comparedPrecision);
-	compareResult= compareResult && (qAbs(v1.z() - v2.z()) <= comparedPrecision);
-
-	return compareResult;
-}
-
-bool glc::compare(const GLC_Vector3d& v1, const GLC_Vector3d& v2, double accuracy)
-{
-    bool compareResult= (qAbs(v1.x() - v2.x()) <= accuracy);
-    compareResult= compareResult && (qAbs(v1.y() - v2.y()) <= accuracy);
-    compareResult= compareResult && (qAbs(v1.z() - v2.z()) <= accuracy);
-
-    return compareResult;
-}
-
-bool glc::compare(const GLC_Vector2d& v1, const GLC_Vector2d& v2)
-{
-	bool compareResult= (qAbs(v1.x() - v2.x()) <= comparedPrecision);
-	return compareResult && (qAbs(v1.y() - v2.y()) <= comparedPrecision);
-}
-
-bool glc::compare(const GLC_Vector2d& v1, const GLC_Vector2d& v2, double accuracy)
-{
-    bool compareResult= (qAbs(v1.x() - v2.x()) <= accuracy);
-    return compareResult && (qAbs(v1.y() - v2.y()) <= accuracy);
-}
-
-bool glc::compare(const QPointF& v1, const QPointF& v2)
-{
-	bool compareResult= (qAbs(v1.x() - v2.x()) <= comparedPrecision);
-	return compareResult && (qAbs(v1.y() - v2.y()) <= comparedPrecision);
-}
-
-bool glc::compare(const QPointF& v1, const QPointF& v2, double accuracy)
-{
-    bool compareResult= (qAbs(v1.x() - v2.x()) <= accuracy);
-    return compareResult && (qAbs(v1.y() - v2.y()) <= accuracy);
+    bool subject= false;
+    const bool p1EqualP3= compare(p1, p3);
+    const bool p2EqualP3= compare(p2, p3);
+    const bool p1EqualP4= compare(p1, p4);
+    const bool p2EqualP4= compare(p2, p4);
+    if ((p1EqualP3 && p2EqualP4) || (p2EqualP3 && p1EqualP4))
+    {
+        subject= true;
+    }
+    else if (glc::pointsAreCollinear(p1, p2, p3) && glc::pointsAreCollinear(p1, p2, p4))
+    {
+        const double squaredLength1= GLC_Vector3d(p1 - p2).squaredLength();
+        const double squaredLength2= GLC_Vector3d(p3 - p4).squaredLength();
+        if (squaredLength1 > squaredLength2)
+        {
+            subject= (pointIsIncludeInSegment(p1, p2, p3) || pointIsIncludeInSegment(p1, p2, p4));
+        }
+        else
+        {
+            subject= (pointIsIncludeInSegment(p3, p4, p1) || pointIsIncludeInSegment(p3, p4, p2));
+        }
+    }
+    return subject;
 }
 
 double glc::round(double value)
 {
-	value= value / comparedPrecision;
-	value= (value >= 0.0 ? floor(value + 0.5) : ceil(value - 0.5));
-	value= value * comparedPrecision;
-	return value;
+    return round(value, comparedPrecision);
 }
 
 double glc::round(double value, double accuracy)
 {
-    value= value / accuracy;
-    value= (value >= 0.0 ? floor(value + 0.5) : ceil(value - 0.5));
-    value= value * accuracy;
+    if (!qFuzzyIsNull(accuracy))
+    {
+        value= value / accuracy;
+        value= (value >= 0.0 ? floor(value + 0.5) : ceil(value - 0.5));
+        value= value * accuracy;
+    }
+    else value= 0.0;
+
     return value;
 }
 
@@ -639,28 +670,28 @@ QPointF glc::round(const QPointF& point, double accuracy)
     return subject;
 }
 
-GLC_Vector2d round(const GLC_Vector2d& vector)
+GLC_Vector2d glc::round(const GLC_Vector2d& vector)
 {
 	GLC_Vector2d subject(glc::round(vector.x()), glc::round(vector.y()));
 
 	return subject;
 }
 
-GLC_Vector2d round(const GLC_Vector2d& vector, double accuracy)
+GLC_Vector2d glc::round(const GLC_Vector2d& vector, double accuracy)
 {
     GLC_Vector2d subject(glc::round(vector.x(), accuracy), glc::round(vector.y(), accuracy));
 
     return subject;
 }
 
-GLC_Vector3d round(const GLC_Vector3d& vector)
+GLC_Vector3d glc::round(const GLC_Vector3d& vector)
 {
 	GLC_Vector3d subject(glc::round(vector.x()), glc::round(vector.y()), glc::round(vector.z()));
 
 	return subject;
 }
 
-GLC_Vector3d round(const GLC_Vector3d& vector, double accuracy)
+GLC_Vector3d glc::round(const GLC_Vector3d& vector, double accuracy)
 {
     GLC_Vector3d subject(glc::round(vector.x(), accuracy), glc::round(vector.y(), accuracy), glc::round(vector.z(), accuracy));
 
@@ -704,7 +735,7 @@ bool glc::pointInPolygon(const GLC_Point2d& point, const QList<GLC_Point2d>& pol
 
 double glc::zeroTo2PIAngle(double angle)
 {
-	if (qFuzzyCompare(fabs(angle), glc::PI))
+	if (glc::fuzzyCompare(fabs(angle), glc::PI))
 	{
 		angle= glc::PI;
 	}
@@ -741,13 +772,22 @@ QList<GLC_Point2d> glc::polygonIn2d(QList<GLC_Point3d> polygon3d)
         transformation.setMatRot(rotationAxis, angle);
     }
 
-    QList<GLC_Point2d> subject;
-    // Transform polygon vertexs
-    for (int i=0; i < count; ++i)
+    for (GLC_Point3d& point : polygon3d)
     {
-        polygon3d[i]= transformation * polygon3d[i];
-        // Create 2d vector
-        subject << polygon3d[i].toVector2d(Z_AXIS);
+        point= transformation * point;
+    }
+
+    GLC_Matrix4x4 transformation1;
+    if (!rotationAxis.isNull())
+    {
+        transformation1.setMatRot(rotationAxis, glc::X_AXIS);
+    }
+
+    QList<GLC_Point2d> subject;
+    for (GLC_Point3d& point : polygon3d)
+    {
+        point= transformation1 * point;
+        subject << point.toVector2d(Z_AXIS);
     }
 
     return subject;
@@ -759,7 +799,7 @@ QList<GLC_Point2d> glc::normalyzePolygon(const QList<GLC_Point2d>& polygon)
     const int count= polygon.count();
     Q_ASSERT(count > 2);
 
-    GLC_Point2d minPoint= polygon.first();
+    GLC_Point2d minPoint= polygon.constFirst();
     GLC_Point2d maxPoint= minPoint;
     for (int i= 1; i < count; ++i)
     {
@@ -784,4 +824,445 @@ QList<GLC_Point2d> glc::normalyzePolygon(const QList<GLC_Point2d>& polygon)
     }
 
     return subject;
+}
+
+GLC_Vector3d glc::triangulatePolygonClip2TRi(QList<GLuint> *pIndexList, const QList<float> &bulkList)
+{
+    // Get the polygon vertice
+    QList<GLC_Point3d> originPoints;
+    const int size= pIndexList->size();
+    for (int i= 0; i < size; ++i)
+    {
+        const int currentIndex= pIndexList->at(i);
+        const GLC_Point3d currentPoint= GLC_Point3d(bulkList.at(currentIndex * 3), bulkList.at(currentIndex * 3 + 1), bulkList.at(currentIndex * 3 + 2));
+        originPoints.append(currentPoint);
+    }
+
+    //-------------- Change frame to mach polygon plane
+    // Compute face normal
+    const GLC_Point3d p1(originPoints[0]);
+    const GLC_Point3d p2(originPoints[1]);
+    const GLC_Point3d p3(originPoints[2]);
+    GLC_Vector3d subject(triangleNormal(p1, p2, p3));
+
+    // Check if the vertice lies on the plane
+    GLC_Plane plane(p1, p2, p3);
+    bool isLieOnPlane= true;
+    int i= 3;
+    while (isLieOnPlane && (i < size))
+    {
+        GLC_Point3d point= originPoints.at(i);
+        isLieOnPlane= plane.lieOnThisPlane(point);
+        ++i;
+    }
+    if (isLieOnPlane)
+    {
+        // Create the transformation matrix
+        GLC_Matrix4x4 transformation;
+
+        GLC_Vector3d rotationAxis(subject ^ glc::Z_AXIS);
+        if (!rotationAxis.isNull())
+        {
+            const double angle= acos(subject * glc::Z_AXIS);
+            transformation.setMatRot(rotationAxis, angle);
+        }
+        else if (glc::compare(Z_AXIS.inverted(), subject))
+        {
+            transformation.setMatRot(glc::X_AXIS, glc::PI);
+        }
+
+        QList<GLC_Point2d> polygon;
+        vector<c2t::Point> boundingPolygon(size);
+        // Transform polygon vertexs
+        for (int i=0; i < size; ++i)
+        {
+            originPoints[i]= transformation * originPoints[i];
+            // Create 2d vector
+
+            GLC_Point2d currentPoint= originPoints[i].toVector2d(Z_AXIS);
+            polygon.append(currentPoint);
+            c2t::Point point;
+            point.x= currentPoint.x();
+            point.y= currentPoint.y();
+            boundingPolygon[i]= point;
+        }
+
+        if (polygonCompatibleWithClip2TRi(polygon))
+        {
+            vector<vector<c2t::Point> > inputPolygons;
+            vector<c2t::Point> outputTriangles;  // Every 3 points is a triangle
+
+            c2t::clip2tri clip2tri;
+            clip2tri.triangulate(inputPolygons, outputTriangles, boundingPolygon);
+
+            QList<GLuint> oldIndex(*pIndexList);
+            pIndexList->clear();
+            const int count= outputTriangles.size();
+            for (int i= 0; i < count; ++i)
+            {
+                const GLC_Point2d point(outputTriangles.at(i).x, outputTriangles.at(i).y);
+                for (int j= 0; j < size ; ++j)
+                {
+                    if (glc::compare(point, (polygon.at(j))))
+                    {
+                        pIndexList->append(oldIndex.at(j));
+                    }
+                }
+            }
+            if(pIndexList->size() != count)
+            {
+                qWarning() << "glc::triangulatePolygonClip2TRi failed";
+                // Somethings got wrong
+                // Use the old method wich preserve index integrety
+                pIndexList->operator =(oldIndex);
+                triangulatePolygon(pIndexList, bulkList);
+            }
+        }
+        else
+        {
+            qWarning() << "Polygon with NULL edge found glc::triangulatePolygonClip2TRi failed";
+            qWarning() << "Use old method";
+            triangulatePolygon(pIndexList, bulkList);
+        }
+    }
+    else
+    {
+        qWarning() << "Non planar polygon found glc::triangulatePolygonClip2TRi failed";
+        qWarning() << "Use old method";
+        triangulatePolygon(pIndexList, bulkList);
+    }
+
+    return subject;
+}
+
+bool glc::triangleIsCCW(const GLC_Point3d& p1, const GLC_Point3d& p2, const GLC_Point3d& p3, const GLC_Vector3d& normal)
+{
+    const GLC_Vector3d computedNormal(triangleNormal(p1, p2, p3));
+
+    bool subject= glc::compare(computedNormal, normal);
+
+    return subject;
+}
+
+GLC_Vector3d glc::triangleNormal(const GLC_Point3d &p1, const GLC_Point3d &p2, const GLC_Point3d &p3)
+{
+    const GLC_Vector3d edge1(p2 - p1);
+    const GLC_Vector3d edge2(p3 - p2);
+
+    GLC_Vector3d subject(edge1 ^ edge2);
+    subject.normalize();
+
+    return subject;
+}
+
+QList<GLC_uint> glc::reverseTriangleIndexWindingOrder(const QList<GLC_uint>& index)
+{
+    QList<GLC_uint> subject;
+    const int count= index.count();
+    for (int i= 0; i < count; i+=3)
+    {
+        subject.append(index.at(i));
+        subject.append(index.at(i + 2));
+        subject.append(index.at(i + 1));
+    }
+
+    return subject;
+}
+
+bool glc::polygonCompatibleWithClip2TRi(const QList<GLC_Point2d> polygon)
+{
+    bool subject= true;
+    const int count= polygon.count();
+    int i= 0;
+    while (subject && (i < count))
+    {
+        GLC_Point2d p1= polygon.at(i);
+        int j= i + 1;
+        while (subject && (j < count))
+        {
+            GLC_Point2d p2= polygon.at(j);
+            subject= !glc::compare(p1, p2, glc::EPSILON);
+            ++j;
+        }
+        ++i;
+    }
+
+    return subject;
+}
+
+QList<GLC_Point3d> glc::AddCorner(const QList<GLC_Point3d> &segments, double radius, int count)
+{
+    Q_ASSERT(segments.count() == 3);
+    Q_ASSERT(radius > 0.0);
+    Q_ASSERT(count > 1);
+
+    QList<GLC_Point3d> subject;
+
+    // Compute face normal to compute angle between segments
+    const GLC_Point3d p0(segments[0]);
+    const GLC_Point3d p1(segments[1]);
+    const GLC_Point3d p2(segments[2]);
+
+    const GLC_Vector3d edge0(p1 - p0);
+    const GLC_Vector3d edge1(p1 - p2);
+
+    GLC_Vector3d direction(edge1 ^ edge0);
+    direction.normalize();
+
+    const double angle = (edge1.signedAngleWithVect(edge0, direction));
+    const double deltaLength= radius * (cos(angle / 2.0) / sin(angle / 2.0));
+
+    // Compute new segment end before corner
+    GLC_Vector3d p1OffsetOnEdge0(p0 - p1);
+    p1OffsetOnEdge0.setLength(deltaLength);
+    GLC_Point3d newP1OnEdge0= p1 + p1OffsetOnEdge0;
+
+    GLC_Vector3d p1OffsetOnEdge1(p2 - p1);
+    p1OffsetOnEdge1.setLength(deltaLength);
+    GLC_Point3d newP1OnEdge1= p1 + p1OffsetOnEdge1;
+
+
+    // Compute corner axis position
+    GLC_Matrix4x4 m1(p1OffsetOnEdge0, glc::PI / 2.0);
+    GLC_Vector3d centerOffset= m1 * direction;
+    centerOffset.setLength(radius);
+    GLC_Point3d axisPos= newP1OnEdge0 + centerOffset;
+
+    // Add first segment
+    subject << p0;
+    if (p0 != newP1OnEdge0)
+    {
+        subject << newP1OnEdge0;
+    }
+
+    const double deltaAngle= (glc::PI - angle) / count; // Complementary angle
+
+    // Add Corner
+    const GLC_Point3d relativeStartingPoint(newP1OnEdge0 - axisPos);
+    for (int i= 1; i < count; ++i)
+    {
+        const double currentAngle= deltaAngle * i;
+        const GLC_Matrix4x4 transformation(direction, currentAngle);
+        const GLC_Point3d currentPoint(transformation * relativeStartingPoint);
+        subject.append(currentPoint + axisPos);
+    }
+
+    // Add last segment
+    subject << newP1OnEdge1;
+    if (newP1OnEdge1 != p2)
+    {
+        subject << p2;
+    }
+
+    return subject;
+}
+
+QList<GLC_Point2d> glc::findIntersectionBetwen2Circle(const GLC_Point2d& c0, double r0, const GLC_Point2d& c1, double r1)
+{
+    QList<GLC_Point2d> subject;
+
+    const GLC_Vector2d u(c1 - c0);
+    const double uSqrLen= u * u;
+    const double deltaRadius= r0 - r1;
+    if (!qFuzzyIsNull(uSqrLen) || !qFuzzyIsNull(deltaRadius))
+    {
+        const double sQrDeltaRadius= deltaRadius * deltaRadius;
+        if (uSqrLen >= sQrDeltaRadius)
+        {
+            const double r0AddR1= r0 + r1;
+            const double sqrR0AddR1= r0AddR1 * r0AddR1;
+            if (uSqrLen < sqrR0AddR1)
+            {
+                if (sQrDeltaRadius < uSqrLen)
+                {
+                    const double invUSqrLen= 1.0 / uSqrLen;
+                    const double s= 0.5 * (((r0 * r0) - (r1 * r1)) * invUSqrLen + 1.0);
+                    const GLC_Vector2d tmp(c0 + (u * s));
+
+                    // In theory, discr is nonnegative.  However, numerical round-off
+                    // errors can make it slightly negative.  Clamp it to zero.
+                    double discr= ((r0 * r0) * invUSqrLen) - (s * s);
+                    if (discr < 0.0)
+                    {
+                        discr= 0.0;
+                    }
+
+                    const double t= sqrt(discr);
+                    const GLC_Vector2d v(u.y(), -u.x());
+
+                    const GLC_Point2d int1(tmp - (v * t));
+                    subject.append(int1);
+
+                    const GLC_Point2d int2(tmp + (v * t));
+                    if (int1 != int2)
+                    {
+                        subject.append(int2);
+                    }
+                }
+                else
+                {
+                    // tangent
+                    GLC_Point2d intersect(c0 + (u * (r0 / deltaRadius)));
+                    subject.append(intersect);
+                }
+            }
+            else
+            {
+                // tangent
+                GLC_Point2d intersect(c0 + (u * (r0 / r0AddR1)));
+                subject.append(intersect);
+            }
+        }
+    }
+
+    return subject;
+}
+
+QList<GLC_Point3d> glc::circleFromCenterAndTwoPoint(const GLC_Point3d& center, const GLC_Point3d& start
+                                                    , const GLC_Point3d& end, int count, const GLC_Vector3d& direction)
+{
+    // Compute face normal to compute angle between segments
+    const GLC_Vector3d edge0(start - center);
+    const GLC_Vector3d edge1(end - center);
+
+    const double angle = (edge0.signedAngleWithVect(edge1, direction));
+
+    QList<GLC_Point3d> subject;
+
+    // Add first segment
+    subject << start;
+
+    const double deltaAngle= (angle) / count;
+
+    // Add Corner
+    const GLC_Point3d relativeStartingPoint(edge0);
+    for (int i= 1; i < count; ++i)
+    {
+        const double currentAngle= deltaAngle * i;
+        const GLC_Matrix4x4 transformation(direction, currentAngle);
+        const GLC_Point3d currentPoint(transformation * relativeStartingPoint);
+        subject.append(currentPoint + center);
+    }
+
+    // Add last segment
+    subject << end;
+
+    return subject;
+}
+
+QList<double> glc::line2DImplicitCoefs(const GLC_Point2d& p, const GLC_Vector2d& v)
+{
+    // Normal vector
+    const GLC_Vector2d n(perpVector(v));
+
+    // Get coeffs
+    double a= n.x();
+    double b= n.y();
+    double c= -(n * p);
+
+    QList<double> subject;
+    subject << a << b << c;
+
+    return subject;
+}
+
+QList<GLC_Point2d> glc::circleCenterTangentToLineAndCircleWithGivenRadius(const GLC_Point2d& linePoint, const GLC_Vector2d& lineVect
+                                                                          , const GLC_Point2d& circleCenter, double circleRadius
+                                                                          , double radius)
+{
+    QList<GLC_Point2d> subject;
+    QList<double> lineCoef= line2DImplicitCoefs(linePoint, lineVect);
+    double a= lineCoef.at(0);
+    double b= lineCoef.at(1);
+    double c= lineCoef.at(2);
+
+    const double normalizeFactor= sqrt((a * a) + (b * b));
+
+    const double circleCenterToLineDistance= qAbs(a * circleCenter.x() + b * circleCenter.y() + c) / normalizeFactor;
+    if (!(circleCenterToLineDistance > ((2.0 * radius) + circleRadius)))
+    {
+        const GLC_Vector2d n(perpVector(lineVect).setLength(radius));
+        const GLC_Point2d& linePointp1= linePoint + n;
+        const GLC_Point2d& linePointp2= linePoint - n;
+        const double radiusPlusCircleRadius= circleRadius + radius;
+        const double radiusSubstCircleRadius= circleRadius - radius;
+        subject.append(line2CircleIntersection(linePointp1, lineVect, circleCenter, radiusPlusCircleRadius));
+        subject.append(line2CircleIntersection(linePointp2, lineVect, circleCenter, radiusPlusCircleRadius));
+        subject.append(line2CircleIntersection(linePointp1, lineVect, circleCenter, radiusSubstCircleRadius));
+        subject.append(line2CircleIntersection(linePointp2, lineVect, circleCenter, radiusSubstCircleRadius));
+    }
+
+    return subject;
+}
+
+QList<GLC_Point2d> glc::removeDuplicate(const QList<GLC_Point2d>& points)
+{
+    QList<GLC_Point2d> subject;
+    const int count= points.count();
+    for (int i= 0; i < count; ++i)
+    {
+        const GLC_Point2d point(points.at(i));
+        const int subjectCount= subject.count();
+        bool duplicateFound= false;
+        for (int j= 0; j < subjectCount; ++j)
+        {
+            duplicateFound= (compare(subject.at(j), point));
+            if (duplicateFound) break;
+        }
+        if (!duplicateFound) subject.append(point);
+    }
+    return subject;
+}
+
+QList<GLC_Point2d> glc::line2CircleIntersection(const GLC_Point2d& lineOrigin, const GLC_Vector2d& lineDir, const GLC_Point2d& circleCenter, double radius)
+{
+    QList<GLC_Point2d> subject;
+    const GLC_Vector2d diff(lineOrigin - circleCenter);
+    const double a0= (diff * diff) - (radius * radius);
+    const double a1= (lineDir * diff);
+    const double discr= (a1 * a1) - a0;
+    if (discr > 0.0)
+    {
+        double root= sqrt(discr);
+        const GLC_Point2d p1(lineOrigin + (lineDir * (-a1 - root)));
+        const GLC_Point2d p2(lineOrigin + (lineDir * (-a1 + root)));
+        subject << p1 << p2;
+    }
+    else if (qFuzzyIsNull(discr))
+    {
+        const GLC_Point2d p(lineOrigin + (lineDir * (-a1)));
+        subject << p;
+    }
+
+    return subject;
+}
+
+GLC_Point3d glc::project(const GLC_Point3d& point, const GLC_Plane& plane)
+{
+    Q_ASSERT(!plane.isNull());
+
+    const GLC_Vector3d normal(plane.normal());
+
+    GLC_Point3d subject(point - (((point * normal) + plane.coefD()) * normal));
+
+    return subject;
+}
+
+bool glc::pointsAreCollinear(const QPointF& p1, const QPointF& p2, const QPointF& p3, double accuracy)
+{
+    return glc::compare(0.0, ((((p2.x() - p1.x()) * (p3.y() - p1.y()) - (p3.x() - p1.x()) * (p2.y() - p1.y())))), accuracy);
+}
+
+double glc::area(const QPolygonF& polygon)
+{
+    double subject= 0;
+    const int count= polygon.count();
+    for (int i= 0; i < count -1; ++i)
+    {
+        int j= (i + 1) % count;
+        subject+= polygon.at(i).x() * polygon.at(j).y();
+        subject-= polygon.at(i).y() * polygon.at(j).x();
+    }
+
+    return qAbs(subject);
 }

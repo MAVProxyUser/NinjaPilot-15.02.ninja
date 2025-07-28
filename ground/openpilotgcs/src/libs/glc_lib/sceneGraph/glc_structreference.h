@@ -35,7 +35,7 @@
 
 #include "../glc_config.h"
 
-class GLC_StructOccurence;
+class GLC_StructOccurrence;
 
 //////////////////////////////////////////////////////////////////////
 //! \class GLC_StructReference
@@ -78,18 +78,18 @@ public:
 
 	//! Return the list of instance of this reference
 	inline QList<GLC_StructInstance*> listOfStructInstances() const
-	{ return m_SetOfInstance.toList();}
+    { return m_SetOfInstance.values();}
 
-	//! Return the Set of occurence of this reference
-	QSet<GLC_StructOccurence*> setOfStructOccurence() const;
+	//! Return the Set of occurrence of this reference
+	QSet<GLC_StructOccurrence*> setOfStructOccurrence() const;
 
-	//! Return the list of occurence of this reference
-	inline QList<GLC_StructOccurence*> listOfStructOccurence() const
-	{return setOfStructOccurence().toList();}
+	//! Return the list of occurrence of this reference
+	inline QList<GLC_StructOccurrence*> listOfStructOccurrence() const
+    {return setOfStructOccurrence().values();}
 
 	//! Return true if this reference has a representation
 	inline bool hasRepresentation() const
-	{return NULL != m_pRepresentation;}
+    {return nullptr != m_pRepresentation;}
 
 	//! Return the representation of this reference
 	/*! The representation must exists*/
@@ -102,37 +102,37 @@ public:
 	//! Get number of faces
 	inline unsigned int numberOfFaces() const
 	{
-		Q_ASSERT(NULL != m_pRepresentation);
+        Q_ASSERT(nullptr != m_pRepresentation);
 		GLC_3DRep* pRep= dynamic_cast<GLC_3DRep*>(m_pRepresentation);
-		if (NULL != pRep) return pRep->faceCount();
+        if (nullptr != pRep) return pRep->faceCount();
 		else return 0;
 	}
 
 	//! Get number of vertex
 	inline unsigned int numberOfVertex() const
 	{
-		Q_ASSERT(NULL != m_pRepresentation);
+        Q_ASSERT(nullptr != m_pRepresentation);
 		GLC_3DRep* pRep= dynamic_cast<GLC_3DRep*>(m_pRepresentation);
-		if (NULL != pRep) return pRep->vertexCount();
+        if (nullptr != pRep) return pRep->vertexCount();
 		else return 0;
 	}
 
 	//! Get number of materials
 	inline unsigned int numberOfMaterials() const
 	{
-		Q_ASSERT(NULL != m_pRepresentation);
+        Q_ASSERT(nullptr != m_pRepresentation);
 		GLC_3DRep* pRep= dynamic_cast<GLC_3DRep*>(m_pRepresentation);
-		if (NULL != pRep) return pRep->materialCount();
+        if (nullptr != pRep) return pRep->materialCount();
 		else return 0;
 	}
 
 	//! Return the number of body
 	inline unsigned int numberOfBody() const
 	{
-		if(NULL != m_pRepresentation)
+        if(nullptr != m_pRepresentation)
 		{
 			GLC_3DRep* pRep= dynamic_cast<GLC_3DRep*>(m_pRepresentation);
-			if (NULL != pRep) return pRep->numberOfBody();
+            if (nullptr != pRep) return pRep->numberOfBody();
 			else return 0;
 		}
 		else return 0;
@@ -141,15 +141,15 @@ public:
 	//! Get materials List
 	inline QSet<GLC_Material*> materialSet() const
 	{
-		Q_ASSERT(NULL != m_pRepresentation);
+        Q_ASSERT(nullptr != m_pRepresentation);
 		GLC_3DRep* pRep= dynamic_cast<GLC_3DRep*>(m_pRepresentation);
-		if (NULL != pRep) return pRep->materialSet();
+        if (nullptr != pRep) return pRep->materialSet();
 		else return QSet<GLC_Material*>();
 	}
 
 	//! Return true if the reference contains User attributes
 	inline bool containsAttributes() const
-	{ return ((NULL != m_pAttributes) && !m_pAttributes->isEmpty());}
+    { return ((nullptr != m_pAttributes) && !m_pAttributes->isEmpty());}
 
 	//! Return handle to the reference attributes
 	inline GLC_Attributes* attributesHandle() const
@@ -210,9 +210,9 @@ public:
 	/*! The representation must exists*/
 	bool unloadRepresentation();
 
-	//! Add the given occurence as a child of all occurrences of this reference
-	/*! Return the list of added occurence*/
-	QList<GLC_StructOccurence*> addChild(GLC_StructOccurence* pOccurence);
+	//! Add the given occurrence as a child of all occurrences of this reference
+	/*! Return the list of added occurrence*/
+	QList<GLC_StructOccurrence*> addChild(GLC_StructOccurrence* pOccurrence);
 
 
 //@}

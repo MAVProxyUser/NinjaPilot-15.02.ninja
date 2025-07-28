@@ -26,7 +26,7 @@
 #define GLC_MESHDATA_H_
 
 #include <QVector>
-#include <QGLBuffer>
+#include <QOpenGLBuffer>
 
 #include "glc_lod.h"
 #include "../glc_global.h"
@@ -86,16 +86,20 @@ public:
 	{return m_LodList.size();}
 
 	//! Return the Position Vector
-	GLfloatVector positionVector() const;
+    const GLfloatVector& positionVector() const
+    {return m_Positions;}
 
 	//! Return the normal Vector
-	GLfloatVector normalVector() const;
+    const GLfloatVector& normalVector() const
+    {return m_Normals;}
 
 	//! Return the texel Vector
-	GLfloatVector texelVector() const;
+    const GLfloatVector& texelVector() const
+    {return m_Texels;}
 
 	//! Return the color Vector
-	GLfloatVector colorVector() const;
+    GLfloatVector colorVector() const
+    {return m_Colors;}
 
 	//! Return the Position Vector handle
 	inline GLfloatVector* positionVectorHandle()
@@ -176,9 +180,6 @@ public:
 	//! Clear the content of the meshData and makes it empty
 	void clear();
 
-	//! Copy VBO to the Client Side
-	void copyVboToClientSide();
-
 	//! Release client VBO
 	void releaseVboClientSide(bool update= false);
 
@@ -204,17 +205,17 @@ public:
 //@{
 //////////////////////////////////////////////////////////////////////
 public:
-	//! Vbo creation
-	void createVBOs();
+    //! Create mesh data VBO in the current context. Return true on success
+    bool createVBOs();
 
 	//! Ibo Usage
-	bool useVBO(bool, GLC_MeshData::VboType);
+    bool useVBO(GLC_MeshData::VboType vboType);
 
 	//! Ibo Usage
 	inline void useIBO(bool use, const int currentLod= 0)
 	{
 		if (use) m_LodList.at(currentLod)->useIBO();
-		else QGLBuffer::release(QGLBuffer::IndexBuffer);
+        else QOpenGLBuffer::release(QOpenGLBuffer::IndexBuffer);
 	}
 
 	//! Fill all LOD IBO
@@ -231,7 +232,7 @@ public:
 private:
 
 	//! The vertex Buffer
-	QGLBuffer m_VertexBuffer;
+    QOpenGLBuffer m_VertexBuffer;
 
 	//! Vertex Position Vector
 	GLfloatVector m_Positions;
@@ -246,13 +247,13 @@ private:
 	GLfloatVector m_Colors;
 
 	//! Normals Buffer
-	QGLBuffer m_NormalBuffer;
+    QOpenGLBuffer m_NormalBuffer;
 
 	//! Texture Buffer
-	QGLBuffer m_TexelBuffer;
+    QOpenGLBuffer m_TexelBuffer;
 
 	//! Color Buffer
-	QGLBuffer m_ColorBuffer;
+    QOpenGLBuffer m_ColorBuffer;
 
 	//! The list of LOD
 	QList<GLC_Lod*> m_LodList;

@@ -50,17 +50,14 @@ public:
 //@{
 //////////////////////////////////////////////////////////////////////
 public:
-	//! Return true if VBO is supported
-	static bool vboSupported();
-
 	//! Return true if VBO is used
 	static bool vboUsed();
 
-	//! Return true if GLSL is supported
-	static bool glslSupported();
-
 	//! Return true if frameBuffer is supported
 	static bool frameBufferSupported();
+
+    //! Return true if frameBuffer blit is supported
+    static bool frameBufferBlitSupported();
 
 	//! Return true if GLSL is used
 	static bool glslUsed();
@@ -82,9 +79,6 @@ public:
 
 	//! Return the Opengl renderer
 	static QString renderer();
-
-	//! Return true if OpenGL Vendor is NVIDIA
-	static bool vendorIsNvidia();
 
 	//! Return true if pixel culling is activate
 	static bool isPixelCullingActivated();
@@ -116,20 +110,17 @@ public:
 	//! Intialize the state
 	static void init();
 
-	//! Set VBO support
-	static void setVboSupport();
-
 	//! Set VBO usage
 	static void setVboUsage(const bool);
-
-	//! Set GLSL support
-	static void setGlslSupport();
 
 	//! Set Point Sprite support
 	static void setPointSpriteSupport();
 
 	//! Set the frame buffer support
 	static void setFrameBufferSupport();
+
+    //! Set the frame buffer blit support
+    static void setFrameBufferBlitSupport();
 
 	//! Set GLSL usage
 	static void setGlslUsage(const bool);
@@ -164,14 +155,8 @@ public:
 //Private attributes
 //////////////////////////////////////////////////////////////////////
 private:
-	//! VBO supported flag
-	static bool m_VboSupported;
-
 	//! VBO used
 	static bool m_UseVbo;
-
-	//! GLSL supported flag
-	static bool m_GlslSupported;
 
 	//! Point Sprite supported flag
 	static bool m_PointSpriteSupported;
@@ -212,9 +197,11 @@ private:
 	//! Frame buffer supported
 	static bool m_IsFrameBufferSupported;
 
+    //! Frame buffer supported
+    static bool m_IsFrameBufferBlitSupported;
+
 	//! State valid flag
 	static bool m_IsValid;
-
 };
 
 #endif /*GLC_STATE_H_*/

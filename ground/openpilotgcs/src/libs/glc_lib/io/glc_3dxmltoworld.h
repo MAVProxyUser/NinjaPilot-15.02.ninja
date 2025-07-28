@@ -37,12 +37,11 @@
 #include "../glc_config.h"
 
 class GLC_World;
-class QGLContext;
 class QuaZip;
 class QuaZipFile;
 class GLC_StructReference;
 class GLC_StructInstance;
-class GLC_StructOccurence;
+class GLC_StructOccurrence;
 class GLC_Mesh;
 
 //////////////////////////////////////////////////////////////////////
@@ -79,15 +78,15 @@ class GLC_LIB_EXPORT GLC_3dxmlToWorld : public QObject
 		QString m_AssociatedFile;
 	};
 
-	//! \class V3OccurenceAttrib
-	/*! \brief V3OccurenceAttrib : Specifique occurence attribute */
-	struct V3OccurenceAttrib
+	//! \class V3OccurrenceAttrib
+	/*! \brief V3OccurrenceAttrib : Specifique occurrence attribute */
+	struct V3OccurrenceAttrib
 	{
-		inline V3OccurenceAttrib()
+		inline V3OccurrenceAttrib()
 		: m_IsVisible(true)
 		, m_pRenderProperties(NULL)
 		{}
-		inline ~V3OccurenceAttrib()
+		inline ~V3OccurrenceAttrib()
 		{delete m_pRenderProperties;}
 
 		//! Visibility attribute
@@ -96,17 +95,17 @@ class GLC_LIB_EXPORT GLC_3dxmlToWorld : public QObject
 		GLC_RenderProperties* m_pRenderProperties;
 	};
 
-	//! \class V3OccurenceAttrib
-	/*! \brief V3OccurenceAttrib : Specifique occurence attribute */
-	struct V4OccurenceAttrib
+	//! \class V3OccurrenceAttrib
+	/*! \brief V3OccurrenceAttrib : Specifique occurrence attribute */
+	struct V4OccurrenceAttrib
 	{
-		inline V4OccurenceAttrib()
+		inline V4OccurrenceAttrib()
 		: m_IsVisible(true)
 		, m_pRenderProperties(NULL)
 		, m_pMatrix(NULL)
 		, m_Path()
 		{}
-		inline ~V4OccurenceAttrib()
+		inline ~V4OccurrenceAttrib()
 		{
 			delete m_pRenderProperties;
 			delete m_pMatrix;
@@ -150,12 +149,15 @@ public:
 	//! Create an GLC_World from an input 3DXML File
 	GLC_World* createWorldFrom3dxml(QFile &, bool StructureOnly, bool getExternalRef= false);
 
+    //! Create an GLC_World from an input 3DXML File
+    GLC_World* createWorldFrom3dxml(QIODevice* pDevice);
+
 	//! Create 3DRep from an 3DXML rep
-	GLC_3DRep create3DrepFrom3dxmlRep(const QString&);
+    GLC_3DRep create3DrepFrom3dxmlRep(const QString&, bool useZipMutex= true);
 
 	//! Get the list of attached files
 	inline QStringList listOfAttachedFileName() const
-	{return m_SetOfAttachedFileName.toList();}
+    {return m_SetOfAttachedFileName.values();}
 
 
 //@}
@@ -247,11 +249,11 @@ private:
 	//! Load 3DXML V4 default view property
 	void loadV4DefaultViewProperty();
 
-	//! Return the occurence path of the current DefaultViewProperty
-	QList<unsigned int> loadOccurencePath();
+	//! Return the occurrence path of the current DefaultViewProperty
+	QList<unsigned int> loadOccurrencePath();
 
 	//! Load Graphics properties element
-	void loadGraphicProperties(V4OccurenceAttrib* pAttrib);
+	void loadGraphicProperties(V4OccurrenceAttrib* pAttrib);
 
 	//! Load the local representation
 	void loadLocalRepresentations();
@@ -301,8 +303,8 @@ private:
 	//! Check if the given file is binary
 	void checkFileValidity(QIODevice* pIODevice);
 
-	//! Apply the given attribute to the right occurence from the given occurence
-	void applyV4Attribute(GLC_StructOccurence* pOccurence, V4OccurenceAttrib* pV4OccurenceAttrib, QHash<GLC_StructInstance*, unsigned int>& InstanceToIdHash);
+	//! Apply the given attribute to the right occurrence from the given occurrence
+	void applyV4Attribute(GLC_StructOccurrence* pOccurrence, V4OccurrenceAttrib* pV4OccurrenceAttrib, QHash<GLC_StructInstance*, unsigned int>& InstanceToIdHash);
 
 	//! Load representation from 3DRep file
 	void loadRep(GLC_Mesh* pMesh);
@@ -388,11 +390,11 @@ private:
 	//! The current file time and date
 	QDateTime m_CurrentDateTime;
 
-	//! Hash table of occurence specific attributes for 3DXML V3
-	QHash<unsigned int, V3OccurenceAttrib*> m_V3OccurenceAttribHash;
+	//! Hash table of occurrence specific attributes for 3DXML V3
+	QHash<unsigned int, V3OccurrenceAttrib*> m_V3OccurrenceAttribHash;
 
-	//! List of occurence specific attributes for 3DXML V4
-	QList<V4OccurenceAttrib*> m_V4OccurenceAttribList;
+	//! List of occurrence specific attributes for 3DXML V4
+	QList<V4OccurrenceAttrib*> m_V4OccurrenceAttribList;
 
 	//! bool get external ref 3D name
 	bool m_GetExternalRef3DName;
@@ -403,6 +405,13 @@ private:
 
 	//! Flag to know if the 3DXML is in version 3.x
 	bool m_IsVersion3;
+
+    //! Flag to know if zip mutex must be used
+    bool m_UseZipMutex;
+
+	unsigned int m_productGroupRootId;
+
+    bool m_UseNative;
 
 };
 

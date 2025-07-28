@@ -26,8 +26,8 @@
 #define GLC_SHADER_H_
 
 #include "../glc_global.h"
-#include <QGLShader>
-#include <QGLShaderProgram>
+#include <QOpenGLShader>
+#include <QOpenGLShaderProgram>
 #include <QStack>
 #include <QFile>
 #include <QMutex>
@@ -56,8 +56,8 @@ public:
 	//! Default constructor
 	GLC_Shader();
 
-	//! Construct shader with specifie vertex and fragment
-	GLC_Shader(QFile&, QFile&);
+    //! Construct shader with specify vertex and fragment
+    GLC_Shader(QFile& vertexShaderFile, QFile& fragmentShaderFile);
 
 	//! Copy constructor
 	GLC_Shader(const GLC_Shader&);
@@ -87,7 +87,7 @@ public:
 	{return m_Name;}
 
 	//! Return an handle to the QGLProgramShader of this shader
-	inline QGLShaderProgram* programShaderHandle()
+    inline QOpenGLShaderProgram* programShaderHandle()
 	{return &m_ProgramShader;}
 
 	//! Return the position attribute id
@@ -122,6 +122,71 @@ public:
 	//! Return handle to the current active shader
 	/*! Return NULL if there is no current active shader*/
 	static GLC_Shader* currentShaderHandle();
+
+    //! Return the modelView location id
+    inline int modelViewLocationId() const
+    {return m_ModelViewLocationId;}
+
+    //! Return the modelView Projection matrix id
+    inline int mvpLocationId() const
+    {return m_MvpLocationId;}
+
+    //! Return the inverse modelView location id
+    inline int invModelViewLocationId() const
+    {return m_InvModelViewLocationId;}
+
+    //! Return the enable lighting location id
+    inline int enableLightingId() const
+    {return m_EnableLightingId;}
+
+    //! Return the two sided enable state id
+    inline int twoSidedLightingStateId() const
+    {return m_TwosidedEnableStateId;}
+
+    //! Return the lights enable state id
+    inline int lightsEnableStateId() const
+    {return m_LightsEnableStateId;}
+
+    //! Return the color material satte id
+    inline int colorMaterialStateId() const
+    {return m_ColorMaterialStateId;}
+
+    //! Return the light position id of the given light id
+    inline int lightPositionId(GLenum lightId) const
+    {return m_LightsPositionId.value(lightId);}
+
+    //! Return the light ambient color id of the given light id
+    inline int lightAmbientColorId(GLenum lightId) const
+    {return m_LightsAmbientColorId.value(lightId);}
+
+    //! Return the light diffuse color id of the given light id
+    inline int lightDiffuseColorId(GLenum lightId) const
+    {return m_LightsDiffuseColorId.value(lightId);}
+
+    //! Return the light specular color id of the given light id
+    inline int lightSpecularColorId(GLenum lightId) const
+    {return m_LightsSpecularColorId.value(lightId);}
+
+    //! Return the light spot direction id of the given light id
+    inline int lightSpotDirectionId(GLenum lightId) const
+    {return m_LightsSpotDirectionId.value(lightId);}
+
+    //! Return the light attenuation factors id of the given light id
+    inline int lightAttebuationFactorsId(GLenum lightId) const
+    {return m_LightsAttenuationFactorsId.value(lightId);}
+
+    //! Return the light spot exponent id of the given light id
+    inline int lightSpotExponentId(GLenum lightId) const
+    {return m_LightsSpotExponentId.value(lightId);}
+
+    //! Return the light spot cutoff id of the given light id
+    inline int lightSpotCutoffId(GLenum lightId) const
+    {return m_LightsSpotCutoffAngleId.value(lightId);}
+
+    //! Return the light compute distance attenuation id of the given light id
+    inline int lightComputeDistanceAttenuationId(GLenum lightId) const
+    {return m_LightsComputeDistanceAttenuationId.value(lightId);}
+
 //@}
 
 //////////////////////////////////////////////////////////////////////
@@ -130,78 +195,26 @@ public:
 //////////////////////////////////////////////////////////////////////
 public:
 	//! Set Vertex and fragment shaders
-	void setVertexAndFragmentShader(QFile&, QFile&);
+    void setVertexAndFragmentShader(QFile& vertexShaderFile, QFile& fragmentShaderFile);
 
 	//! Replace this shader by a copy of another shader
 	/* If this shader is usable replacing shader must be usable*/
 	void replaceShader(const GLC_Shader&);
 
 	//! Assignement operator which use replace shader method
-	inline GLC_Shader& operator=(const GLC_Shader& shader)
+    inline GLC_Shader& operator=(const GLC_Shader& other)
 	{
-		replaceShader(shader);
-		return *this;
+        if (this != &other)
+        {
+            replaceShader(other);
+        }
+        return *this;
 	}
 
 	//! Set the Shader Name
 	inline void setName(const QString& name)
 	{m_Name= name;}
 
-	//! Return the modelView location id
-	inline int modelViewLocationId() const
-	{return m_ModelViewLocationId;}
-
-	//! Return the modelView Projection matrix id
-	inline int mvpLocationId() const
-	{return m_MvpLocationId;}
-
-	//! Return the inverse modelView location id
-	inline int invModelViewLocationId() const
-	{return m_InvModelViewLocationId;}
-
-	//! Return the enable lighting location id
-	inline int enableLightingId() const
-	{return m_EnableLightingId;}
-
-	//! Return the lights enable state id
-	inline int lightsEnableStateId() const
-	{return m_LightsEnableStateId;}
-
-	//! Return the light position id of the given light id
-	inline int lightPositionId(GLenum lightId) const
-	{return m_LightsPositionId.value(lightId);}
-
-	//! Return the light ambient color id of the given light id
-	inline int lightAmbientColorId(GLenum lightId) const
-	{return m_LightsAmbientColorId.value(lightId);}
-
-	//! Return the light diffuse color id of the given light id
-	inline int lightDiffuseColorId(GLenum lightId) const
-	{return m_LightsDiffuseColorId.value(lightId);}
-
-	//! Return the light specular color id of the given light id
-	inline int lightSpecularColorId(GLenum lightId) const
-	{return m_LightsSpecularColorId.value(lightId);}
-
-	//! Return the light spot direction id of the given light id
-	inline int lightSpotDirectionId(GLenum lightId) const
-	{return m_LightsSpotDirectionId.value(lightId);}
-
-	//! Return the light attenuation factors id of the given light id
-	inline int lightAttebuationFactorsId(GLenum lightId) const
-	{return m_LightsAttenuationFactorsId.value(lightId);}
-
-	//! Return the light spot exponent id of the given light id
-	inline int lightSpotExponentId(GLenum lightId) const
-	{return m_LightsSpotExponentId.value(lightId);}
-
-	//! Return the light spot cutoff id of the given light id
-	inline int lightSpotCutoffId(GLenum lightId) const
-	{return m_LightsSpotCutoffAngleId.value(lightId);}
-
-	//! Return the light compute distance attenuation id of the given light id
-	inline int lightComputeDistanceAttenuationId(GLenum lightId) const
-	{return m_LightsComputeDistanceAttenuationId.value(lightId);}
 
 //@}
 
@@ -249,13 +262,13 @@ private:
 	static QHash<GLC_uint, GLC_Shader*> m_ShaderProgramHash;
 
 	//! Vertex shader
-	QGLShader m_VertexShader;
+    QOpenGLShader m_VertexShader;
 
 	//! Fragment shader
-	QGLShader m_FragmentShader;
+    QOpenGLShader m_FragmentShader;
 
 	//! The programShader
-	QGLShaderProgram m_ProgramShader;
+    QOpenGLShaderProgram m_ProgramShader;
 
 	//! Programm shader ID
 	GLC_uint m_ProgramShaderId;
@@ -287,8 +300,14 @@ private:
 	//! The enable lighting id
 	int m_EnableLightingId;
 
+    //! The two sided lighting enable state id
+    int m_TwosidedEnableStateId;
+
 	//! Lights enable states id
 	int m_LightsEnableStateId;
+
+    //! Color material usage
+    int m_ColorMaterialStateId;
 
 	//! Lights positions id
 	QMap<GLenum, int> m_LightsPositionId;

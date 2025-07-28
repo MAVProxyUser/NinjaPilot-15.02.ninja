@@ -31,6 +31,7 @@
 #include <QString>
 #include <QObject>
 #include <QHash>
+#include <QMultiHash>
 #include <QVector>
 #include <QStringList>
 
@@ -41,18 +42,8 @@
 
 #include "../glc_config.h"
 
-enum FaceType
-{
-	notSet,
-	coordinate,
-	coordinateAndTexture,
-	coordinateAndNormal,
-	coordinateAndTextureAndNormal
-};
-
 class GLC_World;
 class GLC_ObjMtlLoader;
-class QGLContext;
 
 //////////////////////////////////////////////////////////////////////
 //! \class GLC_ObjToWorld
@@ -69,6 +60,15 @@ class QGLContext;
 class GLC_LIB_EXPORT GLC_ObjToWorld : public QObject
 {
 	Q_OBJECT
+private:
+    enum FaceType
+    {
+        notSet,
+        coordinate,
+        coordinateAndTexture,
+        coordinateAndNormal,
+        coordinateAndTextureAndNormal
+    };
 
 public:
 	// OBJ Vertice (Position index, Normal index and TexCoord index)
@@ -104,8 +104,9 @@ public:
 	};
 
 	// Current OBJ Mesh
-	struct CurrentObjMesh
+    class CurrentObjMesh
 	{
+    public:
 		CurrentObjMesh(const QString materialName)
 		: m_pMesh(new GLC_Mesh())
 		, m_Positions()
@@ -119,6 +120,7 @@ public:
 		{
 			m_Materials.insert(materialName, m_pLastOffsetSize);
 		}
+
 		~CurrentObjMesh()
 		{
 			QHash<QString, MatOffsetSize*>::iterator i= m_Materials.begin();
@@ -128,6 +130,7 @@ public:
 				++i;
 			}
 		}
+    public:
 		GLC_Mesh* m_pMesh;
 		QList<float> m_Positions;
 		QList<float> m_Normals;
@@ -137,11 +140,13 @@ public:
 		// Pointer to the last matOffsetSize
 		MatOffsetSize* m_pLastOffsetSize;
 		// QHash containing material id and associated offset and size
-		QHash<QString, MatOffsetSize*> m_Materials;
+        QMultiHash<QString, MatOffsetSize*> m_Materials;
 		//! The next free index
 		int m_NextFreeIndex;
 		//! The Hash table of obj vertice mapping to index
 		QHash<ObjVertice, GLuint> m_ObjVerticeIndexMap;
+    private:
+        Q_DISABLE_COPY(CurrentObjMesh)
 	};
 
 //////////////////////////////////////////////////////////////////////
@@ -256,6 +261,18 @@ private:
 
 	//! The texture coordinate bulk data
 	QList<float> m_Texels;
+
+    int m_VerticeIndex;
+    int m_NormalIndex;
+    int m_TextureIndex;
+
+    int m_VerticeOffset;
+    int m_NormalOffset;
+    int m_TextureOffset;
+
+
+    bool m_ResetIndex;
+
 };
 
 // To use ObjVertice as a QHash key

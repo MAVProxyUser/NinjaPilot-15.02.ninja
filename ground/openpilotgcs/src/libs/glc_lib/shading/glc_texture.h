@@ -27,6 +27,9 @@
 
 #include <QFile>
 #include <QtOpenGL>
+#include <QOpenGLTexture>
+
+#include "../maths/glc_matrix4x4.h"
 
 #include "../glc_config.h"
 
@@ -73,42 +76,49 @@ public:
 //@{
 //////////////////////////////////////////////////////////////////////
 public:
-	//! Return the QGLContext of the texture
-	inline QGLContext* context() const
-	{return m_pQGLContext;}
-
 	//! Return the texture File Name
-	inline QString fileName() const
+    const QString& fileName() const
 	{return m_FileName;}
 
 	//! Return OpenGL Texture Id
-	inline GLuint GL_ID() const
-	{return m_GlTextureID;}
+    GLuint textureId() const;
 
 	//! Return true if the texture is loaded
-	inline bool isLoaded() const
-	{return (m_GlTextureID != 0);}
+    bool isLoaded() const
+    {return (m_pQOpenGLTexture != NULL);}
 
 	//! Return the texture size
-	inline QSize size() const
+    const QSize& size() const
 	{return m_TextureSize;}
 
 	//! Return the maximum texture size
-	static QSize maxSize()
-	{return m_MaxTextureSize;}
+    static QSize maxSize();
+
+    static QSize minSize();
 
 	//! Return true if texture are the same
 	bool operator==(const GLC_Texture&) const;
 
+    //! Return false if texture are the same
+    bool operator!=(const GLC_Texture& other) const
+    {return !this->operator ==(other);}
+
 	//! Return true if the texture has alpha channel
-	inline bool hasAlphaChannel() const
+    bool hasAlphaChannel() const
 	{ return m_HasAlphaChannel;}
 
 	//! Return the an image of the texture
-	inline QImage imageOfTexture() const
-	{ return m_textureImage;}
+    const QImage& imageOfTexture() const
+    {return m_TextureImage;}
 
+    const GLC_Matrix4x4& matrix() const
+    {return m_Matrix;}
 
+    bool hasTransformationMatrix() const
+    {return m_Matrix.type() != GLC_Matrix4x4::Identity;}
+
+    bool byPassMaxSize() const
+    {return m_BypassMaxSize;}
 //@}
 
 //////////////////////////////////////////////////////////////////////
@@ -119,6 +129,15 @@ public:
 	// Set the maximum texture size
 	static void setMaxTextureSize(const QSize&);
 
+    void setMatrix(const GLC_Matrix4x4& matrix)
+    {m_Matrix= matrix;}
+
+    void setByPassMaxSize(bool value)
+    {m_BypassMaxSize= value;}
+
+    void setFileName(const QString& value)
+    {m_FileName= value;}
+
 //@}
 //////////////////////////////////////////////////////////////////////
 /*! \name OpenGL Functions*/
@@ -126,7 +145,7 @@ public:
 //////////////////////////////////////////////////////////////////////
 public:
 	//! Load the texture
-	void glLoadTexture(QGLContext* pContext= NULL);
+    void glLoadTexture();
 	//! Bind texture in 2D mode
 	void glcBindTexture(void);
 
@@ -139,12 +158,6 @@ private:
 	//! Load the image of this texture from the given fileName and return resutling image
 	QImage loadFromFile(const QString& fileName);
 
-	//! Remove this Opengl texture id
-	void removeThisOpenGLTextureId();
-
-	//! Add this Opengl texture id
-	void addThisOpenGLTextureId();
-
 //@}
 
 //////////////////////////////////////////////////////////////////////
@@ -153,22 +166,24 @@ private:
 
 private:
 	//! OpenGL Context
-	QGLContext *m_pQGLContext;
+    QOpenGLTexture *m_pQOpenGLTexture;
 
 	//! Texture Name
 	QString m_FileName;
 
-	//! OpenGL Texture ID
-	GLuint	m_GlTextureID;
-
 	//! QImage off the texture
-	QImage m_textureImage;
+    QImage m_TextureImage;
 
 	//! Size of the texture
 	QSize m_TextureSize;
 
 	//! Flag to know if the texture has alpha channel
 	bool m_HasAlphaChannel;
+
+    GLC_Matrix4x4 m_Matrix;
+
+    //! Flag to know if size is limited
+    bool m_BypassMaxSize;
 
 	//! Static member used to check texture size
 	static QSize m_MaxTextureSize;

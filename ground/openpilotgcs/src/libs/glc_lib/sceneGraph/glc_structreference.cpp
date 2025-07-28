@@ -23,14 +23,14 @@
 //! \file glc_structreference.cpp implementation of the GLC_StructReference class.
 
 #include "glc_structreference.h"
-#include "glc_structoccurence.h"
+#include "glc_structoccurrence.h"
 
 // Default constructor
 GLC_StructReference::GLC_StructReference(const QString& name)
-: m_SetOfInstance()
-, m_pRepresentation(NULL)
-, m_Name(name)
-, m_pAttributes(NULL)
+    : m_SetOfInstance()
+    , m_pRepresentation(nullptr)
+    , m_Name(name)
+    , m_pAttributes(nullptr)
 {
 
 
@@ -38,43 +38,52 @@ GLC_StructReference::GLC_StructReference(const QString& name)
 
 // Create reference with representation
 GLC_StructReference::GLC_StructReference(GLC_Rep* pRep)
-: m_SetOfInstance()
-, m_pRepresentation(pRep)
-, m_Name(m_pRepresentation->name())
-, m_pAttributes(NULL)
+    : m_SetOfInstance()
+    , m_pRepresentation(pRep)
+    , m_Name(m_pRepresentation->name())
+    , m_pAttributes(nullptr)
 {
 
 }
 
 // Copy constructor
-GLC_StructReference::GLC_StructReference(const GLC_StructReference& ref)
-: m_SetOfInstance()
-, m_pRepresentation(NULL)
-, m_Name(ref.m_Name)
-, m_pAttributes(new GLC_Attributes(*(ref.m_pAttributes)))
+GLC_StructReference::GLC_StructReference(const GLC_StructReference& other)
+    : m_SetOfInstance()
+    , m_pRepresentation(nullptr)
+    , m_Name(other.m_Name)
+    , m_pAttributes(nullptr)
 {
-	if (NULL != ref.m_pRepresentation)
+    if (nullptr != other.m_pAttributes)
+    {
+        m_pAttributes= new GLC_Attributes(*(other.m_pAttributes));
+    }
+    if (nullptr != other.m_pRepresentation)
 	{
-		m_pRepresentation= ref.m_pRepresentation->clone();
+        m_pRepresentation= other.m_pRepresentation->clone();
 	}
 }
 
 //! Overload "=" operator
-GLC_StructReference& GLC_StructReference::operator=(const GLC_StructReference& ref)
+GLC_StructReference& GLC_StructReference::operator=(const GLC_StructReference& other)
 {
-	if (this != &ref)
+    if (this != &other)
 	{
 		m_SetOfInstance.clear();
-		delete m_pAttributes;
-		m_pAttributes= NULL;
+        m_Name= other.m_Name;
 
-		m_Name= ref.m_Name;
-		m_pAttributes= new GLC_Attributes(*(ref.m_pAttributes));
+        delete m_pAttributes;
+        if (nullptr != other.m_pAttributes)
+        {
+            m_pAttributes= new GLC_Attributes(*(other.m_pAttributes));
+        }
+        else m_pAttributes= nullptr;
 
-		if (NULL != ref.m_pRepresentation)
+        delete m_pRepresentation;
+        if (nullptr != other.m_pRepresentation)
 		{
-			m_pRepresentation= ref.m_pRepresentation->clone();
+            m_pRepresentation= other.m_pRepresentation->clone();
 		}
+        else m_pRepresentation= nullptr;
 	}
 	return *this;
 }
@@ -90,21 +99,21 @@ GLC_StructReference::~GLC_StructReference()
 // Get Functions
 //////////////////////////////////////////////////////////////////////
 
-QSet<GLC_StructOccurence*> GLC_StructReference::setOfStructOccurence() const
+QSet<GLC_StructOccurrence*> GLC_StructReference::setOfStructOccurrence() const
 {
 	QList<GLC_StructInstance*> instanceList= listOfStructInstances();
-	QSet<GLC_StructOccurence*> occurenceSet;
+	QSet<GLC_StructOccurrence*> occurrenceSet;
 	const int size= instanceList.size();
 	for (int i= 0; i < size; ++i)
 	{
-		QList<GLC_StructOccurence*> occurenceList= instanceList.at(i)->listOfStructOccurences();
-		const int occurenceSize= occurenceList.size();
-		for (int occIndex= 0; occIndex < occurenceSize; ++occIndex)
+		QList<GLC_StructOccurrence*> occurrenceList= instanceList.at(i)->listOfStructOccurrences();
+		const int occurrenceSize= occurrenceList.size();
+		for (int occIndex= 0; occIndex < occurrenceSize; ++occIndex)
 		{
-			occurenceSet.insert(occurenceList.at(occIndex));
+			occurrenceSet.insert(occurrenceList.at(occIndex));
 		}
 	}
-	return occurenceSet;
+	return occurrenceSet;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -113,18 +122,18 @@ QSet<GLC_StructOccurence*> GLC_StructReference::setOfStructOccurence() const
 // Set the reference representation
 void GLC_StructReference::setRepresentation(const GLC_3DRep& rep)
 {
-	// Unload occurence representation
+	// Unload occurrence representation
 	{
-		QSet<GLC_StructOccurence*> structOccurenceSet= this->setOfStructOccurence();
-		QSet<GLC_StructOccurence*>::iterator iOcc= structOccurenceSet.begin();
-		while (structOccurenceSet.constEnd() != iOcc)
+		QSet<GLC_StructOccurrence*> structOccurrenceSet= this->setOfStructOccurrence();
+		QSet<GLC_StructOccurrence*>::iterator iOcc= structOccurrenceSet.begin();
+		while (structOccurrenceSet.constEnd() != iOcc)
 		{
 			(*iOcc)->remove3DViewInstance();
 			++iOcc;
 		}
 	}
 
-	if(NULL == m_pRepresentation)
+    if(nullptr == m_pRepresentation)
 	{
 		m_pRepresentation= new GLC_3DRep(rep);
 	}
@@ -135,15 +144,15 @@ void GLC_StructReference::setRepresentation(const GLC_3DRep& rep)
 
 	if (m_pRepresentation->isLoaded())
 	{
-		QSet<GLC_StructOccurence*> structOccurenceSet= this->setOfStructOccurence();
-		QSet<GLC_StructOccurence*>::iterator iOcc= structOccurenceSet.begin();
-		while (structOccurenceSet.constEnd() != iOcc)
+		QSet<GLC_StructOccurrence*> structOccurrenceSet= this->setOfStructOccurrence();
+		QSet<GLC_StructOccurrence*>::iterator iOcc= structOccurrenceSet.begin();
+		while (structOccurrenceSet.constEnd() != iOcc)
 		{
-			GLC_StructOccurence* pOccurence= *iOcc;
-			Q_ASSERT(!pOccurence->has3DViewInstance());
-			if (pOccurence->useAutomatic3DViewInstanceCreation())
+			GLC_StructOccurrence* pOccurrence= *iOcc;
+			Q_ASSERT(!pOccurrence->has3DViewInstance());
+			if (pOccurrence->useAutomatic3DViewInstanceCreation())
 			{
-				pOccurence->create3DViewInstance();
+				pOccurrence->create3DViewInstance();
 			}
 			++iOcc;
 		}
@@ -152,13 +161,13 @@ void GLC_StructReference::setRepresentation(const GLC_3DRep& rep)
 
 GLC_Rep* GLC_StructReference::representationHandle() const
 {
-	Q_ASSERT(NULL != m_pRepresentation);
+    Q_ASSERT(nullptr != m_pRepresentation);
 	return m_pRepresentation;
 }
 
 QString GLC_StructReference::representationName() const
 {
-	if (NULL != m_pRepresentation)
+    if (nullptr != m_pRepresentation)
 	{
 		return m_pRepresentation->name();
 	}
@@ -167,7 +176,7 @@ QString GLC_StructReference::representationName() const
 
 bool GLC_StructReference::representationIsLoaded() const
 {
-	if (NULL != m_pRepresentation)
+    if (nullptr != m_pRepresentation)
 	{
 		return m_pRepresentation->isLoaded();
 	}
@@ -177,7 +186,7 @@ bool GLC_StructReference::representationIsLoaded() const
 
 QString GLC_StructReference::representationFileName() const
 {
-	if (NULL != m_pRepresentation)
+    if (nullptr != m_pRepresentation)
 	{
 		return m_pRepresentation->fileName();
 	}
@@ -186,7 +195,7 @@ QString GLC_StructReference::representationFileName() const
 
 bool GLC_StructReference::representationIsEmpty() const
 {
-	if (NULL != m_pRepresentation)
+    if (nullptr != m_pRepresentation)
 	{
 		return m_pRepresentation->isEmpty();
 	}
@@ -196,7 +205,7 @@ bool GLC_StructReference::representationIsEmpty() const
 
 void GLC_StructReference::setRepresentationName(const QString& representationName)
 {
-	if (NULL != m_pRepresentation)
+    if (nullptr != m_pRepresentation)
 	{
 		m_pRepresentation->setName(representationName);
 	}
@@ -204,18 +213,18 @@ void GLC_StructReference::setRepresentationName(const QString& representationNam
 
 bool GLC_StructReference::loadRepresentation()
 {
-	Q_ASSERT(NULL != m_pRepresentation);
+    Q_ASSERT(nullptr != m_pRepresentation);
 	if (m_pRepresentation->load())
 	{
-		QSet<GLC_StructOccurence*> structOccurenceSet= this->setOfStructOccurence();
-		QSet<GLC_StructOccurence*>::iterator iOcc= structOccurenceSet.begin();
-		while (structOccurenceSet.constEnd() != iOcc)
+		QSet<GLC_StructOccurrence*> structOccurrenceSet= this->setOfStructOccurrence();
+		QSet<GLC_StructOccurrence*>::iterator iOcc= structOccurrenceSet.begin();
+		while (structOccurrenceSet.constEnd() != iOcc)
 		{
-			GLC_StructOccurence* pOccurence= *iOcc;
-			Q_ASSERT(!pOccurence->has3DViewInstance());
-			if (pOccurence->useAutomatic3DViewInstanceCreation())
+			GLC_StructOccurrence* pOccurrence= *iOcc;
+			Q_ASSERT(!pOccurrence->has3DViewInstance());
+			if (pOccurrence->useAutomatic3DViewInstanceCreation())
 			{
-				pOccurence->create3DViewInstance();
+				pOccurrence->create3DViewInstance();
 			}
 			++iOcc;
 		}
@@ -226,12 +235,12 @@ bool GLC_StructReference::loadRepresentation()
 
 bool GLC_StructReference::unloadRepresentation()
 {
-	Q_ASSERT(NULL != m_pRepresentation);
+    Q_ASSERT(nullptr != m_pRepresentation);
 	if (m_pRepresentation->unload())
 	{
-		QSet<GLC_StructOccurence*> structOccurenceSet= this->setOfStructOccurence();
-		QSet<GLC_StructOccurence*>::iterator iOcc= structOccurenceSet.begin();
-		while (structOccurenceSet.constEnd() != iOcc)
+		QSet<GLC_StructOccurrence*> structOccurrenceSet= this->setOfStructOccurrence();
+		QSet<GLC_StructOccurrence*>::iterator iOcc= structOccurrenceSet.begin();
+		while (structOccurrenceSet.constEnd() != iOcc)
 		{
 			(*iOcc)->remove3DViewInstance();
 			++iOcc;
@@ -241,21 +250,21 @@ bool GLC_StructReference::unloadRepresentation()
 	else return false;
 }
 
-QList<GLC_StructOccurence*> GLC_StructReference::addChild(GLC_StructOccurence* pOccurence)
+QList<GLC_StructOccurrence*> GLC_StructReference::addChild(GLC_StructOccurrence* pOccurrence)
 {
-	QList<GLC_StructOccurence*> subject;
-	if (hasStructInstance() && firstInstanceHandle()->hasStructOccurence())
+	QList<GLC_StructOccurrence*> subject;
+	if (hasStructInstance() && firstInstanceHandle()->hasStructOccurrence())
 	{
-		QList<GLC_StructOccurence*> parentOccurences= listOfStructOccurence();
-		const int parentCount= parentOccurences.count();
-		GLC_StructInstance* pNewInstance= NULL;
+		QList<GLC_StructOccurrence*> parentOccurrences= listOfStructOccurrence();
+		const int parentCount= parentOccurrences.count();
+        GLC_StructInstance* pNewInstance= nullptr;
 		for (int i= 0; i < parentCount; ++i)
 		{
-			GLC_StructOccurence* pCurrentParent= parentOccurences.at(i);
-			GLC_StructOccurence* pNewChild= NULL;
-			if (NULL == pNewInstance)
+			GLC_StructOccurrence* pCurrentParent= parentOccurrences.at(i);
+            GLC_StructOccurrence* pNewChild= nullptr;
+            if (nullptr == pNewInstance)
 			{
-				pNewChild= pOccurence;
+				pNewChild= pOccurrence;
 				pNewInstance= pNewChild->structInstance();
 				pCurrentParent->addChild(pNewChild);
 			}

@@ -34,7 +34,7 @@
 
 #include "../glc_config.h"
 
-class QGLContext;
+class GLC_Context;
 
 //////////////////////////////////////////////////////////////////////
 //! \class GLC_Light
@@ -61,11 +61,15 @@ public:
 public:
 	//! Construct a default GLC_Light
 	/*! By default, ambient color is black, diffuse Color is white and specular color is white*/
-	GLC_Light(const QGLContext* pContext= NULL, const QColor& color= Qt::white);
+    GLC_Light(GLC_Context* pContext= NULL, const QColor& color= Qt::white);
 
-	//! Construct a default GLC_Light
+    //! Construct a GLC_Light with the given type
 	/*! By default, ambient color is black, diffuse Color is white and specular color is white*/
-	GLC_Light(LightType lightType, const QGLContext* pContext= NULL, const QColor& color= Qt::white);
+    GLC_Light(LightType lightType, GLC_Context* pContext= NULL, const QColor& color= Qt::white);
+
+    //! Construct a shared light of the given type and id
+    /*! By default, ambient color is black, diffuse Color is white and specular color is white*/
+    GLC_Light(LightType lightType, GLenum lightID);
 
 	//! Copy constructor
 	GLC_Light(const GLC_Light& light);
@@ -83,7 +87,7 @@ public:
 	static int maxLightCount();
 
 	//! Return the number of builtable light
-	static int builtAbleLightCount(QGLContext* pContext);
+    static int builtAbleLightCount(GLC_Context *pContext);
 
 	//! Return a GLC_Point3d representing light position
 	inline GLC_Point3d position(void) const
@@ -198,16 +202,6 @@ public:
 //@}
 
 //////////////////////////////////////////////////////////////////////
-/*! \name OpenGL Functions*/
-//@{
-//////////////////////////////////////////////////////////////////////
-
-private:
-
-
-//@}
-
-//////////////////////////////////////////////////////////////////////
 // Private services fonction
 //////////////////////////////////////////////////////////////////////
 private:
@@ -262,13 +256,12 @@ private:
 	//! Maximum number of light
 	static GLint m_MaxLight;
 
-	//! The context of this light
-	QGLContext* m_pContext;
-
-	//! Flag to know if this light is valid
-	bool m_IsValid;
+    //! The context of this light
+    GLC_Context* m_pContext;
 
 	//! Mapping between context and light set
-	static QHash<const QGLContext*, QSet<GLenum> > m_ContextToFreeLightSet;
+    static QHash<GLC_Context*, QSet<GLenum> > m_ContextToFreeLightSet;
+
+    const bool m_Shared;
 };
 #endif //GLC_LIGHT_H_

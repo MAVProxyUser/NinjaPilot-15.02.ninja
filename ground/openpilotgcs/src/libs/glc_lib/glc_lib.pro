@@ -5,7 +5,7 @@ TARGET = GLC_lib
 DEFINES += GLC_LIB_LIBRARY
 include(../../openpilotgcslibrary.pri)
 
-QT += core opengl
+QT += core opengl concurrent
 
 # disable all warnings (no need for warnings as glc sources are imported)
 CONFIG += exceptions warn_off
@@ -58,6 +58,16 @@ HEADERS_LIB3DS += 3rdparty/lib3ds/atmosphere.h \
            
 HEADERS_GLEXT += 3rdparty/glext/glext.h
 
+HEADERS_CLIP2TRI += 3rdparty/clip2tri/clip2tri/clip2tri.h \
+                    3rdparty/clip2tri/clipper/clip_clipper.hpp \
+                    3rdparty/clip2tri/poly2tri/clip_poly2tri.h \
+                    3rdparty/clip2tri/poly2tri/common/clip_shapes.h \
+                    3rdparty/clip2tri/poly2tri/common/clip_utils.h \
+                    3rdparty/clip2tri/poly2tri/sweep/clip_cdt.h \
+                    3rdparty/clip2tri/poly2tri/sweep/clip_advancing_front.h \
+                    3rdparty/clip2tri/poly2tri/sweep/clip_sweep.h \
+                    3rdparty/clip2tri/poly2tri/sweep/clip_sweep_context.h
+
 HEADERS_GLC_MATHS += 	maths/glc_utils_maths.h \
 						maths/glc_vector2d.h \
 						maths/glc_vector2df.h \
@@ -68,7 +78,8 @@ HEADERS_GLC_MATHS += 	maths/glc_utils_maths.h \
 						maths/glc_interpolator.h \
 						maths/glc_plane.h \
 						maths/glc_geomtools.h \
-						maths/glc_line3d.h
+						maths/glc_line3d.h \
+						maths/glc_polygon.h
 						
 HEADERS_GLC_IO +=		io/glc_objmtlloader.h \
 						io/glc_objtoworld.h \
@@ -89,7 +100,7 @@ HEADERS_GLC_SCENEGRAPH +=	sceneGraph/glc_3dviewcollection.h \
 							sceneGraph/glc_3dviewinstance.h \
 							sceneGraph/glc_structreference.h \
 							sceneGraph/glc_structinstance.h \
-							sceneGraph/glc_structoccurence.h \
+							sceneGraph/glc_structoccurrence.h \
 							sceneGraph/glc_world.h \
 							sceneGraph/glc_attributes.h \
 							sceneGraph/glc_worldhandle.h \
@@ -120,7 +131,8 @@ HEADERS_GLC_GEOMETRY +=		geometry/glc_geometry.h \
 							geometry/glc_cone.h \
 							geometry/glc_sphere.h \
 							geometry/glc_pointcloud.h \
-							geometry/glc_extrudedmesh.h
+							geometry/glc_extrudedmesh.h \
+							geometry/glc_text.h
 
 HEADERS_GLC_SHADING +=	shading/glc_material.h \						
 						shading/glc_texture.h \
@@ -167,7 +179,9 @@ HEADERS_GLC += glc_global.h \
            glc_context.h \
            glc_contextmanager.h \
            glc_contextshareddata.h \
-           glc_uniformshaderdata.h
+           glc_uniformshaderdata.h \
+           glc_renderstate.h \
+           glc_selectionevent.h
            
 HEADERS_GLC_3DWIDGET += 3DWidget/glc_3dwidget.h \
 						3DWidget/glc_cuttingplane.h \
@@ -181,7 +195,7 @@ HEADERS_GLC_3DWIDGET += 3DWidget/glc_3dwidget.h \
 HEADERS_GLC_GLU +=	glu/glc_glu.h
 
 HEADERS += $${HEADERS_QUAZIP} $${HEADERS_LIB3DS} $${HEADERS_GLC_MATHS} $${HEADERS_GLC_IO}
-HEADERS += $${HEADERS_GLC} $${HEADERS_GLEXT} $${HEADERS_GLC_SCENEGRAPH} $${HEADERS_GLC_GEOMETRY}
+HEADERS += $${HEADERS_GLC} $${HEADERS_GLEXT} $${HEADERS_CLIP2TRI} $${HEADERS_GLC_SCENEGRAPH} $${HEADERS_GLC_GEOMETRY}
 HEADERS += $${HEADERS_GLC_SHADING} $${HEADERS_GLC_VIEWPORT} $${HEADERS_GLC_3DWIDGET} $${HEADERS_GLC_GLU}
 		   
 SOURCES += 3rdparty/zlib/adler32.c \
@@ -196,12 +210,21 @@ SOURCES += 3rdparty/zlib/adler32.c \
            3rdparty/zlib/uncompr.c \
            3rdparty/zlib/zutil.c
 
-SOURCES += 3rdparty/quazip/ioapi.c \
+SOURCES += 3rdparty/quazip/qioapi.cpp \
            3rdparty/quazip/quazip.cpp \
            3rdparty/quazip/quazipfile.cpp \
+           3rdparty/quazip/quazipfileinfo.cpp \
            3rdparty/quazip/quazipnewinfo.cpp \
            3rdparty/quazip/unzip.c \
            3rdparty/quazip/zip.c
+
+SOURCES += 3rdparty/clip2tri/clip2tri/clip2tri.cpp \
+           3rdparty/clip2tri/clipper/clip_clipper.cpp \
+           3rdparty/clip2tri/poly2tri/common/clip_shapes.cc \
+           3rdparty/clip2tri/poly2tri/sweep/clip_cdt.cc \
+           3rdparty/clip2tri/poly2tri/sweep/clip_advancing_front.cc \
+           3rdparty/clip2tri/poly2tri/sweep/clip_sweep.cc \
+           3rdparty/clip2tri/poly2tri/sweep/clip_sweep_context.cc
 
 SOURCES += 3rdparty/lib3ds/atmosphere.c \
            3rdparty/lib3ds/background.c \
@@ -227,7 +250,8 @@ SOURCES +=	maths/glc_matrix4x4.cpp \
 			maths/glc_interpolator.cpp \
 			maths/glc_plane.cpp \
 			maths/glc_geomtools.cpp \
-			maths/glc_line3d.cpp
+			maths/glc_line3d.cpp \
+			maths/glc_polygon.cpp
 
 SOURCES +=	io/glc_objmtlloader.cpp \
 			io/glc_objtoworld.cpp \
@@ -245,7 +269,7 @@ SOURCES +=	sceneGraph/glc_3dviewcollection.cpp \
 			sceneGraph/glc_3dviewinstance.cpp \
 			sceneGraph/glc_structreference.cpp \
 			sceneGraph/glc_structinstance.cpp \
-			sceneGraph/glc_structoccurence.cpp \
+			sceneGraph/glc_structoccurrence.cpp \
 			sceneGraph/glc_world.cpp \
 			sceneGraph/glc_attributes.cpp \
 			sceneGraph/glc_worldhandle.cpp \
@@ -276,7 +300,8 @@ SOURCES +=	geometry/glc_geometry.cpp \
 			geometry/glc_cone.cpp \
 			geometry/glc_sphere.cpp \
 			geometry/glc_pointcloud.cpp \
-			geometry/glc_extrudedmesh.cpp
+			geometry/glc_extrudedmesh.cpp \
+			geometry/glc_text.cpp
 
 
 SOURCES +=	shading/glc_material.cpp \
@@ -323,7 +348,9 @@ SOURCES +=	glc_global.cpp \
 			glc_context.cpp \
 			glc_contextmanager.cpp \
 			glc_contextshareddata.cpp \
-			glc_uniformshaderdata.cpp
+			glc_uniformshaderdata.cpp \
+			glc_renderstate.cpp \
+			glc_selectionevent.cpp
 
 SOURCES +=	3DWidget/glc_3dwidget.cpp \
 			3DWidget/glc_cuttingplane.cpp \
@@ -387,7 +414,7 @@ HEADERS_INST = include/GLC_BoundingBox \
     		   include/GLC_Attributes \
     		   include/GLC_Rectangle \
     		   include/GLC_Mesh \
-    		   include/GLC_StructOccurence \
+    		   include/GLC_StructOccurrence \
     		   include/GLC_StructInstance \
     		   include/GLC_StructReference \
     		   include/GLC_Line \

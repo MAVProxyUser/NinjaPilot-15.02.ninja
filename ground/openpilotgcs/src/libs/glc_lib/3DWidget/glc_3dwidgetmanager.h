@@ -28,7 +28,9 @@
 
 #include "../glc_config.h"
 
+QT_BEGIN_NAMESPACE
 class QMouseEvent;
+QT_END_NAMESPACE
 
 class GLC_LIB_EXPORT GLC_3DWidgetManager
 {
@@ -62,6 +64,10 @@ public:
 	inline bool contains3DWidget(GLC_uint id) const
 	{return m_pWidgetManagerHandle->contains3DWidget(id);}
 
+    //! Return true if this 3DWidget manager has visible widget
+    inline bool hasVisibleWidget() const
+    {return m_pWidgetManagerHandle->hasVisibleWidget();}
+
 	//! Return the 3DWidget of the given widget id
 	inline GLC_3DWidget* widget(GLC_uint id) const
 	{return m_pWidgetManagerHandle->widget(id);}
@@ -69,6 +75,16 @@ public:
 	//! Return true if this 3DWidget manager is empty
 	inline bool isEmpty() const
 	{return m_pWidgetManagerHandle->isEmpty();}
+
+    //! Return true if this 3DWidget manager has active widget
+    inline bool hasAnActiveWidget() const
+    {return m_pWidgetManagerHandle->hasAnActiveWidget();}
+
+    bool useOrderRendering() const
+    {return m_pWidgetManagerHandle->useOrderRendering();}
+
+    GLC_uint active3DWidgetId() const
+    {return m_pWidgetManagerHandle->active3DWidgetId();}
 
 //@}
 
@@ -90,9 +106,20 @@ public:
 	inline void clear()
 	{m_pWidgetManagerHandle->clear();}
 
+    //! Remove all 3D view instance of the given type from this manager
+    inline void clear(int type)
+    {m_pWidgetManagerHandle->clear(type);}
+
 	//! Set the visibility of the given 3D widget id
 	inline void setWidgetVisible(GLC_uint id, bool visible)
 	{m_pWidgetManagerHandle->setWidgetVisible(id, visible);}
+
+    //! Update all 3dwidget
+    void update()
+    {m_pWidgetManagerHandle->update();}
+
+    void setOrderRenderingUsage(bool use)
+    {m_pWidgetManagerHandle->setOrderRenderingUsage(use);}
 
 //@}
 //////////////////////////////////////////////////////////////////////
@@ -100,21 +127,17 @@ public:
 //@{
 //////////////////////////////////////////////////////////////////////
 public:
-	//! Recieve Mouse double click event with the given instance id Return true if the event is catch
-	inline glc::WidgetEventFlag mouseDoubleClickEvent(QMouseEvent * pEvent)
-	{return m_pWidgetManagerHandle->mouseDoubleClickEvent(pEvent);}
-
 	//! Recieve Mouse move event with the given instance id Return true if the event is catch
-	inline glc::WidgetEventFlag mouseMoveEvent(QMouseEvent * pEvent)
-	{return m_pWidgetManagerHandle->mouseMoveEvent(pEvent);}
+    glc::WidgetEventFlag moveEvent(GLC_uint selectedId, const GLC_Point3d &pos, QInputEvent* pInputEvent)
+    {return m_pWidgetManagerHandle->moveEvent(selectedId, pos, pInputEvent);}
 
 	//! Recieve Mouse press event with the given instance id Return true if the event is catch
-	inline glc::WidgetEventFlag mousePressEvent(QMouseEvent * pEvent)
-	{return m_pWidgetManagerHandle->mousePressEvent(pEvent);}
+    glc::WidgetEventFlag pressEvent(GLC_uint id, const GLC_Point3d &pos, QInputEvent* pInputEvent)
+    {return m_pWidgetManagerHandle->pressEvent(id, pos, pInputEvent);}
 
 	//! Recieve Mouse release event with the given instance id Return true if the event is catch
-	inline glc::WidgetEventFlag mouseReleaseEvent(QMouseEvent * pEvent)
-	{return m_pWidgetManagerHandle->mouseReleaseEvent(pEvent);}
+    glc::WidgetEventFlag releaseEvent(QInputEvent* pInputEvent)
+    {return m_pWidgetManagerHandle->releaseEvent(pInputEvent);}
 
 //@}
 

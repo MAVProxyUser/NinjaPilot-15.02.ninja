@@ -133,9 +133,9 @@ bool GLC_Interpolator::CalcInterpolAngulaireMat(void)
 
 	const GLC_Vector3d AxeRot(m_StartPoint ^ m_EndPoint);
 
-	const double Angle= m_EndPoint.angleWithVect(m_StartPoint) / m_StepCount;
+    const double Angle= m_EndPoint.angleWithVect2(m_StartPoint) / m_StepCount;
 
-	if (qFuzzyCompare(Angle, 0.0))
+	if (glc::fuzzyCompare(Angle, 0.0))
 	{
 		m_InterpolMat.setToIdentity();
 		return false;

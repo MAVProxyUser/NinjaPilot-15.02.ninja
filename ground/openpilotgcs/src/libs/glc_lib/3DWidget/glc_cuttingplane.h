@@ -88,12 +88,16 @@ public:
 	//! Copy the given cutting plane in this cutting plane and return a reference on this cutting plane
 	virtual GLC_CuttingPlane& operator=(const GLC_CuttingPlane& cuttingPlane);
 
-	//! Update the lenght of this cutting plane
+	//! Update the length of this cutting plane
 	void updateLength(double l1, double l2);
 
 	//! Set this plane color
 	inline void setColor(const QColor& color)
 	{m_Color= color;}
+	
+	//! Set this plane normal
+	inline void setNormal(const GLC_Vector3d& normal)
+	{m_Normal= normal;}
 
 	//! Set this plane opacity
 	inline void setOpacity(double opacity)
@@ -117,13 +121,13 @@ public:
 	virtual glc::WidgetEventFlag unselect(const GLC_Point3d&, GLC_uint id);
 
 	//! The mouse is over this widget and a mousse button is pressed
-	virtual glc::WidgetEventFlag mousePressed(const GLC_Point3d&, Qt::MouseButton, GLC_uint id);
+    virtual glc::WidgetEventFlag pressed(const GLC_Point3d&, GLC_uint id);
 
 	//! The mouse is over this widget and a mousse button is released
-	virtual glc::WidgetEventFlag mouseReleased(Qt::MouseButton);
+    virtual glc::WidgetEventFlag released();
 
 	//! This widget is selected and the mousse move with a pressed buttons
-	virtual glc::WidgetEventFlag mouseMove(const GLC_Point3d&, Qt::MouseButtons, GLC_uint id);
+    virtual glc::WidgetEventFlag move(const GLC_Point3d&, GLC_uint id);
 
 //@}
 

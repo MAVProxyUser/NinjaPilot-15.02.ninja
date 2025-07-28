@@ -77,13 +77,16 @@ public:
 	//! Return the type of representation
 	virtual int type() const;
 
-	//! Get Geometry
+    //! Get Geometry from index
 	inline GLC_Geometry* geomAt(int index) const
 	{
 		Q_ASSERT(NULL != m_pGeomList);
 		Q_ASSERT(m_pGeomList->size() > index);
 		return m_pGeomList->at(index);
 	}
+
+    //! Get geometry from id
+    GLC_Geometry* geomOfId(GLC_uint id) const;
 
 	//! Return the number of body
 	inline int numberOfBody() const
@@ -132,11 +135,17 @@ public:
 //////////////////////////////////////////////////////////////////////
 public:
 	//! Add Geometry to the 3DRep
-	inline void addGeom(GLC_Geometry* pGeom)
+    void addGeom(GLC_Geometry* pGeom)
 	{
 		m_pGeomList->append(pGeom);
 		*m_pIsLoaded= true;
 	}
+
+    //! Take geometry
+    QList<GLC_Geometry*> takeGeometry();
+
+    //! Remove all geometries of this 3DRep
+    void clear();
 
 	//! Remove empty geometries and factorise materials
 	void clean();
@@ -162,9 +171,6 @@ public:
 	//! Take the geometry of another 3DRep
 	void take(GLC_3DRep* pSource);
 
-	//! Copy VBO to the Client Side
-	void copyVboToClientSide();
-
 	//! Release client VBO
 	void releaseVboClientSide(bool update= false);
 
@@ -173,6 +179,8 @@ public:
 
 	//! Set VBO usage
 	void setVboUsage(bool usage);
+
+    void setMeshWireColorAndLineWidth(const QColor& color, GLfloat lineWidth);
 
 //@}
 

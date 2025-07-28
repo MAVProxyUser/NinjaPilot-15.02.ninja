@@ -23,7 +23,64 @@
 
 #include "glc_matrix4x4.h"
 
+#include <cmath>
+#include <QVector4D>
+
 #include <QtDebug>
+
+using namespace std;
+
+GLC_Matrix4x4 GLC_Matrix4x4::frustumMatrix(double left, double right, double bottom, double top, double nearVal, double farVal)
+{
+    const double a= (right + left) / (right - left);
+    const double b= (top + bottom) / (top - bottom);
+    const double c= - (farVal + nearVal) / (farVal - nearVal);
+    const double d= - (2.0 * farVal * nearVal) / (farVal - nearVal);
+
+    GLC_Matrix4x4 subject;
+
+    subject.m_Matrix[0]= (2.0 * nearVal) / (right - left);
+    subject.m_Matrix[5]= (2.0 * nearVal) / (top - bottom);
+    subject.m_Matrix[8]= a;
+    subject.m_Matrix[9]= b;
+    subject.m_Matrix[10]= c;
+    subject.m_Matrix[11]= -1.0;
+    subject.m_Matrix[14]= d;
+    subject.m_Matrix[15]= 0.0;
+
+    subject.m_Type= General;
+    return subject;
+}
+
+GLC_Matrix4x4 GLC_Matrix4x4::orthonormalMatrix(double left, double right, double bottom, double top, double nearVal, double farVal)
+{
+    const double tx= - (right + left) / (right - left);
+    const double ty= - (top + bottom) / (top - bottom);
+    const double tz= - (farVal + nearVal) / (farVal - nearVal);
+
+    GLC_Matrix4x4 subject;
+    subject.m_Matrix[0]= 2.0 / (right - left);
+    subject.m_Matrix[5]= 2.0 / (top - bottom);
+    subject.m_Matrix[10]= -2.0 / (farVal - nearVal);
+    subject.m_Matrix[12]= tx;
+    subject.m_Matrix[13]= ty;
+    subject.m_Matrix[14]= tz;
+
+    subject.m_Type= General;
+    return subject;
+}
+
+GLC_Plane GLC_Matrix4x4::operator *(const GLC_Plane& plane) const
+{
+
+    QVector4D planeFactors(plane.coefA(), plane.coefB(), plane.coefC(), plane.coefD());
+    QMatrix4x4 matrix(qMatrix());
+
+    QVector4D newPlaneFactor= matrix.inverted().transposed() * planeFactors;
+    GLC_Plane subject(newPlaneFactor.x(), newPlaneFactor.y(), newPlaneFactor.z(), newPlaneFactor.w());
+
+    return subject;
+}
 
 //////////////////////////////////////////////////////////////////////
 // Set Functions
@@ -53,6 +110,8 @@ GLC_Matrix4x4& GLC_Matrix4x4::fromEuler(const double angle_x, const double angle
 
     m_Matrix[12]=  0.0; m_Matrix[13]= 0.0; m_Matrix[14]= 0.0; m_Matrix[3]= 0.0; m_Matrix[7]= 0.0; m_Matrix[11] = 0.0;
     m_Matrix[15] =  1.0;
+
+    m_Type= Direct;
 
 	return *this;
 }
@@ -124,7 +183,7 @@ QString GLC_Matrix4x4::toString() const
 QQuaternion GLC_Matrix4x4::quaternion() const
 {
 	QQuaternion subject;
-	GLC_Matrix4x4 rotMat= rotationMatrix();
+    GLC_Matrix4x4 rotMat= rotationMatrix();
 	if ((this->type() != GLC_Matrix4x4::Identity) && (rotMat != GLC_Matrix4x4()))
 	{
 		const double matrixTrace= rotMat.trace();
@@ -140,32 +199,31 @@ QQuaternion GLC_Matrix4x4::quaternion() const
 		}
 		else
 		{
-			if ((abs(rotMat.m_Matrix[0]) > abs(rotMat.m_Matrix[5])) &&  (abs(rotMat.m_Matrix[0]) > abs(rotMat.m_Matrix[15])))
+            if ((rotMat.m_Matrix[0] > rotMat.m_Matrix[5]) &&  (rotMat.m_Matrix[0] > rotMat.m_Matrix[10]))
 			{	// column 0 greater
-		        s= sqrt(1.0 + rotMat.m_Matrix[0] - rotMat.m_Matrix[5] - rotMat.m_Matrix[10]) * 2.0;
+                s= 2.0 * sqrt( 1.0 + rotMat.m_Matrix[0] - rotMat.m_Matrix[5] - rotMat.m_Matrix[10]);
+                w= (rotMat.m_Matrix[9] - rotMat.m_Matrix[6] ) / s;
+                x= 0.25 * s;
+                y= (rotMat.m_Matrix[1] + rotMat.m_Matrix[4] ) / s;
+                z= (rotMat.m_Matrix[2] + rotMat.m_Matrix[8] ) / s;
 
-		        w= (rotMat.m_Matrix[6] + rotMat.m_Matrix[9] ) / s;
-		        x= 0.5 / s;
-		        y= (rotMat.m_Matrix[1] + rotMat.m_Matrix[4] ) / s;
-		        z= (rotMat.m_Matrix[2] + rotMat.m_Matrix[8] ) / s;
 			}
-			else if ((abs(rotMat.m_Matrix[5]) > abs(rotMat.m_Matrix[0])) &&  (abs(rotMat.m_Matrix[5]) > abs(rotMat.m_Matrix[15])))
+            else if (rotMat.m_Matrix[5] > rotMat.m_Matrix[10])
 			{	// column 1 greater
-		        s= sqrt(1.0 + rotMat.m_Matrix[5] - rotMat.m_Matrix[0] - rotMat.m_Matrix[10]) * 2.0;
+                s= 2.0 * sqrt( 1.0 + rotMat.m_Matrix[5] - rotMat.m_Matrix[0] - rotMat.m_Matrix[10]);
+                w= (rotMat.m_Matrix[2] - rotMat.m_Matrix[8] ) / s;
+                x= (rotMat.m_Matrix[1] + rotMat.m_Matrix[4] ) / s;
+                y= 0.25 * s;
+                z= (rotMat.m_Matrix[6] + rotMat.m_Matrix[9] ) / s;
 
-		        w= (rotMat.m_Matrix[2] + rotMat.m_Matrix[8]) / s;
-		        x= (rotMat.m_Matrix[1] + rotMat.m_Matrix[4]) / s;
-		        y= 0.5 / s;
-		        z= (rotMat.m_Matrix[6] + rotMat.m_Matrix[9]) / s;
 			}
 			else
-			{	// column 3 greater
-		        s= sqrt(1.0 + rotMat.m_Matrix[10] - rotMat.m_Matrix[0] - rotMat.m_Matrix[5]) * 2.0;
-
-		        w = (rotMat.m_Matrix[1] + rotMat.m_Matrix[4]) / s;
-		        x = (rotMat.m_Matrix[2] + rotMat.m_Matrix[8]) / s;
-		        y = (rotMat.m_Matrix[6] + rotMat.m_Matrix[9]) / s;
-		        z = 0.5 / s;
+            {	// column 2 greater
+                s= 2.0 * sqrt( 1.0 + rotMat.m_Matrix[10] - rotMat.m_Matrix[0] - rotMat.m_Matrix[5] );
+                w= (rotMat.m_Matrix[4] - rotMat.m_Matrix[1] ) / s;
+                x= (rotMat.m_Matrix[2] + rotMat.m_Matrix[8] ) / s;
+                y= (rotMat.m_Matrix[6] + rotMat.m_Matrix[9] ) / s;
+                z= 0.25 * s;
 			}
 		}
 		subject= QQuaternion(w, x, y, z);
@@ -176,9 +234,9 @@ QQuaternion GLC_Matrix4x4::quaternion() const
 
 QPair<GLC_Vector3d, double> GLC_Matrix4x4::rotationVectorAndAngle() const
 {
-	QPair<GLC_Vector3d, double> subject(GLC_Vector3d(), 0.0);
-	if (GLC_Matrix4x4(*this).optimise().type() != GLC_Matrix4x4::Identity)
-	{
+    QPair<GLC_Vector3d, double> subject(GLC_Vector3d(), 0.0);
+    if (GLC_Matrix4x4(*this).optimise().type() != GLC_Matrix4x4::Identity)
+    {
 		QQuaternion quaternion= this->quaternion();
 		quaternion.normalize();
 
@@ -196,6 +254,40 @@ QPair<GLC_Vector3d, double> GLC_Matrix4x4::rotationVectorAndAngle() const
 	    subject.second= angle * 2.0;
 	}
 
-	return subject;
+    return subject;
 }
+
+GLC_Vector3d GLC_Matrix4x4::getXvector() const
+{
+    const int index= 0 * 4;
+    GLC_Vector3d subject(m_Matrix[index], m_Matrix[index + 1], m_Matrix[index + 2]);
+
+    return subject;
+}
+
+GLC_Vector3d GLC_Matrix4x4::getYvector() const
+{
+    const int index= 1 * 4;
+    GLC_Vector3d subject(m_Matrix[index], m_Matrix[index + 1], m_Matrix[index + 2]);
+
+    return subject;
+}
+
+GLC_Vector3d GLC_Matrix4x4::getZvector() const
+{
+    const int index= 2 * 4;
+    GLC_Vector3d subject(m_Matrix[index], m_Matrix[index + 1], m_Matrix[index + 2]);
+
+    return subject;
+}
+
+GLC_Vector3d GLC_Matrix4x4::getWvector() const
+{
+    const int index= 3 * 4;
+    GLC_Vector3d subject(m_Matrix[index], m_Matrix[index + 1], m_Matrix[index + 2]);
+
+    return subject;
+}
+
+
 

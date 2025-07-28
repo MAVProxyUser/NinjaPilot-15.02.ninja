@@ -51,13 +51,13 @@ class GLC_LIB_EXPORT GLC_Axis : public GLC_3DWidget
 //////////////////////////////////////////////////////////////////////
 public:
 	//! Construct a axis widget
-	GLC_Axis(const GLC_Point3d& center, GLC_3DWidgetManagerHandle*  pWidgetManagerHandle= NULL);
+    GLC_Axis(const GLC_Point3d& center, GLC_3DWidgetManagerHandle*  pWidgetManagerHandle= nullptr);
 
 	//! Copy constructor
-	GLC_Axis(const GLC_Axis& axis);
+    GLC_Axis(const GLC_Axis& other);
 
 	//! Destructor
-	virtual ~GLC_Axis();
+    ~GLC_Axis() override;
 //@}
 
 //////////////////////////////////////////////////////////////////////
@@ -66,12 +66,24 @@ public:
 //////////////////////////////////////////////////////////////////////
 public:
 	//! Return this axis center
-	inline GLC_Point3d center() const
+    GLC_Point3d center() const
 	{return m_Center;}
 
 	//! Return this axis length
-	inline double axisLength() const
+    double axisLength() const
 	{return m_AxisLength;}
+
+    //! Return the axis radius/length ratio
+    double axisRadiusRatio() const
+    {return m_AxisRadiusRatio;}
+
+    //! Return the move step
+    double moveStep() const
+    {return m_MoveStep;}
+
+    GLC_Vector3d offset() const
+    {return m_Offset;}
+
 //@}
 
 //////////////////////////////////////////////////////////////////////
@@ -83,13 +95,23 @@ public:
 	virtual GLC_Axis& operator=(const GLC_Axis& axis);
 
 	//! Update widget representation
-	virtual void updateWidgetRep();
+    void updateWidgetRep() override;
 
 	//! Set the axis length
 	void setAxisLength(double length);
 
+    //! Set the axis radius/length ratio
+    void setAxisRadiusLengthRatio(double value);
+
 	//! Set Axis center
 	void setCenter(const GLC_Point3d& newCenter);
+
+    //! Set Axis orientation
+    void setOrientation(const GLC_Matrix4x4& matrix);
+
+    //! Set the move step
+    void setMoveStep(double value)
+    {m_MoveStep= value;}
 
 //@}
 
@@ -100,19 +122,19 @@ public:
 public:
 
 	//! This widget as been selected
-	virtual glc::WidgetEventFlag select(const GLC_Point3d&, GLC_uint id);
+    glc::WidgetEventFlag select(const GLC_Point3d&, GLC_uint id) override;
 
 	//! This widget as been unselected
-	virtual glc::WidgetEventFlag unselect(const GLC_Point3d&, GLC_uint id);
+    glc::WidgetEventFlag unselect(const GLC_Point3d&, GLC_uint id) override;
 
 	//! The mouse is over this widget and a mousse button is pressed
-	virtual glc::WidgetEventFlag mousePressed(const GLC_Point3d&, Qt::MouseButton, GLC_uint id);
+    glc::WidgetEventFlag pressed(const GLC_Point3d&, GLC_uint id) override;
 
 	//! The mouse is over this widget and a mousse button is released
-	virtual glc::WidgetEventFlag mouseReleased(Qt::MouseButton);
+    glc::WidgetEventFlag released() override;
 
 	//! This widget is selected and the mousse move with a pressed buttons
-	virtual glc::WidgetEventFlag mouseMove(const GLC_Point3d&, Qt::MouseButtons, GLC_uint id);
+    glc::WidgetEventFlag move(const GLC_Point3d&, GLC_uint id) override;
 
 //@}
 
@@ -121,10 +143,10 @@ public:
 //////////////////////////////////////////////////////////////////////
 protected:
 	//! Create the 3DView instance of this 3d widget
-	virtual void create3DviewInstance();
+    void create3DviewInstance() override;
 
 	//! Reset the view state of this 3DWidget
-	virtual void resetViewState();
+    void resetViewState() override;
 
 //////////////////////////////////////////////////////////////////////
 // Private services function
@@ -140,6 +162,9 @@ private:
 	//! The axis center
 	GLC_Point3d m_Center;
 
+    //! The axis orientation matrix
+    GLC_Matrix4x4 m_OrientationMatrix;
+
 	//! The manipulator scale factor
 	double m_ScaleFactor;
 
@@ -154,6 +179,11 @@ private:
 
 	//! The axis radius Ratio : Radius / Length
 	double m_AxisRadiusRatio;
+
+    //! The move step
+    double m_MoveStep;
+
+    GLC_Vector3d m_Offset;
 
 };
 

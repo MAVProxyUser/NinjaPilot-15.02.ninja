@@ -46,7 +46,7 @@ public:
 	//! Default constructor
 	GLC_Rectangle();
 
-	//! Construct a rectangle with the given lenght
+	//! Construct a rectangle with the given length
 	GLC_Rectangle(double l1, double l2);
 
 	//! Construct a restangle with the given rectangle
@@ -80,7 +80,9 @@ public:
 //@{
 //////////////////////////////////////////////////////////////////////
 public:
-	//! Set this rectangle with the given lenght
+    virtual bool update();
+
+	//! Set this rectangle with the given length
 	GLC_Rectangle& setRectangle(double l1, double l2);
 
 	//! Set this rectangle length 1

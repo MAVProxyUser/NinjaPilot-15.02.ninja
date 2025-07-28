@@ -24,7 +24,6 @@
 
 #ifndef GLC_VIEWPORT_H_
 #define GLC_VIEWPORT_H_
-#include <QGLWidget>
 #include <QPair>
 #include <QHash>
 #include <QObject>
@@ -85,26 +84,29 @@ public:
 	inline GLC_Camera* cameraHandle() const
 	{return m_pViewCam;}
 
+    //! Return this viewport size
+    QSize size() const;
+
 	//! Get this viewport Horizontal size
 	inline int viewHSize() const
-	{ return m_WindowHSize;}
+    { return m_Width;}
 
 	//! Get this viewport Vertical size
 	inline int viewVSize() const
-	{ return m_WindowVSize;}
+    { return m_Height;}
 
 	//! Get this viewport ratio
 	inline double aspectRatio() const
-	{ return static_cast<double>(m_WindowHSize) / static_cast<double>(m_WindowVSize);}
+    {return m_AspectRatio;}
 
 	//! Return the normalyse mouse position from screen coordinate
-	GLC_Point2d normalyseMousePosition(int x, int y);
+    GLC_Point2d normalyseMousePosition(int x, int y) const;
 
 	//! Map screen position to OpenGL screen position
-	GLC_Point2d mapToOpenGLScreen(int x, int y);
+    GLC_Point2d mapToOpenGLScreen(int x, int y) const;
 
 	//! Map normalyze screen position to OpenGL screen position
-	GLC_Point2d mapNormalyzeToOpenGLScreen(double x, double y);
+    GLC_Point2d mapNormalyzeToOpenGLScreen(double x, double y) const;
 
 	//! Map Screen position to OpenGL position (On image Plane) according to this viewport
 	GLC_Vector3d mapPosMouse( GLdouble Posx, GLdouble Posy) const;
@@ -172,14 +174,13 @@ public:
 //////////////////////////////////////////////////////////////////////
 public:
 	//! Initialize OpenGL with default values
-	/*! Glew initialisation is made here */
 	void initGl();
 
 	//! Load camera's transformation Matrix and display image if necessary
-	void glExecuteCam(void);
+    void glExecuteCam(const QImage &image= QImage(), bool preserveRatio= true);
 
 	//! Update this viewport OpenGL projection matrix
-	void updateProjectionMat(void);
+    void updateProjectionMat(bool updateOpenGL= true);
 
 	//! Force the aspect ratio of this viewport
 	void forceAspectRatio(double);
@@ -195,12 +196,28 @@ public:
 	GLC_Frustum selectionFrustum(int, int) const;
 
 	//! Return the world 3d point from the given screen coordinate
-	GLC_Point3d unProject(int, int) const;
+    GLC_Point3d unproject(int, int, GLenum buffer= GL_FRONT, bool onGeometry= false) const;
+
+    //! Return the screen coordinate from the world 3D point
+    GLC_Point2d project(const GLC_Point3d& point, bool useCameraMatrix= true) const;
+
+    //! Return the list of screen coordinate form the givne world 3D points list
+    QList<GLC_Point2d> project(const QList<GLC_Point3d>& points, bool useCameraMatrix= true) const;
+
+    //! Return the world 3d point of given Z from the given screen coordinate
+    GLC_Point3d fuzzyUnproject(int x, int y, double z) const;
 
 	//! Return the list af world 3d point form the givne list af screen coordinates
 	/*! The size of the given list must be a multiple of 2*/
-	QList<GLC_Point3d> unproject(const QList<int>&)const;
+    QList<GLC_Point3d> unproject(const QList<int>& list, GLenum buffer= GL_FRONT)const;
 
+    //! Render the given string into the current OpenGL context
+    /*! x and y are specified in window coordinates*/
+    void renderText(const GLC_Point3d &point, const QString& text, const QColor& color= Qt::white, const QFont& font= QFont(), int deviceRatio= 1);
+
+    //! Return the device aspect ratio which has been set with size
+    int devicePixelRatio() const
+    {return m_DevicePixelRatio;}
 //@}
 
 //////////////////////////////////////////////////////////////////////
@@ -225,32 +242,38 @@ public:
 //////////////////////////////////////////////////////////////////////
 public:
 
-	//! Inform the viewport that the OpenGL window size has been modified
-	void setWinGLSize(int HSize, int VSize);
+    //! Update the OpenGL view size
+    void setWinGLSize(int width, int height, int devicePixelRatio, bool updateOpenGL= true);
+
+    //! Update the OpenGL view size
+    void setWinGLSize(int width, int height, bool updateOpenGL= true);
+
+    //! Update the OpenGL view size
+    void setWinGLSize(const QSize& size, bool updateOpenGL= true);
 
 	//! Call the attached QGLWidgetSelect  updateGL function and return the picking id
 	/*! Return UID of the nearest picked object */
-	GLC_uint renderAndSelect(int x, int y);
+    GLC_uint renderAndSelect(int x, int y, GLenum buffer= GL_BACK);
 
 	//! Return the picking id from the already render window
-	GLC_uint selectOnPreviousRender(int x, int y);
+    GLC_uint selectOnPreviousRender(int x, int y, GLenum buffer= GL_BACK);
 
 	//! Select a body inside a 3DViewInstance and return its UID
 	/*! Return UID of the nearest picked body */
-	GLC_uint selectBody(GLC_3DViewInstance*, int x, int y);
+    GLC_uint selectBody(GLC_3DViewInstance*, int x, int y, GLenum buffer= GL_BACK);
 
 	//! Select a primitive inside a 3DViewInstance and return its UID and its body index
 	/*! Return UID of the nearest picked primitive */
-	QPair<int, GLC_uint> selectPrimitive(GLC_3DViewInstance*, int x, int y);
+    QPair<int, GLC_uint> selectPrimitive(GLC_3DViewInstance*, int x, int y, GLenum buffer= GL_BACK);
 
 	//! Select objects inside specified square and return its UID in a set
-	QSet<GLC_uint> selectInsideSquare(int x1, int y1, int x2, int y2);
+    QSet<GLC_uint> selectInsideSquare(int x1, int y1, int x2, int y2, GLenum buffer= GL_BACK);
 
 	//! load background image from file in this viewport
-	void loadBackGroundImage(const QString& imageFile);
+    void loadBackGroundImage(const QString& imageFile, bool preserveRatio= false);
 
 	//! load background image in this viewport
-	void loadBackGroundImage(const QImage& image);
+    void loadBackGroundImage(const QImage& image, bool preserveRatio= false);
 
 	//! delete background image of this viewport
 	void deleteBackGroundImage();
@@ -264,14 +287,14 @@ public:
 	}
 
 	//! Set near clipping distance of this viewport
-	bool setDistMin(double DistMin);
+    bool setDistMin(double DistMin, bool updateOpenGL= true);
 
 	//! Set far clipping distance of this viewport
-	bool setDistMax(double DistMax);
+    bool setDistMax(double DistMax, bool updateOpenGL= true);
 
 	//! Set Near and Far clipping distance of this viewport
 	/*! box shouldn't be empty*/
-	void setDistMinAndMax(const GLC_BoundingBox& bBox);
+    void setDistMinAndMax(const GLC_BoundingBox& bBox, bool updateOpenGL= true);
 
 	//! Set the Background color of this viewport
 	void setBackgroundColor(QColor setColor);
@@ -300,11 +323,16 @@ public:
 	inline void add3DWidget(GLC_3DViewInstance& widget)
 	{m_3DWidgetCollection.add(widget);}
 
-	//! Clear the background color with the specified color
-	void clearBackground(const QColor& color) const;
+    //! Set the clear background color with the stored color
+    void clearBackground() const;
+
+    //! Set the clear background color with the specified color
+    void clearBackground(const QColor& color) const;
+
+    //! Clear
 
 	//! Set othographic usage to the given flag
-	void setToOrtho(bool useOrtho);
+    void setToOrtho(bool useOrtho);
 
 	//! Set minimum pixel culling size
 	inline void setMinimumPixelCullingSize(int size)
@@ -320,7 +348,13 @@ public:
 //{@
 	//! Set the viewport's camera in order to reframe on the current scene
 	/*! box shouldn't be empty*/
-	void reframe(const GLC_BoundingBox& box);
+	void reframe(const GLC_BoundingBox& box, double coverFactor = 2.2);
+
+    GLC_Camera reframedCamera(const GLC_BoundingBox& box, double coverFactor = 2.2) const;
+
+    //! Set the viewport's camera in order to match new cover
+    /*! Return true on success*/
+    bool reframeFromDeltaCover(double deltaCover);
 
 //@} End Zooming functions
 /////////////////////////////////////////////////////////////////////
@@ -341,10 +375,10 @@ signals:
 //////////////////////////////////////////////////////////////////////
 private:
 	//! Return the meaningful color ID inside a square in screen coordinates
-	GLC_uint meaningfulIdInsideSquare(GLint x, GLint y, GLsizei width, GLsizei height);
+    GLC_uint meaningfullIdInsideSquare(GLint x, GLint y, GLsizei width, GLsizei height, GLenum buffer);
 
 	//! Return the Set of ID inside a square in screen coordinate
-	QSet<GLC_uint> listOfIdInsideSquare(GLint x, GLint y, GLsizei width, GLsizei height);
+    QSet<GLC_uint> listOfIdInsideSquare(GLint x, GLint y, GLsizei width, GLsizei height, GLenum buffer);
 
 	//! Update minimum ratio size for pixel culling
 	void updateMinimumRatioSize();
@@ -360,7 +394,7 @@ private:
 
 	double m_DistanceMax;		//!< Camera Maximum distance (far clipping plane)
 	double m_dDistanceMini;		//!< Camera Minimum distance (near clipping plane)
-	double m_ViewAngle;		//!< Camera angle of view
+    double m_ViewAngle;         //!< Camera angle of view
 	double m_ViewTangent;		//!< Camera angle tangent
 
 
@@ -368,8 +402,8 @@ private:
 	GLC_ImagePlane* m_pImagePlane;
 
 	// OpenGL View Definition
-	int m_WindowHSize;			//!< Horizontal OpenGL viewport size
-	int m_WindowVSize;			//!< Vertical OpenGL viewport size
+    int m_Width;			//!< Horizontal OpenGL viewport size
+    int m_Height;			//!< Vertical OpenGL viewport size
 
 	//! View AspectRatio
 	double m_AspectRatio;
@@ -406,6 +440,11 @@ private:
 
 	//! The minimum dynamic size ratio
 	double m_MinimumDynamicRatioSize;
+
+    //! Text rendering collection
+    GLC_3DViewCollection m_TextRenderingCollection;
+
+    int m_DevicePixelRatio;
 };
 
 GLC_Matrix4x4 GLC_Viewport::compositionMatrix() const
