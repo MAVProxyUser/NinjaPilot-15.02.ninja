@@ -72,8 +72,8 @@ extern DFUStates DeviceState;
 extern uint8_t JumpToApp;
 extern int32_t platform_senddata(const uint8_t *msg, uint16_t msg_len);
 /* Private function prototypes -----------------------------------------------*/
-static uint32_t baseOfAdressType(uint8_t type);
-static uint8_t isBiggerThanAvailable(uint8_t type, uint32_t size);
+static uint32_t baseOfAdressType(DFUTransfer type);
+static uint8_t isBiggerThanAvailable(DFUTransfer type, uint32_t size);
 static void OPDfuIni(uint8_t discover);
 bool flash_read(uint8_t *buffer, uint32_t adr, DFUProgType type);
 /* Private functions ---------------------------------------------------------*/

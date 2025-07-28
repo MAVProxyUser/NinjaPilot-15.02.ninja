@@ -39,6 +39,7 @@
  */
 
 #include <pios.h>
+#include <string.h>
 
 #include <uavobjectmanager.h>
 #include <openpilot.h>
@@ -142,7 +143,11 @@ static void systemTask(__attribute__((unused)) void *parameters)
         OPLinkStatusGet(&oplinkStatus);
 
         // Get the other device stats.
-        PIOS_RFM2B_GetPairStats(pios_rfm22b_id, oplinkStatus.PairIDs, oplinkStatus.PairSignalStrengths, OPLINKSTATUS_PAIRIDS_NUMELEM);
+        uint32_t pairIDs[OPLINKSTATUS_PAIRIDS_NUMELEM];
+        int8_t pairSignalStrengths[OPLINKSTATUS_PAIRIDS_NUMELEM];
+        PIOS_RFM2B_GetPairStats(pios_rfm22b_id, pairIDs, pairSignalStrengths, OPLINKSTATUS_PAIRIDS_NUMELEM);
+        memcpy(oplinkStatus.PairIDs, pairIDs, sizeof(oplinkStatus.PairIDs));
+        memcpy(oplinkStatus.PairSignalStrengths, pairSignalStrengths, sizeof(oplinkStatus.PairSignalStrengths));
 
         // Get the stats from the radio device
         struct rfm22b_stats radio_stats;

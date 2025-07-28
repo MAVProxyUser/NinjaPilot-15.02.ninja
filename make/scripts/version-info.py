@@ -307,7 +307,7 @@ def sha1(file):
     else:
         sha1 = hashlib.sha1()
         with open(file, 'rb') as f:
-            for chunk in iter(lambda: f.read(8192), ''):
+            for chunk in iter(lambda: f.read(8192), b''):
                 sha1.update(chunk)
         hex_stream = lambda s:",".join(['0x'+hex(c if isinstance(c, int) else ord(c))[2:].zfill(2) for c in s])
         return hex_stream(sha1.digest())

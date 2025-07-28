@@ -13,7 +13,7 @@ def append(verbose, text, data):
     """Appends data to global image, updates global offset, prints details if verbose is set"""
     global image, offset
     if verbose:
-        print text, "0x%08x" % len(data), "@ 0x%08x" % offset, "%8d bytes" % len(data)
+        print(text, "0x%08x" % len(data), "@ 0x%08x" % offset, "%8d bytes" % len(data))
     image  += data
     offset += len(data)
 
@@ -30,9 +30,9 @@ def create_entire_flash(args):
     assert args.fw_bin_path is not None
     assert args.fwinfo_bin_path is not None
 
-    image = ""
+    image = b""
     offset = 0
-    pad = chr(0xff)
+    pad = bytes([0xff])
 
     try:
         bl_bin_file = open(args.bl_bin_path, "rb")
@@ -57,7 +57,7 @@ def create_entire_flash(args):
         append(args.verbose, "Firmware info blob: ", fwinfo_bin)
 
         if args.verbose:
-            print "Entire flash image size:", offset, "bytes"
+            print("Entire flash image size:", offset, "bytes")
 
         if args.outfile:
             of = open(args.outfile, "wb")

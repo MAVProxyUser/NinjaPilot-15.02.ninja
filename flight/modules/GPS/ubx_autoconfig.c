@@ -310,6 +310,7 @@ static void configure(uint16_t *bytes_to_send)
             // Skip and fall through to next step
             status->lastConfigSent++;
         }
+        __attribute__((fallthrough));
     case LAST_CONFIG_SENT_START + 3:
         config_sbas(bytes_to_send);
         if (!status->currentSettings.storeSettings) {

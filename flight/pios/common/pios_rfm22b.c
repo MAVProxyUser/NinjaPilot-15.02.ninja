@@ -135,7 +135,7 @@ struct pios_rfm22b_transition {
 };
 
 // Must ensure these prefilled arrays match the define sizes
-static const uint8_t FULL_PREAMBLE[FIFO_SIZE] = {
+static const uint8_t __attribute__((unused)) FULL_PREAMBLE[FIFO_SIZE] = {
     PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE,
     PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE,
     PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE,
@@ -151,7 +151,7 @@ static const uint8_t FULL_PREAMBLE[FIFO_SIZE] = {
     PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE
 }; // 64 bytes
 
-static const uint8_t HEADER[(TX_PREAMBLE_NIBBLES + 1) / 2 + 2] = {
+static const uint8_t __attribute__((unused)) HEADER[(TX_PREAMBLE_NIBBLES + 1) / 2 + 2] = {
     PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE, PREAMBLE_BYTE, SYNC_BYTE_1, SYNC_BYTE_2
 };
 
@@ -370,7 +370,7 @@ static const uint8_t reg_72[] = { 0x30, 0x48, 0x48, 0x48, 0x48, 0x60, 0x90, 0xCD
 
 static const uint8_t packet_time[] = { 80, 40, 25, 15, 13, 10, 8, 6, 5 };
 static const uint8_t packet_time_ppm[] = { 26, 25, 25, 15, 13, 10, 8, 6, 5 };
-static const uint8_t num_channels[] = { 32, 32, 32, 32, 32, 32, 32, 32, 32 };
+static const uint8_t __attribute__((unused)) num_channels[] = { 32, 32, 32, 32, 32, 32, 32, 32, 32 };
 
 static struct pios_rfm22b_dev *g_rfm22b_dev = NULL;
 
