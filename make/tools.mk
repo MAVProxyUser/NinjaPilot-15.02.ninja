@@ -552,16 +552,30 @@ $(eval $(call TOOL_INSTALL_TEMPLATE,arm_sdk,$(ARM_SDK_DIR),$(ARM_SDK_URL),$(ARM_
 endif
 
 # Check for xpack ARM toolchain first (auto-detect latest version)
-XPACK_BASE_DIR := $(HOME)/Library/xPacks/@xpack-dev-tools/arm-none-eabi-gcc
-XPACK_ARM_DIR := $(shell find "$(XPACK_BASE_DIR)" -name ".content" -type d 2>/dev/null | head -1)
-ifneq ($(XPACK_ARM_DIR),)
-    export ARM_SDK_PREFIX := $(XPACK_ARM_DIR)/bin/arm-none-eabi-
-else ifeq ($(shell [ -d "$(ARM_SDK_DIR)" ] && $(ECHO) "exists"), exists)
-    export ARM_SDK_PREFIX := $(ARM_SDK_DIR)/bin/arm-none-eabi-
-else
-    # not installed, hope it's in the path...
-    # $(info $(EMPTY) WARNING     $(call toprel, $(ARM_SDK_DIR)) not found (make arm_sdk_install), using system PATH)
-    export ARM_SDK_PREFIX ?= arm-none-eabi-
+ifeq ($(UNAME), Darwin)
+    XPACK_BASE_DIR := $(HOME)/Library/xPacks/@xpack-dev-tools/arm-none-eabi-gcc
+else ifeq ($(UNAME), Linux)
+    XPACK_BASE_DIR := $(HOME)/.local/xPacks/@xpack-dev-tools/arm-none-eabi-gcc
+else ifeq ($(UNAME), Windows)
+    XPACK_BASE_DIR := $(APPDATA)/xPacks/@xpack-dev-tools/arm-none-eabi-gcc
+endif
+
+ifneq ($(XPACK_BASE_DIR),)
+    XPACK_ARM_DIR := $(shell find "$(XPACK_BASE_DIR)" -name ".content" -type d 2>/dev/null | head -1)
+    ifneq ($(XPACK_ARM_DIR),)
+        export ARM_SDK_PREFIX := $(XPACK_ARM_DIR)/bin/arm-none-eabi-
+    endif
+endif
+
+# Fallback to traditional ARM SDK if xpack not found
+ifeq ($(ARM_SDK_PREFIX),)
+    ifeq ($(shell [ -d "$(ARM_SDK_DIR)" ] && $(ECHO) "exists"), exists)
+        export ARM_SDK_PREFIX := $(ARM_SDK_DIR)/bin/arm-none-eabi-
+    else
+        # not installed, hope it's in the path...
+        # $(info $(EMPTY) WARNING     $(call toprel, $(ARM_SDK_DIR)) not found (make arm_sdk_install), using system PATH)
+        export ARM_SDK_PREFIX ?= arm-none-eabi-
+    endif
 endif
 
 .PHONY: arm_sdk_version
