@@ -551,7 +551,11 @@ $(eval $(call TOOL_INSTALL_TEMPLATE,arm_sdk,$(ARM_SDK_DIR),$(ARM_SDK_URL),$(ARM_
 
 endif
 
-ifeq ($(shell [ -d "$(ARM_SDK_DIR)" ] && $(ECHO) "exists"), exists)
+# Check for xpack ARM toolchain first
+XPACK_ARM_DIR := $(HOME)/Library/xPacks/@xpack-dev-tools/arm-none-eabi-gcc/14.2.1-1.1.1/.content
+ifeq ($(shell [ -d "$(XPACK_ARM_DIR)" ] && $(ECHO) "exists"), exists)
+    export ARM_SDK_PREFIX := $(XPACK_ARM_DIR)/bin/arm-none-eabi-
+else ifeq ($(shell [ -d "$(ARM_SDK_DIR)" ] && $(ECHO) "exists"), exists)
     export ARM_SDK_PREFIX := $(ARM_SDK_DIR)/bin/arm-none-eabi-
 else
     # not installed, hope it's in the path...
@@ -566,8 +570,8 @@ arm_sdk_version:
 # Template to check ARM toolchain version before building targets
 define ARM_GCC_VERSION_CHECK_TEMPLATE
 	if ! $(ARM_SDK_PREFIX)gcc --version --specs=nano.specs >/dev/null 2>&1; then \
-		$(ECHO) $(MSG_NOTICE) Please install ARM toolchain 4.8 2014q1 using \'make arm_sdk_install\' && \
-		$(ECHO) $(MSG_NOTICE) Older ARM SDKs do not support new \'--specs=nano.specs\' option && \
+		$(ECHO) $(MSG_NOTICE) Please install ARM toolchain using \'xpm install -g @xpack-dev-tools/arm-none-eabi-gcc@latest\' && \
+		$(ECHO) $(MSG_NOTICE) Then add to PATH: export PATH=\"$(HOME)/Library/xPacks/@xpack-dev-tools/arm-none-eabi-gcc/14.2.1-1.1.1/.content/bin:\$$PATH\" && \
 		exit 1; \
 	fi
 endef

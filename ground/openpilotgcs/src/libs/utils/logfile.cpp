@@ -22,7 +22,7 @@ LogFile::LogFile(QObject *parent) :
 bool LogFile::open(OpenMode mode)
 {
     // start a timer for playback
-    m_myTime.restart();
+    m_myTime.start();
     if (m_file.isOpen()) {
         // We end up here when doing a replay, because the connection
         // manager will also try to open the QIODevice, even though we just
@@ -66,7 +66,7 @@ qint64 LogFile::writeData(const char *data, qint64 dataSize)
 
     // If m_nextTimeStamp != -1 then use this timestamp instead of the timer
     // This is used when saving logs from on-board logging
-    quint32 timeStamp = m_useProvidedTimeStamp ? m_nextTimeStamp : m_myTime.elapsed();
+    quint32 timeStamp = m_useProvidedTimeStamp ? m_nextTimeStamp : (quint32)m_myTime.elapsed();
 
     m_file.write((char *)&timeStamp, sizeof(timeStamp));
     m_file.write((char *)&dataSize, sizeof(dataSize));
@@ -100,7 +100,7 @@ void LogFile::timerFired()
 
     if (m_file.bytesAvailable() > 4) {
         int time;
-        time = m_myTime.elapsed();
+        time = (quint32)m_myTime.elapsed();
 
         // TODO: going back in time will be a problem
         while ((m_lastPlayed + ((time - m_timeOffset) * m_playbackSpeed) > m_lastTimeStamp)) {
@@ -145,7 +145,7 @@ void LogFile::timerFired()
             }
 
             m_timeOffset = time;
-            time = m_myTime.elapsed();
+            time = (quint32)m_myTime.elapsed();
         }
     } else {
         stopReplay();

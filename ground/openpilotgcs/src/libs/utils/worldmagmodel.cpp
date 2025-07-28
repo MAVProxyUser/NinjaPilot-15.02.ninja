@@ -235,7 +235,7 @@ void WorldMagModel::Initialize()
     // Really, Really needs to be read from a file - out of date in 2015 at latest
     MagneticModel.EditionDate = 5.7863328170559505e-307;
     MagneticModel.epoch = 2010.0;
-    sprintf(MagneticModel.ModelName, "WMM-2010");
+    snprintf(MagneticModel.ModelName, sizeof(MagneticModel.ModelName), "WMM-2010");
 }
 
 

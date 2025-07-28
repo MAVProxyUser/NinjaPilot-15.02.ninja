@@ -2,7 +2,7 @@
 #define LOGFILE_H
 
 #include <QIODevice>
-#include <QTime>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QMutexLocker>
 #include <QDebug>
@@ -60,7 +60,7 @@ signals:
 protected:
     QByteArray m_dataBuffer;
     QTimer m_timer;
-    QTime m_myTime;
+    QElapsedTimer m_myTime;
     QFile m_file;
     qint32 m_lastTimeStamp;
     qint32 m_lastPlayed;

@@ -34,6 +34,7 @@
 #include <QMenu>
 #include <QDockWidget>
 #include <QSettings>
+#include <algorithm>
 
 static const char lockedKeyC[]   = "Locked";
 static const char stateKeyC[]    = "State";
@@ -284,7 +285,7 @@ QMenu *FancyMainWindow::createPopupMenu()
             actions.append(dockwidgets.at(i)->toggleViewAction());
         }
     }
-    qSort(actions.begin(), actions.end(), actionLessThan);
+    std::sort(actions.begin(), actions.end(), actionLessThan);
     QMenu *menu = new QMenu(this);
     foreach(QAction * action, actions)
     menu->addAction(action);

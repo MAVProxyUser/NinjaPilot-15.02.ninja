@@ -238,8 +238,8 @@ QRectF SvgImageProvider::scaledElementBounds(const QString &svgFile, const QStri
     }
 
     QRectF elementBounds = renderer->boundsOnElement(elementName);
-    QMatrix matrix = renderer->matrixForElement(elementName);
-    elementBounds = matrix.mapRect(elementBounds);
+    QTransform transform = renderer->transformForElement(elementName);
+    elementBounds = transform.mapRect(elementBounds);
 
     QSize docSize  = renderer->defaultSize();
     return QRectF(elementBounds.x() / docSize.width(),
