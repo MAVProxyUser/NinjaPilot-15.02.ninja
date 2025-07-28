@@ -31,7 +31,7 @@
 #include <QObject>
 #include <QQueue>
 #include <QTimer>
-#include <QTime>
+#include <QElapsedTimer>
 #include <QMutex>
 #include <QMutexLocker>
 #include "uavobjectmanager.h"
@@ -73,7 +73,7 @@ private:
     QTimer *statsTimer;
     UAVObject *objPending;
     QMutex *mutex;
-    QTime *connectionTimer;
+    QElapsedTimer *connectionTimer;
 
     void startRetrievingObjects();
     void retrieveNextObject();

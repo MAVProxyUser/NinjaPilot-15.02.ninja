@@ -318,7 +318,7 @@ void ShortcutSettings::initialize()
         }
 
         item->setText(2, s->m_key.toString());
-        item->setData(0, Qt::UserRole, qVariantFromValue(s));
+        item->setData(0, Qt::UserRole, QVariant::fromValue(s));
     }
 }
 

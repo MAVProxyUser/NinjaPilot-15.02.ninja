@@ -41,7 +41,7 @@ TelemetryMonitor::TelemetryMonitor(UAVObjectManager *objMngr, Telemetry *tel) :
     statsTimer(new QTimer(this)),
     objPending(NULL),
     mutex(new QMutex(QMutex::Recursive)),
-    connectionTimer(new QTime())
+    connectionTimer(new QElapsedTimer())
 {
     // Listen for flight stats updates
     connect(flightStatsObj, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(flightStatsUpdated(UAVObject *)));

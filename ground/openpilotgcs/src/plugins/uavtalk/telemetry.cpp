@@ -28,10 +28,11 @@
 #include "telemetry.h"
 #include "oplinksettings.h"
 #include "objectpersistence.h"
-#include <QTime>
+#include <QElapsedTimer>
 #include <QtGlobal>
 #include <stdlib.h>
 #include <QDebug>
+#include <QRandomGenerator>
 
 /**
  * Constructor
@@ -127,7 +128,7 @@ void Telemetry::setUpdatePeriod(UAVObject *obj, qint32 periodMs)
     for (int n = 0; n < objList.length(); ++n) {
         if (objList[n].obj->getObjID() == obj->getObjID()) {
             objList[n].updatePeriodMs     = periodMs;
-            objList[n].timeToNextUpdateMs = quint32((float)periodMs * (float)qrand() / (float)RAND_MAX); // avoid bunching of updates
+            objList[n].timeToNextUpdateMs = quint32((float)periodMs * QRandomGenerator::global()->generateDouble()); // avoid bunching of updates
         }
     }
 }
@@ -464,7 +465,7 @@ void Telemetry::processPeriodicUpdates()
     qint32 minDelay  = MAX_UPDATE_PERIOD_MS;
     ObjectTimeInfo *objinfo;
     qint32 elapsedMs = 0;
-    QTime time;
+    QElapsedTimer time;
     qint32 offset;
     bool allInstances;
     for (int n = 0; n < objList.length(); ++n) {

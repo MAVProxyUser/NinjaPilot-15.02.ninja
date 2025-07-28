@@ -28,6 +28,7 @@
 
 #include "sidebar.h"
 #include "imode.h"
+#include <algorithm>
 #include "modemanager.h"
 
 #include "actionmanager/actionmanager.h"
@@ -83,7 +84,7 @@ void SideBar::makeItemAvailable(SideBarItem *item)
     while (it != m_itemMap.constEnd()) {
         if (it.value() == item) {
             m_availableItems.append(it.key());
-            qSort(m_availableItems);
+            std::sort(m_availableItems.begin(), m_availableItems.end());
             break;
         }
         ++it;
@@ -325,7 +326,7 @@ void SideBarWidget::updateAvailableItems()
     if (!current.isEmpty() && !itms.contains(current)) {
         itms.append(current);
     }
-    qSort(itms);
+    std::sort(itms.begin(), itms.end());
     m_comboBox->addItems(itms);
     int idx = m_comboBox->findText(current);
     if (idx < 0) {

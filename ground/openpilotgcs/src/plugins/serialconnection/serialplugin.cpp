@@ -28,6 +28,7 @@
 #include "serialplugin.h"
 
 #include <extensionsystem/pluginmanager.h>
+#include <algorithm>
 #include <coreplugin/icore.h>
 
 #include <QtCore/QtPlugin>
@@ -142,7 +143,7 @@ QList <Core::IConnection::device> SerialConnection::availableDevices()
         QList<QSerialPortInfo> ports = availablePorts();
 
         // sort the list by port number (nice idea from PT_Dreamer :))
-        qSort(ports.begin(), ports.end(), sortPorts);
+        std::sort(ports.begin(), ports.end(), sortPorts);
         foreach(QSerialPortInfo port, ports) {
             device d;
 

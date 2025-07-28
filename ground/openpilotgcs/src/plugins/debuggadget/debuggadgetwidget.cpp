@@ -63,6 +63,10 @@ void DebugGadgetWidget::customMessageHandler(QtMsgType type, const QMessageLogCo
     case QtFatalMsg:
         txt   = QString("Fatal: %1").arg(msg);
         abort();
+    case QtInfoMsg:
+        txt   = QString("Info: %1").arg(msg);
+        color = Qt::blue;
+        break;
     }
 
     debugengine::getInstance()->setTextEdit(m_textedit);

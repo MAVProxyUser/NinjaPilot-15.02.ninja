@@ -285,6 +285,9 @@ void mainMessageOutput(QtMsgType type, const QMessageLogContext &context, const 
     case QtFatalMsg:
         out << "FTL: ";
         break;
+    case QtInfoMsg:
+        out << "INF: ";
+        break;
     }
 
     out << msg << '\n';

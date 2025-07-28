@@ -26,6 +26,7 @@
  */
 #include "urlfactory.h"
 #include <QRegExp>
+#include <QElapsedTimer>
 
 
 namespace core {
@@ -537,7 +538,7 @@ internals::PointLatLng UrlFactory::GetLatLngFromGeocoderUrl(const QString &url, 
 #ifdef DEBUG_URLFACTORY
         qDebug() << "GetLatLngFromGeocoderUrl:URL=" << url;
 #endif // DEBUG_URLFACTORY
-        QTime time;
+        QElapsedTimer time;
         time.start();
         while ((!(reply->isFinished()) || (time.elapsed() > (6 * Timeout)))) {
             QCoreApplication::processEvents(QEventLoop::AllEvents);
@@ -628,7 +629,7 @@ Placemark UrlFactory::GetPlacemarkFromReverseGeocoderUrl(const QString &url, con
 #ifdef DEBUG_URLFACTORY
         qDebug() << "GetLatLngFromGeocoderUrl:URL=" << url;
 #endif // DEBUG_URLFACTORY
-        QTime time;
+        QElapsedTimer time;
         time.start();
         while ((!(reply->isFinished()) || (time.elapsed() > (6 * Timeout)))) {
             QCoreApplication::processEvents(QEventLoop::AllEvents);

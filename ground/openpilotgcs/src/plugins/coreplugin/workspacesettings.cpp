@@ -247,9 +247,9 @@ void WorkspaceSettings::newModeOrder(QVector<IMode *> modes)
             bool nonShowingMode = (p == -1 && q >= 0);
             bool pqBothFound    = (p >= 0 && q >= 0);
             if (nonShowingMode || (pqBothFound && (priorities.at(q) > priorities.at(p)))) {
-                m_names.swap(i, j);
-                m_iconNames.swap(i, j);
-                m_modeNames.swap(i, j);
+                m_names.swapItemsAt(i, j);
+                m_iconNames.swapItemsAt(i, j);
+                m_modeNames.swapItemsAt(i, j);
                 swapped = true;
             }
         }

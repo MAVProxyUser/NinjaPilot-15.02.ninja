@@ -29,6 +29,7 @@
 #include "settingsdialog.h"
 
 #include <extensionsystem/pluginmanager.h>
+#include <algorithm>
 #include "icore.h"
 #include "coreplugin/uavgadgetinstancemanager.h"
 #include "coreplugin/uavgadgetoptionspagedecorator.h"
@@ -168,10 +169,10 @@ Q_DECLARE_METATYPE(::PageData) SettingsDialog::SettingsDialog(QWidget *parent, c
 
     // the plugin options page list is sorted by untranslated category and names
     // this is done to facilitate access to the language settings when GCS is not running in a language understood by the user.
-    qStableSort(pluginPages.begin(), pluginPages.end(), compareOptionsPageByCategoryAndId);
+    std::stable_sort(pluginPages.begin(), pluginPages.end(), compareOptionsPageByCategoryAndId);
 
     // the plugin options page list is sorted by translated names
-    qStableSort(gadgetPages.begin(), gadgetPages.end(), compareOptionsPageByCategoryAndNameTr);
+    std::stable_sort(gadgetPages.begin(), gadgetPages.end(), compareOptionsPageByCategoryAndNameTr);
 
     // will hold the initially selected item if any
     QTreeWidgetItem *initialItem = 0;
@@ -256,12 +257,12 @@ QTreeWidgetItem *SettingsDialog::addPage(IOptionsPage *page)
         categoryItem = new QTreeWidgetItem(pageTree);
         categoryItem->setIcon(0, page->icon());
         categoryItem->setText(0, page->trCategory());
-        categoryItem->setData(0, Qt::UserRole, qVariantFromValue(pageData));
+        categoryItem->setData(0, Qt::UserRole, QVariant::fromValue(pageData));
     }
 
     QTreeWidgetItem *item = new QTreeWidgetItem(categoryItem);
     item->setText(0, page->trName());
-    item->setData(0, Qt::UserRole, qVariantFromValue(pageData));
+    item->setData(0, Qt::UserRole, QVariant::fromValue(pageData));
 
     switch (categoryItemList->size()) {
     case 0:
@@ -390,7 +391,7 @@ void SettingsDialog::insertPage(IOptionsPage *page)
 
     QTreeWidgetItem *item = new QTreeWidgetItem;
     item->setText(0, page->trName());
-    item->setData(0, Qt::UserRole, qVariantFromValue(pageData));
+    item->setData(0, Qt::UserRole, QVariant::fromValue(pageData));
 
     categoryItem->addChild(item);
     categoryItemList->append(item);

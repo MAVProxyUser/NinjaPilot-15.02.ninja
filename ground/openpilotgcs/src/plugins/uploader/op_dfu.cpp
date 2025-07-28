@@ -30,6 +30,7 @@
 #include <qwaitcondition.h>
 #include <QMetaType>
 #include <QtWidgets/QApplication>
+#include <QElapsedTimer>
 
 using namespace OP_DFU;
 
@@ -1059,7 +1060,7 @@ int DFUObject::receiveData(void *data, int size)
 
     // Serial Mode:
     int x;
-    QTime time;
+    QElapsedTimer time;
     time.start();
     while (true) {
         if ((x = serialhandle->read_Packet(((char *)data) + 1) != -1) || time.elapsed() > 10000) {

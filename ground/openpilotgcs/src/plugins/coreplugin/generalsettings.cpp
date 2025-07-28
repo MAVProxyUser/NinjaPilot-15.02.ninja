@@ -285,11 +285,13 @@ bool GeneralSettings::setCollectUsageData(bool collect)
         setShowUsageDataDisclaimer(true);
     }
     m_collectUsageData = collect;
+    return true;
 }
 
 bool GeneralSettings::setShowUsageDataDisclaimer(bool show)
 {
     m_showUsageDataDisclaimer = show;
+    return true;
 }
 
 void GeneralSettings::setLastUsageHash(QString hash)

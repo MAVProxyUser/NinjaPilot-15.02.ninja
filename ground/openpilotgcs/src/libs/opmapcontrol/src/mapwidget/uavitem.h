@@ -30,6 +30,7 @@
 #include <QGraphicsItem>
 #include <QPainter>
 #include <QLabel>
+#include <QElapsedTimer>
 #include "../internals/pointlatlng.h"
 #include "mapgraphicitem.h"
 #include "waypointitem.h"
@@ -285,7 +286,7 @@ private:
     QGraphicsItemGroup *trail;
     QGraphicsItemGroup *trailLine;
     internals::PointLatLng lasttrailline;
-    QTime timer;
+    QElapsedTimer timer;
     bool showtrail;
     bool showtrailline;
     int trailtime;
