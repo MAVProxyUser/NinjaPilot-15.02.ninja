@@ -551,9 +551,10 @@ $(eval $(call TOOL_INSTALL_TEMPLATE,arm_sdk,$(ARM_SDK_DIR),$(ARM_SDK_URL),$(ARM_
 
 endif
 
-# Check for xpack ARM toolchain first
-XPACK_ARM_DIR := $(HOME)/Library/xPacks/@xpack-dev-tools/arm-none-eabi-gcc/14.2.1-1.1.1/.content
-ifeq ($(shell [ -d "$(XPACK_ARM_DIR)" ] && $(ECHO) "exists"), exists)
+# Check for xpack ARM toolchain first (auto-detect latest version)
+XPACK_BASE_DIR := $(HOME)/Library/xPacks/@xpack-dev-tools/arm-none-eabi-gcc
+XPACK_ARM_DIR := $(shell find "$(XPACK_BASE_DIR)" -name ".content" -type d 2>/dev/null | head -1)
+ifneq ($(XPACK_ARM_DIR),)
     export ARM_SDK_PREFIX := $(XPACK_ARM_DIR)/bin/arm-none-eabi-
 else ifeq ($(shell [ -d "$(ARM_SDK_DIR)" ] && $(ECHO) "exists"), exists)
     export ARM_SDK_PREFIX := $(ARM_SDK_DIR)/bin/arm-none-eabi-
@@ -571,7 +572,7 @@ arm_sdk_version:
 define ARM_GCC_VERSION_CHECK_TEMPLATE
 	if ! $(ARM_SDK_PREFIX)gcc --version --specs=nano.specs >/dev/null 2>&1; then \
 		$(ECHO) $(MSG_NOTICE) Please install ARM toolchain using \'xpm install -g @xpack-dev-tools/arm-none-eabi-gcc@latest\' && \
-		$(ECHO) $(MSG_NOTICE) Then add to PATH: export PATH=\"$(HOME)/Library/xPacks/@xpack-dev-tools/arm-none-eabi-gcc/14.2.1-1.1.1/.content/bin:\$$PATH\" && \
+		$(ECHO) $(MSG_NOTICE) The build system will automatically detect and use the installed xpack toolchain && \
 		exit 1; \
 	fi
 endef
