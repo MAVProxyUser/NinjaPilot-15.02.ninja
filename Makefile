@@ -705,6 +705,9 @@ ifneq ($(strip $(filter opfw_resource all all_fw all_flight package,$(MAKECMDGOA
     $(eval openpilotgcs_qmake: $(OPFW_RESOURCE))
 endif
 
+# Always make GCS depend on firmware resource to ensure firmware is built first
+$(eval openpilotgcs_qmake: $(OPFW_RESOURCE))
+
 # Packaging targets: package
 #  - builds all firmware, opfw_resource, gcs
 #  - copies firmware into a package directory
