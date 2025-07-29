@@ -380,7 +380,7 @@ bool UAVObject::save()
 bool UAVObject::save(QFile & file)
 {
     QMutexLocker locker(mutex);
-    quint8 buffer[numBytes];
+    QByteArray buffer(numBytes, 0);
     quint8 tmpId[4];
 
     // Write the object ID
@@ -398,8 +398,8 @@ bool UAVObject::save(QFile & file)
     }
 
     // Write the data
-    pack(buffer);
-    if (file.write((const char *)buffer, numBytes) == -1) {
+    pack((quint8*)buffer.data());
+    if (file.write(buffer.data(), numBytes) == -1) {
         return false;
     }
 
@@ -444,7 +444,7 @@ bool UAVObject::load()
 bool UAVObject::load(QFile & file)
 {
     QMutexLocker locker(mutex);
-    quint8 buffer[numBytes];
+    QByteArray buffer(numBytes, 0);
     quint8 tmpId[4];
 
     // Read the object ID
@@ -468,10 +468,10 @@ bool UAVObject::load(QFile & file)
     }
 
     // Read and unpack the data
-    if (file.read((char *)buffer, numBytes) != numBytes) {
+    if (file.read(buffer.data(), numBytes) != numBytes) {
         return false;
     }
-    unpack(buffer);
+    unpack((quint8*)buffer.data());
 
     // Done
     return true;

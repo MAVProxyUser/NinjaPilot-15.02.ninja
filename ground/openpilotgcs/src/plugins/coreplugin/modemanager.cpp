@@ -248,6 +248,7 @@ void ModeManager::addAction(Command *command, int priority, QMenu *menu)
     if (p > priority) {
         ++index;
     }
+    Q_UNUSED(index); // Counting logic for potential future use
 
 // m_actionBar->insertAction(index, command->action(), menu);
 }

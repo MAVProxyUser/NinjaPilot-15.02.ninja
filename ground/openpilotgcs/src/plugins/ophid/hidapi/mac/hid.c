@@ -253,7 +253,7 @@ static int get_string_property(IOHIDDeviceRef device, CFStringRef prop, wchar_t 
 			len * sizeof(wchar_t),
 			&used_buf_len);
 
-		if (chars_copied == len)
+		if ((size_t)chars_copied == len)
 			buf[len] = 0; /* len is decremented above */
 		else
 			buf[chars_copied] = 0;
@@ -294,7 +294,7 @@ static int get_string_property_utf8(IOHIDDeviceRef device, CFStringRef prop, cha
 			&used_buf_len);
 		(void)chars_copied; // Variable set but not used
 
-		if (used_buf_len == len)
+		if ((size_t)used_buf_len == len)
 			buf[len] = 0; /* len is decremented above */
 		else
 			buf[used_buf_len] = 0;
@@ -450,7 +450,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 		if ((vendor_id == 0x0 || vendor_id == dev_vid) &&
 		    (product_id == 0x0 || product_id == dev_pid)) {
 			struct hid_device_info *tmp;
-			size_t len;
+			size_t len __attribute__((unused));
 
 			/* VID/PID match. Create the record. */
 			tmp = malloc(sizeof(struct hid_device_info));
@@ -715,6 +715,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 		IOHIDDeviceRef os_dev = device_array[i];
 
 		len = make_path(os_dev, cbuf, sizeof(cbuf));
+		(void)len; // Variable set but not used
 		if (!strcmp(cbuf, path)) {
 			/* Matched Paths. Open this Device. */
 			IOReturn ret = IOHIDDeviceOpen(os_dev, kIOHIDOptionsTypeSeizeDevice);
@@ -1047,7 +1048,7 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 }
 
 
-HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
+HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev __attribute__((unused)))
 {
 	/* TODO: */
 

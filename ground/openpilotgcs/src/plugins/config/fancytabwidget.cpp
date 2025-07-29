@@ -65,7 +65,7 @@ FancyTabBar::FancyTabBar(QWidget *parent, bool isVertical)
     setFocusPolicy(Qt::NoFocus);
     m_hoverControl.setFrameRange(0, 20);
     m_hoverControl.setDuration(130);
-    m_hoverControl.setCurveShape(QTimeLine::EaseInCurve);
+    m_hoverControl.setEasingCurve(QEasingCurve::InCurve);
     connect(&m_hoverControl, SIGNAL(frameChanged(int)), this, SLOT(updateHover()));
     setMouseTracking(true); // Needed for hover events
 }

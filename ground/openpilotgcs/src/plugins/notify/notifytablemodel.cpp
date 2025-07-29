@@ -256,7 +256,7 @@ QMimeData *NotifyTableModel::mimeData(const QModelIndexList & indexes) const
     QByteArray encodedData;
 
     QDataStream stream(&encodedData, QIODevice::WriteOnly);
-    int rows = 0;
+    int rows = 0; Q_UNUSED(rows);
 
     foreach(const QModelIndex &index, indexes) {
         if (!index.column()) {

@@ -82,7 +82,6 @@ UAVGadgetView::UAVGadgetView(Core::UAVGadgetManager *uavGadgetManager, IUAVGadge
         m_uavGadgetList->setContextMenuPolicy(Qt::CustomContextMenu);
         UAVGadgetInstanceManager *im = ICore::instance()->uavGadgetInstanceManager();
         QStringList sl    = im->classIds();
-        int index = 0;
         bool startFromOne = false;
         foreach(QString classId, sl) {
             if (classId == QString("EmptyGadget")) {
@@ -101,7 +100,6 @@ UAVGadgetView::UAVGadgetView(Core::UAVGadgetManager *uavGadgetManager, IUAVGadge
                 m_uavGadgetList->insertItem(i, im->gadgetName(classId), classId);
                 m_uavGadgetList->setItemIcon(i, im->gadgetIcon(classId));
             }
-            ++index;
         }
 
         m_defaultToolBar->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Minimum);

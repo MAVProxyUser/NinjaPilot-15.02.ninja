@@ -64,7 +64,7 @@
 #include <qpdfwriter.h>
 #endif
 
-static inline double qwtDistance(
+__attribute__((unused)) static inline double qwtDistance(
     const QPointF& p1, const QPointF& p2 )
 {
     double dx = p2.x() - p1.x();

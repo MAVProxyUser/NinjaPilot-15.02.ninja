@@ -29,7 +29,7 @@
 #include <stdint.h>
 #include <QtSerialPort/QSerialPort>
 #include <QtSerialPort/QSerialPortInfo>
-#include <QTime>
+#include <QElapsedTimer>
 #include <QDebug>
 #include "common.h"
 
@@ -68,7 +68,7 @@ public:
     portstatus status();
 private:
     portstatus mstatus;
-    QTime timer;
+    QElapsedTimer timer;
     QSerialPort *sport;
 };
 

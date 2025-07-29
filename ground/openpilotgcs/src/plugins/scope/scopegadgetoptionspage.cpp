@@ -369,7 +369,7 @@ void ScopeGadgetOptionsPage::setCurvePlotProperties(QListWidgetItem *listWidgetI
     QRgb rgbColor = (QRgb)varColor.toInt(&parseOK);
     QColor color  = QColor(rgbColor);
 
-    listWidgetItem->setTextColor(color);
+    listWidgetItem->setForeground(QBrush(color));
 
     // Store some additional data for the plot curve on the list item
     listWidgetItem->setData(Qt::UserRole + 0, QVariant(uavObject));

@@ -46,7 +46,7 @@ public:
 
     QQmlListProperty<QObject> steps()
     {
-        return QQmlListProperty<QObject>(this, m_steps);
+        return QQmlListProperty<QObject>(this, &m_steps);
     }
 
     QString &instructions()

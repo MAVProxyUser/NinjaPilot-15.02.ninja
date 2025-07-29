@@ -49,7 +49,7 @@ class TimedDialog : public QProgressDialog {
     Q_OBJECT
 
 public:
-    TimedDialog(const QString &title, const QString &labelText, int timeout, QWidget *parent = 0, Qt::WindowFlags flags = 0);
+    TimedDialog(const QString &title, const QString &labelText, int timeout, QWidget *parent = 0, Qt::WindowFlags flags = Qt::WindowFlags());
 
 private slots:
     void perform();
@@ -74,7 +74,7 @@ public slots:
     void cancel();
     void quit();
 
-    static int openDialog(const QString &title, const QString &labelText, int targetDeviceCount, int timeout, QWidget *parent = 0, Qt::WindowFlags flags = 0);
+    static int openDialog(const QString &title, const QString &labelText, int targetDeviceCount, int timeout, QWidget *parent = 0, Qt::WindowFlags flags = Qt::WindowFlags());
 
 signals:
     void timeChanged(int elapsed);

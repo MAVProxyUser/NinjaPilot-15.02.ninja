@@ -271,58 +271,58 @@ ConfigInputWidget::ConfigInputWidget(QWidget *parent) :
         m_txArrows->setVisible(false);
 
         QRectF orig    = m_renderer->boundsOnElement("ljoy");
-        QMatrix Matrix = m_renderer->matrixForElement("ljoy");
+        QTransform Matrix = m_renderer->transformForElement("ljoy");
         orig = Matrix.mapRect(orig);
         m_txLeftStickOrig.translate(orig.x(), orig.y());
         m_txLeftStick->setTransform(m_txLeftStickOrig, false);
 
         orig   = m_renderer->boundsOnElement("arrows");
-        Matrix = m_renderer->matrixForElement("arrows");
+        Matrix = m_renderer->transformForElement("arrows");
         orig   = Matrix.mapRect(orig);
         m_txArrowsOrig.translate(orig.x(), orig.y());
         m_txArrows->setTransform(m_txArrowsOrig, false);
 
         orig   = m_renderer->boundsOnElement("body");
-        Matrix = m_renderer->matrixForElement("body");
+        Matrix = m_renderer->transformForElement("body");
         orig   = Matrix.mapRect(orig);
         m_txMainBodyOrig.translate(orig.x(), orig.y());
         m_txMainBody->setTransform(m_txMainBodyOrig, false);
 
         orig   = m_renderer->boundsOnElement("flightModeCenter");
-        Matrix = m_renderer->matrixForElement("flightModeCenter");
+        Matrix = m_renderer->transformForElement("flightModeCenter");
         orig   = Matrix.mapRect(orig);
         m_txFlightModeCOrig.translate(orig.x(), orig.y());
         m_txFlightMode->setTransform(m_txFlightModeCOrig, false);
 
         orig   = m_renderer->boundsOnElement("flightModeLeft");
-        Matrix = m_renderer->matrixForElement("flightModeLeft");
+        Matrix = m_renderer->transformForElement("flightModeLeft");
         orig   = Matrix.mapRect(orig);
         m_txFlightModeLOrig.translate(orig.x(), orig.y());
         orig   = m_renderer->boundsOnElement("flightModeRight");
-        Matrix = m_renderer->matrixForElement("flightModeRight");
+        Matrix = m_renderer->transformForElement("flightModeRight");
         orig   = Matrix.mapRect(orig);
         m_txFlightModeROrig.translate(orig.x(), orig.y());
 
         orig   = m_renderer->boundsOnElement("rjoy");
-        Matrix = m_renderer->matrixForElement("rjoy");
+        Matrix = m_renderer->transformForElement("rjoy");
         orig   = Matrix.mapRect(orig);
         m_txRightStickOrig.translate(orig.x(), orig.y());
         m_txRightStick->setTransform(m_txRightStickOrig, false);
 
         orig   = m_renderer->boundsOnElement("access0");
-        Matrix = m_renderer->matrixForElement("access0");
+        Matrix = m_renderer->transformForElement("access0");
         orig   = Matrix.mapRect(orig);
         m_txAccess0Orig.translate(orig.x(), orig.y());
         m_txAccess0->setTransform(m_txAccess0Orig, false);
 
         orig   = m_renderer->boundsOnElement("access1");
-        Matrix = m_renderer->matrixForElement("access1");
+        Matrix = m_renderer->transformForElement("access1");
         orig   = Matrix.mapRect(orig);
         m_txAccess1Orig.translate(orig.x(), orig.y());
         m_txAccess1->setTransform(m_txAccess1Orig, false);
 
         orig   = m_renderer->boundsOnElement("access2");
-        Matrix = m_renderer->matrixForElement("access2");
+        Matrix = m_renderer->transformForElement("access2");
         orig   = Matrix.mapRect(orig);
         m_txAccess2Orig.translate(orig.x(), orig.y());
         m_txAccess2->setTransform(m_txAccess2Orig, true);

@@ -491,8 +491,10 @@ void ConfigOutputWidget::setWarning(QString message)
 
 
 OutputBankControls::OutputBankControls(MixerSettings *mixer, QLabel *label, QColor color, QComboBox *rateCombo, QComboBox *modeCombo) :
-    m_mixer(mixer), m_label(label), m_color(color), m_rateCombo(rateCombo), m_modeCombo(modeCombo)
-{}
+    m_label(label), m_color(color), m_rateCombo(rateCombo), m_modeCombo(modeCombo)
+{
+    Q_UNUSED(mixer);
+}
 
 OutputBankControls::~OutputBankControls()
 {}

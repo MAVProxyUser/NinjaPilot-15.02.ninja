@@ -162,14 +162,14 @@ void ScopeGadgetWidget::wheelEvent(QWheelEvent *e)
         // the value returned by Qt includes the legend, whereas the value transformed by Qwt
         // does *not*. Thus, when zooming with a legend, there will always be a small bias error.
         // In practice, this seems not to be a UI problem.
-        QPoint mouse_pos = e->pos(); // Get the mouse coordinate in the frame
+        QPoint mouse_pos = e->position().toPoint(); // Get the mouse coordinate in the frame
         double zoomLine  = invTransform(QwtPlot::yLeft, mouse_pos.y()); // Transform the y mouse coordinate into a frame value.
 
         double zoomScale = 1.1; // THIS IS AN ARBITRARY CONSTANT, AND PERHAPS SHOULD BE IN A DEFINE INSTEAD OF BURIED HERE
 
         m_mutex.lock(); // DOES THIS mutex.lock NEED TO BE HERE? I DON'T KNOW, I JUST COPIED IT FROM THE ABOVE CODE
         // Set the scale
-        if (e->delta() < 0) {
+        if (e->angleDelta().y() < 0) {
             setAxisScale(QwtPlot::yLeft,
                          (yInterval.minValue() - zoomLine) * zoomScale + zoomLine,
                          (yInterval.maxValue() - zoomLine) * zoomScale + zoomLine);
@@ -369,7 +369,7 @@ void ScopeGadgetWidget::addCurvePlot(QString objectName, QString fieldPlusSubFie
         }
     }
 
-    PlotData *plotData;
+    PlotData *plotData = nullptr;
 
     if (m_plotType == SequentialPlot) {
         plotData = new SequentialPlotData(object, field, element, scaleFactor,
@@ -379,6 +379,10 @@ void ScopeGadgetWidget::addCurvePlot(QString objectName, QString fieldPlusSubFie
         plotData = new ChronoPlotData(object, field, element, scaleFactor,
                                       meanSamples, mathFunction, m_plotDataSize,
                                       pen, antialiased);
+    }
+
+    if (!plotData) {
+        return;
     }
     connect(this, SIGNAL(visibilityChanged(QwtPlotItem *)), plotData, SLOT(visibilityChanged(QwtPlotItem *)));
     plotData->attach(this);

@@ -67,7 +67,6 @@ public:
     }
 
 private:
-    MixerSettings *m_mixer;
     QLabel *m_label;
     QColor m_color;
     QComboBox *m_rateCombo;

@@ -250,7 +250,7 @@ void ConnectionDiagram::setupGraphicsSceneItems(QList<QString> elementsToShow)
             element->setZValue(z++);
             element->setOpacity(1.0);
 
-            QMatrix matrix = m_renderer->matrixForElement(elementId);
+            QTransform matrix = m_renderer->transformForElement(elementId);
             QRectF orig    = matrix.mapRect(m_renderer->boundsOnElement(elementId));
             element->setPos(orig.x(), orig.y());
             m_scene->addItem(element);

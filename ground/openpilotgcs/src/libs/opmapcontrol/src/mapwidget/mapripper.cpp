@@ -130,6 +130,7 @@ void MapRipper::run()
 
         QThread::msleep(sleep);
     }
+    Q_UNUSED(countOk); // Keep track of successful downloads for potential future use
 }
 
 void MapRipper::stopFetching()

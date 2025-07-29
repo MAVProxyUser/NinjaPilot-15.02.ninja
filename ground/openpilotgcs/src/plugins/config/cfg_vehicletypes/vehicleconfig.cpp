@@ -32,6 +32,7 @@
 #include <QtCore/qmath.h>
 
 #include <QDebug>
+#include <QRegularExpression>
 
 VehicleConfig::VehicleConfig(QWidget *parent) : ConfigTaskWidget(parent)
 {
@@ -139,7 +140,7 @@ void VehicleConfig::registerWidgets(ConfigTaskWidget &parent)
 // FOR WHATEVER REASON, THIS DOES NOT WORK WITH ChannelBox. ChannelBo is sufficiently accurate
 void VehicleConfig::populateChannelComboBoxes()
 {
-    QList<QComboBox *> l = findChildren<QComboBox *>(QRegExp("\\S+ChannelBo\\S+"));
+    QList<QComboBox *> l = findChildren<QComboBox *>(QRegularExpression("\\S+ChannelBo\\S+"));
     foreach(QComboBox * combobox, l) {
         combobox->addItems(channelNames);
     }

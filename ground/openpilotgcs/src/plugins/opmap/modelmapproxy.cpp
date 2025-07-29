@@ -295,7 +295,7 @@ void modelMapProxy::rowsInserted(const QModelIndex &parent, int first, int last)
 
     for (int x = first; x < last + 1; x++) {
         QModelIndex index;
-        WayPointItem *item;
+        WayPointItem *item; Q_UNUSED(item);
         internals::PointLatLng latlng;
         distBearingAltitude distBearing;
         double altitude;

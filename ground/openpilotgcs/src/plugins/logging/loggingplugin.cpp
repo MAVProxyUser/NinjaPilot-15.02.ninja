@@ -167,7 +167,7 @@ void LoggingThread::run()
     list = objManager->getObjects();
     QList< QList<UAVObject *> >::const_iterator i;
     QList<UAVObject *>::const_iterator j;
-    int objects = 0;
+    int objects = 0; Q_UNUSED(objects);
 
     for (i = list.constBegin(); i != list.constEnd(); ++i) {
         for (j = (*i).constBegin(); j != (*i).constEnd(); ++j) {

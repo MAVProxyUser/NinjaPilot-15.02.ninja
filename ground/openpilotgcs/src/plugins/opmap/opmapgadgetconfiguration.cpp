@@ -105,38 +105,24 @@ IUAVGadgetConfiguration *OPMapGadgetConfiguration::clone()
 
     return m;
 }
-void OPMapGadgetConfiguration::saveConfig() const
-{
-    if (!m_settings) {
-        return;
-    }
-    m_settings->setValue("mapProvider", m_mapProvider);
-    m_settings->setValue("defaultZoom", m_defaultZoom);
-    m_settings->setValue("defaultLatitude", m_defaultLatitude);
-    m_settings->setValue("defaultLongitude", m_defaultLongitude);
-    m_settings->setValue("useOpenGL", m_useOpenGL);
-    m_settings->setValue("showTileGridLines", m_showTileGridLines);
-    m_settings->setValue("accessMode", m_accessMode);
-    m_settings->setValue("useMemoryCache", m_useMemoryCache);
-    m_settings->setValue("uavSymbol", m_uavSymbol);
-    m_settings->setValue("cacheLocation", Utils::PathUtils().RemoveStoragePath(m_cacheLocation));
-    m_settings->setValue("maxUpdateRate", m_maxUpdateRate);
-    m_settings->setValue("overlayOpacity", m_opacity);
-}
 void OPMapGadgetConfiguration::saveConfig(QSettings *qSettings) const
 {
-    qSettings->setValue("mapProvider", m_mapProvider);
-    qSettings->setValue("defaultZoom", m_defaultZoom);
-    qSettings->setValue("defaultLatitude", m_defaultLatitude);
-    qSettings->setValue("defaultLongitude", m_defaultLongitude);
-    qSettings->setValue("useOpenGL", m_useOpenGL);
-    qSettings->setValue("showTileGridLines", m_showTileGridLines);
-    qSettings->setValue("accessMode", m_accessMode);
-    qSettings->setValue("useMemoryCache", m_useMemoryCache);
-    qSettings->setValue("uavSymbol", m_uavSymbol);
-    qSettings->setValue("cacheLocation", Utils::PathUtils().RemoveStoragePath(m_cacheLocation));
-    qSettings->setValue("maxUpdateRate", m_maxUpdateRate);
-    qSettings->setValue("overlayOpacity", m_opacity);
+    QSettings *settings = qSettings ? qSettings : m_settings;
+    if (!settings) {
+        return;
+    }
+    settings->setValue("mapProvider", m_mapProvider);
+    settings->setValue("defaultZoom", m_defaultZoom);
+    settings->setValue("defaultLatitude", m_defaultLatitude);
+    settings->setValue("defaultLongitude", m_defaultLongitude);
+    settings->setValue("useOpenGL", m_useOpenGL);
+    settings->setValue("showTileGridLines", m_showTileGridLines);
+    settings->setValue("accessMode", m_accessMode);
+    settings->setValue("useMemoryCache", m_useMemoryCache);
+    settings->setValue("uavSymbol", m_uavSymbol);
+    settings->setValue("cacheLocation", Utils::PathUtils().RemoveStoragePath(m_cacheLocation));
+    settings->setValue("maxUpdateRate", m_maxUpdateRate);
+    settings->setValue("overlayOpacity", m_opacity);
 }
 void OPMapGadgetConfiguration::setCacheLocation(QString cacheLocation)
 {

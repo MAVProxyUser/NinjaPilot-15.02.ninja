@@ -50,8 +50,8 @@ class OPMapGadgetConfiguration : public IUAVGadgetConfiguration {
 public:
     explicit OPMapGadgetConfiguration(QString classId, QSettings *qSettings = 0, QObject *parent = 0);
 
-    void saveConfig(QSettings *settings) const;
-    IUAVGadgetConfiguration *clone();
+    void saveConfig(QSettings *settings) const override;
+    IUAVGadgetConfiguration *clone() override;
 
     QString mapProvider() const
     {
@@ -101,7 +101,6 @@ public:
     {
         return m_opacity;
     }
-    void saveConfig() const;
 public slots:
     void setMapProvider(QString provider)
     {

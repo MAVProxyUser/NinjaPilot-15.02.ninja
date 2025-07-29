@@ -71,7 +71,7 @@ using namespace Utils;
 
 enum { debugUAVGadgetManager = 0 };
 
-static inline ExtensionSystem::PluginManager *pluginManager()
+__attribute__((unused)) static inline ExtensionSystem::PluginManager *pluginManager()
 {
     return ExtensionSystem::PluginManager::instance();
 }
