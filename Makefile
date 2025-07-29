@@ -137,6 +137,7 @@ all: uavobjects all_ground all_flight
 .PHONY: all_clean
 all_clean:
 	@$(ECHO) " CLEAN      $(call toprel, $(BUILD_DIR))"
+	$(V1) [ ! -d "$(BUILD_DIR)" ] || (find "$(BUILD_DIR)" -name ".DS_Store" -delete 2>/dev/null || true)
 	$(V1) [ ! -d "$(BUILD_DIR)" ] || $(RM) -rf "$(BUILD_DIR)"
 	@$(ECHO) " CLEAR      shell command cache"
 	$(V1) hash -r 2>/dev/null || true

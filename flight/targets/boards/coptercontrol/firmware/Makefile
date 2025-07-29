@@ -118,6 +118,8 @@ ifndef TESTAPP
     SRC += $(OPUAVSYNTHDIR)/ratedesired.c
     SRC += $(OPUAVSYNTHDIR)/txpidsettings.c
     SRC += $(OPUAVSYNTHDIR)/mpu6000settings.c
+    SRC += $(OPUAVSYNTHDIR)/takeofflocation.c
+    SRC += $(OPUAVSYNTHDIR)/perfcounter.c
     # Command line option for Gcsreceiver module
     ifeq ($(GCSRECEIVER), YES)
         SRC += $(OPUAVSYNTHDIR)/gcsreceiver.c
@@ -127,7 +129,6 @@ ifndef TESTAPP
         CDEFS += -DDIAG_TASKS
         SRC += $(OPUAVSYNTHDIR)/taskinfo.c
         SRC += $(OPUAVSYNTHDIR)/callbackinfo.c
-        SRC += $(OPUAVSYNTHDIR)/perfcounter.c
         SRC += $(OPUAVSYNTHDIR)/i2cstats.c
     endif
 else

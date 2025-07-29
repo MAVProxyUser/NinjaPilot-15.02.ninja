@@ -129,3 +129,18 @@ equals(copyqt, 1) {
         addCopyDirTarget($${dir},$$[QT_INSTALL_QML],$${GCS_QT_QML_PATH})
     }
 }
+
+# Copy QWT framework on macOS
+macx {
+    QWT_FRAMEWORK_PATH = $$GCS_BUILD_TREE/src/libs/qwt/lib/qwt.framework
+    GCS_FRAMEWORKS_PATH = $$GCS_APP_PATH/$${GCS_APP_TARGET}.app/Contents/Frameworks
+    
+    # Ensure Frameworks directory exists
+    frameworks_dir.target = $$GCS_FRAMEWORKS_PATH
+    frameworks_dir.commands = $$QMAKE_MKDIR $$GCS_FRAMEWORKS_PATH
+    QMAKE_EXTRA_TARGETS += frameworks_dir
+    
+    # Copy QWT framework
+    addCopyDirTarget(qwt.framework,$${QWT_FRAMEWORK_PATH}/../,$${GCS_FRAMEWORKS_PATH})
+    qwt.framework.depends += frameworks_dir
+}
