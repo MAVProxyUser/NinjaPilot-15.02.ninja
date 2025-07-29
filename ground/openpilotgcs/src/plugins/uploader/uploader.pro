@@ -60,8 +60,11 @@ FORMS += \
 
 RESOURCES += uploader.qrc
 
-exists( ../../../../../build/openpilotgcs-synthetics/opfw_resource.qrc ) {
-    RESOURCES += ../../../../../build/openpilotgcs-synthetics/opfw_resource.qrc
+# Check for firmware resource file and add if available
+OPFW_RESOURCE_PATH = $${GCS_BUILD_TREE}/../openpilotgcs-synthetics/opfw_resource.qrc
+exists( $$OPFW_RESOURCE_PATH ) {
+    RESOURCES += $$OPFW_RESOURCE_PATH
+    message("Using firmware resource file for automatic firmware upgrades")
 } else {
     message("opfw_resource.qrc is not available, automatic firmware upgrades are disabled")
 }

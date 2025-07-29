@@ -42,5 +42,5 @@ class Plot : public QwtPlot
     QwtPlotCurve* m_curve;
     QwtWheel* m_wheel;
 
-    int m_boundaryCondition;
+    int m_boundaryCondition __attribute__((unused));
 };

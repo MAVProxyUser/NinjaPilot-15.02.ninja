@@ -439,7 +439,7 @@ sim_osx_%: uavobjects_flight
 ##############################
 
 .PHONY: all_ground
-all_ground: openpilotgcs uploader
+all_ground: $(OPFW_RESOURCE) openpilotgcs uploader
 
 # Convenience target for the GCS
 .PHONY: gcs gcs_qmake gcs_clean
@@ -460,6 +460,7 @@ OPENPILOTGCS_MAKEFILE := $(OPENPILOTGCS_DIR)/Makefile
 
 .PHONY: openpilotgcs_qmake
 openpilotgcs_qmake $(OPENPILOTGCS_MAKEFILE): uavobjects_gcs | $(OPENPILOTGCS_DIR)
+	$(V1) $(MAKE) $(OPFW_RESOURCE)
 	$(V1) ( cd $(OPENPILOTGCS_DIR) && \
 	    $(QMAKE) $(ROOT_DIR)/ground/openpilotgcs/openpilotgcs.pro -spec $(QT_SPEC) -r CONFIG+="$(GCS_BUILD_CONF) $(GCS_SILENT)" $(GCS_QMAKE_OPTS) \
 	)

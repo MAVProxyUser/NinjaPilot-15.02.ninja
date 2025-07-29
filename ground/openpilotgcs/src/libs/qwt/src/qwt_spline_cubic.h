@@ -48,7 +48,7 @@ class QWT_EXPORT QwtSplineCubic : public QwtSplineC2
 
   private:
     class PrivateData;
-    PrivateData* m_data;
+    PrivateData* m_data __attribute__((unused));
 };
 
 #endif

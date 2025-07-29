@@ -92,7 +92,7 @@ class QWT_EXPORT QwtPolarPicker : public QwtPicker
     virtual QPainterPath pickArea() const QWT_OVERRIDE;
 
     class PrivateData;
-    PrivateData* m_data;
+    PrivateData* m_data __attribute__((unused));
 };
 
 #endif
