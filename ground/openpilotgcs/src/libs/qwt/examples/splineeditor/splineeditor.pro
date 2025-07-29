@@ -5,6 +5,9 @@
 
 include( $${PWD}/../examples.pri )
 
+# Suppress warnings for unused private fields in this example
+macx: QMAKE_CXXFLAGS += -Wno-unused-private-field
+
 TARGET       = splineeditor
 
 HEADERS = \

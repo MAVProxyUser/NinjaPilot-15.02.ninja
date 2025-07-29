@@ -465,7 +465,7 @@ openpilotgcs_qmake $(OPENPILOTGCS_MAKEFILE): uavobjects_gcs | $(OPENPILOTGCS_DIR
 	)
 
 .PHONY: openpilotgcs
-openpilotgcs: uavobjects_gcs $(OPENPILOTGCS_MAKEFILE)
+openpilotgcs: uavobjects_gcs $(OPFW_RESOURCE) $(OPENPILOTGCS_MAKEFILE)
 	$(V1) $(MAKE) -w -C $(OPENPILOTGCS_DIR)/$(MAKE_DIR);
 
 .PHONY: openpilotgcs_clean

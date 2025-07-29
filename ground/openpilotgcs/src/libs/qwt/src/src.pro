@@ -46,6 +46,9 @@ contains(QWT_CONFIG, QwtFramework) {
     CONFIG += lib_bundle
 }
 
+# Suppress warnings for unused private fields in this third-party library
+macx: QMAKE_CXXFLAGS += -Wno-unused-private-field
+
 include ( $${PWD}/src.pri )
 
 # Install directives
