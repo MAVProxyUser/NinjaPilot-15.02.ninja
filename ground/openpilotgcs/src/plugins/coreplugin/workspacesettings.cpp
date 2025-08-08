@@ -107,7 +107,7 @@ void WorkspaceSettings::readSettings(QSettings *qs)
     m_modeNames.clear();
 
     qs->beginGroup(QLatin1String("Workspace"));
-    m_numberOfWorkspaces = qs->value(QLatin1String("NumberOfWorkspaces"), 2).toInt();
+    m_numberOfWorkspaces = qs->value(QLatin1String("NumberOfWorkspaces"), 0).toInt();
     m_previousNumberOfWorkspaces = m_numberOfWorkspaces;
     for (int i = 1; i <= MAX_WORKSPACES; ++i) {
         QString numberString    = QString::number(i);
