@@ -110,7 +110,7 @@ typedef QMap<QString, QString> AppOptionValues;
 const int OptionIndent = 4;
 const int DescriptionIndent = 24;
 
-const QLatin1String APP_NAME("NinjaPilot GCS");
+const QLatin1String APP_NAME("NinjaPilotGCS");
 
 const QLatin1String CORE_PLUGIN_NAME("Core");
 
@@ -609,7 +609,7 @@ int main(int argc, char * *argv)
         }
         if (!errors.isEmpty()) {
             QMessageBox::warning(0,
-                                 QCoreApplication::translate("Application", "NinjaPilot GCS - Plugin loader messages"),
+                                 QCoreApplication::translate("Application", "NinjaPilotGCS - Plugin loader messages"),
                                  errors.join(QString::fromLatin1("\n\n")));
         }
     }

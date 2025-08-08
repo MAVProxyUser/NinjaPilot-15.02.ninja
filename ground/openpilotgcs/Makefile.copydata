@@ -526,49 +526,49 @@ distclean: clean
 ####### Sub-libraries
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Imports/QtQuick/Controls: /opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Controls
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/Controls" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick" 
-	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Controls" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/Controls"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/Controls" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick" 
+	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Controls" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/Controls"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Imports/QtQuick/Dialogs: /opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Dialogs
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/Dialogs" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick" 
-	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Dialogs" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/Dialogs"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/Dialogs" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick" 
+	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Dialogs" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/Dialogs"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Imports/QtQuick/Layouts: /opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Layouts
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/Layouts" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick" 
-	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Layouts" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/Layouts"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/Layouts" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick" 
+	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Layouts" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/Layouts"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Imports/QtQuick/LocalStorage: /opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/LocalStorage
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/LocalStorage" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick" 
-	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/LocalStorage" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/LocalStorage"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/LocalStorage" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick" 
+	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/LocalStorage" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/LocalStorage"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Imports/QtQuick/Particles.2: /opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Particles.2
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/Particles.2" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick" 
-	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Particles.2" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/Particles.2"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/Particles.2" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick" 
+	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Particles.2" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/Particles.2"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Imports/QtQuick/PrivateWidgets: /opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/PrivateWidgets
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/PrivateWidgets" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick" 
-	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/PrivateWidgets" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/PrivateWidgets"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/PrivateWidgets" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick" 
+	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/PrivateWidgets" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/PrivateWidgets"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Imports/QtQuick/Window.2: /opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Window.2
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/Window.2" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick" 
-	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Window.2" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/Window.2"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/Window.2" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick" 
+	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/Window.2" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/Window.2"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Imports/QtQuick/XmlListModel: /opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/XmlListModel
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/XmlListModel" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick" 
-	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/XmlListModel" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick/XmlListModel"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/XmlListModel" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick" 
+	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick/XmlListModel" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick/XmlListModel"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Imports/QtQuick.2: /opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick.2
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick.2" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports" 
-	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick.2" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Imports/QtQuick.2"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick.2" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports" 
+	 $(COPY_DIR) "/opt/homebrew/Cellar/qt@5/5.15.16_2/qml/QtQuick.2" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Imports/QtQuick.2"
 
 xcodeproj:
 	@$(QMAKE) -spec macx-xcode "$(EXPORT__PRO_FILE_)" -spec /opt/homebrew/Cellar/qt@5/5.15.16_2/mkspecs/macx-clang CONFIG+=release
