@@ -34,5 +34,6 @@
 #define INNERLOOP_H
 
 void stabilizationInnerloopInit();
+void stabilizationInnerloopResetAxisLock();
 
 #endif /* INNERLOOP_H */

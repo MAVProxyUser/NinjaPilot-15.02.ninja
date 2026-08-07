@@ -36,6 +36,7 @@
 #include <pid.h>
 #include <manualcontrolcommand.h>
 #include <flightmodesettings.h>
+#include <flightstatus.h>
 #include <stabilizationsettings.h>
 #include <stabilizationdesired.h>
 #include <stabilizationstatus.h>
@@ -56,6 +57,7 @@ StabilizationData stabSettings;
 
 // Private variables
 static int cur_flight_mode = -1;
+static uint8_t previousArmedStatus = FLIGHTSTATUS_ARMED_DISARMED;
 
 // Private functions
 static void SettingsUpdatedCb(UAVObjEvent *ev);
@@ -63,6 +65,7 @@ static void BankUpdatedCb(UAVObjEvent *ev);
 static void SettingsBankUpdatedCb(UAVObjEvent *ev);
 static void FlightModeSwitchUpdatedCb(UAVObjEvent *ev);
 static void StabilizationDesiredUpdatedCb(UAVObjEvent *ev);
+static void ArmedStatusUpdatedCb(UAVObjEvent *ev);
 
 /**
  * Module initialization
@@ -76,6 +79,7 @@ int32_t StabilizationStart()
     StabilizationSettingsBank2ConnectCallback(SettingsBankUpdatedCb);
     StabilizationSettingsBank3ConnectCallback(SettingsBankUpdatedCb);
     StabilizationDesiredConnectCallback(StabilizationDesiredUpdatedCb);
+    FlightStatusConnectCallback(ArmedStatusUpdatedCb);
     SettingsUpdatedCb(StabilizationSettingsHandle());
     StabilizationDesiredUpdatedCb(StabilizationDesiredHandle());
     FlightModeSwitchUpdatedCb(ManualControlCommandHandle());
@@ -176,6 +180,39 @@ static void StabilizationDesiredUpdatedCb(__attribute__((unused)) UAVObjEvent *e
         }
     }
     StabilizationStatusSet(&status);
+}
+
+/**
+ * Reset the rate/attitude PID integrators on the disarmed->armed transition.
+ *
+ * Nothing else in this module ever zeros stabSettings.{outer,inner}Pids after
+ * boot (StabilizationInitialize() does it once, via MODULE_INITCALL, and
+ * that's it) - so any iAccumulator windup from a previous flight, or from
+ * fighting a disturbance while disarmed/testing, otherwise carries over
+ * indefinitely across arm cycles with no way to unwind short of a reboot or
+ * a stabilization mode change (innerloop.c's own reinit check only fires on
+ * an InnerLoop mode change, never on arm/disarm). A real flight sees
+ * continuous external forces (wind, control inputs) the whole time it's
+ * armed, so this carry-over is a real hazard, not just a testing artifact -
+ * starting each arm with clean integrators is standard practice on other
+ * flight controllers for exactly this reason.
+ */
+static void ArmedStatusUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
+{
+    uint8_t armedStatus;
+
+    FlightStatusArmedGet(&armedStatus);
+
+    if (armedStatus == FLIGHTSTATUS_ARMED_ARMED && previousArmedStatus != FLIGHTSTATUS_ARMED_ARMED) {
+        pid_zero(&stabSettings.outerPids[0]);
+        pid_zero(&stabSettings.outerPids[1]);
+        pid_zero(&stabSettings.outerPids[2]);
+        pid_zero(&stabSettings.innerPids[0]);
+        pid_zero(&stabSettings.innerPids[1]);
+        pid_zero(&stabSettings.innerPids[2]);
+        stabilizationInnerloopResetAxisLock();
+    }
+    previousArmedStatus = armedStatus;
 }
 
 static void FlightModeSwitchUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)

@@ -390,7 +390,7 @@ void PIOS_CALLBACKSCHEDULER_ForEachCallback(CallbackSchedulerCallbackInfoCallbac
 /**
  * Stack magic, find how much stack is being used without affecting performance
  */
-static void markStack(DelayedCallbackInfo *current)
+__attribute__((unused)) static void markStack(DelayedCallbackInfo *current)
 {
     register int8_t t;
     register int32_t halfWayMark;
@@ -412,7 +412,7 @@ static void markStack(DelayedCallbackInfo *current)
         *(marker + t) = '#';
     }
 }
-static void checkStack(DelayedCallbackInfo *current)
+__attribute__((unused)) static void checkStack(DelayedCallbackInfo *current)
 {
     register int8_t t;
     register int32_t halfWayMark;
@@ -511,11 +511,33 @@ static int32_t runNextCallback(struct DelayedCallbackTaskStruct *task, DelayedCa
                 xSemaphoreGiveRecursive(mutex);
 
                 /* callback gets invoked here - check stack sizes */
+#ifndef USE_SIM_POSIX
+                // This watermarking works by writing a '#' pattern into a
+                // "safety zone" computed as (current stack pointer -
+                // declared stackSize), then later checking whether it's
+                // still intact. That's only valid when a task's declared
+                // stackSize actually matches its real, small, fixed-size
+                // stack - true on embedded targets, false here: every
+                // FreeRTOS "task" on the Posix port runs on a full-size
+                // real pthread stack (pxPortInitialiseStack() is a no-op),
+                // so the computed address lands inside normal, actively-
+                // used stack space instead of any real boundary. The
+                // task's own execution overwrites it almost immediately,
+                // which was showing up as StackOverflow: Warning on
+                // essentially every callback (EventDispatcher,
+                // StateEstimation, Stabilization, ManualControl all hit
+                // the sentinel stackNotFree=-1 within seconds of boot).
+                // Same root cause, same fix as configCHECK_FOR_STACK_OVERFLOW
+                // in FreeRTOSConfig.h - skip it here; the OS's own guard
+                // pages are what actually protect these threads.
                 markStack(current);
+#endif
 
                 current->cb(); // call the callback
 
+#ifndef USE_SIM_POSIX
                 checkStack(current);
+#endif
 
                 current->runCount++;
 

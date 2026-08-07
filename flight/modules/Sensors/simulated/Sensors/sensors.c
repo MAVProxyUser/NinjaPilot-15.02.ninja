@@ -62,11 +62,16 @@
 #include "gpspositionsensor.h"
 #include "gpsvelocitysensor.h"
 #include "homelocation.h"
+#include "flightbatterystate.h"
+#include "alarms.h"
 // #include "sensor.h"
 #include "ratedesired.h"
 #include "revocalibration.h"
 #include "systemsettings.h"
 #include "taskinfo.h"
+#if defined(PIOS_INCLUDE_GCSRCVR)
+#include "gcsreceiver.h"
+#endif
 
 #include "CoordinateConversions.h"
 
@@ -88,6 +93,8 @@ static void simulateConstant();
 static void simulateModelAgnostic();
 static void simulateModelQuadcopter();
 static void simulateModelAirplane();
+static void addExternalRateDisturbance(float rpy[3]);
+static void simulateBatteryData(void);
 
 static float accel_bias[3];
 
@@ -102,6 +109,10 @@ enum sensor_sim_type { CONSTANT, MODEL_AGNOSTIC, MODEL_QUADCOPTER, MODEL_AIRPLAN
  */
 int32_t SensorsInitialize(void)
 {
+    // Was never seeded, so every run replayed the exact same rand()
+    // sequence - including whatever unlucky draw rand_gauss() hit first.
+    srand((unsigned int)PIOS_DELAY_GetRaw());
+
     accel_bias[0] = rand_gauss() / 10;
     accel_bias[1] = rand_gauss() / 10;
     accel_bias[2] = rand_gauss() / 10;
@@ -321,6 +332,124 @@ static void simulateModelAgnostic()
     MagSensorSet(&mag);
 }
 
+/**
+ * Battery/FlightTime are read from real ADC hardware on actual boards
+ * (flight/modules/Battery/battery.c, not even compiled into this SITL
+ * target) - there's no ADC peripheral to simulate here. Fake the same
+ * plausible, healthy reading battery.c would publish on a real 3S pack
+ * sitting comfortably above its warning threshold, and clear the two
+ * alarms it owns directly, the same way this file already fakes GPS/
+ * Baro/Mag sensor data despite not being those modules either.
+ */
+static void simulateBatteryData(void)
+{
+    static bool initialized = false;
+    static uint32_t start_time;
+
+    if (!initialized) {
+        FlightBatteryStateInitialize();
+        start_time  = PIOS_DELAY_GetRaw();
+        initialized = true;
+    }
+
+    float elapsed = PIOS_DELAY_DiffuS(start_time) / 1.0e6f;
+
+    FlightBatteryStateData battery;
+    FlightBatteryStateGet(&battery);
+    battery.NbCells   = 3;
+    battery.Voltage   = 12.2f - 0.01f * rand_gauss(); // healthy 3S pack, well above warning
+    battery.Current   = 8.0f + rand_gauss();
+    battery.PeakCurrent = 12.0f;
+    battery.AvgCurrent  = 8.0f;
+    battery.BoardSupplyVoltage  = 5.0f;
+    battery.ConsumedEnergy      = elapsed * 8.0f * (1000.0f / 3600.0f); // mAh at ~8A average
+    battery.EstimatedFlightTime = 600.0f; // comfortably above the 120s warning threshold
+    FlightBatteryStateSet(&battery);
+
+    AlarmsClear(SYSTEMALARMS_ALARM_BATTERY);
+    AlarmsClear(SYSTEMALARMS_ALARM_FLIGHTTIME);
+}
+
+/**
+ * Let a ground tool "grab" the simulated airframe and tilt it, the same way
+ * HITL used to let an external simulator (X-Plane/FlightGear/IL-2/AeroSimRC)
+ * drive the vehicle - except here the disturbance rides in on the spare
+ * GCSReceiver channels (5-7) instead of a second, external UDP protocol.
+ *
+ * Each channel maps to a *target lean angle* on its axis, not a raw rate:
+ * holding a slider at its midpoint asks for +/-45 degrees and holds it
+ * there (like a hand pushing the board over and holding it), rather than
+ * commanding a constant spin rate that would run away unopposed. The
+ * external "hand" is a simple proportional servo (target angle vs. the
+ * board's own current AttitudeState) capped to a sane rate, so it converges
+ * smoothly instead of overshooting. Letting the slider go back to neutral
+ * drops the target back to 0 - both this servo and the real Stabilization
+ * loop then pull the same direction, back to level, so recovery looks like
+ * one clean motion instead of two things fighting.
+ *
+ * While a slider is held away from level, the real flight code still has to
+ * fight this external rate via RateDesired every tick, same as it would a
+ * gust or a shove by hand - it just no longer has to fight an unbounded one.
+ *
+ * Channels are ignored while outside the valid 1000-2000us PWM range (i.e.
+ * while nothing is actively driving them), so this is a no-op unless a tool
+ * is deliberately holding a channel away from the 1500us neutral.
+ */
+static void addExternalRateDisturbance(__attribute__((unused)) float rpy[3])
+{
+#if defined(PIOS_INCLUDE_GCSRCVR)
+    GCSReceiverData gcsReceiver;
+    GCSReceiverGet(&gcsReceiver);
+
+    AttitudeStateData attitudeState;
+    AttitudeStateGet(&attitudeState);
+
+    const uint16_t neutral    = 1500;
+    const float    degPerUs   = 45.0f / 500.0f; // +-500us of stick -> +-45 deg target lean
+    const float    servoGain  = 3.0f;  // deg/s of external rate per degree of angle error -
+                                        // dropped from 8.0: this term is injected straight
+                                        // into rpy[] AFTER the real rateDesired contribution
+                                        // has already gone through the ACTUATOR_ALPHA lag
+                                        // filter above, so at gain 8 the disturbance had an
+                                        // inherent, unfair speed advantage over the real
+                                        // Stabilization loop's (lag-filtered) correction -
+                                        // full-deflection held at ~93% of target with the
+                                        // real correction only visible as a couple degrees
+                                        // of "won't quite get there", indistinguishable by
+                                        // eye from the slider just setting the angle directly
+    const float    maxRate    = 12.0f; // deg/s clamp - also keeps the state estimator's
+                                        // low-pass-filtered gravity prediction from lagging
+                                        // the real accel reading too far behind during the
+                                        // ramp, which is what was leaking a spurious yaw
+                                        // correction out of the complementary filter's
+                                        // accel-error cross product on a fast roll/pitch push
+
+    float current[3] = { attitudeState.Roll, attitudeState.Pitch, attitudeState.Yaw };
+    const uint16_t channelForAxis[3] = { 5, 6, 7 };
+
+    for (int i = 0; i < 3; i++) {
+        uint16_t ch = gcsReceiver.Channel[channelForAxis[i]];
+        // GCSReceiver channels default/idle at 1500us neutral even with no
+        // client ever connected, so "in the valid PWM range" alone doesn't
+        // mean "actively driven". Require a real deadband away from neutral
+        // too, or this servos the whole attitude to 0 forever at rest.
+        if (ch <= 900 || ch >= 2100 || fabsf((float)ch - neutral) < 30.0f) {
+            continue; // not actively driven - no external force on this axis at all
+        }
+        float target = ((float)ch - neutral) * degPerUs;
+        float error  = target - current[i];
+        float rate   = error * servoGain;
+        if (rate > maxRate) {
+            rate = maxRate;
+        }
+        if (rate < -maxRate) {
+            rate = -maxRate;
+        }
+        rpy[i] += rate;
+    }
+#endif /* PIOS_INCLUDE_GCSRCVR */
+}
+
 float thrustToDegs   = 50;
 bool overideAttitude = false;
 static void simulateModelQuadcopter()
@@ -344,8 +473,18 @@ static void simulateModelQuadcopter()
 
     float dT = (PIOS_DELAY_DiffuS(last_time) / 1e6);
 
-    if (dT < 1e-3) {
-        dT = 2e-3;
+    // last_time starts at 0 (static init), so on the very first call
+    // PIOS_DELAY_DiffuS(0) measures elapsed time since power-on instead of
+    // since "the previous tick" - dT comes back as thousands of seconds.
+    // That single bogus dT is enough to shove vel[] to ~100s of m/s in one
+    // Euler step, and the friction term then bleeds a huge phantom
+    // acceleration into every following tick for a long time after (verified:
+    // this alone was enough to fake out the attitude estimator's boot-time
+    // leveling). Clamp the top end the same way the bottom end already is.
+    if (dT < 1e-3f) {
+        dT = 2e-3f;
+    } else if (dT > 0.1f) {
+        dT = 2e-3f;
     }
     last_time = PIOS_DELAY_GetRaw();
 
@@ -354,7 +493,7 @@ static void simulateModelQuadcopter()
     ActuatorDesiredData actuatorDesired;
     ActuatorDesiredGet(&actuatorDesired);
 
-    float thrust = (flightStatus.Armed == FLIGHTSTATUS_ARMED_ARMED) ? actuatorDesired.Throttle * MAX_THRUST : 0;
+    float thrust = (flightStatus.Armed == FLIGHTSTATUS_ARMED_ARMED) ? actuatorDesired.Thrust * MAX_THRUST : 0;
     if (thrust < 0) {
         thrust = 0;
     }
@@ -380,6 +519,7 @@ static void simulateModelQuadcopter()
     rpy[0] = (flightStatus.Armed == FLIGHTSTATUS_ARMED_ARMED) * rateDesired.Roll * (1 - ACTUATOR_ALPHA) + rpy[0] * ACTUATOR_ALPHA;
     rpy[1] = (flightStatus.Armed == FLIGHTSTATUS_ARMED_ARMED) * rateDesired.Pitch * (1 - ACTUATOR_ALPHA) + rpy[1] * ACTUATOR_ALPHA;
     rpy[2] = (flightStatus.Armed == FLIGHTSTATUS_ARMED_ARMED) * rateDesired.Yaw * (1 - ACTUATOR_ALPHA) + rpy[2] * ACTUATOR_ALPHA;
+    addExternalRateDisturbance(rpy);
 
     GyroSensorData gyroSensorData; // Skip get as we set all the fields
     gyroSensorData.x = rpy[0] + rand_gauss();
@@ -443,8 +583,15 @@ static void simulateModelQuadcopter()
     pos[1] = pos[1] + vel[1] * dT;
     pos[2] = pos[2] + vel[2] * dT;
 
-    // Simulate hitting ground
-    if (pos[2] > 0) {
+    // Simulate hitting ground. pos[2] starts at exactly 0 (on the ground),
+    // so this must be >= not > - otherwise the very first tick never
+    // clamps, ned_accel[2] stays at the unclamped freefall value instead of
+    // the resting one, and the simulated accelerometer briefly reports
+    // near-zero specific force. The attitude estimator's one-shot boot-time
+    // init reads accel via atan2f(), which is unstable near a zero
+    // denominator, so that single bad sample can init Roll/Pitch tens of
+    // degrees off level and freeze there for the whole calibration window.
+    if (pos[2] >= 0) {
         pos[2] = 0;
         vel[2] = 0;
         ned_accel[2] = 0;
@@ -508,10 +655,23 @@ static void simulateModelQuadcopter()
         gpsPosition.Groundspeed = sqrt(pow(vel[0] + gps_vel_drift[0], 2) + pow(vel[1] + gps_vel_drift[1], 2));
         gpsPosition.Heading     = 180 / M_PI * atan2(vel[1] + gps_vel_drift[1], vel[0] + gps_vel_drift[0]);
         gpsPosition.Satellites  = 7;
-        gpsPosition.PDOP = 1;
+        gpsPosition.PDOP  = 1.0f;
+        // Never set anywhere else either - defaulted to 0, which reads as
+        // an impossibly perfect fix next to a PDOP of 1. Plausible companion
+        // values for a good 7-satellite fix (vertical geometry is normally
+        // weaker than horizontal, hence HDOP < VDOP).
+        gpsPosition.HDOP  = 0.8f;
+        gpsPosition.VDOP  = 1.2f;
+        // GPS.c's alarm never clears on a good fix alone - it also checks
+        // Status==Fix3D, which this simulator was never setting (it just
+        // defaulted to NoGPS), so the GPS alarm stayed stuck regardless of
+        // how good the simulated fix looked.
+        gpsPosition.Status = GPSPOSITIONSENSOR_STATUS_FIX3D;
         GPSPositionSensorSet(&gpsPosition);
         last_gps_time    = PIOS_DELAY_GetRaw();
     }
+
+    simulateBatteryData();
 
     // Update GPS Velocity measurements
     static uint32_t last_gps_vel_time = 1000; // Delay by a millisecond
@@ -535,6 +695,16 @@ static void simulateModelQuadcopter()
 
         MagSensorSet(&mag);
         last_mag_time = PIOS_DELAY_GetRaw();
+
+        // On real Revolution hardware the magnetometer (HMC5883) and
+        // barometer (MS5611) are the two chips actually living on the I2C
+        // bus (gyro/accel are SPI) - confirmed against SensorTest/System/
+        // pios_board.c in the full upstream tree, both PIOS_I2C_Init'd
+        // unconditionally at boot, not optional accessories. Nothing in
+        // this codebase has ever set this alarm (verified: zero producers,
+        // real hardware included), so tie its health to the same two
+        // sensors it actually carries succeeding here, same as Battery.
+        AlarmsClear(SYSTEMALARMS_ALARM_I2C);
     }
 
     AttitudeSimulatedData attitudeSimulated;
@@ -544,12 +714,12 @@ static void simulateModelQuadcopter()
     attitudeSimulated.q3 = q[2];
     attitudeSimulated.q4 = q[3];
     Quaternion2RPY(q, &attitudeSimulated.Roll);
-    attitudeSimulated.Position[0] = pos[0];
-    attitudeSimulated.Position[1] = pos[1];
-    attitudeSimulated.Position[2] = pos[2];
-    attitudeSimulated.Velocity[0] = vel[0];
-    attitudeSimulated.Velocity[1] = vel[1];
-    attitudeSimulated.Velocity[2] = vel[2];
+    attitudeSimulated.Position.North = pos[0];
+    attitudeSimulated.Position.East = pos[1];
+    attitudeSimulated.Position.Down = pos[2];
+    attitudeSimulated.Velocity.North = vel[0];
+    attitudeSimulated.Velocity.East = vel[1];
+    attitudeSimulated.Velocity.Down = vel[2];
     AttitudeSimulatedSet(&attitudeSimulated);
 }
 
@@ -587,8 +757,18 @@ static void simulateModelAirplane()
 
     float dT = (PIOS_DELAY_DiffuS(last_time) / 1e6);
 
-    if (dT < 1e-3) {
-        dT = 2e-3;
+    // last_time starts at 0 (static init), so on the very first call
+    // PIOS_DELAY_DiffuS(0) measures elapsed time since power-on instead of
+    // since "the previous tick" - dT comes back as thousands of seconds.
+    // That single bogus dT is enough to shove vel[] to ~100s of m/s in one
+    // Euler step, and the friction term then bleeds a huge phantom
+    // acceleration into every following tick for a long time after (verified:
+    // this alone was enough to fake out the attitude estimator's boot-time
+    // leveling). Clamp the top end the same way the bottom end already is.
+    if (dT < 1e-3f) {
+        dT = 2e-3f;
+    } else if (dT > 0.1f) {
+        dT = 2e-3f;
     }
     last_time = PIOS_DELAY_GetRaw();
 
@@ -597,7 +777,7 @@ static void simulateModelAirplane()
     ActuatorDesiredData actuatorDesired;
     ActuatorDesiredGet(&actuatorDesired);
 
-    float thrust = (flightStatus.Armed == FLIGHTSTATUS_ARMED_ARMED) ? actuatorDesired.Throttle * MAX_THRUST : 0;
+    float thrust = (flightStatus.Armed == FLIGHTSTATUS_ARMED_ARMED) ? actuatorDesired.Thrust * MAX_THRUST : 0;
     if (thrust < 0) {
         thrust = 0;
     }
@@ -631,6 +811,7 @@ static void simulateModelAirplane()
     rpy[1]  = (flightStatus.Armed == FLIGHTSTATUS_ARMED_ARMED) * rateDesired.Pitch * (1 - ACTUATOR_ALPHA) + rpy[1] * ACTUATOR_ALPHA;
     rpy[2]  = (flightStatus.Armed == FLIGHTSTATUS_ARMED_ARMED) * rateDesired.Yaw * (1 - ACTUATOR_ALPHA) + rpy[2] * ACTUATOR_ALPHA;
     rpy[2] += roll * ROLL_HEADING_COUPLING;
+    addExternalRateDisturbance(rpy);
 
 
     GyroSensorData gyroSensorData; // Skip get as we set all the fields
@@ -716,8 +897,15 @@ static void simulateModelAirplane()
     pos[1] = pos[1] + vel[1] * dT;
     pos[2] = pos[2] + vel[2] * dT;
 
-    // Simulate hitting ground
-    if (pos[2] > 0) {
+    // Simulate hitting ground. pos[2] starts at exactly 0 (on the ground),
+    // so this must be >= not > - otherwise the very first tick never
+    // clamps, ned_accel[2] stays at the unclamped freefall value instead of
+    // the resting one, and the simulated accelerometer briefly reports
+    // near-zero specific force. The attitude estimator's one-shot boot-time
+    // init reads accel via atan2f(), which is unstable near a zero
+    // denominator, so that single bad sample can init Roll/Pitch tens of
+    // degrees off level and freeze there for the whole calibration window.
+    if (pos[2] >= 0) {
         pos[2] = 0;
         vel[2] = 0;
         ned_accel[2] = 0;
@@ -791,10 +979,23 @@ static void simulateModelAirplane()
         gpsPosition.Groundspeed = sqrt(pow(vel[0] + gps_vel_drift[0], 2) + pow(vel[1] + gps_vel_drift[1], 2));
         gpsPosition.Heading     = 180 / M_PI * atan2(vel[1] + gps_vel_drift[1], vel[0] + gps_vel_drift[0]);
         gpsPosition.Satellites  = 7;
-        gpsPosition.PDOP = 1;
+        gpsPosition.PDOP  = 1.0f;
+        // Never set anywhere else either - defaulted to 0, which reads as
+        // an impossibly perfect fix next to a PDOP of 1. Plausible companion
+        // values for a good 7-satellite fix (vertical geometry is normally
+        // weaker than horizontal, hence HDOP < VDOP).
+        gpsPosition.HDOP  = 0.8f;
+        gpsPosition.VDOP  = 1.2f;
+        // GPS.c's alarm never clears on a good fix alone - it also checks
+        // Status==Fix3D, which this simulator was never setting (it just
+        // defaulted to NoGPS), so the GPS alarm stayed stuck regardless of
+        // how good the simulated fix looked.
+        gpsPosition.Status = GPSPOSITIONSENSOR_STATUS_FIX3D;
         GPSPositionSensorSet(&gpsPosition);
         last_gps_time    = PIOS_DELAY_GetRaw();
     }
+
+    simulateBatteryData();
 
     // Update GPS Velocity measurements
     static uint32_t last_gps_vel_time = 1000; // Delay by a millisecond
@@ -817,6 +1018,16 @@ static void simulateModelAirplane()
         mag.z = 100 + homeLocation.Be[0] * Rbe[2][0] + homeLocation.Be[1] * Rbe[2][1] + homeLocation.Be[2] * Rbe[2][2];
         MagSensorSet(&mag);
         last_mag_time = PIOS_DELAY_GetRaw();
+
+        // On real Revolution hardware the magnetometer (HMC5883) and
+        // barometer (MS5611) are the two chips actually living on the I2C
+        // bus (gyro/accel are SPI) - confirmed against SensorTest/System/
+        // pios_board.c in the full upstream tree, both PIOS_I2C_Init'd
+        // unconditionally at boot, not optional accessories. Nothing in
+        // this codebase has ever set this alarm (verified: zero producers,
+        // real hardware included), so tie its health to the same two
+        // sensors it actually carries succeeding here, same as Battery.
+        AlarmsClear(SYSTEMALARMS_ALARM_I2C);
     }
 
     AttitudeSimulatedData attitudeSimulated;
@@ -826,12 +1037,12 @@ static void simulateModelAirplane()
     attitudeSimulated.q3 = q[2];
     attitudeSimulated.q4 = q[3];
     Quaternion2RPY(q, &attitudeSimulated.Roll);
-    attitudeSimulated.Position[0] = pos[0];
-    attitudeSimulated.Position[1] = pos[1];
-    attitudeSimulated.Position[2] = pos[2];
-    attitudeSimulated.Velocity[0] = vel[0];
-    attitudeSimulated.Velocity[1] = vel[1];
-    attitudeSimulated.Velocity[2] = vel[2];
+    attitudeSimulated.Position.North = pos[0];
+    attitudeSimulated.Position.East = pos[1];
+    attitudeSimulated.Position.Down = pos[2];
+    attitudeSimulated.Velocity.North = vel[0];
+    attitudeSimulated.Velocity.East = vel[1];
+    attitudeSimulated.Velocity.Down = vel[2];
     AttitudeSimulatedSet(&attitudeSimulated);
 }
 
@@ -839,18 +1050,22 @@ static float rand_gauss(void)
 {
     float v1, v2, s;
 
+    // Polar Box-Muller: s = v1^2 + v2^2 is only rejected for s >= 1 here, but
+    // the result is v1 * sqrt(-2*log(s)/s), which blows up as s -> 0. With an
+    // unseeded rand() replaying the exact same sequence every run, an early
+    // near-zero s isn't a rare fluke - it happens on *every* run, producing a
+    // "sensor noise" sample of hundreds of g's (verified: this alone was
+    // enough to fake out the attitude estimator's boot-time leveling and
+    // freeze the sim at a wildly wrong resting attitude). Floor s so the
+    // result stays in a plausible noise range regardless of luck.
     do {
         v1 = 2.0 * ((float)rand() / RAND_MAX) - 1;
         v2 = 2.0 * ((float)rand() / RAND_MAX) - 1;
 
         s  = v1 * v1 + v2 * v2;
-    } while (s >= 1.0);
+    } while (s >= 1.0 || s < 1e-2f);
 
-    if (s == 0.0) {
-        return 0.0;
-    } else {
-        return v1 * sqrt(-2.0 * log(s) / s);
-    }
+    return v1 * sqrt(-2.0 * log(s) / s);
 }
 
 

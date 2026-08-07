@@ -97,6 +97,23 @@ void stabilizationInnerloopInit()
     PIOS_CALLBACKSCHEDULER_Schedule(callbackHandle, FAILSAFE_TIMEOUT_MS, CALLBACK_UPDATEMODE_LATER);
 }
 
+/**
+ * AxisLock's axis_lock_accum[] is a separate accumulator from the PID
+ * iAccumulator terms stabilization.c already zeros on arm - it's file-local
+ * here, so it needs its own reset entry point. Without this, a heading
+ * error that accumulated during an earlier arm session (or from repeated
+ * disturbance testing while disarmed) keeps commanding a large corrective
+ * yaw rate indefinitely after a fresh arm, even with a level, non-rotating
+ * vehicle - AxisLock has no absolute reference to unwind back to on its
+ * own, so nothing else ever clears it.
+ */
+void stabilizationInnerloopResetAxisLock()
+{
+    axis_lock_accum[0] = 0;
+    axis_lock_accum[1] = 0;
+    axis_lock_accum[2] = 0;
+}
+
 static float get_pid_scale_source_value()
 {
     float value;

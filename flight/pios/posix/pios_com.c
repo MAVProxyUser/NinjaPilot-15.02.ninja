@@ -359,7 +359,20 @@ int32_t PIOS_COM_SendBuffer(uint32_t com_id, const uint8_t *buffer, uint16_t len
 #endif
     } while (rc == -2);
 
-    return rc;
+    // PIOS_COM_SendBufferNonBlocking's contract is "0 on success", but
+    // PIOS_COM_SendBuffer's callers (uavtalk.c's sendSingleObject in
+    // particular) expect the byte count back, same as the non-POSIX
+    // pios_com.c's PIOS_COM_SendBuffer (which returns len on success).
+    // Passing rc straight through here meant every single send compared
+    // 0 != tx_msg_len and got counted as a failure - the actual bytes did
+    // go out fine (this is exactly why RxBytes/RxDataRate on the GCS side
+    // were always healthy while TxBytes/TxDataRate sat frozen at 0 and
+    // TxFailures/TxRetries climbed continuously with nothing ever wrong on
+    // the wire).
+    if (rc < 0) {
+        return rc;
+    }
+    return len;
 }
 
 /**

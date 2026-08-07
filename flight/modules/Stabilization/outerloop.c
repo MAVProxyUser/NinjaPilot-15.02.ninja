@@ -266,7 +266,19 @@ static void stabilizationOuterloopTask()
     rateDesired.Roll = rateDesiredAxis[0];
     rateDesired.Pitch = rateDesiredAxis[1];
     rateDesired.Yaw = rateDesiredAxis[2];
-    
+
+    // Thrust has no outer-loop PID of its own - every other axis falls
+    // through to a direct stabilizationDesired->rateDesired copy in
+    // OUTERLOOP_DIRECT above, but this per-axis loop only ever runs over
+    // t=0..2 (Roll/Pitch/Yaw), so that copy never happened for Thrust.
+    // Nothing else in the codebase writes RateDesired.Thrust, so it sat at
+    // its 0.0 default forever - Actuator's mixer reads ActuatorDesired.Thrust
+    // (which chains back to this), so no motor could ever respond to
+    // throttle. This is the same passthrough OUTERLOOP_DIRECT does, applied
+    // unconditionally since Thrust doesn't have Attitude/RattitudeWeakLeveling/etc
+    // outer-loop modes to begin with.
+    rateDesired.Thrust = stabilizationDesired.Thrust;
+
     RateDesiredSet(&rateDesired);
     {
         uint8_t armed;
