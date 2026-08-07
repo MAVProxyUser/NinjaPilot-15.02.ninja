@@ -37,15 +37,15 @@
 // ****** convert Lat,Lon,Alt to ECEF  ************
 void LLA2ECEF(int32_t LLAi[3], double ECEF[3])
 {
-    const double a  = 6378137.0d; // Equatorial Radius
-    const double e  = 8.1819190842622e-2d; // Eccentricity
+    const double a  = 6378137.0; // Equatorial Radius
+    const double e  = 8.1819190842622e-2; // Eccentricity
     const double e2 = e * e; // Eccentricity squared
     double sinLat, sinLon, cosLat, cosLon;
     double N;
     double LLA[3]   = {
-        (double)LLAi[0] * 1e-7d,
-        (double)LLAi[1] * 1e-7d,
-        (double)LLAi[2] * 1e-4d
+        (double)LLAi[0] * 1e-7,
+        (double)LLAi[1] * 1e-7,
+        (double)LLAi[2] * 1e-4
     };
 
     sinLat = sin(DEG2RAD_D(LLA[0]));
@@ -53,11 +53,11 @@ void LLA2ECEF(int32_t LLAi[3], double ECEF[3])
     cosLat = cos(DEG2RAD_D(LLA[0]));
     cosLon = cos(DEG2RAD_D(LLA[1]));
 
-    N = a / sqrt(1.0d - e2 * sinLat * sinLat); // prime vertical radius of curvature
+    N = a / sqrt(1.0 - e2 * sinLat * sinLat); // prime vertical radius of curvature
 
     ECEF[0] = (N + LLA[2]) * cosLat * cosLon;
     ECEF[1] = (N + LLA[2]) * cosLat * sinLon;
-    ECEF[2] = ((1.0d - e2) * N + LLA[2]) * sinLat;
+    ECEF[2] = ((1.0 - e2) * N + LLA[2]) * sinLat;
 }
 
 // ****** convert ECEF to Lat,Lon,Alt (ITERATIVE!) *********
@@ -79,7 +79,7 @@ uint16_t ECEF2LLA(double ECEF[3], float LLA[3])
     uint16_t iter;
 
 #define MAX_ITER 10 // should not take more than 5 for valid coordinates
-#define ACCURACY 1.0e-11d // used to be e-14, but we don't need sub micrometer exact calculations
+#define ACCURACY 1.0e-11 // used to be e-14, but we don't need sub micrometer exact calculations
 
     LLA[1] = (float)RAD2DEG_D(atan2(y, x));
     Lat    = DEG2RAD_D((double)LLA[0]);

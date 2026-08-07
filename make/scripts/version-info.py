@@ -346,7 +346,7 @@ def get_hash_of_dirs(directory, verbose = 0, raw = 0, n = 40):
                     print('Hashing', names)
                 filepath = os.path.join(root, names)
                 try:
-                    f1 = open(filepath, 'rU')
+                    f1 = open(filepath, 'rb')
                 except:
                     # You can't open the file for some reason
                     continue
@@ -365,7 +365,7 @@ def get_hash_of_dirs(directory, verbose = 0, raw = 0, n = 40):
                     print('Hash is', f1hash.hexdigest())
 
                 # Append the hex representation of the current file's hash into the cumulative hash
-                SHAhash.update(f1hash.hexdigest())
+                SHAhash.update(f1hash.hexdigest().encode('utf-8'))
 
     except:
         import traceback

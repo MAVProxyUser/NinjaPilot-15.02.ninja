@@ -210,11 +210,12 @@ export OPGCSSYNTHDIR := $(BUILD_DIR)/openpilotgcs-synthetics
 DIRS += $(OPGCSSYNTHDIR)
 
 # Define supported board lists
-ALL_BOARDS    := coptercontrol oplinkmini 
+ALL_BOARDS    := coptercontrol oplinkmini simposix
 
 # Short names of each board (used to display board name in parallel builds)
 coptercontrol_short    := 'cc  '
 oplinkmini_short       := 'oplm'
+simposix_short          := 'posx'
 
 # Start out assuming that we'll build fw, bl and bu for all boards
 FW_BOARDS  := $(ALL_BOARDS)
@@ -258,7 +259,9 @@ $(1): fw_$(1)_opfw
 fw_$(1): fw_$(1)_opfw
 
 fw_$(1)_%: uavobjects_flight
+ifneq ($(1),simposix)
 	$(V1) $$(ARM_GCC_VERSION_CHECK_TEMPLATE)
+endif
 	$(V1) $(MKDIR) -p $(BUILD_DIR)/fw_$(1)/dep
 	$(V1) cd $(ROOT_DIR)/flight/targets/boards/$(1)/firmware && \
 		$$(MAKE) -r --no-print-directory \

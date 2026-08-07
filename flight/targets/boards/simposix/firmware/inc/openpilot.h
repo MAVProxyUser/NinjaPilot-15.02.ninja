@@ -1,13 +1,14 @@
 /**
  ******************************************************************************
+ * @addtogroup OpenPilotSystem OpenPilot System
+ * @{
+ * @addtogroup OpenPilotCore OpenPilot Core
+ * @{
+ * @file       openpilot.h
+ * @author     The OpenPilot Team, http://www.openpilot.org Copyright (C) 2010.
+ * @brief      Main OpenPilot header.
+ * @see        The GNU Public License (GPL) Version 3
  *
- * @file       pios_mem.h
- * @author     The OpenPilot Team, http://www.openpilot.org Copyright (C) 2014.
- * @addtogroup PiOS
- * @{
- * @addtogroup PiOS
- * @{
- * @brief PiOS memory allocation API
  *****************************************************************************/
 /*
  * This program is free software; you can redistribute it and/or modify
@@ -24,16 +25,28 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
-#ifndef PIOS_MEM_H
-#define PIOS_MEM_H
-#include <stddef.h>
 
-void *pios_fastheapmalloc(size_t size);
 
-void *pios_malloc(size_t size);
+#ifndef OPENPILOT_H
+#define OPENPILOT_H
 
-void *pios_realloc(void *ptr, size_t size);
+/* PIOS Includes */
+#include <pios.h>
 
-void pios_free(void *p);
+/* OpenPilot Libraries */
+#include <utlist.h>
+#include <uavobjectmanager.h>
+#include <eventdispatcher.h>
+#include <uavtalk.h>
 
-#endif /* PIOS_MEM_H */
+#include "alarms.h"
+#include <mathmisc.h>
+
+/* Global Functions */
+void OpenPilotInit(void);
+
+#endif /* OPENPILOT_H */
+/**
+ * @}
+ * @}
+ */

@@ -127,7 +127,7 @@ QString UAVObjectParser::parseXML(QString & xml, QString & filename)
 {
     // Create DOM document and parse it
     QDomDocument doc("UAVObjects");
-    bool parsed = doc.setContent(xml);
+    bool parsed = (bool)doc.setContent(xml);
 
     if (!parsed) {
         return QString("Improperly formated XML file");

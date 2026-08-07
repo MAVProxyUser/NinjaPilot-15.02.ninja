@@ -24,6 +24,7 @@
  * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include <QRegularExpression>
 #include "uavobjectgeneratorpython.h"
 using namespace std;
 
@@ -75,7 +76,7 @@ bool UAVObjectGeneratorPython::process_object(ObjectInfo *info)
             // Go through each option
             QStringList options = info->fields[n]->options;
             for (int m = 0; m < options.length(); ++m) {
-                QString name = options[m].toUpper().replace(QRegExp(ENUM_SPECIAL_CHARS), "");
+                QString name = options[m].toUpper().replace(QRegularExpression(ENUM_SPECIAL_CHARS), "");
                 if (name[0].isDigit()) {
                     name = QString("N%1").arg(name);
                 }
@@ -88,7 +89,7 @@ bool UAVObjectGeneratorPython::process_object(ObjectInfo *info)
             // Go through the element names
             QStringList elemNames = info->fields[n]->elementNames;
             for (int m = 0; m < elemNames.length(); ++m) {
-                QString name = elemNames[m].toUpper().replace(QRegExp(ENUM_SPECIAL_CHARS), "");
+                QString name = elemNames[m].toUpper().replace(QRegularExpression(ENUM_SPECIAL_CHARS), "");
                 if (name[0].isDigit()) {
                     name = QString("N%1").arg(name);
                 }

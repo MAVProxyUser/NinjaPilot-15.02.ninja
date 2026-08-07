@@ -266,7 +266,16 @@ static void gpsTask(__attribute__((unused)) void *parameters)
 
     // Loop forever
     while (1) {
-#if defined(PIOS_INCLUDE_GPS_UBX_PARSER) && !defined(PIOS_GPS_MINIMAL)
+        // UBX auto-config polls/configures a real UBX receiver over this
+        // same port - there's no such receiver in SITL, and PIOS_COM_SendBuffer
+        // deadlocks the whole process trying to send on a UDP-backed COM port
+        // nothing is listening on (confirmed with a live backtrace: gpsTask
+        // is the only thread not sitting in the scheduler's normal suspend
+        // wait, blocked instead inside PIOS_COM_SendBuffer's semaphore take -
+        // every other task in the system is fine). sensors.c already
+        // publishes GPSPositionSensor directly, so there's nothing for a
+        // real UBX exchange to accomplish here anyway.
+#if defined(PIOS_INCLUDE_GPS_UBX_PARSER) && !defined(PIOS_GPS_MINIMAL) && !defined(USE_SIM_POSIX)
         if (gpsSettings.DataProtocol == GPSSETTINGS_DATAPROTOCOL_UBX) {
             char *buffer   = 0;
             uint16_t count = 0;
@@ -334,8 +343,23 @@ static void gpsTask(__attribute__((unused)) void *parameters)
 
         // Check for GPS timeout
         timeNowMs = xTaskGetTickCount() * portTICK_RATE_MS;
-        if ((timeNowMs - timeOfLastUpdateMs) >= GPS_TIMEOUT_MS ||
-            (gpsSettings.DataProtocol == GPSSETTINGS_DATAPROTOCOL_UBX && gpspositionsensor.AutoConfigStatus == GPSPOSITIONSENSOR_AUTOCONFIGSTATUS_ERROR)) {
+#ifdef USE_SIM_POSIX
+        // timeOfLastUpdateMs only ever advances inside the byte-parsing
+        // loop above, which requires real bytes to arrive on gpsPort -
+        // there's no real GPS serial device in SITL, so it would sit at
+        // its boot-time value forever and this task would permanently
+        // read "timed out" regardless of how good sensors.c's simulated
+        // fix is. gpspositionsensor itself is also only ever read once,
+        // at task startup (see GPSPositionSensorGet above, never called
+        // again in this file) - re-read it here to pick up what the
+        // simulator has actually been publishing since then.
+        GPSPositionSensorGet(&gpspositionsensor);
+        bool gpsTimedOut = false;
+#else
+        bool gpsTimedOut = (timeNowMs - timeOfLastUpdateMs) >= GPS_TIMEOUT_MS ||
+                            (gpsSettings.DataProtocol == GPSSETTINGS_DATAPROTOCOL_UBX && gpspositionsensor.AutoConfigStatus == GPSPOSITIONSENSOR_AUTOCONFIGSTATUS_ERROR);
+#endif
+        if (gpsTimedOut) {
             // we have not received any valid GPS sentences for a while.
             // either the GPS is not plugged in or a hardware problem or the GPS has locked up.
             uint8_t status = GPSPOSITIONSENSOR_STATUS_NOGPS;

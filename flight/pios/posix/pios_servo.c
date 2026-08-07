@@ -68,4 +68,26 @@ void PIOS_Servo_Set(uint8_t Servo, uint16_t Position)
 #endif // PIOS_ENABLE_DEBUG_PINS
 }
 
+/**
+ * Flush any pending single-pulse (OneShot/PWMSync) bank updates.
+ * There is no real timer hardware to service on posix, so this is a no-op.
+ */
+void PIOS_Servo_Update()
+{}
+
+/**
+ * Configure a servo bank's update mode (continuous PWM vs single-pulse).
+ * There is no real bank hardware on posix, so this is a no-op.
+ */
+void PIOS_Servo_SetBankMode(uint8_t bank, uint8_t mode)
+{}
+
+/**
+ * There is only one simulated output bank on posix, so every pin maps to it.
+ */
+uint8_t PIOS_Servo_GetPinBank(uint8_t pin)
+{
+    return 0;
+}
+
 #endif /* if defined(PIOS_INCLUDE_SERVO) */

@@ -25,6 +25,7 @@
  */
 
 #include <QDebug>
+#include <QRegularExpression>
 #include "uavobjectgeneratorjava.h"
 using namespace std;
 
@@ -161,7 +162,7 @@ bool UAVObjectGeneratorJava::process_object(ObjectInfo *info)
             for (int m = 0; m < options.length(); ++m) {
                 QString s = (m != (options.length() - 1)) ? "%1_%2=%3, " : "%1_%2=%3";
                 enums.append(s.arg(info->fields[n]->name.toUpper())
-                             .arg(options[m].toUpper().replace(QRegExp(ENUM_SPECIAL_CHARS), ""))
+                             .arg(options[m].toUpper().replace(QRegularExpression(ENUM_SPECIAL_CHARS), ""))
                              .arg(m));
             }
             enums.append(QString(" } %1Options;\n")

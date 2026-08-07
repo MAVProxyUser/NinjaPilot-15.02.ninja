@@ -24,6 +24,7 @@
  * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include <QRegularExpression>
 #include "uavobjectgeneratorflight.h"
 
 using namespace std;
@@ -166,7 +167,7 @@ bool UAVObjectGeneratorFlight::process_object(ObjectInfo *info)
                 enums.append(s
                              .arg(info->name.toUpper())
                              .arg(info->fields[n]->name.toUpper())
-                             .arg(options[m].toUpper().replace(QRegExp(ENUM_SPECIAL_CHARS), ""))
+                             .arg(options[m].toUpper().replace(QRegularExpression(ENUM_SPECIAL_CHARS), ""))
                              .arg(m));
             }
             enums.append(QString("} %1%2Options;\n")

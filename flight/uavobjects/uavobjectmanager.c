@@ -46,9 +46,25 @@ int32_t UAVObjPers_stub(__attribute__((unused)) UAVObjHandle obj_handle, __attri
 {
     return 0;
 }
+#if defined(__APPLE__)
+/* Mach-O does not support the alias attribute, so forward to the stub directly. */
+int32_t __attribute__((weak)) UAVObjSave(UAVObjHandle obj_handle, uint16_t instId)
+{
+    return UAVObjPers_stub(obj_handle, instId);
+}
+int32_t __attribute__((weak)) UAVObjLoad(UAVObjHandle obj_handle, uint16_t instId)
+{
+    return UAVObjPers_stub(obj_handle, instId);
+}
+int32_t __attribute__((weak)) UAVObjDelete(UAVObjHandle obj_handle, uint16_t instId)
+{
+    return UAVObjPers_stub(obj_handle, instId);
+}
+#else
 int32_t UAVObjSave(UAVObjHandle obj_handle, uint16_t instId)  __attribute__((weak, alias("UAVObjPers_stub")));;
 int32_t UAVObjLoad(UAVObjHandle obj_handle, uint16_t instId) __attribute__((weak, alias("UAVObjPers_stub")));
 int32_t UAVObjDelete(UAVObjHandle obj_handle, uint16_t instId) __attribute__((weak, alias("UAVObjPers_stub")));
+#endif
 
 
 // Private variables
