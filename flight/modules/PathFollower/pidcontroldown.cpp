@@ -34,6 +34,9 @@ extern "C" {
 #include <callbackinfo.h>
 
 #include <math.h>
+#ifdef SIMPOSIX
+#include <stdio.h>
+#endif
 #include <pid.h>
 #include <CoordinateConversions.h>
 #include <sin_lookup.h>
@@ -89,7 +92,24 @@ void PIDControlDown::Activate()
     float currentThrust;
 
     StabilizationDesiredThrustGet(&currentThrust);
+#ifdef SIMPOSIX
+    // pid2_apply()'s reconfigure/bumpless-transfer math (pid.c) makes the
+    // next output exactly equal the u0 passed to pid2_transfer() - so u0
+    // needs to be the actual desired output value, not an offset from
+    // neutral. UpdateNeutralThrust() below calls pid2_transfer(&PID,
+    // mDownCommand) with the raw last-output value, no subtraction, which
+    // is consistent with that. This subtraction made u0 negative (clamped
+    // to mMinThrust) for nearly the entire realistic thrust range,
+    // producing a hard minimum-thrust dip on every PositionHold engagement
+    // - only gated to SIMPOSIX pending independent verification against
+    // real hardware (see session notes: not yet confirmed whether/how this
+    // manifests there, only derived + reproduced in SITL).
+    printf("[SIMPOSIX-IFDEF-MARKER] PIDControlDown::Activate() using fixed u0=currentThrust (%.4f), not currentThrust-mNeutral\n", (double)currentThrust);
+    fflush(stdout);
+    float u0 = currentThrust;
+#else
     float u0 = currentThrust - mNeutral;
+#endif
     pid2_transfer(&PID, u0);
     mActive = true;
 }
@@ -340,7 +360,26 @@ void PIDControlDown::UpdateVelocityState(float pv)
         // RateLimit(velocitySetpointDesired, mVelocitySetpointCurrent, 2.0f );
         mVelocitySetpointCurrent = velocitySetpointDesired;
     } else {
+#ifdef SIMPOSIX
+        // RateLimit() is fully implemented a few lines above but was never
+        // actually wired in on this path (mFSM is NULL for plain
+        // PositionHold/VtolFlyController - controlDown.Initialize() is
+        // never called in vtolflycontroller.cpp - so this else branch is
+        // what we actually run, and it previously jumped
+        // mVelocitySetpointCurrent straight to mVelocitySetpointTarget
+        // with no smoothing at all, even though VerticalVelMax clamps the
+        // target's MAGNITUDE). Confirmed via direct trace that this
+        // allowed the real velocity to reach 13+ m/s (vs a 1.5 m/s
+        // setpoint) during a bang-bang cycle, outrunning the vehicle's
+        // ability to arrest a fall before ground impact - a genuine
+        // crash, not just an overshoot. Also note the commented call
+        // above wouldn't have compiled as-is: RateLimit() takes float*,
+        // that call passes plain float. 2.0f (m/s^2) matches the
+        // original author's own choice in the commented FSM branch above.
+        RateLimit(&mVelocitySetpointTarget, &mVelocitySetpointCurrent, 2.0f);
+#else
         mVelocitySetpointCurrent = mVelocitySetpointTarget;
+#endif
     }
 }
 

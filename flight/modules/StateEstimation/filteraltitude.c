@@ -37,6 +37,10 @@
 
 #include <CoordinateConversions.h>
 
+#ifdef SIMPOSIX
+#include <stdio.h>
+#endif
+
 // Private constants
 
 // duration of accel bias initialization phase
@@ -171,6 +175,38 @@ static filterResult filter(stateFilter *self, stateEstimation *state)
 
             this->altitudeState += 0.5f * (speedLast + this->velocityState) * dT;
 
+#ifdef SIMPOSIX
+            // Investigating whether the PositionState.Down divergence seen
+            // during PositionHold (real vehicle confirmed on the ground the
+            // whole time via GPS/pose ground truth, yet this estimate
+            // wandered to 10-20+ m) comes from residual accel bias
+            // double-integrating unchecked here, rather than from the
+            // baro-differentiation term (already instrumented above and
+            // confirmed NOT to spike during the divergence). ~1Hz at
+            // PIOS_SENSOR_RATE=500Hz.
+            {
+                static int callCount = 0;
+                static portTickType lastPrintTick = 0;
+                callCount++;
+                portTickType nowTick = xTaskGetTickCount();
+                // Time-based, not call-count-based: the real call rate here
+                // is unknown (the count-based %500 throttle never fired in
+                // one full test run, meaning this branch runs far slower
+                // than the assumed 500Hz) - print the very first call
+                // immediately (confirms the branch runs at all) then at
+                // most once per second after that.
+                if (callCount == 1 || (nowTick - lastPrintTick) / portTICK_RATE_MS >= 1000) {
+                    lastPrintTick = nowTick;
+                    printf("[SIMPOSIX-IFDEF-MARKER] filteraltitude.c accel integrator: "
+                           "callCount=%d dT=%.6f current=%.5f accelState=%.5f accelBiasState=%.5f "
+                           "accelLast=%.5f velocityState=%.5f altitudeState=%.5f\n",
+                           callCount, (double)dT, (double)current, (double)this->accelState,
+                           (double)this->accelBiasState, (double)this->accelLast,
+                           (double)this->velocityState, (double)this->altitudeState);
+                    fflush(stdout);
+                }
+            }
+#endif
 
             state->pos[0]   = this->pos[0];
             state->pos[1]   = this->pos[1];
@@ -189,7 +225,25 @@ static filterResult filter(stateFilter *self, stateEstimation *state)
             // correct the velocity state (low pass differentiation)
             // low pass for average dT, compensate timing jitter from scheduler
             float dT = PIOS_DELTATIME_GetAverageSeconds(&this->dt2config);
+#ifdef SIMPOSIX
+            float velBefore = this->velocityState;
+#endif
             this->velocityState = (1.0f - (this->settings.BaroKp * this->settings.BaroKp)) * this->velocityState + (this->settings.BaroKp * this->settings.BaroKp) * (state->baro[0] - this->baroLast) / dT;
+#ifdef SIMPOSIX
+            // A single baro-diff step producing a multi-m/s velocityState jump is
+            // the suspected mechanism behind the PositionState.Down flyaway
+            // seen investigating PositionHold - divide-by-small-dT amplifying
+            // an ordinary baro sample-to-sample difference. Only print when
+            // it actually happens (not every sample) so this doesn't flood
+            // the log during normal operation.
+            if (fabsf(this->velocityState - velBefore) > 3.0f) {
+                printf("[SIMPOSIX-IFDEF-MARKER] filteraltitude.c baro velocity spike: "
+                       "dT=%.6f baro=%.4f baroLast=%.4f velBefore=%.4f velAfter=%.4f BaroKp=%.4f\n",
+                       (double)dT, (double)state->baro[0], (double)this->baroLast,
+                       (double)velBefore, (double)this->velocityState, (double)this->settings.BaroKp);
+                fflush(stdout);
+            }
+#endif
             this->baroLast  = state->baro[0];
 
             state->pos[0]   = this->pos[0];

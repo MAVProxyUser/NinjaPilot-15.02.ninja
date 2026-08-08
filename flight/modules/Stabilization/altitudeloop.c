@@ -27,6 +27,9 @@
  */
 
 #include <openpilot.h>
+#ifdef SIMPOSIX
+#include <stdio.h>
+#endif
 
 #include <callbackinfo.h>
 
@@ -81,6 +84,11 @@ float stabilizationAltitudeHold(float setpoint, ThrustModeType mode, bool reinit
         pid_zero(&pid0);
         pid_zero(&pid1);
         newaltitude = true;
+#ifdef SIMPOSIX
+        printf("[SIMPOSIX-IFDEF-MARKER] stabilizationAltitudeHold REINIT: setpoint=%.4f mode=%d startThrust=%.4f\n",
+               (double)setpoint, (int)mode, (double)startThrust);
+        fflush(stdout);
+#endif
     }
 
     const float DEADBAND      = 0.20f;
@@ -178,6 +186,34 @@ static void altitudeHoldTask(void)
         break;
     }
 
+#ifdef SIMPOSIX
+    // Unlike PathFollower's PIDControlDown (pidcontroldown.cpp), which
+    // explicitly bounds both its velocity setpoint (VerticalVelMax) and
+    // its thrust output (boundf(v, ulow, uhigh) in GetDownCommand()),
+    // this loop had no output bounding at all - pid0's Kp=0.8 (compile
+    // default; AltitudeHoldSettings is never sent by this bridge) applied
+    // directly, unbounded, to whatever position error existed. Confirmed
+    // via direct instrumentation: VelocityDesired reached -22 m/s and the
+    // resulting thrustDemand reached +10.1 (thrust should be ~[0,1]) once
+    // any real position error built up - not a slow/sluggish response,
+    // an actually-unbounded one that gets clipped hard somewhere
+    // downstream into bang-bang behavior. Clamping both here, matching
+    // PathFollower's existing, working pattern. No equivalent
+    // AltitudeHoldSettings field exists for these bounds (XML only has
+    // AltitudePI/VelocityPI/CutThrustWhenZero/ThrustExp/ThrustRate), so
+    // these are hardcoded sanity limits, not settings-driven - gated to
+    // SIMPOSIX pending a decision on whether to add real settings fields.
+    // 1.5 m/s matches VtolPathFollowerSettings.VerticalVelMax (gazebo_bridge.py) -
+    // PositionHold inherits whatever velocity state Stabilized2/altitude-hold
+    // leaves behind at the mode handoff (confirmed via PIDStatus trace: PathFollower's
+    // PID saw actual=11.47 m/s real descent rate right after a 3.0 m/s-clamped
+    // handoff, correctly slamming to max thrust in response) - keeping both
+    // loops' velocity ceilings consistent limits how violent that handoff can be.
+    const float ALTITUDEHOLD_MAX_VELOCITY = 1.5f; // m/s
+    altitudeHoldStatus.VelocityDesired = boundf(altitudeHoldStatus.VelocityDesired,
+                                                 -ALTITUDEHOLD_MAX_VELOCITY, ALTITUDEHOLD_MAX_VELOCITY);
+#endif
+
     AltitudeHoldStatusSet(&altitudeHoldStatus);
 
     switch (thrustMode) {
@@ -193,6 +229,22 @@ static void altitudeHoldTask(void)
     }
     break;
     }
+#ifdef SIMPOSIX
+    thrustDemand = boundf(thrustDemand, 0.0f, 1.0f);
+#endif
+
+#ifdef SIMPOSIX
+    {
+        static int callCount = 0;
+        callCount++;
+        if (callCount % 100 == 0) {
+            printf("[althold] mode=%d posDown=%.4f velDown=%.4f dT=%.5f thrustSetpoint=%.4f startThrust=%.4f VelocityDesired=%.4f thrustDemand=%.4f\n",
+                   (int)thrustMode, (double)positionStateDown, (double)velocityStateDown, (double)dT,
+                   (double)thrustSetpoint, (double)startThrust, (double)altitudeHoldStatus.VelocityDesired, (double)thrustDemand);
+            fflush(stdout);
+        }
+    }
+#endif
 }
 
 static void SettingsUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)

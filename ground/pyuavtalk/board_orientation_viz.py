@@ -102,8 +102,27 @@ FLIGHT_MODE_SETTINGS_DEFAULTS = {
     "ArmingSequenceTime": 1000,
     "DisarmingSequenceTime": 1000,
     "Stabilization1Settings": ["Attitude", "Attitude", "AxisLock", "Manual"],
-    "Stabilization2Settings": ["Attitude", "Attitude", "Rate", "Manual"],
-    "Stabilization3Settings": ["Rate", "Rate", "Rate", "Manual"],
+    # Repurposed as a "pure baro alt hold" test slot: Roll/Pitch=Attitude
+    # (leveling), Thrust=AltitudeHold (flight/modules/Stabilization/
+    # altitudeloop.c - a real, separate, fast Stabilization-loop-rate PID
+    # against PositionState.Down/VelocityState.Down, activated via
+    # STABILIZATIONDESIRED_STABILIZATIONMODE_ALTITUDEHOLD, distinct from
+    # PathFollower's CruiseControl-based thrust used by PositionHold).
+    # Lets alt-hold be tested in isolation from GPS horizontal position
+    # hold and from PathFollower entirely.
+    "Stabilization2Settings": ["Attitude", "Attitude", "AxisLock", "AltitudeHold"],
+    # "2D position hold" test slot: baro altitude hold (same as
+    # Stabilization2) plus magnetometer-referenced yaw heading hold
+    # instead of AxisLock's rate-integral drift-and-hold - Yaw=Attitude
+    # uses AttitudeState.Yaw directly (outerloop.c's quaternion-attitude
+    # error path), which is mag-corrected now that HomeLocation.Be is
+    # measured from a real sensor reading (see gazebo_bridge.py's
+    # send_config()). Roll/Pitch=Attitude only levels the craft - nothing
+    # here corrects horizontal drift (that's PositionHold/PathFollower's
+    # job, a separate flight mode), so wind-driven horizontal drift is
+    # expected and acceptable, matching a real 2D hold (heading + altitude
+    # only, no GPS lateral correction).
+    "Stabilization3Settings": ["Attitude", "Attitude", "Attitude", "AltitudeHold"],
     "Stabilization4Settings": ["Attitude", "Attitude", "AxisLock", "CruiseControl"],
     "Stabilization5Settings": ["Attitude", "Attitude", "Rate", "CruiseControl"],
     "Stabilization6Settings": ["Rate", "Rate", "Rate", "Manual"],
@@ -164,7 +183,26 @@ REVOSETTINGS_DEFAULTS = {
     # No mag in the default "Basic (Complementary)" chain, so filtermag.c's
     # checkMagValidity() never runs and the alarm sits at Uninitialised
     # forever regardless of how good the simulated compass reading is.
-    "FusionAlgorithm": "Complementary+Mag",
+    # Mag fusion instability (see filtermag.c/filtercf.c history in
+    # CLAUDE.md/session notes) traced to HomeLocation.Be not actually
+    # matching what Gazebo's magnetometer plugin reports (magnitude AND
+    # direction) - gazebo_bridge.py's send_config() now MEASURES Be from a
+    # real reading at spawn (vehicle level, Yaw=0) instead of assuming a
+    # fixed value, so the two are always self-consistent. Re-test before
+    # reverting to "Basic (Complementary)" if instability returns.
+    # PositionHold's own controller (VtolFlyController/PathFollower) owns
+    # a full 3D target (PathDesired.End.North/East/Down, all captured
+    # together in plan_setup_positionHold()) and directly sets
+    # stabDesired.Thrust via controlDown.GetDownCommand() - vertical hold
+    # genuinely is part of PositionHold's job in this codebase, not a
+    # separate system underneath it. "Complementary+Mag" (baro-only
+    # altitude, no GPS/lla fusion) was a holdover from working around the
+    # since-fixed magnetometer bug - now that mag fusion works and we have
+    # a real navsat GPS feed (see gazebo_bridge.py), fuse it in too via
+    # Complementary+Mag+GPSOutdoor (adds llaFilter to the chain -
+    # filterlla.c requires HomeLocation.Set + GPS Fix3D/PDOP/satellite
+    # thresholds, all already satisfied by publish_slow_sensors()).
+    "FusionAlgorithm": "Complementary+Mag+GPSOutdoor",
     "BaroGPSOffsetCorrectionAlpha": 0.9993335555062,
     "MagnetometerMaxDeviation": [0.05, 0.15],
     "BaroTempCorrectionPolynomial": [0, 0, 0, 0],

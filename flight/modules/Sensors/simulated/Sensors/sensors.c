@@ -169,11 +169,23 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
 // HomeLocationSet(&homeLocation);
 
 
+    // When an external physics bridge (e.g. the Gazebo bridge) is driving
+    // this session, it publishes GyroSensor/AccelSensor/BaroSensor/
+    // GPSPositionSensor/MagSensor itself over the same UAVTalk link this
+    // module normally uses - if both write every tick they'll fight over
+    // the same objects. Checked once here rather than every tick.
+    bool externalPhysics = (getenv("NINJAPILOT_EXTERNAL_PHYSICS") != NULL);
+
     // Main task loop
     lastSysTime = xTaskGetTickCount();
     uint32_t last_time = PIOS_DELAY_GetRaw();
     while (1) {
         PIOS_WDG_UpdateFlag(PIOS_WDG_SENSORS);
+
+        if (externalPhysics) {
+            vTaskDelay(2 / portTICK_RATE_MS);
+            continue;
+        }
 
         SystemSettingsData systemSettings;
         SystemSettingsGet(&systemSettings);
