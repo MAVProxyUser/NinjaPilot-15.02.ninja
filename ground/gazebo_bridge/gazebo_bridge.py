@@ -681,17 +681,26 @@ def climb_to(target_alt_m, max_time=20.0):
         # Predictive: start braking once current altitude + a stopping-
         # distance margin (proportional to climb rate) would carry it past
         # target, not only once it's already there.
-        stopping_margin = max(0.0, climb_rate) * 0.5
+        stopping_margin = max(0.0, climb_rate) * 1.0
         if not braking and alt + stopping_margin >= target_alt_m:
             braking = True
 
         if braking:
-            if alt >= target_alt_m and climb_rate < 0.15:
+            if alt >= target_alt_m and abs(climb_rate) < 0.15:
                 break
-            # Below hover thrust - actual deceleration, not just "stop
-            # adding more climb throttle." A bit harder the faster it's
-            # still climbing.
-            control.throttle = max(0.55, HOVER_THRUST - 0.05 - 0.01 * max(0.0, climb_rate))
+            # Proportional brake, not a near-hover nudge: an earlier
+            # version only cut to hover-0.06ish regardless of climb_rate,
+            # which measured as WAY too weak to actually decelerate - real
+            # data showed climb_rate climbing from 1.14 to 2.01 m/s the
+            # entire time "braking" was nominally active, overshooting the
+            # 8m safety ceiling on the climb to 10ft. Scaling the cut
+            # directly by climb_rate, and easing back toward (not below)
+            # HOVER_THRUST as climb_rate approaches zero, gives a real,
+            # continuously-responsive brake instead of a fixed weak one -
+            # and naturally stops braking once the climb is actually
+            # arrested, rather than staying locked at a hard cut that
+            # would itself overshoot into a descent.
+            control.throttle = min(HOVER_THRUST, max(0.2, HOVER_THRUST - 0.30 * climb_rate))
         else:
             # A bit more aggressive the further below target, easing off
             # near it - not the fixed-ramp-then-hope-it's-airborne approach
