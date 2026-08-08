@@ -33,6 +33,8 @@
 #if defined(PIOS_INCLUDE_UDP)
 
 #include <signal.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <pios_udp_priv.h>
 
 /* We need a list of UDP devices */
@@ -82,6 +84,49 @@ void *PIOS_UDP_RxThread(void *udp_dev_n)
      * com devices never get closed except by application "reboot"
      * we also never give up our mutex except for waiting
      */
+#if defined(PIOS_INCLUDE_FREERTOS)
+    /* FREERTOS + POSIX PORT CONSTRAINT (learned the hard way - a plain
+     * blocking recvfrom() at HIGH task priority wedges the entire RTOS):
+     * in the Posix port a task blocked in a NATIVE syscall still counts
+     * as FreeRTOS's ready/running task - the scheduler keeps selecting
+     * it while the pthread sits in the kernel, so nothing lower ever
+     * runs. Blocking natively was only ever survivable at the old
+     * bottom-of-the-system priority (everything outranked it), and that
+     * exact placement is what let the kernel socket queue back up under
+     * real flight load - seconds of stale-but-in-order sensor and
+     * command data, surfacing as the load-dependent "estimator randomly
+     * freezes" symptom.
+     *
+     * Port-correct real-time design instead: NON-blocking socket, drain
+     * EVERY pending datagram per wakeup, then genuinely block in
+     * FreeRTOS (vTaskDelay one tick) so every other task runs normally.
+     * At high task priority this bounds sensor/command staleness to
+     * ~one tick (1ms) regardless of system load, matching the role this
+     * thread plays on real hardware (ISR+DMA: drain immediately, never
+     * make sensor bytes wait on application code). */
+    while (1) {
+        int received;
+        do {
+            udp_dev->clientLength = sizeof(udp_dev->client);
+            received = recvfrom(udp_dev->socket,
+                                &udp_dev->rx_buffer,
+                                PIOS_UDP_RX_BUFFER_SIZE,
+                                0,
+                                (struct sockaddr *)&udp_dev->client,
+                                (socklen_t *)&udp_dev->clientLength);
+            if (received > 0) {
+                /* copy received data to buffer if possible */
+                /* we do NOT buffer data locally. If the com buffer can't receive, data is discarded! */
+                /* (thats what the USART driver does too!) */
+                bool rx_need_yield = false;
+                if (udp_dev->rx_in_cb) {
+                    (void)(udp_dev->rx_in_cb)(udp_dev->rx_in_context, udp_dev->rx_buffer, received, NULL, &rx_need_yield);
+                }
+            }
+        } while (received > 0);
+        vTaskDelay(1);
+    }
+#else /* PIOS_INCLUDE_FREERTOS */
     while (1) {
         /**
          * receive
@@ -101,15 +146,10 @@ void *PIOS_UDP_RxThread(void *udp_dev_n)
             if (udp_dev->rx_in_cb) {
                 (void)(udp_dev->rx_in_cb)(udp_dev->rx_in_context, udp_dev->rx_buffer, received, NULL, &rx_need_yield);
             }
-
-#if defined(PIOS_INCLUDE_FREERTOS)
-            /* vPortYieldFromISR() (no-arg) doesn't exist in the current
-             * FreeRTOS-Kernel Posix port - portYIELD_FROM_ISR(x) is the
-             * standard cross-port macro now, and already checks x itself. */
-            portYIELD_FROM_ISR(rx_need_yield);
-#endif /* PIOS_INCLUDE_FREERTOS */
         }
     }
+#endif /* PIOS_INCLUDE_FREERTOS */
+    return NULL;
 }
 
 
@@ -137,10 +177,56 @@ int32_t PIOS_UDP_Init(uint32_t *udp_id, const struct pios_udp_cfg *cfg)
     udp_dev->server.sin_port   = htons(udp_dev->cfg->port);
     int res = bind(udp_dev->socket, (struct sockaddr *)&udp_dev->server, sizeof(udp_dev->server));
 
-    /* Create transmit thread for this connection */
+    /* Bound the kernel receive buffer to a small, real-time-appropriate
+     * size. This socket is the SimPosix stand-in for the hardware sensor/
+     * telemetry links; for a real-time control feed, freshness beats
+     * completeness - a deep kernel buffer (platform defaults are hundreds
+     * of KB) becomes a multi-second FIFO of stale-but-in-order data the
+     * moment the RX task falls behind, and every consumer downstream
+     * (state estimator, receiver/ManualControl) then reads seconds-old
+     * reality with no error or drop ever surfacing. Confirmed live: a
+     * commanded throttle CUT arrived at ManualControlCommand ~5s late,
+     * time-stretched, while the bridge-side send loop was provably
+     * current - the backlog was here, in the kernel socket queue. With a
+     * small buffer, transient overload drops OLD data instead of
+     * delaying ALL data (UAVTalk's ACKed settings writes retry on their
+     * own, so config traffic survives drops fine). */
+    int rcvbuf = 16384;
+    if (setsockopt(udp_dev->socket, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0) {
+        printf("udp dev %i - warning: SO_RCVBUF set failed\n", pios_udp_num_devices - 1);
+    }
+
+#if defined(PIOS_INCLUDE_FREERTOS)
+    /* Non-blocking is REQUIRED for the FreeRTOS drain-per-wakeup receive
+     * loop (see PIOS_UDP_RxThread) - with a blocking socket the first
+     * empty recvfrom() would block the pthread natively, which in the
+     * Posix port stalls the whole RTOS when done from a high-priority
+     * task. */
+    int flags = fcntl(udp_dev->socket, F_GETFL, 0);
+    if (flags < 0 || fcntl(udp_dev->socket, F_SETFL, flags | O_NONBLOCK) < 0) {
+        printf("udp dev %i - warning: O_NONBLOCK set failed\n", pios_udp_num_devices - 1);
+    }
+#endif
+
+    /* Create receive thread for this connection */
 #if defined(PIOS_INCLUDE_FREERTOS)
 // ( pdTASK_CODE pvTaskCode, const portCHAR * const pcName, unsigned portSHORT usStackDepth, void *pvParameters, unsigned portBASE_TYPE uxPriority, xTaskHandle *pvCreatedTask );
-    xTaskCreate((pdTASK_CODE)PIOS_UDP_RxThread, "UDP_Rx_Thread", 1024, (void *)udp_dev, (tskIDLE_PRIORITY + 1), &udp_dev->rxThread);
+    /* HIGHEST task priority in the system (see pios_callbackscheduler.h's
+     * DelayedCallbackPriorityTask ladder - DEVICEDRIVER sits at
+     * tskIDLE_PRIORITY+7 after the STABILIZATIONOUTERLOOP bump), NOT the
+     * old tskIDLE_PRIORITY+1 (the LOWEST in the system). On real hardware
+     * this thread's job is done by a hardware ISR that preempts every
+     * task, always - sensor bytes never wait for application code. At
+     * priority 1 this task was starved for whole seconds under real
+     * flight load once the estimator/control tasks (priorities 3-6)
+     * started genuinely running hot, which is exactly when fresh sensor
+     * data matters most - the load-dependent "estimator randomly
+     * freezes" symptom was largely THIS: the estimator running fine on
+     * seconds-old input. Its per-wakeup work is a recvfrom + fifo copy
+     * (microseconds), so top priority costs the rest of the system
+     * essentially nothing - same rate/deadline-monotonic reasoning as
+     * the callback-scheduler priority ladder. */
+    xTaskCreate((pdTASK_CODE)PIOS_UDP_RxThread, "UDP_Rx_Thread", 1024, (void *)udp_dev, (tskIDLE_PRIORITY + 7), &udp_dev->rxThread);
 #else
     pthread_create(&udp_dev->rxThread, NULL, PIOS_UDP_RxThread, (void *)udp_dev);
 #endif

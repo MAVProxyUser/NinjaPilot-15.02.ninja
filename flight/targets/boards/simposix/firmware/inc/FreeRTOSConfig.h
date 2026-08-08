@@ -49,7 +49,7 @@
 #define configUSE_TICK_HOOK                          0
 #define configCPU_CLOCK_HZ                           72000000
 #define configTICK_RATE_HZ                           1000
-#define configMAX_PRIORITIES                         7  /* was 5 - bumped for CALLBACK_TASK_STATEESTIMATION and CALLBACK_TASK_ALTITUDEHOLD, see pios_callbackscheduler.h */
+#define configMAX_PRIORITIES                         8  /* was 7 - bumped again for CALLBACK_TASK_STABILIZATIONOUTERLOOP, see pios_callbackscheduler.h */
 #define configMINIMAL_STACK_SIZE                     256
 #define configTOTAL_HEAP_SIZE                        (45 * 1024)
 #define configMAX_TASK_NAME_LEN                      (16)

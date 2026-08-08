@@ -121,13 +121,35 @@ typedef enum {
 // consumer must never sit above its own producer in a priority-strict
 // scheduler for exactly this reason - it can eat the CPU time the
 // producer needed to keep up.
+//
+// CALLBACK_TASK_STABILIZATIONOUTERLOOP: same class of bug, found chasing
+// a manual-throttle (no estimator/hold-mode involvement at all) test that
+// still got hit with an instant idle-to-near-max thrust snap. outerloop.c
+// (produces RateDesired.Thrust from StabilizationDesired.Thrust) and
+// innerloop.c (consumes RateDesired.Thrust, CRITICAL priority, gyro-
+// triggered at ~500Hz) both used to share CALLBACK_TASK_FLIGHTCONTROL,
+// outerloop.c at only REGULAR priority. Confirmed via innerloop.c's own
+// rateupdates watchdog counter (already-existing code, see innerloop.c)
+// collapsing to its floor within ~3s of boot and staying there - NOT a
+// persistent starvation though (confirmed: the instant AttitudeState
+// updates resumed flowing after a separate ~12s gap near an arm
+// transition, rateupdates recovered from -64 to -6 in a single sample and
+// stayed healthy for the rest of the test) - but a real, reproducible
+// worst-case risk under sustained CRITICAL load in FLIGHTCONTROL
+// regardless. Placed above FlightControl for the same producer-must-
+// outrank-consumer reason as StateEstimation above AltitudeHold -
+// innerloop.c (the consumer, still correctly CRITICAL-priority inside
+// FlightControl - it's a genuinely fast, latency-sensitive loop and
+// shouldn't move) must never be able to starve outerloop.c (the
+// producer) from getting a chance to run at all.
 typedef enum {
-    CALLBACK_TASK_AUXILIARY        = (tskIDLE_PRIORITY + 1),
-    CALLBACK_TASK_NAVIGATION       = (tskIDLE_PRIORITY + 2),
-    CALLBACK_TASK_FLIGHTCONTROL    = (tskIDLE_PRIORITY + 3),
-    CALLBACK_TASK_ALTITUDEHOLD     = (tskIDLE_PRIORITY + 4),
-    CALLBACK_TASK_STATEESTIMATION  = (tskIDLE_PRIORITY + 5),
-    CALLBACK_TASK_DEVICEDRIVER     = (tskIDLE_PRIORITY + 6),
+    CALLBACK_TASK_AUXILIARY               = (tskIDLE_PRIORITY + 1),
+    CALLBACK_TASK_NAVIGATION              = (tskIDLE_PRIORITY + 2),
+    CALLBACK_TASK_FLIGHTCONTROL           = (tskIDLE_PRIORITY + 3),
+    CALLBACK_TASK_STABILIZATIONOUTERLOOP  = (tskIDLE_PRIORITY + 4),
+    CALLBACK_TASK_ALTITUDEHOLD            = (tskIDLE_PRIORITY + 5),
+    CALLBACK_TASK_STATEESTIMATION         = (tskIDLE_PRIORITY + 6),
+    CALLBACK_TASK_DEVICEDRIVER            = (tskIDLE_PRIORITY + 7),
 } DelayedCallbackPriorityTask;
 // Use the PriorityTask to define the global importance of callback execution
 // compared to other processes in the system.

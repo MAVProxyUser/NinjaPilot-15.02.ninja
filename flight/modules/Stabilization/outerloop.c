@@ -34,6 +34,7 @@
 #include <openpilot.h>
 #ifdef SIMPOSIX
 #include <stdio.h>
+#include <sys/time.h>
 #endif
 #include <pid.h>
 #include <callbackinfo.h>
@@ -82,7 +83,14 @@ void stabilizationOuterloopInit()
 
     PIOS_DELTATIME_Init(&timeval, UPDATE_EXPECTED, UPDATE_MIN, UPDATE_MAX, UPDATE_ALPHA);
 
-    callbackHandle = PIOS_CALLBACKSCHEDULER_Create(&stabilizationOuterloopTask, CALLBACK_PRIORITY, CBTASK_PRIORITY, CALLBACKINFO_RUNNING_STABILIZATION0, STACK_SIZE_BYTES);
+    // Its own dedicated task, NOT the shared CBTASK_PRIORITY (CALLBACK_TASK_FLIGHTCONTROL)
+    // that innerloop.c still correctly uses - see pios_callbackscheduler.h's
+    // CALLBACK_TASK_STABILIZATIONOUTERLOOP comment for why: this task
+    // (outerloop.c) is RateDesired.Thrust's producer, innerloop.c (still
+    // CRITICAL priority inside FlightControl, correctly so - it's a fast,
+    // gyro-triggered loop) is its consumer, and a consumer must never be
+    // able to starve its own producer of scheduler time.
+    callbackHandle = PIOS_CALLBACKSCHEDULER_Create(&stabilizationOuterloopTask, CALLBACK_PRIORITY, CALLBACK_TASK_STABILIZATIONOUTERLOOP, CALLBACKINFO_RUNNING_STABILIZATION0, STACK_SIZE_BYTES);
     AttitudeStateConnectCallback(AttitudeStateUpdatedCb);
 }
 
@@ -357,6 +365,23 @@ static void AttitudeStateUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
 {
     // to reduce CPU utilization, outer loop is not executed on every state update
     static uint8_t cpusaver = 0;
+
+#ifdef SIMPOSIX
+    {
+        static uint32_t callCount = 0;
+        static double lastPrint = 0.0;
+        struct timeval tv;
+        callCount++;
+        gettimeofday(&tv, NULL);
+        double wallclock = (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
+        if (callCount == 1 || wallclock - lastPrint > 0.5) {
+            lastPrint = wallclock;
+            printf("[SIMPOSIX-IFDEF-MARKER] outerloop.c AttitudeStateUpdatedCb: t=%.3f callCount=%u\n",
+                   wallclock, (unsigned)callCount);
+            fflush(stdout);
+        }
+    }
+#endif
 
     if ((cpusaver++ % OUTERLOOP_SKIPCOUNT) == 0) {
         // this does not need mutex protection as both eventdispatcher and stabi run in same callback task!

@@ -28,7 +28,7 @@
 #define configUSE_MALLOC_FAILED_HOOK                 1
 #define configCPU_CLOCK_HZ                           72000000
 #define configTICK_RATE_HZ                           1000
-#define configMAX_PRIORITIES                         7  /* was 5 - bumped for CALLBACK_TASK_STATEESTIMATION and CALLBACK_TASK_ALTITUDEHOLD, see pios_callbackscheduler.h */
+#define configMAX_PRIORITIES                         8  /* was 7 - bumped again for CALLBACK_TASK_STABILIZATIONOUTERLOOP, see pios_callbackscheduler.h */
 #define configMINIMAL_STACK_SIZE                     48
 #define configTOTAL_HEAP_SIZE                        (54 * 256)
 #define configMAX_TASK_NAME_LEN                      (16)

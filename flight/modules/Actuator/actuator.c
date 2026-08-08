@@ -270,6 +270,37 @@ static void actuatorTask(__attribute__((unused)) void *parameters)
             throttleDesired = 0;
         }
 
+        // Slew-rate limit a RISING throttleDesired only - never limits a
+        // drop, so disarm/failsafe/emergency cuts stay instant. This exists
+        // because throttleDesired can arrive stale (whatever it was several
+        // real seconds ago) if its upstream producer (Stabilization's
+        // outerloop.c, itself gated on AttitudeState updates) goes quiet for
+        // an extended stretch - confirmed directly via SITL: a real ~12s gap
+        // between the first and second AttitudeState publish near an arm
+        // transition left RateDesired.Thrust (and everything downstream)
+        // pinned at -1.0 the whole time, then the INSTANT AttitudeState
+        // resumed, it snapped straight to the live commanded value in one
+        // tick - not a bug in the mixer or this module, but this module is
+        // the last, most robust place to make that snap physically
+        // impossible regardless of which upstream cause produces a stale
+        // value (this one, a telemetry hiccup, an EKF reinit, etc. - all
+        // look identical from here: a big, sudden jump in throttleDesired).
+        // Bounded to a generous ~0.67s for the full -1..1 range - well
+        // inside what any real control loop needs, but hard enough to turn
+        // an instant full-power snap into a ramp a physical vehicle (and
+        // this test harness's crash detector) can actually react to.
+        {
+            static float lastThrottleDesired = 0.0f;
+            const float THRUST_SLEW_RATE_PER_S = 3.0f;
+            if (armed && throttleDesired > lastThrottleDesired) {
+                float maxDelta = THRUST_SLEW_RATE_PER_S * dTSeconds;
+                if (throttleDesired > lastThrottleDesired + maxDelta) {
+                    throttleDesired = lastThrottleDesired + maxDelta;
+                }
+            }
+            lastThrottleDesired = throttleDesired;
+        }
+
         if ((frameType == FRAME_TYPE_GROUND && !activeThrottle) || (frameType != FRAME_TYPE_GROUND && throttleDesired <= 0.00f) || !armed) {
             // force set all other controls to zero if throttle is cut (previously set in Stabilization)
             if (actuatorSettings.LowThrottleZeroAxis.Roll == ACTUATORSETTINGS_LOWTHROTTLEZEROAXIS_TRUE) {

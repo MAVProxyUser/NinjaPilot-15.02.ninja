@@ -50,6 +50,11 @@
 #include <virtualflybar.h>
 #include <cruisecontrol.h>
 
+#ifdef SIMPOSIX
+#include <stdio.h>
+#include <sys/time.h>
+#endif
+
 // Private constants
 
 #define CALLBACK_PRIORITY CALLBACK_PRIORITY_CRITICAL
@@ -229,6 +234,21 @@ static void stabilizationInnerloopTask()
             // critical if we missed 3 gyro updates
             crit = true;
         }
+#ifdef SIMPOSIX
+        {
+            static double lastMonPrint = 0.0;
+            struct timeval tvm;
+            gettimeofday(&tvm, NULL);
+            double wcm = (double)tvm.tv_sec + (double)tvm.tv_usec / 1e6;
+            if (wcm - lastMonPrint > 0.5) {
+                lastMonPrint = wcm;
+                printf("[SIMPOSIX-IFDEF-MARKER] innerloop.c watchdog: t=%.3f gyroupdates=%d rateupdates=%d "
+                       "warn=%d error=%d crit=%d\n", wcm, (int)stabSettings.monitor.gyroupdates,
+                       (int)stabSettings.monitor.rateupdates, (int)warn, (int)error, (int)crit);
+                fflush(stdout);
+            }
+        }
+#endif
         stabSettings.monitor.gyroupdates = 0;
 
         if (crit) {
@@ -337,6 +357,35 @@ static void stabilizationInnerloopTask()
     
     actuator.UpdateTime = dT * 1000;
 
+#ifdef SIMPOSIX
+    {
+        static bool lastGateOpen = false;
+        bool gateOpen = (cchain.Stabilization == FLIGHTSTATUS_CONTROLCHAIN_TRUE);
+        if (gateOpen != lastGateOpen) {
+            lastGateOpen = gateOpen;
+            struct timeval tv;
+            gettimeofday(&tv, NULL);
+            double wallclock = (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
+            printf("[SIMPOSIX-IFDEF-MARKER] innerloop.c cchain.Stabilization gate CHANGED: t=%.3f gateOpen=%d "
+                   "actuator.Thrust=%.4f\n", wallclock, (int)gateOpen, (double)actuator.Thrust);
+            fflush(stdout);
+        }
+        static double lastPeriodicPrint = 0.0;
+        struct timeval tv2;
+        gettimeofday(&tv2, NULL);
+        double wallclock2 = (double)tv2.tv_sec + (double)tv2.tv_usec / 1e6;
+        if (wallclock2 - lastPeriodicPrint > 0.5) {
+            lastPeriodicPrint = wallclock2;
+            printf("[SIMPOSIX-IFDEF-MARKER] innerloop.c PERIODIC: t=%.3f gateOpen=%d "
+                   "rateDesired.Thrust=%.4f actuatorDesiredAxis3_BEFORE_LOOP=%.4f actuator.Thrust_BEFORE_LOOP=%.4f "
+                   "InnerLoop[3]=%d OuterLoop_n/a StabMode3=%d\n",
+                   wallclock2, (int)gateOpen, (double)rateDesired.Thrust, (double)actuatorDesiredAxis[3],
+                   (double)actuator.Thrust, (int)StabilizationStatusInnerLoopToArray(enabled)[3],
+                   (int)previous_mode[3]);
+            fflush(stdout);
+        }
+    }
+#endif
     if (cchain.Stabilization == FLIGHTSTATUS_CONTROLCHAIN_TRUE) {
         ActuatorDesiredSet(&actuator);
     } else {
