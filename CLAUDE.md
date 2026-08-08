@@ -187,23 +187,40 @@ d45aa42f5, b8999ec7f carry full detail):
   ~56ms-2s, blinding the velocity fast-path and causing the vario
   overshoot they were meant to prevent).
 
-STILL OPEN:
-- **PositionHold (3D GPS)**: engages, then descends slowly into the
-  ground and tips over. Precisely characterized: PathFollower's vertical
-  velocity PID trusts VelocityState, which reported a real ~0.3-0.5 m/s
-  descent as arrested (residual complementary-filter velocity lag -
-  tolerable to the vario/hold loops, fatal to PathFollower's tighter
-  loop). This is exactly the scenario the V1-V4 vertical-filter
-  comparison exists for - re-run it on the now-clean sensor data; V3
-  (real 3-state Kalman, worktree ../NinjaPilot-alt-v3-kalman) is the
-  most promising candidate.
+**3D GPS POSITIONHOLD: WORKING** (commit 77ac78e73, 2026-08-08 late
+session). 60s dedicated hold: max lateral error 0.04m, steady-state
+altitude +/-0.05m; full scripted sequence passes end-to-end genuinely
+airborne (ground-truth-verified). The three fixes that got there, in
+order of discovery:
+- V3 Kalman vertical filter ported to main (covariance-derived baro
+  gain replacing BaroKp/BaroKp^2).
+- **The 90-degree yaw frame error** (the lateral-spiral root cause):
+  Gazebo ENU zero-rotation spawn faces EAST; measuring HomeLocation.Be
+  in the body frame at spawn defined yaw=0 as east while GPS/NED uses
+  true north - PathFollower rotated every correction ~90deg (positive
+  feedback, gain-independent divergence). Fixed: world SDF spawns
+  facing true north AND Be now derives from the world <magnetic_field>
+  ENU->NED (never trust spawn attitude for a world reference).
+- VtolPathFollowerSettings.FlyawayEmergencyFallback DISABLED for sim
+  (course-error criterion is numerical noise at zero-velocity hover;
+  false-tripped a commanded 2.3 m/s descent after 35s of perfect hold).
+  Plus: neutral thrust 0.70 (measured), VerticalVelPID 0.6/0.45,
+  horizontal cascade detuned for 10Hz GPS feedback, attitude P back to
+  stock 2.5.
+- `NINJAPILOT_TEST_MODE=poshold` = fast (~2min) PositionHold iteration
+  test with real ground-truth pass criteria.
+
+STILL OPEN (quality-of-life, not blockers):
+- The full outdoor EKF (INS13) attitude degrades in flight on sim-clean
+  sensors (covariance sanity resets; EKFConfiguration Q/R expect real
+  sensor noise) - its own tuning project if ever wanted here.
 - The exact defective line in the 16-byte multi-read path (com fifo
   boundary handling) was bypassed by the big single read, not isolated -
   worth a targeted dig someday.
 - Extensive `[SIMPOSIX-IFDEF-MARKER]` debug prints remain scattered in
   stateestimation.c, filteraltitude.c, altitudeloop.c, innerloop.c,
   outerloop.c, uavobjectmanager.c, pios_callbackscheduler.c, uavtalk.c,
-  pios_udp.c — promised cleanup once 3D hold is green.
+  pios_udp.c — now eligible for cleanup (3D hold is green).
 
 ## Estimator findings that ARE real (fixed earlier, keep)
 
