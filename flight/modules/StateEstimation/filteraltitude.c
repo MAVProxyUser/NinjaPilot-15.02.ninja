@@ -357,7 +357,16 @@ static filterResult filter(stateFilter *self, stateEstimation *state)
 #ifdef SIMPOSIX
             float velBefore = this->velocityState;
 #endif
-            this->velocityState = (1.0f - (this->settings.BaroKp * this->settings.BaroKp)) * this->velocityState + (this->settings.BaroKp * this->settings.BaroKp) * (state->baro[0] - this->baroLast) / dT;
+            // V1 EXPERIMENT: the original code used beta = BaroKp^2 for the
+            // velocity-correction gain, an approximation of the canonical
+            // Benedict & Bordner (1962) critically-damped alpha-beta (g-h)
+            // filter relation beta = alpha^2 / (2 - alpha). For a small
+            // alpha (BaroKp default 0.04) the two are numerically close
+            // (0.0016 vs 0.001633), so this is not expected to meaningfully
+            // change behavior on its own - testing empirically rather than
+            // assuming.
+            float betaGain = (this->settings.BaroKp * this->settings.BaroKp) / (2.0f - this->settings.BaroKp);
+            this->velocityState = (1.0f - betaGain) * this->velocityState + betaGain * (state->baro[0] - this->baroLast) / dT;
 #ifdef SIMPOSIX
             // A single baro-diff step producing a multi-m/s velocityState jump is
             // the suspected mechanism behind the PositionState.Down flyaway
