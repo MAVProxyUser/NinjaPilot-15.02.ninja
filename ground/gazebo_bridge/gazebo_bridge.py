@@ -42,6 +42,14 @@ import board_orientation_viz as bov
 # are unaffected - those are low-frequency and always worth seeing.
 VERBOSE = os.environ.get("NINJAPILOT_VERBOSE", "0") == "1"
 
+# NINJAPILOT_TEST_MODE=manual_hover runs manual_hover_test() instead of the
+# scripted run_test_sequence() - see manual_hover_test()'s own docstring for
+# why this exists (isolating "can the physical vehicle actually be flown to
+# and held at a real height at all" from "does the flight controller's own
+# state estimator/hold-mode logic work", since the latter was found to be
+# broken independent of which vertical-channel filter algorithm is used).
+TEST_MODE = os.environ.get("NINJAPILOT_TEST_MODE", "scripted")
+
 import gz.transport13 as transport
 from gz.msgs10.pose_v_pb2 import Pose_V
 from gz.msgs10.actuators_pb2 import Actuators
@@ -168,6 +176,8 @@ class VehicleState(object):
         self.have_pose = False
         self.have_imu = False
         self.have_navsat = False
+        self._pose_t_last = 0.0
+        self.pose_vel_d = 0.0
         self.pos_ned = (0.0, 0.0, 0.0)
         self.quat_ned = (1.0, 0.0, 0.0, 0.0)
         self.accel_body = (0.0, 0.0, -GRAV)
@@ -183,6 +193,17 @@ class VehicleState(object):
 
     def update_from_pose(self, t, pos_ned, quat_ned):
         with self.lock:
+            # Pose-derived vertical rate (lightly low-passed) - the pose
+            # topic is the FASTEST ground-truth feed available. The navsat
+            # velocity (gps_vel_ned) only updates at 10Hz, and using it as
+            # the damping/rate feedback in the manual-hover controller
+            # produced a classic delayed-feedback oscillation (vehicle
+            # yo-yoing 0.7-11.5m with correct-per-sample commands).
+            if self.have_pose and t > self._pose_t_last:
+                dt = t - self._pose_t_last
+                raw = (pos_ned[2] - self.pos_ned[2]) / dt
+                self.pose_vel_d = 0.7 * self.pose_vel_d + 0.3 * raw
+            self._pose_t_last = t
             self.pos_ned = pos_ned
             self.quat_ned = quat_ned
             self.have_pose = True
@@ -227,6 +248,14 @@ class VehicleState(object):
     def baro_snapshot(self):
         with self.lock:
             return (self.have_baro, self.baro_alt)
+
+    def pose_alt_climb(self):
+        """(have_pose, altitude_up_m, climb_rate_up_mps) - both derived
+        from the fast pose topic (climb rate low-passed), NOT the 10Hz
+        navsat velocity. Use this for any closed-loop control done bridge-
+        side; the navsat feed's latency destabilizes rate feedback."""
+        with self.lock:
+            return (self.have_pose, -self.pos_ned[2], -self.pose_vel_d)
 
 
 state = VehicleState()
@@ -840,11 +869,62 @@ def vario_climb_and_hold(target_alt_m, mode_position, mode_label, hold_seconds, 
     return wait_with_crash_check(hold_seconds, f"{mode_label} hold")
 
 
+def wait_for_attitude_ok(timeout=90.0, stable_seconds=1.0):
+    """Block until SystemAlarms.Attitude reads 'OK' and stays there for
+    stable_seconds. This is the arming gate a real pilot gets for free
+    from the GCS alarm display and okToArm(): filtercf.c deliberately
+    suppresses ALL AttitudeState output for CALIBRATION_DELAY_MS (4s,
+    returns ERROR) + CALIBRATION_DURATION_MS (6s of gyro-bias zeroing,
+    returns CRITICAL) after every filter-chain init - and chain inits
+    STACK (boot default chain, then the RevoSettings fusion-algorithm
+    change from send_config(), then the HomeLocation write re-init each
+    restart the clock). With no AttitudeState updates, outerloop.c is
+    never dispatched (it is AttitudeState-event-driven), RateDesired
+    stays stale, and ActuatorCommand sits at idle regardless of throttle
+    - arming and commanding a climb inside that window is what produced
+    the "vehicle ignores throttle for ~12s then snaps to near-max"
+    behavior. This bridge force-arms via Arming="Always Armed", which
+    bypasses okToArm()'s alarm check - so the contract real hardware
+    enforces must be honored here explicitly instead.
+
+    Returns True when ready, False on timeout (callers should abort the
+    test rather than arm blind)."""
+    deadline = time.time() + timeout
+    ok_since = None
+    last_progress = 0.0
+    att_idx = ALARM_NAMES.index("Attitude")
+    while time.time() < deadline:
+        alarms = _last_alarms[0]
+        att = alarms[att_idx] if alarms is not None else None
+        if att == "OK":
+            if ok_since is None:
+                ok_since = time.time()
+            elif time.time() - ok_since >= stable_seconds:
+                print(f"[test] attitude estimator ready (Attitude alarm OK for {stable_seconds:.0f}s)")
+                return True
+        else:
+            ok_since = None
+        now = time.time()
+        if now - last_progress > 5.0:
+            last_progress = now
+            print(f"[test] waiting for attitude estimator... (Attitude alarm: {att})", flush=True)
+        time.sleep(0.25)
+    alarms = _last_alarms[0]
+    att = alarms[att_idx] if alarms is not None else "never reported"
+    print(f"[test] ERROR: attitude estimator not ready after {timeout:.0f}s (Attitude alarm: {att}) - aborting")
+    return False
+
+
 def run_test_sequence():
     """Simple scripted acceptance test: arm, ramp to a hover throttle, hold,
     then hand off to PositionHold (Alt via CruiseControl + GPS position)."""
     print("[test] waiting 3s for link + config to settle...")
     time.sleep(3.0)
+
+    # Do not arm during filtercf.c's calibration window - see
+    # wait_for_attitude_ok's docstring for the whole story.
+    if not wait_for_attitude_ok():
+        return
 
     print("[test] arming (throttle must be at idle for the arm gesture)")
     control.throttle = 0.0
@@ -888,6 +968,14 @@ def run_test_sequence():
     # why a plain disarm/rearm doesn't fix this on its own.
     print("[test] resetting state estimator before climbing further...")
     reset_estimator()
+    # reset_estimator() toggles FusionAlgorithm, which re-inits the whole
+    # filter chain - filtercf.c restarts its full calibration window
+    # (4s silent + 6s bias zeroing, NO AttitudeState output the whole
+    # time, so outerloop/thrust are dead - see wait_for_attitude_ok).
+    # Re-arming and climbing before that window closes is flying blind
+    # into the exact dead-zone this gate exists to prevent.
+    if not wait_for_attitude_ok():
+        return
     control.mode_position = 0  # Stabilization1Settings = Thrust=Manual, for the arm gesture below
     control.throttle = 0.0
     control.armed = True
@@ -941,6 +1029,139 @@ def run_test_sequence():
     # this is a normal, planned end of test.
     land()
     print("[test] sequence done")
+
+
+def manual_hover_test():
+    """Foundation-block sanity check, deliberately independent of the flight
+    controller's own state estimator/hold-mode logic: arm in raw-manual-
+    throttle mode (Stabilization1Settings = Attitude/Attitude/AxisLock/
+    Manual, control.mode_position=0 - self-leveling only, no altitude
+    logic in the flight code at all), then run a simple P+I controller
+    HERE, in Python, using Gazebo's own ground-truth pose (state.snapshot())
+    as feedback - never PositionState/VelocityState - to climb to and hold
+    10m, then 20m.
+
+    This exists because run_test_sequence()'s AltitudeVario/AltitudeHold-
+    based climbs all crash the same way regardless of which of the 4
+    vertical-channel estimator algorithms is running (see the V1-V4
+    comparison), and filteraltitude.c's own altitudeState was independently
+    confirmed to sit near 0 while ground truth climbed well past it - i.e.
+    the estimator, not the vehicle/physics/motor pipeline, is suspect. If
+    this manual/ground-truth-driven hover ALSO can't hold height, the bug is
+    in thrust/physics, not the estimator, and every hour spent on filter
+    algorithms this session was pointed at the wrong layer. If it CAN hold
+    height cleanly, that's confirmed and isolated: the actuator/physics
+    chain is sound, and 100% of the remaining problem is state estimation."""
+    print("[test] manual_hover_test: waiting 3s for link + config to settle...")
+    time.sleep(3.0)
+
+    # Same arming gate as run_test_sequence - see wait_for_attitude_ok's
+    # docstring. Manual thrust mode doesn't need the estimator to FLY,
+    # but outerloop.c (which forwards even Manual thrust into RateDesired)
+    # is AttitudeState-event-driven and never runs while filtercf.c is
+    # calibrating - throttle is dead until this gate opens.
+    if not wait_for_attitude_ok():
+        return
+
+    print("[test] manual_hover_test: arming (raw manual throttle, no hold mode)")
+    control.mode_position = 0  # Stabilization1Settings = Attitude/Attitude/AxisLock/Manual
+    control.throttle = 0.0
+    control.armed = True
+    time.sleep(2.0)
+
+    # Safety net independent of RUNAWAY_ALTITUDE_M (that 8m ceiling is
+    # calibrated for the scripted test's much lower targets - it would
+    # immediately misfire against a deliberate 10m/20m target here).
+    HARD_CEILING_M = 25.0
+
+    # Cascaded altitude controller - the standard structure, replacing an
+    # earlier flat P+I+D that was confirmed unstable in a real run (bang-
+    # bang throttle between its cap and mid-range, one deep descent
+    # excursion it could not arrest because the same cap that limited
+    # climb also limited RECOVERY authority - the vehicle hit the ground
+    # at 3.8 m/s with throttle pinned at the cap, bounced, tilted, and
+    # flipped). Outer loop: altitude error -> desired climb rate,
+    # asymmetric limits (climb gently, never command a fast descent).
+    # Inner loop: climb-rate error -> throttle about hover. Naturally
+    # damped (rate feedback IS the damping), no integrator to wind up,
+    # and full 0.90 authority available whenever arresting a descent.
+    RATE_KP        = 0.4    # (m/s) desired per meter of altitude error
+    MAX_CLIMB_MPS  = 1.5
+    MAX_DESCENT_MPS = 0.8
+    THR_PER_MPS    = 0.15   # throttle per (m/s) of climb-rate error
+    # Throttle envelope [0.45, 0.80], deliberately narrow around hover
+    # (0.68): at 0.90 collective the mixer has almost no differential
+    # headroom left for roll/pitch torque - confirmed live, every violent
+    # excursion in the previous run coincided with a 0.90-throttle
+    # command, ending in a 70-degree pitch-over the firmware SAW (its own
+    # AttitudeState reported it) but physically could not correct.
+    # Attitude authority beats vertical tracking speed, always.
+    THR_MIN = 0.45
+    THR_MAX = 0.80
+
+    def hold_altitude(target_m, hold_seconds, label, climb_timeout=30.0):
+        """Climb to target_m, then hold for hold_seconds. FAILS (returns
+        False, cuts throttle, disarms) on: hard ceiling, a crash/tilt-over
+        (flight controller's own attitude - a flipped vehicle 'holding'
+        0m forever was scored as a pass by an earlier version of this
+        test), or not reaching the target within climb_timeout (a
+        vacuous timeout is a FAIL, not a hold)."""
+        start = time.time()
+        reached_at = None
+        print(f"[test] manual_hover_test: climbing to {target_m:.0f}m via cascaded rate controller "
+              f"(ground-truth feedback only)...")
+        last_log = 0.0
+        while True:
+            now = time.time()
+            have_pose, alt, climb_rate = state.pose_alt_climb()
+            if not have_pose:
+                alt = climb_rate = 0.0
+            if alt > HARD_CEILING_M:
+                print(f"[test] manual_hover_test: FAIL - hard ceiling {HARD_CEILING_M:.0f}m exceeded "
+                      f"(alt={alt:.2f}m) - cutting throttle and disarming")
+                control.throttle = 0.0
+                control.armed = False
+                return False
+            have_att, roll, pitch, _, _ = fc_state.snapshot()
+            if have_att and (abs(roll) > 60.0 or abs(pitch) > 60.0):
+                print(f"[test] manual_hover_test: FAIL - tilt-over roll={roll:.1f} pitch={pitch:.1f} "
+                      f"at alt={alt:.2f}m - cutting throttle and disarming")
+                control.throttle = 0.0
+                control.armed = False
+                return False
+            if reached_at is None:
+                if abs(target_m - alt) < 1.0:
+                    reached_at = now
+                    print(f"[test] manual_hover_test: {label} reached {alt:.2f}m - holding {hold_seconds:.0f}s")
+                elif now - start > climb_timeout:
+                    print(f"[test] manual_hover_test: FAIL - never reached {target_m:.0f}m within "
+                          f"{climb_timeout:.0f}s (alt={alt:.2f}m) - cutting throttle and disarming")
+                    control.throttle = 0.0
+                    control.armed = False
+                    return False
+            elif now - reached_at >= hold_seconds:
+                print(f"[test] manual_hover_test: {label} hold complete (alt={alt:.2f}m)")
+                return True
+
+            desired_rate = max(-MAX_DESCENT_MPS, min(MAX_CLIMB_MPS, RATE_KP * (target_m - alt)))
+            control.throttle = max(THR_MIN, min(THR_MAX, HOVER_THRUST + THR_PER_MPS * (desired_rate - climb_rate)))
+            if now - last_log > 1.0:
+                last_log = now
+                print(f"[test] manual_hover_test: {label} alt={alt:.3f}m target={target_m:.1f}m "
+                      f"climb_rate={climb_rate:.3f} desired_rate={desired_rate:.3f} "
+                      f"throttle={control.throttle:.3f}", flush=True)
+            # 20Hz - every 100ms of pure loop latency was measurable phase
+            # lag in the earlier oscillating versions of this controller.
+            time.sleep(0.05)
+
+    if not hold_altitude(10.0, 45.0, "10m hover"):
+        return
+    if not hold_altitude(20.0, 45.0, "20m hover"):
+        return
+
+    print("[test] manual_hover_test: both holds completed - landing")
+    land()
+    print("[test] manual_hover_test: sequence done")
 
 
 # ---------------------------------------------------------------------------
@@ -1172,7 +1393,20 @@ def uavtalk_thread():
             "RollRatePID": [0.0030, 0.0065, 0.000033, 0.3],
             "PitchRatePID": [0.0030, 0.0065, 0.000033, 0.3],
             "YawRatePID": [0.00620, 0.01000, 0.00005, 0.3],
-            "RollPI": [2.5, 0, 50], "PitchPI": [2.5, 0, 50],
+            # Outer attitude P halved from the stock 2.5: with the
+            # transport layer now verified fresh (1ms-bounded RX, full-rate
+            # AttitudeState - conditions the earlier "tuning didn't help"
+            # experiments never had), a clean, reproducible ~0.5Hz DIVERGENT
+            # pitch oscillation remained after ~40s of otherwise rock-solid
+            # hover (amplitude doubling per cycle: 1.8->3.4->8.2->19->38->84
+            # deg, confirmed in AttitudeState telemetry). That slow
+            # frequency is outer-loop timescale: attitude P at 2.5 is
+            # overdriving a rate loop that is genuinely sluggish on the X3
+            # (far higher moment of inertia than the small quads the stock
+            # defaults target). Halving outer P trades attitude snappiness
+            # for stability margin - the correct direction for a larger
+            # airframe, and the same knob a real pilot would turn first.
+            "RollPI": [1.2, 0, 50], "PitchPI": [1.2, 0, 50],
             "YawPI": [2.5, 0, 50],
             "AcroInsanityFactor": 0.4,
             "ThrustPIDScaleCurve": [0.3, 0.15, 0, -0.15, -0.3],
@@ -1187,7 +1421,8 @@ def uavtalk_thread():
     def on_connected():
         send_config()
         configured["done"] = True
-        threading.Thread(target=run_test_sequence, daemon=True).start()
+        target = manual_hover_test if TEST_MODE == "manual_hover" else run_test_sequence
+        threading.Thread(target=target, daemon=True).start()
 
     def on_object(objdef, inst_id, decoded):
         ts = time.time()
@@ -1374,7 +1609,21 @@ def uavtalk_thread():
                 # real send happens in between even within the same tick -
                 # genuine separation, not just a different modulo on
                 # otherwise-adjacent calls.
-                if have_pose and i % 2 == 0:
+                # Every tick, not alternate ticks: the transport fix that
+                # matters is the SEPARATED send position (a real send sits
+                # between Gyro and Accel), not the halved rate - and the
+                # halved rate had real collateral damage: filtercf.c only
+                # publishes AttitudeState on gyro ticks where accel was
+                # ALSO seen, so accel at 250Hz halved AttitudeState to
+                # ~250Hz, which (a) halves the outerloop dispatch rate
+                # (AttitudeState-gated, 1-in-OUTERLOOP_SKIPCOUNT) and
+                # (b) sits innerloop.c's rateupdates watchdog exactly at
+                # its warn/critical edge (its thresholds assume attitude
+                # tracks the 500Hz gyro rate), producing a constantly
+                # flapping Stabilization alarm. The firmware-side UDP RX
+                # drain-per-tick fix (pios_udp.c) removed the backlog
+                # concern that motivated rate reduction in the first place.
+                if have_pose:
                     publish_accel(client, accel_body)
 
                 # CORRECTION to an earlier theory in this investigation:
