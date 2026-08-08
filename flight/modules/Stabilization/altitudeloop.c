@@ -29,6 +29,7 @@
 #include <openpilot.h>
 #ifdef SIMPOSIX
 #include <stdio.h>
+#include <sys/time.h>
 #endif
 
 #include <callbackinfo.h>
@@ -238,8 +239,15 @@ static void altitudeHoldTask(void)
         static int callCount = 0;
         callCount++;
         if (callCount % 100 == 0) {
-            printf("[althold] mode=%d posDown=%.4f velDown=%.4f dT=%.5f thrustSetpoint=%.4f startThrust=%.4f VelocityDesired=%.4f thrustDemand=%.4f\n",
-                   (int)thrustMode, (double)positionStateDown, (double)velocityStateDown, (double)dT,
+            // Real wall-clock time - see filteraltitude.c's accel-integrator
+            // print for why this was added (correlating C-side traces
+            // against the bridge's own time.time()-stamped logs turned out
+            // to need more than file-order/call-count alone).
+            struct timeval tv;
+            gettimeofday(&tv, NULL);
+            double wallclock = (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
+            printf("[althold] t=%.3f mode=%d posDown=%.4f velDown=%.4f dT=%.5f thrustSetpoint=%.4f startThrust=%.4f VelocityDesired=%.4f thrustDemand=%.4f\n",
+                   wallclock, (int)thrustMode, (double)positionStateDown, (double)velocityStateDown, (double)dT,
                    (double)thrustSetpoint, (double)startThrust, (double)altitudeHoldStatus.VelocityDesired, (double)thrustDemand);
             fflush(stdout);
         }

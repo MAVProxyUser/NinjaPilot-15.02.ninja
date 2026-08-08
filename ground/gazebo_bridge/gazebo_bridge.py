@@ -340,6 +340,37 @@ def on_air_pressure(msg):
     altitude = 44330.0 * (1.0 - (msg.pressure / 101325.0) ** (1.0 / 5.255))
     state.update_from_baro(altitude)
     now = time.time()
+    # Unconditional (no 0.5s print-throttle) call counter - confirmed via a
+    # real run that the THROTTLED [barodbg] print landed at an almost
+    # exactly-0.5s cadence for the entire ~6 minute test, every single
+    # time, which only tells us the print gate works, not how often this
+    # callback itself actually fires or whether msg.pressure is tracking
+    # real altitude. A real run also showed this printed altitude frozen
+    # bit-for-bit (pressure_pa=101324.34 repeated 5x) for 2+ real seconds
+    # while ActuatorCommand was pegged near-max and ground-truth pose
+    # (ground truth /pose/info topic, separate subscription) showed the
+    # vehicle actually climbing toward an 8m runaway - i.e. the flight
+    # code's own baro-driven altitude estimate was stuck reporting ground
+    # level while the real vehicle kept climbing under the resulting
+    # sustained high thrust. This counter plus an un-throttled periodic
+    # comparison against ground-truth pose altitude (state.snapshot(), the
+    # SAME independent pose subscription used for climb_rate/check_crash)
+    # is here to determine whether that's (a) this callback genuinely not
+    # firing often/at all during sustained climbs (a Gazebo transport/
+    # threading stall specific to this topic), or (b) firing normally but
+    # with a msg.pressure value that itself isn't tracking real altitude
+    # (a Gazebo air_pressure sensor plugin bug) - the existing 0.5s-gated
+    # print alone can't distinguish these.
+    _baro_call_count[0] += 1
+    if now - _last_baro_diag[0] > 1.0:
+        _last_baro_diag[0] = now
+        have_pose, pos_ned, _, _, _, _ = state.snapshot()
+        truth_alt = -pos_ned[2] if have_pose else float("nan")
+        if VERBOSE:
+            print(f"[barodiag] t={now:.2f} calls_since_last={_baro_call_count[0] - _baro_call_count[1]} "
+                  f"pressure_pa={msg.pressure:.2f} baro_alt={altitude:.4f} truth_alt={truth_alt:.4f} "
+                  f"delta={altitude - truth_alt:.4f}", flush=True)
+        _baro_call_count[1] = _baro_call_count[0]
     if now - _last_baro_dbg[0] > 0.5:
         if VERBOSE:
             print(f"[barodbg] t={now:.2f} pressure_pa={msg.pressure:.2f} altitude={altitude:.4f}", flush=True)
@@ -347,6 +378,8 @@ def on_air_pressure(msg):
 
 
 _last_baro_dbg = [0.0]
+_last_baro_diag = [0.0]
+_baro_call_count = [0, 0]  # [total, count at last diag print]
 
 
 
@@ -369,6 +402,12 @@ class ControlState(object):
         self.armed = False
         self.throttle = 0.0
         self.mode_position = 0  # Stabilized1
+        # See reset_estimator()'s own docstring for why this exists: a
+        # plain disarm/rearm does NOT reset filteraltitude.c's internal
+        # altitudeState/velocityState/accelBiasState - only a real
+        # RevoSettings.FusionAlgorithm value CHANGE (while disarmed) does,
+        # confirmed by reading stateestimation.c's own reinit gate.
+        self.request_estimator_reset = False
 
     def gcs_channels(self):
         throttle_us = int(round(1000 + self.throttle * 1000))
@@ -450,7 +489,7 @@ CRASH_ACCEL_G = 3.0
 # a fake one.
 CRASH_HEIGHT_M = 0.5
 # This test profile only ever intentionally targets 10ft (~3.05m, see
-# FEET_TO_M/climb_to() calls in run_test_sequence). Confirmed via a real
+# FEET_TO_M/vario_climb_and_hold() calls in run_test_sequence). Confirmed via a real
 # incident: PositionHold drove the vehicle to a genuine, ground-truth
 # 116m before losing control and crashing - this happened because nothing
 # was watching real altitude at all while airborne, only the on-the-ground
@@ -571,6 +610,30 @@ def emergency_land(reason):
     print("[test] recovery/descent finished, disarmed on the ground.")
 
 
+def reset_estimator(timeout=3.0):
+    """Disarm, force a real state-estimator reinit, leave disarmed (caller
+    re-arms). A plain disarm/rearm does NOT do this on its own: confirmed
+    by reading stateestimation.c's own StateEstimationCb() - the filter
+    chain only reinitializes (which is what actually zeros
+    filteraltitude.c's accumulated altitudeState/velocityState/
+    accelBiasState) when RevoSettings.FusionAlgorithm's VALUE changes
+    while disarmed, not merely on an arm-state transition. Confirmed
+    necessary by direct evidence: a real run had PositionState.Down stuck
+    at -5.444 (VelocityState.Down stuck at -1.633, motionless) for the
+    ENTIRE 10s "5ft hold" while real GPS/pose showed the vehicle sitting
+    stationary on the ground the whole time - the estimate had diverged
+    and, unlike a real gust or maneuver, was never going to correct
+    itself. Toggles through Basic (Complementary) and back rather than
+    just re-sending the target algorithm, since sending the SAME value
+    twice never produces the `!=` this depends on."""
+    control.armed = False
+    time.sleep(0.3)  # let the disarm actually land before requesting reinit
+    control.request_estimator_reset = True
+    deadline = time.time() + timeout
+    while control.request_estimator_reset and time.time() < deadline:
+        time.sleep(0.05)
+
+
 # health_widget.py polls this file rather than sharing a UAVTalk connection -
 # fw_simposix's posix telemetry link is a single UDP peer, so a second
 # independent client can't just attach alongside gazebo_bridge.py without
@@ -642,114 +705,138 @@ FEET_TO_M = 0.3048
 HOVER_THRUST = 0.68  # X3 hover point - see run_test_sequence's own comment on the 14.9N/21.9N math
 
 
-def climb_to(target_alt_m, max_time=20.0):
-    """Manual-throttle climb (mode_position must already be a Thrust=Manual
-    mode - Stabilization1Settings, the default) to target_alt_m of REAL
-    (ground-truth) altitude, actively braking (not just coasting at hover
-    thrust) as it nears the target so it doesn't overshoot under momentum.
-
-    An earlier version eased straight to HOVER_THRUST (zero net
-    acceleration - NOT deceleration) the instant it reached target
-    altitude, then just handed off to hold_at()'s settle-wait. That
-    doesn't stop a climb already in progress: real climb momentum built up
-    under the aggressive ramp-up throttle just carries the vehicle upward
-    in a straight line afterward (Newton's first law - hover thrust holds
-    velocity constant, it doesn't arrest it), and it can coast for meters
-    past the target before hold_at()'s settle-wait ever gets a chance to
-    matter. Confirmed directly: real GPS-confirmed altitude kept climbing
-    well past target while control.mode_position was STILL 0 (Manual),
-    before any hold mode had even engaged - which ruled out every
-    altitude-hold/state-estimator theory this investigation had chased up
-    to that point. Now brakes below hover thrust once real
-    vertical velocity indicates it's approaching the target, then holds
-    that brake until velocity is actually near zero, not just "target
-    altitude reached, hope it stops in time."
-    Returns True on success, False if a crash was handled mid-climb (caller
+def _wait_for_vertical_settle(mode_label, timeout=7.0):
+    """Poll until vertical velocity is near zero (or timeout), aborting via
+    emergency_land() on a crash. Shared by hold_at() and
+    enter_altitude_vario(): engaging a mode with real residual velocity
+    still present means stabilizationAltitudeHold()'s reinit captures a
+    real target position but zeros the PIDs (pid_zero(&pid0);
+    pid_zero(&pid1)) with no bumpless transfer for velocity at all - the
+    vehicle keeps moving under its own real momentum while the
+    freshly-zeroed PID has no idea, the same class of bug flagged for
+    PIDControlDown::Activate() elsewhere in this file. Returns
+    (ok, vel_down) - ok is False only if a crash was handled (caller
     should stop the sequence)."""
-    start_time = time.time()
-    control.throttle = HOVER_THRUST
-    braking = False
-    while time.time() - start_time < max_time:
-        have_pose, pos_ned, _, vel_ned, _, _ = state.snapshot()
-        alt = -pos_ned[2] if have_pose else 0.0
-        climb_rate = -vel_ned[2] if have_pose else 0.0  # positive = climbing
-        crashed, reason = check_crash()
-        if crashed:
-            emergency_land(f"climbing to {target_alt_m:.2f}m: {reason}")
-            return False
-
-        # Predictive: start braking once current altitude + a stopping-
-        # distance margin (proportional to climb rate) would carry it past
-        # target, not only once it's already there.
-        stopping_margin = max(0.0, climb_rate) * 1.0
-        if not braking and alt + stopping_margin >= target_alt_m:
-            braking = True
-
-        if braking:
-            if alt >= target_alt_m and abs(climb_rate) < 0.15:
-                break
-            # Proportional brake, not a near-hover nudge: an earlier
-            # version only cut to hover-0.06ish regardless of climb_rate,
-            # which measured as WAY too weak to actually decelerate - real
-            # data showed climb_rate climbing from 1.14 to 2.01 m/s the
-            # entire time "braking" was nominally active, overshooting the
-            # 8m safety ceiling on the climb to 10ft. Scaling the cut
-            # directly by climb_rate, and easing back toward (not below)
-            # HOVER_THRUST as climb_rate approaches zero, gives a real,
-            # continuously-responsive brake instead of a fixed weak one -
-            # and naturally stops braking once the climb is actually
-            # arrested, rather than staying locked at a hard cut that
-            # would itself overshoot into a descent.
-            control.throttle = min(HOVER_THRUST, max(0.2, HOVER_THRUST - 0.30 * climb_rate))
-        else:
-            # A bit more aggressive the further below target, easing off
-            # near it - not the fixed-ramp-then-hope-it's-airborne approach
-            # the original single-stage liftoff used, since this needs to
-            # reliably reach two different specific heights, not just
-            # clear the ground.
-            control.throttle = min(0.72, HOVER_THRUST + 0.04 + 0.02 * max(0.0, target_alt_m - alt))
-        if VERBOSE:
-            print(f"[climbdbg] alt={alt:.3f} climb_rate={climb_rate:.3f} braking={braking} throttle={control.throttle:.3f}", flush=True)
-        time.sleep(0.1)
-
-    ease_steps = 20
-    start_throttle = control.throttle
-    for i in range(ease_steps):
-        control.throttle = start_throttle + (HOVER_THRUST - start_throttle) * (i + 1) / ease_steps
-        time.sleep(0.1)
-    return True
-
-
-def hold_at(mode_position, mode_label, hold_seconds):
-    """Wait for vertical velocity to settle BEFORE engaging a hold mode,
-    then hold it. Engaging with real residual velocity still present means
-    stabilizationAltitudeHold()'s reinit captures a real target position
-    but zeros the PIDs (pid_zero(&pid0); pid_zero(&pid1)) with no bumpless
-    transfer for velocity at all - the vehicle keeps climbing under its own
-    real momentum while the freshly-zeroed PID has no idea, exactly the
-    "~150m+ climb-and-crash overshoot" class of bug already flagged for
-    PIDControlDown::Activate() elsewhere in this file. An earlier version
-    of this function switched modes FIRST and waited after - which this
-    docstring already claimed not to do - so every hold_at() call this
-    whole staged-altitude test made was hitting exactly that bug. Returns
-    True if the hold completed normally, False if a crash was handled
-    (caller should stop the sequence)."""
     print(f"[test] waiting for vertical velocity to settle before {mode_label}...")
     settled = False
-    for _ in range(70):  # up to 7s
+    vel_down = 0.0
+    for _ in range(int(timeout / 0.1)):
         _, _, _, vel_ned, _, _ = state.snapshot()
-        if abs(vel_ned[2]) < 0.3:
+        vel_down = vel_ned[2]
+        if abs(vel_down) < 0.3:
             settled = True
             break
         crashed, reason = check_crash()
         if crashed:
             emergency_land(f"waiting to settle before {mode_label}: {reason}")
-            return False
+            return False, vel_down
         time.sleep(0.1)
-    print(f"[test] vertical velocity wait ended: settled={settled} vel_down={vel_ned[2]:.3f}")
+    print(f"[test] vertical velocity wait ended: settled={settled} vel_down={vel_down:.3f}")
+    return True, vel_down
 
+
+def hold_at(mode_position, mode_label, hold_seconds):
+    """Wait for vertical velocity to settle, then switch flight mode and
+    hold. For mode transitions where the destination mode's own reinit is
+    responsible for capturing whatever it needs (e.g. PositionHold's
+    PathFollower auto-captures position on entry). Returns True if the
+    hold completed normally, False if a crash was handled (caller should
+    stop the sequence)."""
+    ok, _ = _wait_for_vertical_settle(mode_label)
+    if not ok:
+        return False
     print(f"[test] switching to {mode_label}")
     control.mode_position = mode_position
+    return wait_with_crash_check(hold_seconds, f"{mode_label} hold")
+
+
+DEADBAND_CENTER = 0.5  # altitudeloop.c: stick centered here = hold, not climb/descend
+VARIO_CLIMB_THROTTLE = 0.8  # comfortably above altitudeloop.c's DEADBAND_HIGH (0.6)
+
+
+def enter_altitude_vario(mode_position, mode_label):
+    """Switch into an AltitudeVario-thrust flight mode at deadband-center
+    throttle (0.5), so outerloop.c's reinit (which fires exactly once, on
+    this actual StabilizationMode transition - see outerloop.c's
+    `reinit = (...OuterLoop... != previous_mode[t])`) captures the CURRENT
+    PositionState.Down and holds it immediately, rather than inheriting
+    whatever control.throttle happened to be last set to. That matters
+    because if control.throttle was left above the ~0.6 deadband (e.g.
+    HOVER_THRUST=0.68, the value another flight mode like PositionHold's
+    CruiseControl thrust doesn't touch or reset), entering this mode would
+    make altitudeloop.c read it as a climb command instead of a hold the
+    instant it engages. Returns True normally, False if a crash was
+    handled while waiting to settle (caller should stop the sequence)."""
+    ok, _ = _wait_for_vertical_settle(mode_label)
+    if not ok:
+        return False
+    control.throttle = DEADBAND_CENTER
+    print(f"[test] switching to {mode_label}")
+    control.mode_position = mode_position
+    return True
+
+
+def vario_climb_and_hold(target_alt_m, mode_position, mode_label, hold_seconds, max_climb_time=25.0):
+    """Climb to target_alt_m and hold using the REAL flight-code altitude
+    control the entire time (flight/modules/Stabilization/altitudeloop.c's
+    stabilizationAltitudeHold(), STABILIZATIONDESIRED_STABILIZATIONMODE_
+    ALTITUDEVARIO) instead of a hand-rolled bridge-side throttle
+    controller. Engages the mode once via enter_altitude_vario() (deadband-
+    center throttle, captures current altitude and holds it), then pushes
+    the raw Thrust setpoint above the ~0.6 deadband to command a real
+    closed-loop climb, and brings it back to center once close to target
+    so the SAME flight code (still in the same StabilizationMode -
+    outerloop.c's reinit only fires on an actual mode transition, never on
+    this internal thrustMode toggle) captures the new altitude and holds
+    it, with continuous, bumpless PID state the whole time.
+
+    This replaces the old climb_to()/hold_at() pair, which did the ENTIRE
+    climb in a separate Thrust=Manual mode using hand-rolled Python
+    throttle math with no connection to the real altitude-hold PID at all
+    - meaning every climb-phase crash this test harness ever hit was a bug
+    in that bridge-side math, not in the flight code, and the flight
+    code's actual climb behavior was never being exercised, only its
+    ability to latch a static point it was handed already-reached. See
+    board_orientation_viz.py's Stabilization2Settings/Stabilization3Settings
+    comments for the AltitudeHold->AltitudeVario mode change this depends
+    on. Returns True if the hold completed normally, False if a crash was
+    handled (caller should stop the sequence)."""
+    if not enter_altitude_vario(mode_position, mode_label):
+        return False
+    time.sleep(1.5)  # let pid1's I-term find real hover thrust before commanding a climb
+    crashed, reason = check_crash()
+    if crashed:
+        emergency_land(f"stabilizing hover before climbing via {mode_label}: {reason}")
+        return False
+
+    print(f"[test] climbing to {target_alt_m:.2f}m via {mode_label} (real AltitudeVario)...")
+    start_time = time.time()
+    control.throttle = VARIO_CLIMB_THROTTLE
+    alt = climb_rate = 0.0
+    reached = False
+    while time.time() - start_time < max_climb_time:
+        have_pose, pos_ned, _, vel_ned, _, _ = state.snapshot()
+        alt = -pos_ned[2] if have_pose else 0.0
+        climb_rate = -vel_ned[2] if have_pose else 0.0  # positive = climbing
+        crashed, reason = check_crash()
+        if crashed:
+            emergency_land(f"climbing to {target_alt_m:.2f}m via {mode_label}: {reason}")
+            return False
+        # altitudeloop.c's own VelocityDesired ceiling is bounded to 1.5
+        # m/s (see its SIMPOSIX ALTITUDEHOLD_MAX_VELOCITY comment) - a
+        # modest stopping margin gives its real PID deceleration room
+        # instead of relying on this loop's 0.1s poll interval alone.
+        stopping_margin = max(0.0, climb_rate) * 0.5
+        if alt + stopping_margin >= target_alt_m:
+            reached = True
+            break
+        if VERBOSE:
+            print(f"[climbdbg] alt={alt:.3f} climb_rate={climb_rate:.3f} throttle={control.throttle:.3f}", flush=True)
+        time.sleep(0.1)
+
+    control.throttle = DEADBAND_CENTER
+    print(f"[test] centering thrust stick: reached={reached} alt={alt:.3f} climb_rate={climb_rate:.3f} "
+          f"- real AltitudeHold PID takes over")
     return wait_with_crash_check(hold_seconds, f"{mode_label} hold")
 
 
@@ -770,31 +857,44 @@ def run_test_sequence():
     # was under test. Gives real step-response data at two known heights
     # instead of one incidental one, and matches what a real bench test of
     # an alt-hold controller would actually do. Uses Stabilized2 (pure baro
-    # altitude hold, no PathFollower - see its own comment below) as the
-    # hold mode for both stages, since it's the simpler, more fundamental
-    # thing to verify before layering GPS/PathFollower on top in the
-    # PositionHold/2D-hold stages that follow.
+    # altitude vario/hold, no PathFollower - see its own comment below) for
+    # both stages, since it's the simpler, more fundamental thing to verify
+    # before layering GPS/PathFollower on top in the PositionHold/2D-hold
+    # stages that follow.
     #
     # Testing PURE baro altitude hold in isolation first, per the actual
     # architecture: PositionHold (flight mode index 3) routes through
     # PathFollower/VtolFlyController for BOTH horizontal AND vertical
     # (CruiseControl-based thrust) - but flight/modules/Stabilization/
     # altitudeloop.c provides a real, separate, fast-loop-native altitude
-    # hold (STABILIZATIONDESIRED_STABILIZATIONMODE_ALTITUDEHOLD) that has
-    # nothing to do with PathFollower at all. "Stabilized2" (index 1, see
-    # board_orientation_viz.py's Stabilization2Settings) is repurposed to
-    # Roll/Pitch=Attitude (leveling) + Thrust=AltitudeHold.
+    # control (STABILIZATIONDESIRED_STABILIZATIONMODE_ALTITUDEVARIO) that
+    # has nothing to do with PathFollower at all. "Stabilized2" (index 1,
+    # see board_orientation_viz.py's Stabilization2Settings) is repurposed
+    # to Roll/Pitch=Attitude (leveling) + Thrust=AltitudeVario. The climb
+    # itself now runs through this same real flight-code PID via
+    # vario_climb_and_hold() - see its own docstring for why the earlier
+    # climb_to()/hold_at() pair never actually exercised this code at all
+    # during the climb, only during the hold.
     print("[test] climbing to 5ft...")
-    if not climb_to(5 * FEET_TO_M):
-        return
-    if not hold_at(1, "5ft hold (Stabilized2, baro altitude, no PathFollower)", 10.0):
+    if not vario_climb_and_hold(5 * FEET_TO_M, 1, "5ft hold (Stabilized2, baro altitude, no PathFollower)", 10.0):
         return
 
+    # Confirmed directly necessary, not precautionary: a real run had
+    # PositionState.Down stuck at -5.444 (VelocityState.Down stuck at
+    # -1.633, i.e. claiming continuous motion) for the entire 10s "5ft
+    # hold" while real GPS/pose showed the vehicle sitting stationary on
+    # the ground the whole time - a diverged estimate that was never
+    # going to self-correct. See reset_estimator()'s own docstring for
+    # why a plain disarm/rearm doesn't fix this on its own.
+    print("[test] resetting state estimator before climbing further...")
+    reset_estimator()
+    control.mode_position = 0  # Stabilization1Settings = Thrust=Manual, for the arm gesture below
+    control.throttle = 0.0
+    control.armed = True
+    time.sleep(2.0)
+
     print("[test] climbing to 10ft...")
-    control.mode_position = 0  # back to Stabilization1Settings (Thrust=Manual) to climb further
-    if not climb_to(10 * FEET_TO_M):
-        return
-    if not hold_at(1, "10ft hold (Stabilized2, baro altitude, no PathFollower)", 10.0):
+    if not vario_climb_and_hold(10 * FEET_TO_M, 1, "10ft hold (Stabilized2, baro altitude, no PathFollower)", 10.0):
         return
 
     # PIDControlDown::Activate() (pidcontroldown.cpp) does
@@ -815,13 +915,21 @@ def run_test_sequence():
     if not hold_at(3, "PositionHold (GPS position + CruiseControl altitude, PathFollower)", 25.0):
         return
 
-    # "2D" test: baro altitude hold (altitudeloop.c, same as Stabilized2)
-    # plus magnetometer-referenced yaw heading hold (Attitude mode uses
-    # AttitudeState.Yaw directly) instead of GPS lateral position hold -
-    # Roll/Pitch=Attitude only levels the craft, so horizontal drift is
-    # expected/acceptable here (no PathFollower/GPS involvement at all,
+    # "2D" test: baro altitude vario/hold (altitudeloop.c, same as
+    # Stabilized2) plus magnetometer-referenced yaw heading hold (Attitude
+    # mode uses AttitudeState.Yaw directly) instead of GPS lateral position
+    # hold - Roll/Pitch=Attitude only levels the craft, so horizontal drift
+    # is expected/acceptable here (no PathFollower/GPS involvement at all,
     # matches board_orientation_viz.py's Stabilization3Settings).
-    if not hold_at(2, "2D hold (baro altitude + magnetometer yaw, no GPS/PathFollower)", 20.0):
+    # enter_altitude_vario() (not hold_at()) because this mode's Thrust
+    # axis is AltitudeVario now: it must force control.throttle to the
+    # deadband center before switching, or it would inherit whatever
+    # control.throttle was last set to (PositionHold's CruiseControl thrust
+    # doesn't touch it, so it's still whatever vario_climb_and_hold() left
+    # it at) and, if that's above the ~0.6 deadband, read it as a climb
+    # command instead of a hold the instant this mode engages.
+    mode_label = "2D hold (baro altitude + magnetometer yaw, no GPS/PathFollower)"
+    if not enter_altitude_vario(2, mode_label) or not wait_with_crash_check(20.0, f"{mode_label} hold"):
         print("[test] sequence done (landed via crash handler)")
         return
 
@@ -1175,13 +1283,34 @@ def uavtalk_thread():
         # One distinct UAVTalk object per (throttled) slot, round-robin -
         # see the comment at this list's use site below for the full
         # investigation into why these need real spacing on this link.
-        # GCSReceiver appears twice so it gets refreshed roughly twice as
-        # often as the others - it directly gates flight safety, the
-        # others are just telemetry/status.
-        extra_actions = [
+        #
+        # Split into two groups at two different rates - an earlier,
+        # single-group version throttled EVERYTHING (including
+        # Baro/Mag/GPS) down to fix a GCSReceiver staleness bug, which
+        # fixed that but broke something else: Baro/Mag/GPS dropped to
+        # ~1.5Hz, and filteraltitude.c's state estimate (which only
+        # updates on SENSORUPDATES_baro/accel) effectively froze between
+        # updates - confirmed directly, PositionState.Down/VelocityState.Down
+        # stuck at fixed nonzero values for a full 10s hold while real
+        # GPS/pose showed the vehicle stationary on the ground the whole
+        # time. Baro/Mag/GPS feed the estimator directly and need to stay
+        # reasonably fast; SystemAlarms/PIDStatus/etc are pure
+        # debug/status readouts this bridge's own on_object() print
+        # handlers use, never consumed by any flight-code decision, so
+        # they can stay at the very slow rate that fixed GCSReceiver
+        # without costing anything real.
+        fast_extra_actions = [
             lambda c: c.send_object("GCSReceiver", {"Channel": control.gcs_channels()}),
+            lambda c: publish_baro(c),
+            lambda c: c.send_object("GCSReceiver", {"Channel": control.gcs_channels()}),
+            lambda c: publish_mag(c),
+            lambda c: c.send_object("GCSReceiver", {"Channel": control.gcs_channels()}),
+            lambda c: publish_gps_velocity(c),
+            lambda c: c.send_object("GCSReceiver", {"Channel": control.gcs_channels()}),
+            lambda c: publish_gps_position(c),
+        ]
+        slow_extra_actions = [
             lambda c: c.request_object("GyroState"),
-            lambda c: c.send_object("GCSReceiver", {"Channel": control.gcs_channels()}),
             lambda c: c.request_object("SystemAlarms"),
             lambda c: c.request_object("FlightStatus"),
             lambda c: c.request_object("AccelState"),
@@ -1189,10 +1318,6 @@ def uavtalk_thread():
             lambda c: c.request_object("PositionState"),
             lambda c: c.request_object("VelocityState"),
             lambda c: c.request_object("ActuatorDesired"),
-            lambda c: publish_baro(c),
-            lambda c: publish_mag(c),
-            lambda c: publish_gps_velocity(c),
-            lambda c: publish_gps_position(c),
         ]
         i = 0
         send_intervals = []
@@ -1203,6 +1328,24 @@ def uavtalk_thread():
                     fms = bov.flight_mode_settings(control.armed, ["Attitude", "Attitude", "Attitude"])
                     send_reliable("FlightModeSettings", bov.resolve_enum_values(db["FlightModeSettings"], fms))
                     last_arm_state["armed"] = control.armed
+
+                if control.request_estimator_reset:
+                    # See reset_estimator()'s docstring - caller is
+                    # responsible for having already disarmed and waited
+                    # for that to land before setting this flag. Toggling
+                    # FusionAlgorithm to a different value and back forces
+                    # stateestimation.c's real reinit condition
+                    # (fusionAlgorithm != revoSettings.FusionAlgorithm),
+                    # which is the only thing that actually clears
+                    # filteraltitude.c's accumulated altitudeState/
+                    # velocityState/accelBiasState.
+                    other = dict(bov.REVOSETTINGS_DEFAULTS)
+                    other["FusionAlgorithm"] = "Basic (Complementary)"
+                    send_reliable("RevoSettings", bov.resolve_enum_values(db["RevoSettings"], other))
+                    time.sleep(0.3)
+                    send_reliable("RevoSettings", bov.resolve_enum_values(db["RevoSettings"], bov.REVOSETTINGS_DEFAULTS))
+                    time.sleep(0.3)
+                    control.request_estimator_reset = False
 
                 have_pose, pos_ned, quat_ned, _, accel_body, gyro_dps = state.snapshot()
                 if have_pose:
@@ -1256,9 +1399,15 @@ def uavtalk_thread():
                 # stream those three stay on (an established hard
                 # requirement - PIOS_SENSOR_RATE, CLAUDE.md), giving the RX
                 # thread real headroom instead of adding to what may
-                # already be saturating it.
+                # already be saturating it. Split into fast_extra_actions
+                # (GCSReceiver + Baro/Mag/GPS - feed the estimator/control
+                # loop directly, need real rate) and slow_extra_actions
+                # (pure debug/status requests - see the split's own
+                # comment above for why an even-slower rate there is free).
                 if i % 20 == 0:
-                    extra_actions[(i // 20) % len(extra_actions)](client)
+                    fast_extra_actions[(i // 20) % len(fast_extra_actions)](client)
+                if i % 100 == 0:
+                    slow_extra_actions[(i // 100) % len(slow_extra_actions)](client)
                 if i % 500 == 0 and latency_stats["samples"]:
                     if VERBOSE:
                         s = latency_stats["samples"]

@@ -103,26 +103,41 @@ FLIGHT_MODE_SETTINGS_DEFAULTS = {
     "DisarmingSequenceTime": 1000,
     "Stabilization1Settings": ["Attitude", "Attitude", "AxisLock", "Manual"],
     # Repurposed as a "pure baro alt hold" test slot: Roll/Pitch=Attitude
-    # (leveling), Thrust=AltitudeHold (flight/modules/Stabilization/
+    # (leveling), Thrust=AltitudeVario (flight/modules/Stabilization/
     # altitudeloop.c - a real, separate, fast Stabilization-loop-rate PID
     # against PositionState.Down/VelocityState.Down, activated via
-    # STABILIZATIONDESIRED_STABILIZATIONMODE_ALTITUDEHOLD, distinct from
+    # STABILIZATIONDESIRED_STABILIZATIONMODE_ALTITUDEVARIO, distinct from
     # PathFollower's CruiseControl-based thrust used by PositionHold).
-    # Lets alt-hold be tested in isolation from GPS horizontal position
-    # hold and from PathFollower entirely.
-    "Stabilization2Settings": ["Attitude", "Attitude", "AxisLock", "AltitudeHold"],
-    # "2D position hold" test slot: baro altitude hold (same as
-    # Stabilization2) plus magnetometer-referenced yaw heading hold
-    # instead of AxisLock's rate-integral drift-and-hold - Yaw=Attitude
-    # uses AttitudeState.Yaw directly (outerloop.c's quaternion-attitude
-    # error path), which is mag-corrected now that HomeLocation.Be is
-    # measured from a real sensor reading (see gazebo_bridge.py's
-    # send_config()). Roll/Pitch=Attitude only levels the craft - nothing
-    # here corrects horizontal drift (that's PositionHold/PathFollower's
-    # job, a separate flight mode), so wind-driven horizontal drift is
-    # expected and acceptable, matching a real 2D hold (heading + altitude
-    # only, no GPS lateral correction).
-    "Stabilization3Settings": ["Attitude", "Attitude", "Attitude", "AltitudeHold"],
+    # Was AltitudeHold: that mode's own stabilizationAltitudeHold() only
+    # ever captures whatever PositionState.Down happens to be at the
+    # instant the mode is entered/re-armed and locks onto it - it never
+    # reads the Thrust setpoint at all once locked, so it CANNOT climb.
+    # gazebo_bridge.py was doing the entire climb itself in a separate
+    # Thrust=Manual mode with hand-rolled Python throttle math before
+    # switching into this slot only to hold what was already reached -
+    # meaning this flight code's actual altitude control was only ever
+    # being asked to latch a static point, never to track a moving
+    # setpoint, the whole time this was "AltitudeHold". AltitudeVario's
+    # deadband convention (see altitudeloop.c) gives the real thing: stick
+    # above ~0.6 commands a real closed-loop climb via the position/
+    # velocity PID cascade, centering it (~0.5) captures the current
+    # PositionState.Down and holds it - same PID chain, same PositionState/
+    # VelocityState feedback, but now actually exercised for the climb,
+    # not just the hold. Lets alt-hold be tested in isolation from GPS
+    # horizontal position hold and from PathFollower entirely.
+    "Stabilization2Settings": ["Attitude", "Attitude", "AxisLock", "AltitudeVario"],
+    # "2D position hold" test slot: baro altitude vario/hold (same as
+    # Stabilization2, see its comment) plus magnetometer-referenced yaw
+    # heading hold instead of AxisLock's rate-integral drift-and-hold -
+    # Yaw=Attitude uses AttitudeState.Yaw directly (outerloop.c's
+    # quaternion-attitude error path), which is mag-corrected now that
+    # HomeLocation.Be is measured from a real sensor reading (see
+    # gazebo_bridge.py's send_config()). Roll/Pitch=Attitude only levels
+    # the craft - nothing here corrects horizontal drift (that's
+    # PositionHold/PathFollower's job, a separate flight mode), so
+    # wind-driven horizontal drift is expected and acceptable, matching a
+    # real 2D hold (heading + altitude only, no GPS lateral correction).
+    "Stabilization3Settings": ["Attitude", "Attitude", "Attitude", "AltitudeVario"],
     "Stabilization4Settings": ["Attitude", "Attitude", "AxisLock", "CruiseControl"],
     "Stabilization5Settings": ["Attitude", "Attitude", "Rate", "CruiseControl"],
     "Stabilization6Settings": ["Rate", "Rate", "Rate", "Manual"],

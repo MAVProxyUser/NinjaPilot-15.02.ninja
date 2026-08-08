@@ -39,6 +39,7 @@
 
 #ifdef SIMPOSIX
 #include <stdio.h>
+#include <sys/time.h>
 #endif
 
 // Private constants
@@ -218,10 +219,25 @@ static filterResult filter(stateFilter *self, stateEstimation *state)
                 // most once per second after that.
                 if (callCount == 1 || (nowTick - lastPrintTick) / portTICK_RATE_MS >= 1000) {
                     lastPrintTick = nowTick;
+                    // Real wall-clock time (not the RTOS tick, which is
+                    // relative to boot and not directly comparable to the
+                    // bridge's own time.time()-stamped [climbdbg]/[barodiag]
+                    // logs) - added to let a C-side and Python-side trace be
+                    // correlated directly instead of inferred from call-count
+                    // order, which turned out to be ambiguous (the reinit
+                    // marker for entering the test's AltitudeVario mode
+                    // appeared EARLIER in this file than callCount==1 of
+                    // this very print, even though this print's own comment
+                    // claims callCount==1 fires on the first call ever - the
+                    // two prints' relative file position alone couldn't
+                    // settle which one actually happened first in real time).
+                    struct timeval tv;
+                    gettimeofday(&tv, NULL);
+                    double wallclock = (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
                     printf("[SIMPOSIX-IFDEF-MARKER] filteraltitude.c accel integrator: "
-                           "callCount=%d dT=%.6f current=%.5f accelState=%.5f accelBiasState=%.5f "
+                           "t=%.3f callCount=%d dT=%.6f current=%.5f accelState=%.5f accelBiasState=%.5f "
                            "accelLast=%.5f velocityState=%.5f altitudeState=%.5f\n",
-                           callCount, (double)dT, (double)current, (double)this->accelState,
+                           wallclock, callCount, (double)dT, (double)current, (double)this->accelState,
                            (double)this->accelBiasState, (double)this->accelLast,
                            (double)this->velocityState, (double)this->altitudeState);
                     fflush(stdout);
