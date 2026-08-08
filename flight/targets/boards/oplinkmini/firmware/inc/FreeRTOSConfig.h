@@ -26,11 +26,11 @@
 #define configUSE_IDLE_HOOK                          1
 #define configUSE_TICK_HOOK                          0
 #define configUSE_MALLOC_FAILED_HOOK                 1
-#define configCPU_CLOCK_HZ                           ((unsigned long)72000000)
-#define configTICK_RATE_HZ                           ((portTickType)1000)
-#define configMAX_PRIORITIES                         ((unsigned portBASE_TYPE)5)
-#define configMINIMAL_STACK_SIZE                     ((unsigned short)48)
-#define configTOTAL_HEAP_SIZE                        ((size_t)(54 * 256))
+#define configCPU_CLOCK_HZ                           72000000
+#define configTICK_RATE_HZ                           1000
+#define configMAX_PRIORITIES                         7  /* was 5 - bumped for CALLBACK_TASK_STATEESTIMATION and CALLBACK_TASK_ALTITUDEHOLD, see pios_callbackscheduler.h */
+#define configMINIMAL_STACK_SIZE                     48
+#define configTOTAL_HEAP_SIZE                        (54 * 256)
 #define configMAX_TASK_NAME_LEN                      (16)
 #define configUSE_TRACE_FACILITY                     0
 #define configUSE_16_BIT_TICKS                       0
@@ -40,6 +40,10 @@
 #define configUSE_COUNTING_SEMAPHORES                0
 #define configUSE_ALTERNATIVE_API                    0
 #define configQUEUE_REGISTRY_SIZE                    10
+
+/* See coptercontrol's FreeRTOSConfig.h for why this is disabled - same
+ * reasoning applies here (ARM_CM3 port, no configASSERT defined). */
+#define configCHECK_HANDLER_INSTALLATION             0
 
 /* Co-routine definitions. */
 #define configUSE_CO_ROUTINES                        0

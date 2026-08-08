@@ -31,6 +31,11 @@
 #include <uavobjectmanager.h>
 #include <taskinfo.h>
 
+#ifdef SIMPOSIX
+#include <stdio.h>
+#include <sys/time.h>
+#endif
+
 // Private constants
 #define STACK_SAFETYCOUNT 16
 #define STACK_SIZE        (190 + STACK_SAFETYSIZE)
@@ -555,16 +560,75 @@ static int32_t runNextCallback(struct DelayedCallbackTaskStruct *task, DelayedCa
  * Scheduler task, responsible of invoking callbacks.
  * \param[in] task The scheduling task being run
  */
+#ifdef SIMPOSIX
+// Diagnostic dump - see the runaway-climb investigation this was added for:
+// altitudeHoldTask (altitudeloop.c, LOW priority) and StateEstimationCb
+// (stateestimation.c, REGULAR priority) both share CALLBACK_TASK_FLIGHTCONTROL
+// with stabilizationInnerloopTask (CRITICAL) and were observed producing
+// zero output for an entire test run, while innerloop clearly kept running
+// (tens of thousands of gyro samples processed). This dumps runCount per
+// registered callback, per priority, per task, once a second, to see
+// directly whether REGULAR/LOW callbacks are ever actually reached by
+// runNextCallback() at all, rather than continuing to reason about it from
+// reading the code alone.
+static void dumpCallbackSchedulerState(struct DelayedCallbackTaskStruct *t, uint32_t loopIters, uint32_t sleptCount)
+{
+    // Per-priorityTask gate, not a single shared static - a single shared
+    // timer meant whichever task's CallbackSchedulerTask happened to call
+    // this first in any given second "won" and reset the gate for
+    // everyone, starving less-frequently-looping tasks' own dumps almost
+    // entirely (confirmed: CALLBACK_TASK_STATEESTIMATION got 4 dumps in an
+    // entire test run vs. CALLBACK_TASK_FLIGHTCONTROL's 176, even though
+    // both tasks' own loops were running the whole time).
+    static uint32_t lastDumpMs[8] = { 0 };
+    int idx = (int)t->priorityTask;
+    if (idx < 0 || idx >= 8) {
+        idx = 0;
+    }
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+    uint32_t nowMs = (uint32_t)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
+    if (nowMs - lastDumpMs[idx] < 1000) {
+        return;
+    }
+    lastDumpMs[idx] = nowMs;
+    printf("[SIMPOSIX-IFDEF-MARKER] CallbackSchedulerTask task='%s' priorityTask=%d "
+           "loopIters=%lu sleptCount=%lu\n",
+           t->name, (int)t->priorityTask, (unsigned long)loopIters, (unsigned long)sleptCount);
+    for (int p = 0; p <= CALLBACK_PRIORITY_LOW; p++) {
+        DelayedCallbackInfo *cb = t->callbackQueue[p];
+        while (cb) {
+            printf("[SIMPOSIX-IFDEF-MARKER]   priority=%d callbackID=%d waiting=%d runCount=%lu\n",
+                   p, (int)cb->callbackID, (int)cb->waiting, (unsigned long)cb->runCount);
+            cb = cb->next;
+        }
+    }
+    fflush(stdout);
+}
+#endif
+
 static void CallbackSchedulerTask(void *task)
 {
     uint32_t delay = 0;
+#ifdef SIMPOSIX
+    uint32_t loopIters  = 0;
+    uint32_t sleptCount = 0;
+#endif
 
     while (1) {
         delay = runNextCallback((struct DelayedCallbackTaskStruct *)task, CALLBACK_PRIORITY_CRITICAL);
         if (delay) {
             // nothing to do but sleep
+#ifdef SIMPOSIX
+            sleptCount++;
+#endif
             xSemaphoreTake(((struct DelayedCallbackTaskStruct *)task)->signal, delay);
         }
+#ifdef SIMPOSIX
+        loopIters++;
+        dumpCallbackSchedulerState((struct DelayedCallbackTaskStruct *)task, loopIters, sleptCount);
+#endif
     }
 }
 

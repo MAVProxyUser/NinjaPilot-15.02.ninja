@@ -1361,10 +1361,22 @@ def uavtalk_thread():
                                   f"min={s[0]*1000:.3f} p50={s[n//2]*1000:.3f} "
                                   f"p95={s[int(n*0.95)]*1000:.3f} max={s[-1]*1000:.3f}", flush=True)
                         send_intervals = []
-                    publish_fast_sensors(client, accel_body, gyro_dps)
+                    publish_gyro(client, gyro_dps)
 
                 latency_stats["last_request_ts"] = time.time()
                 client.request_object("ActuatorCommand")
+
+                # AccelSensor - split from the Gyro send above (see
+                # publish_accel's own docstring for the full "back-to-back
+                # different-object sends corrupt this link" investigation).
+                # Deliberately placed here, after the ActuatorCommand
+                # request rather than immediately after publish_gyro, so a
+                # real send happens in between even within the same tick -
+                # genuine separation, not just a different modulo on
+                # otherwise-adjacent calls.
+                if have_pose and i % 2 == 0:
+                    publish_accel(client, accel_body)
+
                 # CORRECTION to an earlier theory in this investigation:
                 # PIOS_gcsrcvr_Supervisor (the GCSReceiver staleness
                 # watchdog) is confirmed a DEAD mechanism on posix -
@@ -1437,18 +1449,43 @@ _last_gyro_dbg = [0.0]
 _last_alarms = [None]
 
 
-def publish_fast_sensors(client, accel_body, gyro_dps):
-    # Gyro/Accel are the only sensors that actually need to go out every
-    # tick - stabilizationInnerloopTask (innerloop.c) is triggered directly
-    # off GyroState updates, so this is on the critical control path.
+def publish_gyro(client, gyro_dps):
+    # GyroSensor goes out every tick, unconditionally, and from a point in
+    # the loop with real separation from AccelSensor's own send (see
+    # publish_accel's docstring) - stabilizationInnerloopTask (innerloop.c)
+    # is triggered directly off GyroState updates, so this is on the
+    # critical control path and shouldn't be delayed or bundled with
+    # anything else.
     client.send_object("GyroSensor", {"x": gyro_dps[0], "y": gyro_dps[1], "z": gyro_dps[2], "temperature": 25.0})
-    client.send_object("AccelSensor", {"x": accel_body[0], "y": accel_body[1], "z": accel_body[2], "temperature": 25.0})
     now = time.time()
     if now - _last_gyro_dbg[0] > 0.1:
         _last_gyro_dbg[0] = now
         if VERBOSE:
-            print(f"[gyrodbg] t={now:.2f} gyro_dps=({gyro_dps[0]:.2f},{gyro_dps[1]:.2f},{gyro_dps[2]:.2f}) "
-                  f"accel=({accel_body[0]:.2f},{accel_body[1]:.2f},{accel_body[2]:.2f})", flush=True)
+            print(f"[gyrodbg] t={now:.2f} gyro_dps=({gyro_dps[0]:.2f},{gyro_dps[1]:.2f},{gyro_dps[2]:.2f})", flush=True)
+
+
+def publish_accel(client, accel_body):
+    # Split from the old publish_fast_sensors(), which sent GyroSensor and
+    # AccelSensor back-to-back in the same tick with zero gap between them
+    # - exactly the pattern already documented elsewhere in this codebase
+    # (board_orientation_viz.py) as reliably corrupting/dropping one of a
+    # pair of back-to-back different-object sends on this link. Confirmed
+    # directly this was happening here too, and getting WORSE over time
+    # (not a fixed drop rate): a SIMPOSIX-gated counter in
+    # stateestimation.c's sensorUpdatedCb showed gyroMatches and
+    # accelMatches starting in lockstep (654/653) but diverging
+    # continuously as a real test ran (48863/41859 by the end, a growing
+    # ~7000-sample gap) - AccelSensor was being progressively lost at the
+    # transport layer, which is what was actually starving
+    # filteraltitude.c's velocity integration (gated on a fresh
+    # SENSORUPDATES_accel bit) and, transitively, altitudeHoldTask - not
+    # any FreeRTOS scheduling issue, despite how deep that investigation
+    # went before this was found. Called from a separate tick than
+    # publish_gyro (see the sender_loop call site) so the two sends are
+    # genuinely separated by real time (a full loop iteration, including
+    # its own sleep), not just by other code running in between within
+    # the same tick.
+    client.send_object("AccelSensor", {"x": accel_body[0], "y": accel_body[1], "z": accel_body[2], "temperature": 25.0})
 
 
 # Baro/Mag/GPS are real hardware sensors that natively sample at tens of

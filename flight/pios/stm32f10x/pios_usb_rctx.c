@@ -142,9 +142,10 @@ static void PIOS_USB_RCTX_SendReport(struct pios_usb_rctx_dev *usb_rctx_dev)
     SetEPTxValid(usb_rctx_dev->cfg->data_tx_ep);
 
 #ifdef PIOS_INCLUDE_FREERTOS
-    if (need_yield) {
-        vPortYield();
-    }
+    /* vPortYield() (no-arg) doesn't exist in the current FreeRTOS-Kernel port -
+         * portYIELD_FROM_ISR(x) is the standard cross-port macro now, and already
+         * checks x itself. */
+        portYIELD_FROM_ISR(need_yield);
 #endif /* PIOS_INCLUDE_FREERTOS */
 }
 

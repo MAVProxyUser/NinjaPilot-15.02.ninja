@@ -56,11 +56,62 @@ typedef enum {
 // a low priority callback can block a critical one from being executed.
 // Callbacks MUST NOT block execution!
 
+// The three-attempt investigation behind CALLBACK_TASK_STATEESTIMATION and
+// CALLBACK_TASK_ALTITUDEHOLD's placement here (all confirmed via direct
+// instrumentation - a runCount counter in pios_callbackscheduler.c's
+// CallbackSchedulerTask/runNextCallback, and a totalCalls/accelBitSetCalls
+// counter in stateestimation.c - not just reasoned about):
+//
+// 1. StateEstimationCb (stateestimation.c) and altitudeHoldTask
+//    (altitudeloop.c) both originally shared CALLBACK_TASK_FLIGHTCONTROL
+//    with the gyro-driven stabilizationInnerloopTask (CRITICAL priority).
+//    Measured running at only ~8 executions/second, vs ~400-500Hz for the
+//    gyro loop - the callback scheduler's own round-robin-with-one-
+//    reserved-slot fairness mechanism (see the PriorityTask/
+//    CallbackPriority comments below) only lets ONE lower-priority
+//    callback run per full lap of the CRITICAL queue, and at gyro rate
+//    that reserved slot gets consumed by the CRITICAL callback itself
+//    almost every time.
+// 2. Moving both to a shared CALLBACK_TASK_STATEESTIMATION (its own
+//    FreeRTOS task, lower real priority than FLIGHTCONTROL) fixed
+//    StateEstimationCb (tens of thousands of executions/test) but not
+//    altitudeHoldTask (28 executions in one test) - StateEstimationCb's
+//    own dispatch rate (tied to GyroSensor/AccelSensor updates) is high
+//    enough to reproduce the exact same starvation pattern one level
+//    down, so sharing a task with anything dispatched anywhere near gyro
+//    rate doesn't work, no matter the absolute priority level.
+// 3. Giving altitudeHoldTask ITS OWN task too, still at a LOWER real
+//    priority than FLIGHTCONTROL (reasoning: "it'll get real RTOS
+//    scheduling turns whenever FLIGHTCONTROL blocks between gyro
+//    samples") - STILL starved (runCount barely moved). Root cause: this
+//    is strict-priority preemptive scheduling, not fair-share - a
+//    genuinely lower-priority task gets ZERO guaranteed CPU time against
+//    a higher-priority one that's continuously ready, and
+//    FLIGHTCONTROL's own combined CRITICAL+REGULAR workload (gyro loop +
+//    attitude control, both still legitimately needing to run at a high
+//    rate) turned out to leave it ready often enough that it essentially
+//    never blocks long enough to hand real time to a lower-priority task.
+//    This is correct, textbook FreeRTOS behavior, not a bug - the earlier
+//    assumption that "FLIGHTCONTROL blocks between gyro samples" just
+//    wasn't true in practice.
+//
+// The actual fix: StateEstimation and AltitudeHold are placed ABOVE
+// FlightControl here. Their own callback bodies are brief (a handful of
+// float operations - PID applies, sensor fusion math - microseconds, no
+// blocking calls), so the added worst-case latency to gyro-loop dispatch
+// is negligible; this is standard rate/deadline-monotonic priority
+// assignment (a moderate-rate but latency-sensitive task can legitimately
+// sit above a task whose own real-time requirement is bounded and whose
+// per-cycle cost is small), not a workaround. The real hardware-interrupt-
+// level gyro sampling itself is unaffected either way - FreeRTOS task
+// priority only governs software task scheduling, not the sensor ISR.
 typedef enum {
-    CALLBACK_TASK_AUXILIARY     = (tskIDLE_PRIORITY + 1),
-    CALLBACK_TASK_NAVIGATION    = (tskIDLE_PRIORITY + 2),
-    CALLBACK_TASK_FLIGHTCONTROL = (tskIDLE_PRIORITY + 3),
-    CALLBACK_TASK_DEVICEDRIVER  = (tskIDLE_PRIORITY + 4),
+    CALLBACK_TASK_AUXILIARY        = (tskIDLE_PRIORITY + 1),
+    CALLBACK_TASK_NAVIGATION       = (tskIDLE_PRIORITY + 2),
+    CALLBACK_TASK_FLIGHTCONTROL    = (tskIDLE_PRIORITY + 3),
+    CALLBACK_TASK_STATEESTIMATION  = (tskIDLE_PRIORITY + 4),
+    CALLBACK_TASK_ALTITUDEHOLD     = (tskIDLE_PRIORITY + 5),
+    CALLBACK_TASK_DEVICEDRIVER     = (tskIDLE_PRIORITY + 6),
 } DelayedCallbackPriorityTask;
 // Use the PriorityTask to define the global importance of callback execution
 // compared to other processes in the system.

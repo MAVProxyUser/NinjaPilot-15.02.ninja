@@ -234,9 +234,10 @@ static bool PIOS_USB_CDC_SendData(struct pios_usb_cdc_dev *usb_cdc_dev)
                             bytes_to_tx);
 
 #if defined(PIOS_INCLUDE_FREERTOS)
-    if (need_yield) {
-        vPortYield();
-    }
+    /* vPortYield() (no-arg) doesn't exist in the current FreeRTOS-Kernel port -
+         * portYIELD_FROM_ISR(x) is the standard cross-port macro now, and already
+         * checks x itself. */
+        portYIELD_FROM_ISR(need_yield);
 #endif /* PIOS_INCLUDE_FREERTOS */
 
     return true;
@@ -672,9 +673,10 @@ static bool PIOS_USB_CDC_DATA_EP_OUT_Callback(
     }
 
 #if defined(PIOS_INCLUDE_FREERTOS)
-    if (need_yield) {
-        vPortYield();
-    }
+    /* vPortYield() (no-arg) doesn't exist in the current FreeRTOS-Kernel port -
+         * portYIELD_FROM_ISR(x) is the standard cross-port macro now, and already
+         * checks x itself. */
+        portYIELD_FROM_ISR(need_yield);
 #endif /* PIOS_INCLUDE_FREERTOS */
 
     return rc;

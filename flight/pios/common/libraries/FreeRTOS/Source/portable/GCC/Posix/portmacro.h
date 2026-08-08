@@ -1,75 +1,43 @@
 /*
-    FreeRTOS V8.0.0 - Copyright (C) 2014 Real Time Engineers Ltd.
-    All rights reserved
-
-    VISIT http://www.FreeRTOS.org TO ENSURE YOU ARE USING THE LATEST VERSION.
-
-    ***************************************************************************
-     *                                                                       *
-     *    FreeRTOS provides completely free yet professionally developed,    *
-     *    robust, strictly quality controlled, supported, and cross          *
-     *    platform software that has become a de facto standard.             *
-     *                                                                       *
-     *    Help yourself get started quickly and support the FreeRTOS         *
-     *    project by purchasing a FreeRTOS tutorial book, reference          *
-     *    manual, or both from: http://www.FreeRTOS.org/Documentation        *
-     *                                                                       *
-     *    Thank you!                                                         *
-     *                                                                       *
-    ***************************************************************************
-
-    This file is part of the FreeRTOS distribution.
-
-    FreeRTOS is free software; you can redistribute it and/or modify it under
-    the terms of the GNU General Public License (version 2) as published by the
-    Free Software Foundation >>!AND MODIFIED BY!<< the FreeRTOS exception.
-
-    >>! NOTE: The modification to the GPL is included to allow you to distribute
-    >>! a combined work that includes FreeRTOS without being obliged to provide
-    >>! the source code for proprietary components outside of the FreeRTOS
-    >>! kernel.
-
-    FreeRTOS is distributed in the hope that it will be useful, but WITHOUT ANY
-    WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-    FOR A PARTICULAR PURPOSE.  Full license text is available from the following
-    link: http://www.freertos.org/a00114.html
-
-    1 tab == 4 spaces!
-
-    ***************************************************************************
-     *                                                                       *
-     *    Having a problem?  Start by reading the FAQ "My application does   *
-     *    not run, what could be wrong?"                                     *
-     *                                                                       *
-     *    http://www.FreeRTOS.org/FAQHelp.html                               *
-     *                                                                       *
-    ***************************************************************************
-
-    http://www.FreeRTOS.org - Documentation, books, training, latest versions,
-    license and Real Time Engineers Ltd. contact details.
-
-    http://www.FreeRTOS.org/plus - A selection of FreeRTOS ecosystem products,
-    including FreeRTOS+Trace - an indispensable productivity tool, a DOS
-    compatible FAT file system, and our tiny thread aware UDP/IP stack.
-
-    http://www.OpenRTOS.com - Real Time Engineers ltd license FreeRTOS to High
-    Integrity Systems to sell under the OpenRTOS brand.  Low cost OpenRTOS
-    licenses offer ticketed support, indemnification and middleware.
-
-    http://www.SafeRTOS.com - High Integrity Systems also provide a safety
-    engineered and independently SIL3 certified version for use in safety and
-    mission critical applications that require provable dependability.
-
-    1 tab == 4 spaces!
-*/
+ * FreeRTOS Kernel V11.3.0
+ * Copyright 2020 Cambridge Consultants Ltd.
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of
+ * this software and associated documentation files (the "Software"), to deal in
+ * the Software without restriction, including without limitation the rights to
+ * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+ * the Software, and to permit persons to whom the Software is furnished to do so,
+ * subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+ * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+ * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * https://www.FreeRTOS.org
+ * https://github.com/FreeRTOS
+ *
+ */
 
 
 #ifndef PORTMACRO_H
 #define PORTMACRO_H
 
+/* *INDENT-OFF* */
 #ifdef __cplusplus
-extern "C" {
+    extern "C" {
 #endif
+/* *INDENT-ON* */
+
+#include <limits.h>
+#include <stdint.h>
 
 /*-----------------------------------------------------------
  * Port specific definitions.
@@ -82,96 +50,104 @@ extern "C" {
  */
 
 /* Type definitions. */
-#define portCHAR		char
-#define portFLOAT		float
-#define portDOUBLE		double
-#define portLONG		long
-#define portSHORT		short
-#define portSTACK_TYPE  unsigned long
-#define portBASE_TYPE   long
+#define portCHAR                 char
+#define portFLOAT                float
+#define portDOUBLE               double
+#define portLONG                 long
+#define portSHORT                short
+#define portSTACK_TYPE           unsigned long
+#define portBASE_TYPE            long
+#define portPOINTER_SIZE_TYPE    intptr_t
 
-typedef portSTACK_TYPE StackType_t;
-typedef long BaseType_t;
-typedef unsigned long UBaseType_t;
+typedef portSTACK_TYPE   StackType_t;
+typedef long             BaseType_t;
+typedef unsigned long    UBaseType_t;
 
-#if( configUSE_16_BIT_TICKS == 1 )
-	typedef uint16_t TickType_t;
-	#define portMAX_DELAY ( TickType_t ) 0xffff
-#else
-	typedef uint32_t TickType_t;
-	#define portMAX_DELAY ( TickType_t ) 0xffffffffUL
-#endif
+typedef unsigned long    TickType_t;
+#define portMAX_DELAY              ( ( TickType_t ) ULONG_MAX )
+
+#define portTICK_TYPE_IS_ATOMIC    1
+
 /*-----------------------------------------------------------*/
 
 /* Architecture specifics. */
-#define portSTACK_GROWTH				( -1 )
-#define portTICK_PERIOD_MS				( ( portTickType ) 1000 / configTICK_RATE_HZ )
-#define portTICK_RATE_MICROSECONDS		( ( portTickType ) 1000000 / configTICK_RATE_HZ )
-#define portBYTE_ALIGNMENT				4
-#define portREMOVE_STATIC_QUALIFIER
+#define portSTACK_GROWTH                   ( -1 )
+#define portHAS_STACK_OVERFLOW_CHECKING    ( 1 )
+#define portTICK_PERIOD_MS                 ( ( TickType_t ) 1000 / configTICK_RATE_HZ )
+#define portTICK_RATE_MICROSECONDS         ( ( TickType_t ) 1000000 / configTICK_RATE_HZ )
+#define portBYTE_ALIGNMENT                 8
 /*-----------------------------------------------------------*/
-
 
 /* Scheduler utilities. */
-extern void vPortYieldFromISR( void );
 extern void vPortYield( void );
 
-#define portYIELD()					vPortYield()
+#define portYIELD()                vPortYield()
 
-#define portEND_SWITCHING_ISR( xSwitchRequired ) if( xSwitchRequired ) vPortYieldFromISR()
+#define portEND_SWITCHING_ISR( xSwitchRequired ) \
+    do                                           \
+    {                                            \
+        if( xSwitchRequired != pdFALSE )         \
+        {                                        \
+            traceISR_EXIT_TO_SCHEDULER();        \
+            vPortYield();                        \
+        }                                        \
+        else                                     \
+        {                                        \
+            traceISR_EXIT();                     \
+        }                                        \
+    } while( 0 )
+#define portYIELD_FROM_ISR( x )    portEND_SWITCHING_ISR( x )
 /*-----------------------------------------------------------*/
-
 
 /* Critical section management. */
 extern void vPortDisableInterrupts( void );
 extern void vPortEnableInterrupts( void );
-#define portSET_INTERRUPT_MASK()	( vPortDisableInterrupts() )
-#define portCLEAR_INTERRUPT_MASK()	( vPortEnableInterrupts() )
+#define portSET_INTERRUPT_MASK()      ( vPortDisableInterrupts() )
+#define portCLEAR_INTERRUPT_MASK()    ( vPortEnableInterrupts() )
 
-extern portBASE_TYPE xPortSetInterruptMask( void );
-extern void vPortClearInterruptMask( portBASE_TYPE xMask );
-
-#define portSET_INTERRUPT_MASK_FROM_ISR()		xPortSetInterruptMask()
-#define portCLEAR_INTERRUPT_MASK_FROM_ISR(x)	vPortClearInterruptMask(x)
-
+extern UBaseType_t xPortSetInterruptMask( void );
+extern void vPortClearInterruptMask( UBaseType_t xMask );
 
 extern void vPortEnterCritical( void );
 extern void vPortExitCritical( void );
+#define portSET_INTERRUPT_MASK_FROM_ISR()         xPortSetInterruptMask()
+#define portCLEAR_INTERRUPT_MASK_FROM_ISR( x )    vPortClearInterruptMask( x )
+#define portDISABLE_INTERRUPTS()                  portSET_INTERRUPT_MASK()
+#define portENABLE_INTERRUPTS()                   portCLEAR_INTERRUPT_MASK()
+#define portENTER_CRITICAL()                      vPortEnterCritical()
+#define portEXIT_CRITICAL()                       vPortExitCritical()
 
-#define portDISABLE_INTERRUPTS()	portSET_INTERRUPT_MASK()
-#define portENABLE_INTERRUPTS()		portCLEAR_INTERRUPT_MASK()
-#define portENTER_CRITICAL()		vPortEnterCritical()
-#define portEXIT_CRITICAL()			vPortExitCritical()
 /*-----------------------------------------------------------*/
 
-/* Task function macros as described on the FreeRTOS.org WEB site. */
-#define portTASK_FUNCTION_PROTO( vFunction, pvParameters ) void vFunction( void *pvParameters )
-#define portTASK_FUNCTION( vFunction, pvParameters ) void vFunction( void *pvParameters )
+extern void vPortThreadDying( void * pxTaskToDelete,
+                              volatile BaseType_t * pxPendYield );
+extern void vPortCancelThread( void * pxTaskToDelete );
+#define portPRE_TASK_DELETE_HOOK( pvTaskToDelete, pxPendYield )    vPortThreadDying( ( pvTaskToDelete ), ( pxPendYield ) )
+#define portCLEAN_UP_TCB( pxTCB )                                  vPortCancelThread( pxTCB )
+/*-----------------------------------------------------------*/
 
-#define portNOP()
+#define portTASK_FUNCTION_PROTO( vFunction, pvParameters )         void vFunction( void * pvParameters ) __attribute__( ( noreturn ) )
+#define portTASK_FUNCTION( vFunction, pvParameters )               void vFunction( void * pvParameters )
+/*-----------------------------------------------------------*/
 
-#define portOUTPUT_BYTE( a, b )
+/*
+ * Tasks run in their own pthreads and context switches between them
+ * are always a full memory barrier. ISRs are emulated as signals
+ * which also imply a full memory barrier.
+ *
+ * Thus, only a compiler barrier is needed to prevent the compiler
+ * reordering.
+ */
+#define portMEMORY_BARRIER()                        __asm volatile ( "" ::: "memory" )
 
-extern void vPortForciblyEndThread( void *pxTaskToDelete );
-#define traceTASK_DELETE( pxTaskToDelete )		vPortForciblyEndThread( pxTaskToDelete )
+extern uint32_t ulPortGetRunTime( void );
+#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS()    /* no-op */
+#define portGET_RUN_TIME_COUNTER_VALUE()            ulPortGetRunTime()
 
-extern void vPortAddTaskHandle( void *pxTaskHandle );
-#define traceTASK_CREATE( pxNewTCB )			vPortAddTaskHandle( pxNewTCB )
-
-/* Posix Signal definitions that can be changed or read as appropriate. */
-#define SIG_SUSPEND					SIGUSR1
-
-/* Make use of times(man 2) to gather run-time statistics on the tasks. */
-extern void vPortFindTicksPerSecond( void );
-#undef portCONFIGURE_TIMER_FOR_RUN_TIME_STATS
-#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS()	vPortFindTicksPerSecond()		/* Nothing to do because the timer is already present. */
-extern unsigned long ulPortGetTimerValue( void );
-#undef portGET_RUN_TIME_COUNTER_VALUE
-#define portGET_RUN_TIME_COUNTER_VALUE()			ulPortGetTimerValue()			/* Query the System time stats for this process. */
-
+/* *INDENT-OFF* */
 #ifdef __cplusplus
-}
+    }
 #endif
+/* *INDENT-ON* */
 
 #endif /* PORTMACRO_H */
-

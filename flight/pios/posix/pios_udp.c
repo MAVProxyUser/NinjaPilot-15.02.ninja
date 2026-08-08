@@ -103,9 +103,10 @@ void *PIOS_UDP_RxThread(void *udp_dev_n)
             }
 
 #if defined(PIOS_INCLUDE_FREERTOS)
-            if (rx_need_yield) {
-                vPortYieldFromISR();
-            }
+            /* vPortYieldFromISR() (no-arg) doesn't exist in the current
+             * FreeRTOS-Kernel Posix port - portYIELD_FROM_ISR(x) is the
+             * standard cross-port macro now, and already checks x itself. */
+            portYIELD_FROM_ISR(rx_need_yield);
 #endif /* PIOS_INCLUDE_FREERTOS */
         }
     }

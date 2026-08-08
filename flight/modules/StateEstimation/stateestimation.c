@@ -33,6 +33,7 @@
 
 #ifdef SIMPOSIX
 #include <stdio.h>
+#include <sys/time.h>
 #endif
 
 #include <callbackinfo.h>
@@ -63,7 +64,14 @@
 // Private constants
 #define STACK_SIZE_BYTES        256
 #define CALLBACK_PRIORITY       CALLBACK_PRIORITY_REGULAR
-#define TASK_PRIORITY           CALLBACK_TASK_FLIGHTCONTROL
+// Moved off CALLBACK_TASK_FLIGHTCONTROL onto its own dedicated task - see
+// pios_callbackscheduler.h's comment on CALLBACK_TASK_STATEESTIMATION for
+// why (confirmed via direct instrumentation: sharing FLIGHTCONTROL with
+// the gyro-driven CRITICAL stabilization loop left this running at only
+// ~8Hz). altitudeloop.c's altitudeHoldTask shares this same task (kept at
+// CALLBACK_PRIORITY_LOW there, below this module's REGULAR) so a fresh
+// state estimate is always available before altitude-hold consumes it.
+#define TASK_PRIORITY           CALLBACK_TASK_STATEESTIMATION
 #define TIMEOUT_MS              10
 
 // Private filter init const
@@ -143,6 +151,30 @@ typedef const struct filterPipelineStruct {
 static DelayedCallbackInfo *stateEstimationCallback;
 
 static volatile RevoSettingsData revoSettings;
+// updatedSensors is written by sensorUpdatedCb() (a direct UAVObject
+// connect-callback, delivered via eventdispatcher.c's eventTask - which
+// still runs on CALLBACK_TASK_FLIGHTCONTROL) and read-and-cleared by
+// StateEstimationCb() (moved to its own CALLBACK_TASK_STATEESTIMATION
+// task earlier in this investigation - see that constant's comment in
+// pios_callbackscheduler.h). `volatile` alone does NOT make the
+// read-then-clear at the top of StateEstimationCb atomic with respect to
+// a concurrent |= from sensorUpdatedCb on the other thread - a bit set
+// there can land in the gap between the read and the `= 0` clear here and
+// be silently lost, forever, with no drop counter to show it (unlike the
+// UAVObject event queue itself, which was directly instrumented and
+// confirmed to never drop - this loss happens one layer downstream of
+// that, in this module's own bookkeeping). Confirmed via direct
+// instrumentation (a totalCalls/accelBitSetCalls counter): even after
+// fixing genuinely corrupted/lost AccelSensor transport (a separate,
+// already-fixed bug in the Gazebo bridge's send pattern), the fraction of
+// StateEstimationCb calls that actually saw a fresh SENSORUPDATES_accel
+// bit kept declining as the test ran, which is exactly what a race that
+// gets more likely under sustained load - not a fixed corruption rate -
+// looks like. This used to be safe by construction when everything ran
+// serialized on one shared thread; splitting StateEstimationCb onto its
+// own task made it a genuine cross-thread race that needs real mutual
+// exclusion now.
+static xSemaphoreHandle updatedSensorsMutex;
 static volatile sensorUpdates updatedSensors;
 static volatile int32_t fusionAlgorithm  = -1;
 static const filterPipeline *filterChain = NULL;
@@ -275,6 +307,9 @@ static inline int32_t maxint32_t(int32_t a, int32_t b)
  */
 int32_t StateEstimationInitialize(void)
 {
+    updatedSensorsMutex = xSemaphoreCreateMutex();
+    PIOS_Assert(updatedSensorsMutex);
+
     RevoSettingsInitialize();
 
     GyroSensorInitialize();
@@ -422,9 +457,41 @@ static void StateEstimationCb(void)
         }
     }
 
-    // read updated sensor UAVObjects and set initial state
+    // read updated sensor UAVObjects and set initial state - the
+    // read-then-clear must be atomic with respect to sensorUpdatedCb's own
+    // |= on the other thread, or a bit set there can land in the gap and
+    // be lost (see updatedSensorsMutex's own comment at its declaration).
+    xSemaphoreTake(updatedSensorsMutex, portMAX_DELAY);
     states.updated = updatedSensors;
     updatedSensors = 0;
+    xSemaphoreGive(updatedSensorsMutex);
+
+#ifdef SIMPOSIX
+    // Continuing the runaway-climb investigation: altitudeHoldTask is
+    // still capped at ~7-8Hz even fully isolated on its own dedicated
+    // FreeRTOS task, so the bottleneck isn't scheduler contention at all -
+    // it must be upstream, in how often SENSORUPDATES_accel is actually
+    // set here when this callback runs (that bit is what gates
+    // filteraltitude.c's velocity integration, which is what publishes
+    // VelocityState, which is what dispatches altitudeHoldTask). Counting
+    // the real ratio directly instead of continuing to reason about it.
+    {
+        static uint32_t totalCalls = 0, accelBitSetCalls = 0;
+        static portTickType lastPrintTick = 0;
+        totalCalls++;
+        if (IS_SET(states.updated, SENSORUPDATES_accel)) {
+            accelBitSetCalls++;
+        }
+        portTickType nowTick = xTaskGetTickCount();
+        if ((nowTick - lastPrintTick) / portTICK_RATE_MS >= 1000) {
+            lastPrintTick = nowTick;
+            printf("[SIMPOSIX-IFDEF-MARKER] StateEstimationCb: totalCalls=%lu accelBitSetCalls=%lu ratio=%.4f\n",
+                   (unsigned long)totalCalls, (unsigned long)accelBitSetCalls,
+                   totalCalls ? (double)accelBitSetCalls / (double)totalCalls : 0.0);
+            fflush(stdout);
+        }
+    }
+#endif
 
     // fetch sensors, check values, and load into state struct
     FETCH_SENSOR_FROM_UAVOBJECT_CHECK_AND_LOAD_TO_STATE_3_DIMENSIONS(GyroSensor, gyro, x, y, z);
@@ -470,6 +537,30 @@ static void StateEstimationCb(void)
 
     // apply all filters in the current filter chain
     current = filterChain;
+
+#ifdef SIMPOSIX
+    // filteraltitude.c's accel-integrator print (callCount==1 fires
+    // unconditionally on its first-ever execution, no throttle) never
+    // appeared even once in a full test run, despite states.updated's
+    // SENSORUPDATES_accel bit being confirmed set on ~32% of
+    // StateEstimationCb calls at input. Checking whether filterChain is
+    // even the expected cfmQueue, or NULL/something else, before
+    // continuing to assume the chain itself is fine.
+    {
+        static uint32_t lastPrintMs = 0;
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        uint32_t nowMs = (uint32_t)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
+        if (nowMs - lastPrintMs >= 1000) {
+            lastPrintMs = nowMs;
+            printf("[SIMPOSIX-IFDEF-MARKER] filterChain=%p cfmQueue=%p fusionAlgorithm=%ld revoSettings.FusionAlgorithm=%d "
+                   "altitudeFilterInChain=%d\n",
+                   (void *)filterChain, (void *)cfmQueue, (long)fusionAlgorithm, (int)revoSettings.FusionAlgorithm,
+                   (int)(current != NULL));
+            fflush(stdout);
+        }
+    }
+#endif
 
     // we are not done, re-dispatch self execution
 
@@ -612,8 +703,39 @@ static void sensorUpdatedCb(UAVObjEvent *ev)
     }
 #endif
 
+    // Exactly one of these matches per call (ev->obj is a single object
+    // reference) - one lock around the whole chain rather than one per
+    // branch. See updatedSensorsMutex's own comment for why this needs
+    // real protection now (StateEstimationCb, the reader/clearer, moved to
+    // a genuinely separate thread from this callback).
+    xSemaphoreTake(updatedSensorsMutex, portMAX_DELAY);
     if (ev->obj == GyroSensorHandle()) {
         updatedSensors |= SENSORUPDATES_gyro;
+    }
+    if (ev->obj == AccelSensorHandle()) {
+        updatedSensors |= SENSORUPDATES_accel;
+    }
+    if (ev->obj == MagSensorHandle()) {
+        updatedSensors |= SENSORUPDATES_boardMag;
+    }
+    if (ev->obj == AuxMagSensorHandle()) {
+        updatedSensors |= SENSORUPDATES_auxMag;
+    }
+    if (ev->obj == GPSPositionSensorHandle()) {
+        updatedSensors |= SENSORUPDATES_lla;
+    }
+    if (ev->obj == GPSVelocitySensorHandle()) {
+        updatedSensors |= SENSORUPDATES_vel;
+    }
+    if (ev->obj == BaroSensorHandle()) {
+        updatedSensors |= SENSORUPDATES_baro;
+    }
+    if (ev->obj == AirspeedSensorHandle()) {
+        updatedSensors |= SENSORUPDATES_airspeed;
+    }
+    xSemaphoreGive(updatedSensorsMutex);
+
+    if (ev->obj == GyroSensorHandle()) {
         // shortcut - update GyroState right away
         GyroSensorData s;
         GyroStateData t;
@@ -622,34 +744,6 @@ static void sensorUpdatedCb(UAVObjEvent *ev)
         t.y = s.y + gyroDelta[1];
         t.z = s.z + gyroDelta[2];
         GyroStateSet(&t);
-    }
-
-    if (ev->obj == AccelSensorHandle()) {
-        updatedSensors |= SENSORUPDATES_accel;
-    }
-
-    if (ev->obj == MagSensorHandle()) {
-        updatedSensors |= SENSORUPDATES_boardMag;
-    }
-
-    if (ev->obj == AuxMagSensorHandle()) {
-        updatedSensors |= SENSORUPDATES_auxMag;
-    }
-
-    if (ev->obj == GPSPositionSensorHandle()) {
-        updatedSensors |= SENSORUPDATES_lla;
-    }
-
-    if (ev->obj == GPSVelocitySensorHandle()) {
-        updatedSensors |= SENSORUPDATES_vel;
-    }
-
-    if (ev->obj == BaroSensorHandle()) {
-        updatedSensors |= SENSORUPDATES_baro;
-    }
-
-    if (ev->obj == AirspeedSensorHandle()) {
-        updatedSensors |= SENSORUPDATES_airspeed;
     }
 
     PIOS_CALLBACKSCHEDULER_Dispatch(stateEstimationCallback);

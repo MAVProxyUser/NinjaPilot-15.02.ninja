@@ -35,6 +35,11 @@
 #include "pios_struct_helper.h"
 #include "inc/uavobjectprivate.h"
 
+#ifdef SIMPOSIX
+#include <stdio.h>
+#include <sys/time.h>
+#endif
+
 // Private functions
 static InstanceHandle createInstance(struct UAVOData *obj, uint16_t instId);
 static int32_t connectObj(UAVObjHandle obj_handle, xQueueHandle queue, UAVObjEventCallback cb, uint8_t eventMask);
@@ -1555,6 +1560,34 @@ int32_t sendEvent(struct UAVOBase *obj, uint16_t instId, UAVObjEventType trigger
                 }
             }
         }
+#ifdef SIMPOSIX
+        // Continuing the runaway-climb investigation: VelocityStateUpdatedCb
+        // (altitudeloop.c) is only firing ~3-8 times/second despite
+        // VelocityState being genuinely set at a much higher rate. That
+        // callback is delivered through EventCallbackDispatch() ->
+        // eventdispatcher.c's mQueue, a fixed MAX_QUEUE_SIZE=20-entry queue
+        // SHARED by every ConnectCallback registration in the whole
+        // firmware, drained by eventTask() - which itself still runs on
+        // CALLBACK_TASK_FLIGHTCONTROL at CALLBACK_PRIORITY_CRITICAL,
+        // competing directly with the gyro loop. xQueueSend here is
+        // non-blocking (0 timeout) - a full queue means the notification is
+        // silently dropped, forever, counted only in stats.eventCallbackErrors
+        // (already tracked by this file, never previously surfaced anywhere).
+        // Printing it directly for real proof instead of continuing to
+        // reason about it.
+        {
+            static uint32_t lastPrintMs = 0;
+            struct timeval tv;
+            gettimeofday(&tv, NULL);
+            uint32_t nowMs = (uint32_t)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
+            if (nowMs - lastPrintMs >= 1000) {
+                lastPrintMs = nowMs;
+                printf("[SIMPOSIX-IFDEF-MARKER] UAVObj event stats: eventCallbackErrors=%lu eventQueueErrors=%lu\n",
+                       (unsigned long)stats.eventCallbackErrors, (unsigned long)stats.eventQueueErrors);
+                fflush(stdout);
+            }
+        }
+#endif
     }
 
     return 0;

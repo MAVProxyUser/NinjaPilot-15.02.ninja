@@ -308,9 +308,10 @@ static void PIOS_USART_generic_irq_handler(uint32_t usart_id)
     USART_ClearITPendingBit(usart_dev->cfg->regs, USART_IT_ORE);
     USART_ClearITPendingBit(usart_dev->cfg->regs, USART_IT_TC);
 #if defined(PIOS_INCLUDE_FREERTOS)
-    if (rx_need_yield || tx_need_yield) {
-        vPortYield();
-    }
+    /* vPortYield() (no-arg) doesn't exist in the current FreeRTOS-Kernel port -
+         * portYIELD_FROM_ISR(x) is the standard cross-port macro now, and already
+         * checks x itself. */
+        portYIELD_FROM_ISR(rx_need_yield || tx_need_yield);
 #endif /* PIOS_INCLUDE_FREERTOS */
 }
 

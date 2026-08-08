@@ -52,7 +52,14 @@
 #define UPDATE_ALPHA      1.0e-2f
 
 #define CALLBACK_PRIORITY CALLBACK_PRIORITY_LOW
-#define CBTASK_PRIORITY   CALLBACK_TASK_FLIGHTCONTROL
+// Moved off CALLBACK_TASK_FLIGHTCONTROL onto its own dedicated task -
+// first tried sharing CALLBACK_TASK_STATEESTIMATION with
+// stateestimation.c's StateEstimationCb, which turned out to reproduce
+// the same starvation one level down (StateEstimationCb's own ~400-500Hz
+// dispatch rate crowded this out just as badly as the gyro loop did). See
+// pios_callbackscheduler.h's own comment on CALLBACK_TASK_ALTITUDEHOLD
+// for the full investigation.
+#define CBTASK_PRIORITY   CALLBACK_TASK_ALTITUDEHOLD
 
 #define STACK_SIZE_BYTES  512
 // Private types
@@ -66,6 +73,15 @@ static PiOSDeltatimeConfig timeval;
 static float thrustSetpoint = 0.0f;
 static float thrustDemand   = 0.0f;
 static float startThrust    = 0.5f;
+// pid0/pid1/thrustMode/thrustSetpoint/thrustDemand/startThrust above are
+// shared between stabilizationAltitudeHold() (called from outerloop.c, on
+// CALLBACK_TASK_FLIGHTCONTROL) and altitudeHoldTask()/SettingsUpdatedCb()
+// (on CALLBACK_TASK_STATEESTIMATION - see that constant's own comment for
+// why this module moved off the shared gyro-critical task). Safe by
+// construction as long as everything touching them ran on the same single
+// thread; now a genuine cross-thread data race, so real access needs to
+// be protected.
+static xSemaphoreHandle altitudeMutex;
 
 
 // Private functions
@@ -80,18 +96,6 @@ float stabilizationAltitudeHold(float setpoint, ThrustModeType mode, bool reinit
 {
     static bool newaltitude = true;
 
-    if (reinit) {
-        startThrust = setpoint;
-        pid_zero(&pid0);
-        pid_zero(&pid1);
-        newaltitude = true;
-#ifdef SIMPOSIX
-        printf("[SIMPOSIX-IFDEF-MARKER] stabilizationAltitudeHold REINIT: setpoint=%.4f mode=%d startThrust=%.4f\n",
-               (double)setpoint, (int)mode, (double)startThrust);
-        fflush(stdout);
-#endif
-    }
-
     const float DEADBAND      = 0.20f;
     const float DEADBAND_HIGH = 1.0f / 2 + DEADBAND / 2;
     const float DEADBAND_LOW  = 1.0f / 2 - DEADBAND / 2;
@@ -105,6 +109,21 @@ float stabilizationAltitudeHold(float setpoint, ThrustModeType mode, bool reinit
 
     PositionStateData posState;
     PositionStateGet(&posState);
+
+    float result;
+    xSemaphoreTake(altitudeMutex, portMAX_DELAY);
+
+    if (reinit) {
+        startThrust = setpoint;
+        pid_zero(&pid0);
+        pid_zero(&pid1);
+        newaltitude = true;
+#ifdef SIMPOSIX
+        printf("[SIMPOSIX-IFDEF-MARKER] stabilizationAltitudeHold REINIT: setpoint=%.4f mode=%d startThrust=%.4f\n",
+               (double)setpoint, (int)mode, (double)startThrust);
+        fflush(stdout);
+#endif
+    }
 
     if (altitudeHoldSettings.CutThrustWhenZero && setpoint <= 0) {
         // Cut thrust if desired
@@ -128,7 +147,10 @@ float stabilizationAltitudeHold(float setpoint, ThrustModeType mode, bool reinit
         newaltitude    = false;
     }
 
-    return thrustDemand;
+    result = thrustDemand;
+    xSemaphoreGive(altitudeMutex);
+
+    return result;
 }
 
 /**
@@ -143,6 +165,9 @@ void stabilizationAltitudeloopInit()
 
     PIOS_DELTATIME_Init(&timeval, UPDATE_EXPECTED, UPDATE_MIN, UPDATE_MAX, UPDATE_ALPHA);
     // Create object queue
+
+    altitudeMutex = xSemaphoreCreateMutex();
+    PIOS_Assert(altitudeMutex);
 
     altitudeHoldCBInfo = PIOS_CALLBACKSCHEDULER_Create(&altitudeHoldTask, CALLBACK_PRIORITY, CBTASK_PRIORITY, CALLBACKINFO_RUNNING_ALTITUDEHOLD, STACK_SIZE_BYTES);
     AltitudeHoldSettingsConnectCallback(&SettingsUpdatedCb);
@@ -170,6 +195,9 @@ static void altitudeHoldTask(void)
 
     float dT;
     dT = PIOS_DELTATIME_GetAverageSeconds(&timeval);
+
+    xSemaphoreTake(altitudeMutex, portMAX_DELAY);
+
     switch (thrustMode) {
     case ALTITUDEHOLD:
     {
@@ -234,6 +262,8 @@ static void altitudeHoldTask(void)
     thrustDemand = boundf(thrustDemand, 0.0f, 1.0f);
 #endif
 
+    xSemaphoreGive(altitudeMutex);
+
 #ifdef SIMPOSIX
     {
         static int callCount = 0;
@@ -257,15 +287,40 @@ static void altitudeHoldTask(void)
 
 static void SettingsUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
 {
-    AltitudeHoldSettingsGet(&altitudeHoldSettings);
+    AltitudeHoldSettingsData settings;
+    AltitudeHoldSettingsGet(&settings);
+
+    xSemaphoreTake(altitudeMutex, portMAX_DELAY);
+    altitudeHoldSettings = settings;
     pid_configure(&pid0, altitudeHoldSettings.AltitudePI.Kp, altitudeHoldSettings.AltitudePI.Ki, 0, altitudeHoldSettings.AltitudePI.Ilimit);
     pid_zero(&pid0);
     pid_configure(&pid1, altitudeHoldSettings.VelocityPI.Kp, altitudeHoldSettings.VelocityPI.Ki, 0, altitudeHoldSettings.VelocityPI.Ilimit);
     pid_zero(&pid1);
+    xSemaphoreGive(altitudeMutex);
 }
 
 static void VelocityStateUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
 {
+#ifdef SIMPOSIX
+    // Priority reordering (see CALLBACK_TASK_ALTITUDEHOLD's own comment)
+    // made zero difference to altitudeHoldTask's execution rate - still
+    // capped at ~7-8Hz regardless of scheduling priority. That rules out
+    // scheduling/preemption as the bottleneck entirely and points upstream:
+    // if this callback itself isn't firing much faster than ~7-8Hz, no
+    // amount of priority tuning on the CONSUMER side can help. Counting
+    // real calls directly rather than continuing to guess.
+    {
+        static uint32_t calls = 0;
+        static portTickType lastPrintTick = 0;
+        calls++;
+        portTickType nowTick = xTaskGetTickCount();
+        if ((nowTick - lastPrintTick) / portTICK_RATE_MS >= 1000) {
+            lastPrintTick = nowTick;
+            printf("[SIMPOSIX-IFDEF-MARKER] VelocityStateUpdatedCb: calls=%lu\n", (unsigned long)calls);
+            fflush(stdout);
+        }
+    }
+#endif
     PIOS_CALLBACKSCHEDULER_Dispatch(altitudeHoldCBInfo);
 }
 

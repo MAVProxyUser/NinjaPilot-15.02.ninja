@@ -227,9 +227,10 @@ static bool PIOS_USB_HID_SendReport(struct pios_usb_hid_dev *usb_hid_dev)
 #endif
 
 #if defined(PIOS_INCLUDE_FREERTOS)
-    if (need_yield) {
-        vPortYield();
-    }
+    /* vPortYield() (no-arg) doesn't exist in the current FreeRTOS-Kernel port -
+         * portYIELD_FROM_ISR(x) is the standard cross-port macro now, and already
+         * checks x itself. */
+        portYIELD_FROM_ISR(need_yield);
 #endif /* PIOS_INCLUDE_FREERTOS */
 
     return true;
@@ -541,9 +542,10 @@ static bool PIOS_USB_HID_EP_OUT_Callback(uint32_t usb_hid_id, __attribute__((unu
     }
 
 #if defined(PIOS_INCLUDE_FREERTOS)
-    if (need_yield) {
-        vPortYield();
-    }
+    /* vPortYield() (no-arg) doesn't exist in the current FreeRTOS-Kernel port -
+         * portYIELD_FROM_ISR(x) is the standard cross-port macro now, and already
+         * checks x itself. */
+        portYIELD_FROM_ISR(need_yield);
 #endif /* PIOS_INCLUDE_FREERTOS */
 
     return rc;

@@ -69,9 +69,11 @@ EXTRAINCDIRS		+=	$(PIOS_DEVLIB)/inc
 ifneq ($(FREERTOS_DIR),)
 FREERTOS_PORTDIR	:=	$(FREERTOS_DIR)
 SRC					+=	$(sort $(wildcard $(FREERTOS_PORTDIR)/portable/GCC/Posix/*.c))
+SRC					+=	$(sort $(wildcard $(FREERTOS_PORTDIR)/portable/GCC/Posix/utils/*.c))
 SRC					+=	$(sort $(wildcard $(FREERTOS_PORTDIR)/portable/MemMang/heap_3.c))
 
 EXTRAINCDIRS		+=	$(FREERTOS_PORTDIR)/portable/GCC/Posix
+EXTRAINCDIRS		+=	$(FREERTOS_PORTDIR)/portable/GCC/Posix/utils
 
 endif
 

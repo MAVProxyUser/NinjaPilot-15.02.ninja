@@ -26,11 +26,11 @@
 #define configUSE_IDLE_HOOK                          1
 #define configUSE_TICK_HOOK                          0
 #define configUSE_MALLOC_FAILED_HOOK                 1
-#define configCPU_CLOCK_HZ                           ((unsigned long)72000000)
-#define configTICK_RATE_HZ                           ((portTickType)1000)
-#define configMAX_PRIORITIES                         ((unsigned portBASE_TYPE)5)
-#define configMINIMAL_STACK_SIZE                     ((unsigned short)48)
-#define configTOTAL_HEAP_SIZE                        ((size_t)(53 * 256))
+#define configCPU_CLOCK_HZ                           72000000
+#define configTICK_RATE_HZ                           1000
+#define configMAX_PRIORITIES                         7  /* was 5 - bumped for CALLBACK_TASK_STATEESTIMATION and CALLBACK_TASK_ALTITUDEHOLD, see pios_callbackscheduler.h */
+#define configMINIMAL_STACK_SIZE                     48
+#define configTOTAL_HEAP_SIZE                        (53 * 256)
 #define configMAX_TASK_NAME_LEN                      (6)
 #define configUSE_TRACE_FACILITY                     0
 #define configUSE_16_BIT_TICKS                       0
@@ -40,6 +40,19 @@
 #define configUSE_COUNTING_SEMAPHORES                0
 #define configUSE_ALTERNATIVE_API                    0
 #define configQUEUE_REGISTRY_SIZE                    0
+
+/* New in FreeRTOS-Kernel since this project's old V8.0.1: validates at
+ * scheduler startup that the vector table actually routes SVC/PendSV to
+ * FreeRTOS's own handlers (portable/GCC/ARM_CM3/port.c). Useful, but the
+ * check is entirely configASSERT()-gated, and this project has never
+ * defined configASSERT (FreeRTOS.h's own default is an empty macro) - so
+ * leaving this at its upstream default of 1 would just compile in a dead
+ * check (and, under this project's -Wall -Wextra -Werror, a hard
+ * unused-variable error for the pxVectorTable it computes only to feed
+ * that dead assert). Disabling it here preserves the exact same "no
+ * runtime assertions" behavior this target already had, rather than
+ * silently changing it. */
+#define configCHECK_HANDLER_INSTALLATION             0
 
 /* Co-routine definitions. */
 #define configUSE_CO_ROUTINES                        0

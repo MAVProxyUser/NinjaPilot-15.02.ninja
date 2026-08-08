@@ -644,8 +644,8 @@ void vApplicationIdleHook(void)
  * Called by the RTOS when a stack overflow is detected.
  */
 #define DEBUG_STACK_OVERFLOW 0
-void vApplicationStackOverflowHook(__attribute__((unused)) xTaskHandle *pxTask,
-                                   __attribute__((unused)) signed portCHAR *pcTaskName)
+void vApplicationStackOverflowHook(__attribute__((unused)) TaskHandle_t xTask,
+                                   __attribute__((unused)) char *pcTaskName)
 {
     stackOverflow = STACKOVERFLOW_CRITICAL;
 #if DEBUG_STACK_OVERFLOW

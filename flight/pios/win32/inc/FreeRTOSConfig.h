@@ -22,11 +22,11 @@
 
 #define configUSE_IDLE_HOOK                          1
 #define configUSE_TICK_HOOK                          0
-#define configCPU_CLOCK_HZ                           ((unsigned long)72000000)
-#define configTICK_RATE_HZ                           ((portTickType)100)
-#define configMAX_PRIORITIES                         ((unsigned portBASE_TYPE)5)
-#define configMINIMAL_STACK_SIZE                     ((unsigned short)256)
-#define configTOTAL_HEAP_SIZE                        ((size_t)(45 * 1024))
+#define configCPU_CLOCK_HZ                           72000000
+#define configTICK_RATE_HZ                           100
+#define configMAX_PRIORITIES                         7  /* was 5 - bumped for CALLBACK_TASK_STATEESTIMATION and CALLBACK_TASK_ALTITUDEHOLD, see pios_callbackscheduler.h */
+#define configMINIMAL_STACK_SIZE                     256
+#define configTOTAL_HEAP_SIZE                        (45 * 1024)
 #define configMAX_TASK_NAME_LEN                      (16)
 #define configUSE_TRACE_FACILITY                     0
 #define configUSE_16_BIT_TICKS                       0

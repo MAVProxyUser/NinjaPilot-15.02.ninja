@@ -123,14 +123,70 @@ static filterResult filter(stateFilter *self, stateEstimation *state)
 {
     struct data *this = (struct data *)self->localdata;
 
+#ifdef SIMPOSIX
+    // Unconditional, no gating at all - filterChain is confirmed correct
+    // and non-null (altitudeFilter IS in it), yet the accel-integrator
+    // print further down this same function has never fired in a full
+    // test run. Checking whether this function is even being CALLED, and
+    // what first_run/state->updated actually look like on entry, instead
+    // of continuing to assume.
+    {
+        static uint32_t callCount = 0;
+        static uint32_t lastPrintMs = 0;
+        struct timeval tv;
+        callCount++;
+        gettimeofday(&tv, NULL);
+        uint32_t nowMs = (uint32_t)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
+        if (callCount == 1 || nowMs - lastPrintMs >= 1000) {
+            lastPrintMs = nowMs;
+            printf("[SIMPOSIX-IFDEF-MARKER] filteraltitude.c filter() ENTRY: callCount=%lu first_run=%d "
+                   "state->updated=0x%02x accelBitOnEntry=%d\n",
+                   (unsigned long)callCount, (int)this->first_run, (unsigned)state->updated,
+                   (int)IS_SET(state->updated, SENSORUPDATES_accel));
+            fflush(stdout);
+        }
+    }
+#endif
+
     if (reloadSettings) {
         reloadSettings = false;
         AltitudeFilterSettingsGet(&this->settings);
     }
 
     if (this->first_run) {
-        // Initialize to current altitude reading at initial location
-        if (IS_SET(state->updated, SENSORUPDATES_baro)) {
+        // Initialize to current altitude reading at initial location.
+        //
+        // ROOT CAUSE, confirmed via direct instrumentation (an
+        // unconditional entry print showing first_run=1 and
+        // state->updated never containing SENSORUPDATES_baro, through
+        // 2973+ calls in one test): this used to check
+        // IS_SET(state->updated, SENSORUPDATES_baro), but filterbaro.c -
+        // FOURTH in the cfmQueue chain, immediately before this filter -
+        // unconditionally UNSET_MASKs SENSORUPDATES_baro once it's done
+        // its own baro processing. By the time this filter (fifth in the
+        // chain) runs, that bit has always already been cleared, so
+        // first_run could NEVER clear, meaning this filter's entire body
+        // past this gate - including the accel-integration branch that
+        // produces the real VelocityState/PositionState output altitude-
+        // hold and everything downstream of it depends on - has been dead
+        // code for this fusion algorithm the whole time. The only
+        // VelocityState updates ever happening were the sparse trickle
+        // from GPS velocity sensor elsewhere in the chain, which is
+        // exactly the ~3/sec rate this was chased through several layers
+        // of (genuinely real, and now fixed) transport and scheduling
+        // bugs before finding this.
+        //
+        // state->baro[0] is a static-storage field in StateEstimationCb's
+        // own `states` struct - once real baro data has been loaded into
+        // it ONE time (which happens the moment the raw sensor fetch sees
+        // SENSORUPDATES_baro set, before ANY filter in the chain runs),
+        // it stays a real, valid number on every subsequent call
+        // regardless of what any filter later does to the *bit* -
+        // checking that instead correctly reflects "has real baro data
+        // ever arrived", the actual thing this one-time init needs to
+        // know, without depending on a flag another filter destructively
+        // consumes first.
+        if (IS_REAL(state->baro[0])) {
             this->first_run = 0;
             this->initTimer = xTaskGetTickCount();
         }

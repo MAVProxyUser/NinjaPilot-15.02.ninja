@@ -16,36 +16,30 @@
 /* Notes: We use 5 task priorities */
 
 
+/* The old FreeRTOS V8.0.1 Posix port (Source/portable/GCC/Posix, superseded
+ * by the FreeRTOS-Kernel V11.3.0 upgrade) used a bespoke set of per-platform
+ * macros here (COND_SIGNALING/CHECK_TASK_RESUMES/RUNNING_THREAD_MUTEX/
+ * TICK_SIGNAL/TICK_SIGWAIT/IDLE_SLEEPS) to select between several alternate
+ * signal+condvar suspend/resume implementations, one of which (the __APPLE__
+ * branch, i.e. this exact host) had a real missed-wakeup race between a
+ * thread marking itself about to sleep and actually calling
+ * pthread_cond_wait - confirmed via live process sampling (fw_simposix's
+ * flight-control callback thread sat blocked, not busy, for ~90 real
+ * seconds spanning an AltitudeVario runaway-climb test, while the resumer
+ * side of that race checks/signals threadStatus without holding the
+ * sleeper's own mutex). The new port (portable/ThirdParty/GCC/Posix)
+ * doesn't use any of these macros - it replaced the whole mechanism with a
+ * purpose-built event primitive (utils/wait_for_event.c) designed to avoid
+ * exactly that race, so there is nothing left to select per-platform here. */
 #ifdef __APPLE__
-        #define COND_SIGNALING
-        #define CHECK_TASK_RESUMES
-        #define RUNNING_THREAD_MUTEX
-// #define TICK_SIGNAL
-// #define TICK_SIGWAIT
-        #define IDLE_SLEEPS
-
         #define configUSE_PREEMPTION    1
         #define configIDLE_SHOULD_YIELD 0
 #endif
 #ifdef __CYGWIN__
-        #define COND_SIGNALING
-        #define CHECK_TASK_RESUMES
-// #define RUNNING_THREAD_MUTEX
-// #define TICK_SIGNAL
-        #define TICK_SIGWAIT
-        #define IDLE_SLEEPS
-
         #define configUSE_PREEMPTION    0
         #define configIDLE_SHOULD_YIELD 1
 #endif
 #ifdef __linux__
-        #define COND_SIGNALING
-        #define CHECK_TASK_RESUMES
-        #define RUNNING_THREAD_MUTEX
-// #define TICK_SIGNAL
-// #define TICK_SIGWAIT
-        #define IDLE_SLEEPS
-
         #define configUSE_PREEMPTION                 1
         #define configIDLE_SHOULD_YIELD              0
 #endif
@@ -53,11 +47,11 @@
 
 #define configUSE_IDLE_HOOK                          1
 #define configUSE_TICK_HOOK                          0
-#define configCPU_CLOCK_HZ                           ((unsigned long)72000000)
-#define configTICK_RATE_HZ                           ((portTickType)1000)
-#define configMAX_PRIORITIES                         ((unsigned portBASE_TYPE)5)
-#define configMINIMAL_STACK_SIZE                     ((unsigned short)256)
-#define configTOTAL_HEAP_SIZE                        ((size_t)(45 * 1024))
+#define configCPU_CLOCK_HZ                           72000000
+#define configTICK_RATE_HZ                           1000
+#define configMAX_PRIORITIES                         7  /* was 5 - bumped for CALLBACK_TASK_STATEESTIMATION and CALLBACK_TASK_ALTITUDEHOLD, see pios_callbackscheduler.h */
+#define configMINIMAL_STACK_SIZE                     256
+#define configTOTAL_HEAP_SIZE                        (45 * 1024)
 #define configMAX_TASK_NAME_LEN                      (16)
 #define configUSE_TRACE_FACILITY                     0
 #define configUSE_16_BIT_TICKS                       0

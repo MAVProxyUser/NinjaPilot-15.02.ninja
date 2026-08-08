@@ -26,9 +26,21 @@
  *
  */
 
+#ifndef WAIT_FOR_EVENT_H_
+#define WAIT_FOR_EVENT_H_
 
-#ifndef _MSC_VER /* Visual Studio doesn't support #warning. */
-    #warning The name of this file has changed to stack_macros.h.  Please update your code accordingly.  This source file (which has the original name) will be removed in a future release.
-#endif
+#include <stdbool.h>
+#include <time.h>
 
-#include "stack_macros.h"
+struct event;
+
+struct event * event_create( void );
+void event_delete( struct event * );
+bool event_wait( struct event * ev );
+bool event_wait_timed( struct event * ev,
+                       time_t ms );
+void event_signal( struct event * ev );
+
+
+
+#endif /* ifndef WAIT_FOR_EVENT_H_ */
