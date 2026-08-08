@@ -156,21 +156,54 @@ Fixes landed (in main tree, ALL SYNCED TO ~/ninjapilot-build and built):
   STATEESTIMATION/ALTITUDEHOLD. `configMAX_PRIORITIES` bumped 7→8 in all
   5 FreeRTOSConfig.h files (simposix/coptercontrol/oplinkmini/osx/win32).
 
-Open threads left mid-stream when this session ended:
-- The **~12s AttitudeState gap itself is unexplained and still happens
-  every run** (slew limiter only softens the release; the dead window
-  remains). Next lead: instrument filtercf.c's first publish and the
-  bridge's sensor-send during send_config().
-- **Throttle-CUT lag** seen in last run: bridge commanded throttle 0.000
-  while ActuatorCommand stayed 1731 for seconds (AttitudeState WAS
-  flowing then — so it's a different mechanism, possibly GCSReceiver/
-  ManualControl update path). Discovered at the very end, uninvestigated.
-- The scripted (estimator-based) test still crashes; retest it only
-  after the dead-zone threads above are closed.
-- Extensive `[SIMPOSIX-IFDEF-MARKER]` debug prints are scattered in
+RESOLVED in the 2026-08-08 evening session (commits 7fb5b9ab1,
+d45aa42f5, b8999ec7f carry full detail):
+- The ~12s AttitudeState gap = filtercf.c's DELIBERATE calibration
+  windows (4s ERROR + 6s CRITICAL, zero attitude output until init
+  completes), stacked/restarted by config-driven chain re-inits. Handled
+  by the bridge's wait_for_attitude_ok() arming gate (the "Always Armed"
+  force-arm bypasses okToArm's alarm check, so the harness must enforce
+  the contract real hardware enforces via the alarm).
+- The throttle-cut lag AND "estimator randomly freezes" = UDP RX thread
+  at bottom priority (kernel-queue backlog holding SECONDS of stale
+  in-order data) PLUS a com-layer 16-byte-chunked-read corruption
+  destroying ~99% of the last-in-burst object at ~350 pkt/s (perfectly
+  framed packets failing CRC against a constant stale byte; the 65-byte
+  TELEM_USB fifo was exactly one byte short of the 65-byte per-tick
+  burst). Fixed: non-blocking drain-per-tick RX at top priority (a
+  BLOCKING syscall at high priority wedges the whole Posix-port
+  scheduler - learned the hard way), big com buffers, one-read burst
+  consumption in telemetryRxTask, telemetry tasks at sensor-bus priority
+  on SIMPOSIX only. Verified: rxErrors=0, gyro/accel exact 1:1 lockstep
+  at ~510/s.
+- **2D BARO ALTITUDE HOLD NOW PASSES** - both scripted stages (real
+  AltitudeVario climb to 5ft/10ft + holds, estimator tracking truth to
+  centimeters). The manual ground-truth hover foundation test also fully
+  passes (45s holds at 10m and 20m, clean landing).
+- The V2 sustained-gap heuristic (filteraltitude.c) and the bridge's
+  AccelDriftKi=0.05 override were both REMOVED - each was a compensation
+  for the broken transport that became actively harmful on clean data
+  (absorbing real climb acceleration into the bias estimate within
+  ~56ms-2s, blinding the velocity fast-path and causing the vario
+  overshoot they were meant to prevent).
+
+STILL OPEN:
+- **PositionHold (3D GPS)**: engages, then descends slowly into the
+  ground and tips over. Precisely characterized: PathFollower's vertical
+  velocity PID trusts VelocityState, which reported a real ~0.3-0.5 m/s
+  descent as arrested (residual complementary-filter velocity lag -
+  tolerable to the vario/hold loops, fatal to PathFollower's tighter
+  loop). This is exactly the scenario the V1-V4 vertical-filter
+  comparison exists for - re-run it on the now-clean sensor data; V3
+  (real 3-state Kalman, worktree ../NinjaPilot-alt-v3-kalman) is the
+  most promising candidate.
+- The exact defective line in the 16-byte multi-read path (com fifo
+  boundary handling) was bypassed by the big single read, not isolated -
+  worth a targeted dig someday.
+- Extensive `[SIMPOSIX-IFDEF-MARKER]` debug prints remain scattered in
   stateestimation.c, filteraltitude.c, altitudeloop.c, innerloop.c,
-  outerloop.c, uavobjectmanager.c, pios_callbackscheduler.c — promised
-  cleanup once the crash is fully fixed.
+  outerloop.c, uavobjectmanager.c, pios_callbackscheduler.c, uavtalk.c,
+  pios_udp.c — promised cleanup once 3D hold is green.
 
 ## Estimator findings that ARE real (fixed earlier, keep)
 
