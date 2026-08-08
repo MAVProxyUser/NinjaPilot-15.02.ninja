@@ -217,7 +217,15 @@ REVOSETTINGS_DEFAULTS = {
     # Complementary+Mag+GPSOutdoor (adds llaFilter to the chain -
     # filterlla.c requires HomeLocation.Set + GPS Fix3D/PDOP/satellite
     # thresholds, all already satisfied by publish_slow_sensors()).
-    "FusionAlgorithm": "Complementary+Mag+GPSOutdoor",
+    # V4 EXPERIMENT: route through the existing INS13Indoor EKF
+    # (filterekf.c -> insgps13state.c) instead of the Complementary+Mag+
+    # GPSOutdoor chain's filteraltitude.c complementary filter, to test
+    # whether the already-in-tree Kalman filter avoids the runaway-climb
+    # divergence that filteraltitude.c's fixed-gain complementary filter
+    # hits. INS13Indoor still fuses real baro/mag, just uses FakeGPS pos/
+    # vel variance instead of requiring a real GPS fix (see filterekf.c's
+    # usePos=0 path).
+    "FusionAlgorithm": "INS13Indoor",
     "BaroGPSOffsetCorrectionAlpha": 0.9993335555062,
     "MagnetometerMaxDeviation": [0.05, 0.15],
     "BaroTempCorrectionPolynomial": [0, 0, 0, 0],
