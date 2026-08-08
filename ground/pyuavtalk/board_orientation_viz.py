@@ -217,6 +217,16 @@ REVOSETTINGS_DEFAULTS = {
     # Complementary+Mag+GPSOutdoor (adds llaFilter to the chain -
     # filterlla.c requires HomeLocation.Set + GPS Fix3D/PDOP/satellite
     # thresholds, all already satisfied by publish_slow_sensors()).
+    # Complementary+Mag+GPSOutdoor: Mahony attitude (filtercf.c) + the
+    # 3-state Kalman vertical filter (filteraltitude.c) + GPS lla/vel.
+    # The full outdoor EKF ("GPS Navigation (INS13)") was tried on the
+    # clean transport (2026-08-08): its attitude estimate degraded in
+    # flight (Attitude alarm Warning->Critical mid-air, covariance sanity
+    # resets in filterekf.c), porpoising the vehicle laterally into a
+    # crash during a plain baro-hold stage - its EKFConfiguration Q/R
+    # defaults are tuned for real-sensor noise, not this sim's near-zero
+    # noise, and need their own tuning pass before it's flyable here.
+    # The Mahony+KF stack flew every stage rock-solid on the same day.
     "FusionAlgorithm": "Complementary+Mag+GPSOutdoor",
     "BaroGPSOffsetCorrectionAlpha": 0.9993335555062,
     "MagnetometerMaxDeviation": [0.05, 0.15],

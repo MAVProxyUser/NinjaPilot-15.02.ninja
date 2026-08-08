@@ -975,6 +975,15 @@ def run_test_sequence():
     # Re-arming and climbing before that window closes is flying blind
     # into the exact dead-zone this gate exists to prevent.
     if not wait_for_attitude_ok():
+        # NEVER bare-return with the vehicle armed and airborne: an
+        # earlier version did, and the abandoned vehicle held on the
+        # throttle deadband for a while, drifted laterally with nothing
+        # correcting it, and crashed - watched live. land() only needs
+        # ground-truth height and manual Attitude mode, so it works even
+        # with the estimator degraded (which is exactly when this abort
+        # path runs).
+        print("[test] estimator not ready after reset - landing instead of abandoning the vehicle")
+        land()
         return
     control.mode_position = 0  # Stabilization1Settings = Thrust=Manual, for the arm gesture below
     control.throttle = 0.0
@@ -1029,6 +1038,75 @@ def run_test_sequence():
     # this is a normal, planned end of test.
     land()
     print("[test] sequence done")
+
+
+def poshold_test():
+    """Fast-iteration 3D PositionHold test (NINJAPILOT_TEST_MODE=poshold):
+    gate on estimator readiness, arm, real AltitudeVario climb to ~3m,
+    engage PositionHold, then judge a 60s hold against GROUND TRUTH with
+    real pass criteria - unlike wait_with_crash_check, sitting on the
+    floor or drifting away scores a FAIL, not a timeout-pass. ~2min per
+    iteration vs ~6min for the full scripted sequence."""
+    print("[test] poshold_test: waiting 3s for link + config to settle...")
+    time.sleep(3.0)
+    if not wait_for_attitude_ok():
+        return
+    print("[test] poshold_test: arming")
+    control.mode_position = 0
+    control.throttle = 0.0
+    control.armed = True
+    time.sleep(2.0)
+
+    if not vario_climb_and_hold(3.0, 1, "3m staging hold (Stabilized2)", 5.0):
+        print("[test] poshold_test: FAIL - never reached staging altitude")
+        return
+    ok, _ = _wait_for_vertical_settle("PositionHold engage")
+    if not ok:
+        return
+    have_pose, pos_ned, _, _, _, _ = state.snapshot()
+    engage_alt = -pos_ned[2] if have_pose else 0.0
+    engage_n, engage_e = pos_ned[0], pos_ned[1]
+    print(f"[test] poshold_test: engaging PositionHold at alt={engage_alt:.2f}m "
+          f"N={engage_n:.2f} E={engage_e:.2f}")
+    control.mode_position = 3  # PositionHold
+
+    start = time.time()
+    last_log = 0.0
+    max_alt_err = 0.0
+    max_lat_err = 0.0
+    while time.time() - start < 60.0:
+        have_pose, pos_ned, _, vel_ned, _, _ = state.snapshot()
+        alt = -pos_ned[2] if have_pose else 0.0
+        lat_err = math.sqrt((pos_ned[0] - engage_n) ** 2 + (pos_ned[1] - engage_e) ** 2)
+        alt_err = abs(alt - engage_alt)
+        max_alt_err = max(max_alt_err, alt_err)
+        max_lat_err = max(max_lat_err, lat_err)
+        crashed, reason = check_crash()
+        if crashed:
+            emergency_land(f"poshold_test hold: {reason}")
+            print(f"[test] poshold_test: FAIL - crashed ({reason})")
+            return
+        if alt < 0.3:
+            print(f"[test] poshold_test: FAIL - sagged to ground (alt={alt:.2f}m "
+                  f"at t+{time.time() - start:.0f}s) - landing")
+            land()
+            return
+        if lat_err > 8.0:
+            print(f"[test] poshold_test: FAIL - lateral flyaway ({lat_err:.1f}m "
+                  f"at t+{time.time() - start:.0f}s) - landing")
+            land()
+            return
+        now = time.time()
+        if now - last_log > 2.0:
+            last_log = now
+            print(f"[test] poshold_test: t+{now - start:.0f}s alt={alt:.2f}m "
+                  f"(err {alt_err:.2f}) lateral_err={lat_err:.2f}m", flush=True)
+        time.sleep(0.1)
+
+    print(f"[test] poshold_test: PASS - 60s hold complete. max_alt_err={max_alt_err:.2f}m "
+          f"max_lateral_err={max_lat_err:.2f}m")
+    land()
+    print("[test] poshold_test: sequence done")
 
 
 def manual_hover_test():
@@ -1219,10 +1297,38 @@ def uavtalk_thread():
         # mattered - it caused a fast, severe attitude tumble when mag
         # fusion was re-enabled with a mismatched Be). Falls back to the
         # static default only if no mag reading arrived in time.
+        # HomeLocation.Be must be the Earth's field in the WORLD NED frame,
+        # NOT the body-frame reading at spawn. The old measured-at-spawn
+        # approach assumed "body FRD == world NED at spawn since the model
+        # has no initial rotation" - but Gazebo's world frame is ENU, where
+        # a zero-rotation spawn faces +X = EAST. Measuring Be through the
+        # body frame therefore DEFINED the spawn heading (east!) as yaw=0,
+        # while the GPS/NED position frame uses true north - a standing
+        # ~90deg yaw frame error, invisible to attitude leveling and both
+        # baro-hold modes (yaw-agnostic), but fatal to PathFollower: every
+        # NED position/velocity correction got rotated ~90deg before
+        # becoming a roll/pitch command, pushing orthogonal to the error -
+        # measured as a gain-independent lateral spiral divergence
+        # (commanded amplitude ~tripling per cycle) in three consecutive
+        # PositionHold tests across three different gain sets.
+        #
+        # Correct reference: the world SDF's <magnetic_field> vector
+        # (ENU x=E,y=N,z=U) converted to NED, scaled into the magnetometer
+        # plugin's own units via the measured field MAGNITUDE (direction
+        # from the world truth, scale from the sensor - keeps
+        # filtermag.c's magnitude-validity checks consistent with what the
+        # plugin actually reports).
+        WORLD_MAG_ENU_T = (0.0000004, 0.000026, -0.00004)  # quadcopter_ninjapilot.sdf
+        world_ned_t = (WORLD_MAG_ENU_T[1], WORLD_MAG_ENU_T[0], -WORLD_MAG_ENU_T[2])
+        world_mag_norm = math.sqrt(sum(v * v for v in world_ned_t))
         for _ in range(20):  # up to 2s
             have_mag, mag_body = state.mag_snapshot()
             if have_mag:
-                home["Be"] = list(mag_body)
+                meas_norm = math.sqrt(sum(v * v for v in mag_body))
+                scale = meas_norm / world_mag_norm
+                home["Be"] = [v * scale for v in world_ned_t]
+                print(f"[test] HomeLocation.Be set from WORLD field (NED, plugin units): "
+                      f"{home['Be'][0]:.4f} {home['Be'][1]:.4f} {home['Be'][2]:.4f}", flush=True)
                 break
             time.sleep(0.1)
         send_reliable("RevoSettings", bov.resolve_enum_values(db["RevoSettings"], bov.REVOSETTINGS_DEFAULTS))
@@ -1304,8 +1410,28 @@ def uavtalk_thread():
         vtol_pf = {
             "TreatCustomCraftAs": "VTOL",
             "HorizontalVelMax": 3.0, "VerticalVelMax": 1.5, "CourseFeedForward": 1.0,
-            "HorizontalPosP": 0.25, "VerticalPosP": 0.25,
-            "HorizontalVelPID": [8.0, 0.5, 1.0, 15], "VerticalVelPID": [0.3, 0.15, 0.08, 1.0],
+            # HorizontalPosP 0.25->0.15 and HorizontalVelPID P 8->4, D 1->0:
+            # measured divergent oscillation in PositionHold (commanded
+            # roll/pitch amplitude tripling per cycle, 0.04->5.4deg in ~8s,
+            # ending in an accelerating lateral flyaway at ~4.6 m/s). The
+            # horizontal cascade's feedback is a 10Hz GPS staircase
+            # (VelocityState horizontal passes raw GPS velocity through on
+            # this fusion chain) - a D-term on a staircase produces a kick
+            # at every step, and P=8deg/(m/s) against 100ms-stale velocity
+            # is exactly the delayed-feedback instability the manual hover
+            # test hit vertically with navsat-derived rate. Softer gains
+            # trade response speed for stability against that latency.
+            "HorizontalPosP": 0.15, "VerticalPosP": 0.25,
+            # VerticalVelPID Kp 0.3->0.6, Ki 0.15->0.45: measured in a real
+            # PositionHold sag (truth 2.4m -> ground in ~10s), the vertical
+            # velocity PID's output hovered at ~0.69 against a true hover
+            # point of ~0.70 (confirmed by the manual ground-truth hover
+            # test holding steady at 0.70) - a standing few-percent thrust
+            # deficit that Ki=0.15 needed ~7-10s to integrate away, longer
+            # than the vehicle took to reach the floor. Double P for
+            # authority against velocity error, triple Ki so a standing
+            # deficit is closed in ~2s, not ~10.
+            "HorizontalVelPID": [4.0, 0.5, 0.0, 15], "VerticalVelPID": [0.6, 0.45, 0.08, 1.0],
             # ThrustLimits.Neutral is the altitude-hold PID's hover-point
             # baseline (vtolflycontroller.cpp: controlDown.UpdateNeutralThrust
             # uses it directly) - the XML's 0.5 default assumes a much
@@ -1314,9 +1440,23 @@ def uavtalk_thread():
             # physical fact about this specific airframe, the same way a
             # real vehicle's actual weight/thrust ratio would be
             # calibrated in, not a tuning choice.
-            "ThrustLimits": [0.2, 0.68, 0.9], "VelocityFeedforward": 2,
+            # Neutral 0.70, not 0.68: the manual ground-truth hover test's
+            # converged steady-state hold throttle was 0.70 at both 10m and
+            # 20m - that IS this airframe's measured hover point in this
+            # sim. Starting the vertical PID 0.02 low costs a slow sink
+            # the (previously weak) I-term had to fight.
+            "ThrustLimits": [0.2, 0.70, 0.9], "VelocityFeedforward": 2,
             "ThrustControl": "auto", "YawControl": "manual",
-            "FlyawayEmergencyFallback": "enabled", "FlyawayEmergencyFallbackTriggerTime": 10.0,
+            # DISABLED for sim: this real-hardware safety heuristic decides
+            # "flyaway" partly from course-vs-velocity direction error, and
+            # at a genuinely perfect zero-velocity hover the course angle
+            # of a ~0 m/s velocity vector is numerical noise - it false-
+            # tripped after ~35s of a flawless hold (lateral_err 0.00m the
+            # whole time) and COMMANDED the 2.3 m/s descent-to-ground that
+            # looked like a thrust failure (verified: PIDControlDown
+            # setpoint ramped 1.6->2.3 m/s down with the vehicle healthy
+            # and armed).
+            "FlyawayEmergencyFallback": "disabled", "FlyawayEmergencyFallbackTriggerTime": 10.0,
             "EmergencyFallbackAttitude": [0, -20.0], "EmergencyFallbackYawRate": [2.0, 30.0],
             "MaxRollPitch": 25.0, "UpdatePeriod": 50, "BrakeRate": 2.5, "BrakeMaxPitch": 25.0,
             "BrakeHorizontalVelPID": [12.0, 0.0, 0.03, 15], "BrakeVelocityFeedforward": 0,
@@ -1400,20 +1540,21 @@ def uavtalk_thread():
             "RollRatePID": [0.0030, 0.0065, 0.000033, 0.3],
             "PitchRatePID": [0.0030, 0.0065, 0.000033, 0.3],
             "YawRatePID": [0.00620, 0.01000, 0.00005, 0.3],
-            # Outer attitude P halved from the stock 2.5: with the
-            # transport layer now verified fresh (1ms-bounded RX, full-rate
-            # AttitudeState - conditions the earlier "tuning didn't help"
-            # experiments never had), a clean, reproducible ~0.5Hz DIVERGENT
-            # pitch oscillation remained after ~40s of otherwise rock-solid
-            # hover (amplitude doubling per cycle: 1.8->3.4->8.2->19->38->84
-            # deg, confirmed in AttitudeState telemetry). That slow
-            # frequency is outer-loop timescale: attitude P at 2.5 is
-            # overdriving a rate loop that is genuinely sluggish on the X3
-            # (far higher moment of inertia than the small quads the stock
-            # defaults target). Halving outer P trades attitude snappiness
-            # for stability margin - the correct direction for a larger
-            # airframe, and the same knob a real pilot would turn first.
-            "RollPI": [1.2, 0, 50], "PitchPI": [1.2, 0, 50],
+            # STOCK 2.5 restored. This was halved to 1.2 mid-investigation
+            # when a divergent ~0.5Hz pitch oscillation appeared during
+            # sustained hover - but that oscillation was observed while the
+            # transport layer was still destroying ~99% of AccelSensor
+            # packets (the com chunked-read bug, since fixed at the root):
+            # filtercf.c was running on gyro-dominated data with accel
+            # corrections arriving in ~4Hz bursts, so the "attitude
+            # instability" was estimator wobble, not a control-gain
+            # problem. The halved P then became its own bug one level up:
+            # PathFollower's horizontal cascade assumes the attitude loop
+            # tracks its roll/pitch commands promptly, and a ~2x-slower
+            # attitude response inserted enough lag to make PositionHold
+            # laterally divergent (commanded amplitude tripling per cycle)
+            # at ANY horizontal gain tried.
+            "RollPI": [2.5, 0, 50], "PitchPI": [2.5, 0, 50],
             "YawPI": [2.5, 0, 50],
             "AcroInsanityFactor": 0.4,
             "ThrustPIDScaleCurve": [0.3, 0.15, 0, -0.15, -0.3],
@@ -1428,7 +1569,8 @@ def uavtalk_thread():
     def on_connected():
         send_config()
         configured["done"] = True
-        target = manual_hover_test if TEST_MODE == "manual_hover" else run_test_sequence
+        target = {"manual_hover": manual_hover_test,
+                  "poshold": poshold_test}.get(TEST_MODE, run_test_sequence)
         threading.Thread(target=target, daemon=True).start()
 
     def on_object(objdef, inst_id, decoded):

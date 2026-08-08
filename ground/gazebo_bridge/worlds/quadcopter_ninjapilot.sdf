@@ -118,6 +118,18 @@
       <uri>
         model://x3_ninjapilot
       </uri>
+      <!-- Spawn facing TRUE NORTH (world is ENU: +Y = north, so ENU yaw
+           +90deg points body-forward at +Y). Without this the model's
+           zero-rotation spawn faces +X = EAST, and the bridge's
+           measure-Be-at-spawn convention then defines yaw=0 as east while
+           the GPS/NED frame uses true north - a standing ~90deg yaw frame
+           error, invisible to attitude leveling and baro-hold but fatal
+           to PathFollower (every NED correction rotated ~90deg before
+           becoming roll/pitch = lateral spiral divergence, observed
+           across three PositionHold gain sets). Facing north makes
+           body-frame-at-spawn genuinely equal NED, so the measured-Be
+           yaw reference and the GPS frame agree by construction. -->
+      <pose>0 0 0.05 0 0 1.5707963</pose>
       <plugin
         filename="gz-sim-multicopter-motor-model-system"
         name="gz::sim::systems::MulticopterMotorModel">
