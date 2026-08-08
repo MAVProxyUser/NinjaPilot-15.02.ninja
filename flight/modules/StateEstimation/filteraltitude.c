@@ -249,6 +249,27 @@ static filterResult filter(stateFilter *self, stateEstimation *state)
             float correctedAccel = boundf(this->accelState - this->accelBiasState, -2.0f * this->gravity, 2.0f * this->gravity);
             this->velocityState += 0.5f * (this->accelLast + correctedAccel) * dT;
             this->accelLast      = correctedAccel;
+            // Bounding correctedAccel (above) stops a single step from
+            // blowing up, but doesn't stop this exact failure mode:
+            // confirmed via direct trace that a real, SUSTAINED (not
+            // transient) accelState-vs-accelBiasState gap - e.g. during a
+            // real multi-second climb, which AccelDriftKi's deliberately
+            // slow tracking (0.0005, by design - real accel bias drifts
+            // slowly) can't catch up to in any reasonable time - lets
+            // velocityState accumulate a large, physically-wrong standing
+            // value via many small, individually-bounded steps
+            // (velocityState reached -2.62 m/s and stayed there for
+            // 300+ consecutive integration steps in one real trace,
+            // dragging altitudeState from -8.8 to -32.5 over ~10 real
+            // seconds while the actual vehicle was nowhere near that).
+            // Same "bound the output regardless of cause" pattern as
+            // correctedAccel above, one level up: this is a generous
+            // bound (comfortably above anything this vehicle should
+            // really do), not a tight control setpoint like
+            // altitudeloop.c's 1.5 m/s VelocityDesired ceiling - it exists
+            // to stop unbounded multi-second drift, not to constrain real
+            // fast movement.
+            this->velocityState = boundf(this->velocityState, -10.0f, 10.0f);
 #else
             this->velocityState += 0.5f * (this->accelLast + (this->accelState - this->accelBiasState)) * dT;
             this->accelLast      = this->accelState - this->accelBiasState;

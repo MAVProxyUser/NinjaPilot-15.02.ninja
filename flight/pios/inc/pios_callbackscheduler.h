@@ -105,12 +105,28 @@ typedef enum {
 // per-cycle cost is small), not a workaround. The real hardware-interrupt-
 // level gyro sampling itself is unaffected either way - FreeRTOS task
 // priority only governs software task scheduling, not the sensor ISR.
+// StateEstimation is placed ABOVE AltitudeHold, not just above
+// FlightControl: AltitudeHold is StateEstimation's own CONSUMER
+// (altitudeHoldTask is dispatched once per fresh VelocityState, which
+// StateEstimation produces). Once the real filterbaro.c/filteraltitude.c
+// dead-code bug elsewhere in this investigation was fixed and
+// StateEstimationCb actually started running at its real rate (thousands
+// of calls/second instead of the ~8Hz it was stuck at for this entire
+// investigation), altitudeHoldTask's own dispatch rate rose to match -
+// and because it briefly outranked its own producer, it could preempt
+// StateEstimationCb often enough, under real flight load, to reproduce
+// the exact same starvation pattern one level up (confirmed via a real
+// dT spike from ~7ms to ~30ms in filteraltitude.c's integrator during an
+// active climb, causing a real, large single-step position error). A
+// consumer must never sit above its own producer in a priority-strict
+// scheduler for exactly this reason - it can eat the CPU time the
+// producer needed to keep up.
 typedef enum {
     CALLBACK_TASK_AUXILIARY        = (tskIDLE_PRIORITY + 1),
     CALLBACK_TASK_NAVIGATION       = (tskIDLE_PRIORITY + 2),
     CALLBACK_TASK_FLIGHTCONTROL    = (tskIDLE_PRIORITY + 3),
-    CALLBACK_TASK_STATEESTIMATION  = (tskIDLE_PRIORITY + 4),
-    CALLBACK_TASK_ALTITUDEHOLD     = (tskIDLE_PRIORITY + 5),
+    CALLBACK_TASK_ALTITUDEHOLD     = (tskIDLE_PRIORITY + 4),
+    CALLBACK_TASK_STATEESTIMATION  = (tskIDLE_PRIORITY + 5),
     CALLBACK_TASK_DEVICEDRIVER     = (tskIDLE_PRIORITY + 6),
 } DelayedCallbackPriorityTask;
 // Use the PriorityTask to define the global importance of callback execution
