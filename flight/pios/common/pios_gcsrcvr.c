@@ -32,6 +32,10 @@
 
 #ifdef PIOS_INCLUDE_GCSRCVR
 
+#ifdef SIMPOSIX
+#include <stdio.h>
+#endif
+
 #include "uavobjectmanager.h"
 
 #include "pios_gcsrcvr_priv.h"
@@ -113,6 +117,28 @@ static void gcsreceiver_updated(UAVObjEvent *ev)
     if (ev->obj == GCSReceiverHandle()) {
         GCSReceiverGet(&gcsreceiverdata);
         gcsrcvr_dev->Fresh = true;
+#ifdef SIMPOSIX
+        // Confirmed PIOS_RTC_RegisterTickCallback() is a deliberate no-op
+        // on posix (pios_rtc.c) - PIOS_gcsrcvr_Supervisor() never runs, so
+        // it cannot be forcing PIOS_RCVR_TIMEOUT. Whatever's producing the
+        // stuck-at-stale-value symptom has to be visible here: either this
+        // callback isn't firing as often as expected (a real send/receive
+        // gap), or it fires fine but with an unexpectedly stale Channel[0]
+        // value baked into the packet itself. ~1 per second so a several-
+        // second gap in this stream is directly visible as missing prints.
+        {
+            static uint32_t updateCount = 0;
+            static portTickType lastPrintTick = 0;
+            updateCount++;
+            portTickType nowTick = xTaskGetTickCount();
+            if (updateCount == 1 || (nowTick - lastPrintTick) / portTICK_RATE_MS >= 1000) {
+                lastPrintTick = nowTick;
+                printf("[SIMPOSIX-IFDEF-MARKER] gcsreceiver_updated: updateCount=%lu channel0=%u\n",
+                       (unsigned long)updateCount, (unsigned)gcsreceiverdata.Channel[0]);
+                fflush(stdout);
+            }
+        }
+#endif
     }
 }
 

@@ -31,6 +31,10 @@
 
 #include "inc/stateestimation.h"
 
+#ifdef SIMPOSIX
+#include <stdio.h>
+#endif
+
 #include <callbackinfo.h>
 
 #include <gyrosensor.h>
@@ -429,7 +433,31 @@ static void StateEstimationCb(void)
         gyroRaw[1] = states.gyro[1];
         gyroRaw[2] = states.gyro[2];
     }
+#ifdef SIMPOSIX
+    // Single shared gate for pre/post so they're always from the SAME
+    // invocation - two independently-throttled timers here earlier made
+    // pre/post look inconsistent when they were actually just unrelated
+    // samples from different invocations.
+    static portTickType lastAccelDbgTick = 0;
+    portTickType accelDbgNowTick = xTaskGetTickCount();
+    bool doAccelDbgPrint = (accelDbgNowTick - lastAccelDbgTick) / portTICK_RATE_MS >= 1000;
+    bool preBitSet = IS_SET(states.updated, SENSORUPDATES_accel);
+    AccelSensorData dbgAccel = { 0 };
+    if (doAccelDbgPrint && preBitSet) {
+        AccelSensorGet(&dbgAccel);
+    }
+#endif
     FETCH_SENSOR_FROM_UAVOBJECT_CHECK_AND_LOAD_TO_STATE_3_DIMENSIONS(AccelSensor, accel, x, y, z);
+#ifdef SIMPOSIX
+    if (doAccelDbgPrint) {
+        lastAccelDbgTick = accelDbgNowTick;
+        printf("[SIMPOSIX-IFDEF-MARKER] accel fetch: preBit=%d postBit=%d x=%.5f y=%.5f z=%.5f isreal_x=%d isreal_y=%d isreal_z=%d\n",
+               preBitSet, IS_SET(states.updated, SENSORUPDATES_accel),
+               (double)dbgAccel.x, (double)dbgAccel.y, (double)dbgAccel.z,
+               IS_REAL(dbgAccel.x), IS_REAL(dbgAccel.y), IS_REAL(dbgAccel.z));
+        fflush(stdout);
+    }
+#endif
     FETCH_SENSOR_FROM_UAVOBJECT_CHECK_AND_LOAD_TO_STATE_3_DIMENSIONS(MagSensor, boardMag, x, y, z);
     FETCH_SENSOR_FROM_UAVOBJECT_CHECK_AND_LOAD_TO_STATE_3_DIMENSIONS(AuxMagSensor, auxMag, x, y, z);
     FETCH_SENSOR_FROM_UAVOBJECT_CHECK_AND_LOAD_TO_STATE_3_DIMENSIONS(GPSVelocitySensor, vel, North, East, Down);
@@ -557,6 +585,32 @@ static void sensorUpdatedCb(UAVObjEvent *ev)
     if (!ev) {
         return;
     }
+
+#ifdef SIMPOSIX
+    // Investigating why filteraltitude.c's SENSORUPDATES_accel branch never
+    // fires despite AccelSensorConnectCallback being wired identically to
+    // upstream OpenPilot/LibrePilot (confirmed via diff - not a NinjaPilot
+    // regression). Counting matches here, upstream of everything traced so
+    // far, to see whether AccelSensor events are even being delivered to
+    // this callback at all.
+    {
+        static uint32_t gyroMatches = 0, accelMatches = 0;
+        static portTickType lastPrintTick = 0;
+        if (ev->obj == GyroSensorHandle()) {
+            gyroMatches++;
+        }
+        if (ev->obj == AccelSensorHandle()) {
+            accelMatches++;
+        }
+        portTickType nowTick = xTaskGetTickCount();
+        if ((nowTick - lastPrintTick) / portTICK_RATE_MS >= 1000) {
+            lastPrintTick = nowTick;
+            printf("[SIMPOSIX-IFDEF-MARKER] sensorUpdatedCb: gyroMatches=%lu accelMatches=%lu\n",
+                   (unsigned long)gyroMatches, (unsigned long)accelMatches);
+            fflush(stdout);
+        }
+    }
+#endif
 
     if (ev->obj == GyroSensorHandle()) {
         updatedSensors |= SENSORUPDATES_gyro;

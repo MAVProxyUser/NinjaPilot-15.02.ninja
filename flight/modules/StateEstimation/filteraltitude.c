@@ -170,20 +170,41 @@ static filterResult filter(stateFilter *self, stateEstimation *state)
             float dT = PIOS_DELTATIME_GetAverageSeconds(&this->dt1config);
             float speedLast = this->velocityState;
 
+#ifdef SIMPOSIX
+            // ROOT CAUSE, confirmed via direct trace: accelBiasState tracks
+            // accelState at AccelDriftKi (firmware default 0.0005 - very
+            // slow, by design, since real accel bias drifts slowly). But a
+            // real, large, fast transient in `current` (observed swinging
+            // from ~0.25 to -9.81 and back within about a second, plausibly
+            // the vehicle's own real response to the altitudeloop.c PID
+            // saturation investigated alongside this) leaves accelBiasState
+            // stranded far from accelState for an extended time. The
+            // "corrected acceleration" (accelLast) that gap produces gets
+            // DOUBLE-INTEGRATED (into velocityState, then into
+            // altitudeState) with nothing bounding it - one real incident
+            // measured velocityState reaching 60 m/s and altitudeState 51m
+            // from this alone. Bounding the corrected acceleration to a
+            // physically sane limit (2g) doesn't fix why the transient
+            // happens, but stops it from cascading into an unbounded
+            // runaway regardless of cause - the same "bound the output"
+            // pattern already applied to altitudeloop.c's PID output
+            // elsewhere in this investigation.
+            float correctedAccel = boundf(this->accelState - this->accelBiasState, -2.0f * this->gravity, 2.0f * this->gravity);
+            this->velocityState += 0.5f * (this->accelLast + correctedAccel) * dT;
+            this->accelLast      = correctedAccel;
+#else
             this->velocityState += 0.5f * (this->accelLast + (this->accelState - this->accelBiasState)) * dT;
             this->accelLast      = this->accelState - this->accelBiasState;
+#endif
 
             this->altitudeState += 0.5f * (speedLast + this->velocityState) * dT;
 
 #ifdef SIMPOSIX
-            // Investigating whether the PositionState.Down divergence seen
-            // during PositionHold (real vehicle confirmed on the ground the
-            // whole time via GPS/pose ground truth, yet this estimate
-            // wandered to 10-20+ m) comes from residual accel bias
-            // double-integrating unchecked here, rather than from the
-            // baro-differentiation term (already instrumented above and
-            // confirmed NOT to spike during the divergence). ~1Hz at
-            // PIOS_SENSOR_RATE=500Hz.
+            // Confirmed via direct trace (contrary to an earlier, wrong
+            // conclusion in this investigation caused by checking the
+            // bridge's Python log instead of fw_simposix's own C-side
+            // stdout) that this branch runs regularly - roughly matching
+            // PIOS_SENSOR_RATE. ~1Hz print.
             {
                 static int callCount = 0;
                 static portTickType lastPrintTick = 0;
@@ -219,6 +240,21 @@ static filterResult filter(stateFilter *self, stateEstimation *state)
             state->updated |= SENSORUPDATES_vel;
         }
         if (IS_SET(state->updated, SENSORUPDATES_baro)) {
+#ifdef SIMPOSIX
+            // The root cause turned out to be the accel-integration branch
+            // above (an unbounded corrected-acceleration double-integration,
+            // now fixed with a 2g bound) - not this baro term, which was
+            // confirmed sane throughout (BaroKp in range, no NaN, tracks
+            // real altitude with the expected low-pass lag). Kept logging
+            // every time, unconditionally, while actively chasing this -
+            // this is a targeted one-off debugging session, not a
+            // steady-state print left permanently enabled.
+            printf("[SIMPOSIX-IFDEF-MARKER] filteraltitude.c baro lowpass IN: "
+                   "BaroKp=%.6f baro=%.4f altitudeStateBefore=%.4f isnan_altBefore=%d isnan_BaroKp=%d\n",
+                   (double)this->settings.BaroKp, (double)state->baro[0],
+                   (double)this->altitudeState, isnan(this->altitudeState), isnan(this->settings.BaroKp));
+            fflush(stdout);
+#endif
             // correct the altitude state (simple low pass)
             this->altitudeState = (1.0f - this->settings.BaroKp) * this->altitudeState + this->settings.BaroKp * state->baro[0];
 

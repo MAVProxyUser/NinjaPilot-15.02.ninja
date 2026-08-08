@@ -33,6 +33,9 @@
  */
 
 #include <openpilot.h>
+#ifdef SIMPOSIX
+#include <stdio.h>
+#endif
 #include <string.h>
 #include <accessorydesired.h>
 #include <manualcontrolsettings.h>
@@ -364,6 +367,9 @@ static void receiverTask(__attribute__((unused)) void *parameters)
         }
 
         // Implement hysteresis loop on connection status
+#ifdef SIMPOSIX
+        uint8_t connectedBefore = cmd.Connected;
+#endif
         if (valid_input_detected && (++connected_count > 10)) {
             cmd.Connected      = MANUALCONTROLCOMMAND_CONNECTED_TRUE;
             connected_count    = 0;
@@ -373,6 +379,32 @@ static void receiverTask(__attribute__((unused)) void *parameters)
             connected_count    = 0;
             disconnected_count = 0;
         }
+#ifdef SIMPOSIX
+        // Tracing why cmd.Connected flips to FALSE for real, multi-second
+        // stretches (forcing cmd.Throttle = settings.FailsafeChannel.Throttle,
+        // confirmed exactly matching the observed -1.0 symptom) - fires
+        // immediately on any Connected transition (the key event), plus
+        // throttled ongoing state so a stuck-FALSE stretch is still visible
+        // even without a transition.
+        {
+            static portTickType lastPrintTick = 0;
+            portTickType nowTick = xTaskGetTickCount();
+            bool transitioned = (connectedBefore != cmd.Connected);
+            if (transitioned || (nowTick - lastPrintTick) / portTICK_RATE_MS >= 1000) {
+                lastPrintTick = nowTick;
+                printf("[SIMPOSIX-IFDEF-MARKER] receiver.c connected=%d (was %d, transitioned=%d) "
+                       "valid_input=%d connected_count=%u disconnected_count=%u "
+                       "chThrottle=%u chYaw=%u chRoll=%u chPitch=%u\n",
+                       cmd.Connected, connectedBefore, transitioned, valid_input_detected,
+                       connected_count, disconnected_count,
+                       cmd.Channel[MANUALCONTROLSETTINGS_CHANNELGROUPS_THROTTLE],
+                       cmd.Channel[MANUALCONTROLSETTINGS_CHANNELGROUPS_YAW],
+                       cmd.Channel[MANUALCONTROLSETTINGS_CHANNELGROUPS_ROLL],
+                       cmd.Channel[MANUALCONTROLSETTINGS_CHANNELGROUPS_PITCH]);
+                fflush(stdout);
+            }
+        }
+#endif
 
         if (cmd.Connected == MANUALCONTROLCOMMAND_CONNECTED_FALSE) {
             if (frameType != FRAME_TYPE_GROUND) {

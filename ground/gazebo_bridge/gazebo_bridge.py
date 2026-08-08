@@ -159,9 +159,9 @@ class VehicleState(object):
       lag a position-derivative would introduce, which matters directly
       for PositionHold's velocity-error feedback loop.
 
-    publish_slow_sensors() skips sending Baro/Mag/GPS entirely until each
-    one's real sensor has reported at least once, rather than ever
-    synthesizing a placeholder value."""
+    publish_baro()/publish_mag()/publish_gps_velocity()/publish_gps_position()
+    each skip sending until their real sensor has reported at least once,
+    rather than ever synthesizing a placeholder value."""
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -608,7 +608,17 @@ def status_writer_loop():
             os.replace(tmp, STATUS_FILE)
         except OSError:
             pass
-        time.sleep(0.1)
+        # Was 0.1s - suspiciously exactly PIOS_GCSRCVR_TIMEOUT_MS (100ms,
+        # pios_board.h). Confirmed real: a ~12s stretch where the flight
+        # controller saw ManualControlCommand.Throttle=-1.0 (PIOS_RCVR_TIMEOUT
+        # exactly - pios_rcvr.h) despite the bridge continuously commanding
+        # real throttle, meaning PIOS_gcsrcvr_Supervisor() (pios_gcsrcvr.c)
+        # kept deciding no fresh GCSReceiver update had arrived within its
+        # own 100ms window. This thread's own blocking file I/O (json.dump +
+        # os.replace) on the exact same 100ms cadence is a real candidate for
+        # GIL-contending the sender_loop thread out of that window often
+        # enough to matter - slowing it well clear of 100ms to test.
+        time.sleep(0.5)
 
 
 def wait_with_crash_check(duration, label):
@@ -634,28 +644,63 @@ HOVER_THRUST = 0.68  # X3 hover point - see run_test_sequence's own comment on t
 
 def climb_to(target_alt_m, max_time=20.0):
     """Manual-throttle climb (mode_position must already be a Thrust=Manual
-    mode - Stabilization1Settings, the default) to at least target_alt_m of
-    REAL (ground-truth) altitude, then ease to hover thrust so whatever
-    hold mode gets engaged next doesn't inherit an excess climb-throttle
-    baseline (same reasoning as the original single-stage liftoff ramp).
+    mode - Stabilization1Settings, the default) to target_alt_m of REAL
+    (ground-truth) altitude, actively braking (not just coasting at hover
+    thrust) as it nears the target so it doesn't overshoot under momentum.
+
+    An earlier version eased straight to HOVER_THRUST (zero net
+    acceleration - NOT deceleration) the instant it reached target
+    altitude, then just handed off to hold_at()'s settle-wait. That
+    doesn't stop a climb already in progress: real climb momentum built up
+    under the aggressive ramp-up throttle just carries the vehicle upward
+    in a straight line afterward (Newton's first law - hover thrust holds
+    velocity constant, it doesn't arrest it), and it can coast for meters
+    past the target before hold_at()'s settle-wait ever gets a chance to
+    matter. Confirmed directly: real GPS-confirmed altitude kept climbing
+    well past target while control.mode_position was STILL 0 (Manual),
+    before any hold mode had even engaged - which ruled out every
+    altitude-hold/state-estimator theory this investigation had chased up
+    to that point. Now brakes below hover thrust once real
+    vertical velocity indicates it's approaching the target, then holds
+    that brake until velocity is actually near zero, not just "target
+    altitude reached, hope it stops in time."
     Returns True on success, False if a crash was handled mid-climb (caller
     should stop the sequence)."""
     start_time = time.time()
     control.throttle = HOVER_THRUST
+    braking = False
     while time.time() - start_time < max_time:
-        have_pose, pos_ned, _, _, _, _ = state.snapshot()
+        have_pose, pos_ned, _, vel_ned, _, _ = state.snapshot()
         alt = -pos_ned[2] if have_pose else 0.0
-        if alt >= target_alt_m:
-            break
+        climb_rate = -vel_ned[2] if have_pose else 0.0  # positive = climbing
         crashed, reason = check_crash()
         if crashed:
             emergency_land(f"climbing to {target_alt_m:.2f}m: {reason}")
             return False
-        # A bit more aggressive the further below target, easing off near it -
-        # not the fixed-ramp-then-hope-it's-airborne approach the original
-        # single-stage liftoff used, since this needs to reliably reach two
-        # different specific heights, not just clear the ground.
-        control.throttle = min(0.72, HOVER_THRUST + 0.04 + 0.02 * max(0.0, target_alt_m - alt))
+
+        # Predictive: start braking once current altitude + a stopping-
+        # distance margin (proportional to climb rate) would carry it past
+        # target, not only once it's already there.
+        stopping_margin = max(0.0, climb_rate) * 0.5
+        if not braking and alt + stopping_margin >= target_alt_m:
+            braking = True
+
+        if braking:
+            if alt >= target_alt_m and climb_rate < 0.15:
+                break
+            # Below hover thrust - actual deceleration, not just "stop
+            # adding more climb throttle." A bit harder the faster it's
+            # still climbing.
+            control.throttle = max(0.55, HOVER_THRUST - 0.05 - 0.01 * max(0.0, climb_rate))
+        else:
+            # A bit more aggressive the further below target, easing off
+            # near it - not the fixed-ramp-then-hope-it's-airborne approach
+            # the original single-stage liftoff used, since this needs to
+            # reliably reach two different specific heights, not just
+            # clear the ground.
+            control.throttle = min(0.72, HOVER_THRUST + 0.04 + 0.02 * max(0.0, target_alt_m - alt))
+        if VERBOSE:
+            print(f"[climbdbg] alt={alt:.3f} climb_rate={climb_rate:.3f} braking={braking} throttle={control.throttle:.3f}", flush=True)
         time.sleep(0.1)
 
     ease_steps = 20
@@ -667,13 +712,20 @@ def climb_to(target_alt_m, max_time=20.0):
 
 
 def hold_at(mode_position, mode_label, hold_seconds):
-    """Engage a hold mode and hold it, waiting for vertical velocity to
-    settle first (same bumpless-transfer reasoning as the rest of this
-    file - see PIDControlDown::Activate()'s comment above). Returns True if
-    the hold completed normally, False if a crash was handled (caller
-    should stop the sequence)."""
-    print(f"[test] switching to {mode_label}")
-    control.mode_position = mode_position
+    """Wait for vertical velocity to settle BEFORE engaging a hold mode,
+    then hold it. Engaging with real residual velocity still present means
+    stabilizationAltitudeHold()'s reinit captures a real target position
+    but zeros the PIDs (pid_zero(&pid0); pid_zero(&pid1)) with no bumpless
+    transfer for velocity at all - the vehicle keeps climbing under its own
+    real momentum while the freshly-zeroed PID has no idea, exactly the
+    "~150m+ climb-and-crash overshoot" class of bug already flagged for
+    PIDControlDown::Activate() elsewhere in this file. An earlier version
+    of this function switched modes FIRST and waited after - which this
+    docstring already claimed not to do - so every hold_at() call this
+    whole staged-altitude test made was hitting exactly that bug. Returns
+    True if the hold completed normally, False if a crash was handled
+    (caller should stop the sequence)."""
+    print(f"[test] waiting for vertical velocity to settle before {mode_label}...")
     settled = False
     for _ in range(70):  # up to 7s
         _, _, _, vel_ned, _, _ = state.snapshot()
@@ -682,10 +734,13 @@ def hold_at(mode_position, mode_label, hold_seconds):
             break
         crashed, reason = check_crash()
         if crashed:
-            emergency_land(f"waiting to settle into {mode_label}: {reason}")
+            emergency_land(f"waiting to settle before {mode_label}: {reason}")
             return False
         time.sleep(0.1)
     print(f"[test] vertical velocity wait ended: settled={settled} vel_down={vel_ned[2]:.3f}")
+
+    print(f"[test] switching to {mode_label}")
+    control.mode_position = mode_position
     return wait_with_crash_check(hold_seconds, f"{mode_label} hold")
 
 
@@ -837,6 +892,18 @@ def uavtalk_thread():
         send_reliable("HomeLocation", bov.resolve_enum_values(db["HomeLocation"], home))
         time.sleep(0.2)
         send_reliable("MixerSettings", bov.resolve_enum_values(db["MixerSettings"], bov.mixer_settings()))
+        time.sleep(0.2)
+        # firmware default AccelDriftKi=0.0005 is far too slow to track a
+        # real, fast accel transient (measured swinging ~0.25 to -9.81 and
+        # back within about a second during a PositionHold runaway) -
+        # accelBiasState stays stranded far from accelState for seconds,
+        # and the resulting "corrected acceleration" error double-integrates
+        # into a real runaway (see filteraltitude.c's own comment on this).
+        # Testing whether a much faster bias-tracking rate closes that gap.
+        send_reliable("AltitudeFilterSettings", {
+            "AccelLowPassKp": 0.04, "AccelDriftKi": 0.05,
+            "InitializationAccelDriftKi": 0.2, "BaroKp": 0.04,
+        })
         time.sleep(0.2)
         # Without this, the flight side has no idea GCSReceiver's channels
         # are meant to be Throttle/Roll/Pitch/Yaw/FlightMode - nothing ever
@@ -1096,6 +1163,28 @@ def uavtalk_thread():
         # periodic schedule, so requesting it every tick is safe and gets a
         # fresh value each time. GCSReceiver (stick input) doesn't need
         # this rate - every 10th tick (~50Hz) is plenty.
+        # One distinct UAVTalk object per (throttled) slot, round-robin -
+        # see the comment at this list's use site below for the full
+        # investigation into why these need real spacing on this link.
+        # GCSReceiver appears twice so it gets refreshed roughly twice as
+        # often as the others - it directly gates flight safety, the
+        # others are just telemetry/status.
+        extra_actions = [
+            lambda c: c.send_object("GCSReceiver", {"Channel": control.gcs_channels()}),
+            lambda c: c.request_object("GyroState"),
+            lambda c: c.send_object("GCSReceiver", {"Channel": control.gcs_channels()}),
+            lambda c: c.request_object("SystemAlarms"),
+            lambda c: c.request_object("FlightStatus"),
+            lambda c: c.request_object("AccelState"),
+            lambda c: c.request_object("PIDStatus"),
+            lambda c: c.request_object("PositionState"),
+            lambda c: c.request_object("VelocityState"),
+            lambda c: c.request_object("ActuatorDesired"),
+            lambda c: publish_baro(c),
+            lambda c: publish_mag(c),
+            lambda c: publish_gps_velocity(c),
+            lambda c: publish_gps_position(c),
+        ]
         i = 0
         send_intervals = []
         last_send_ts = [None]
@@ -1121,21 +1210,46 @@ def uavtalk_thread():
                                   f"p95={s[int(n*0.95)]*1000:.3f} max={s[-1]*1000:.3f}", flush=True)
                         send_intervals = []
                     publish_fast_sensors(client, accel_body, gyro_dps)
-                    if i % 25 == 0:
-                        publish_slow_sensors(client)
 
                 latency_stats["last_request_ts"] = time.time()
                 client.request_object("ActuatorCommand")
-                if i % 5 == 0:
-                    client.request_object("GyroState")
-                    client.request_object("SystemAlarms")
-                    client.request_object("AccelState")
-                    client.request_object("PIDStatus")
-                    client.request_object("PositionState")
-                    client.request_object("VelocityState")
-                    client.request_object("ActuatorDesired")
-                if i % 10 == 0:
-                    client.send_object("GCSReceiver", {"Channel": control.gcs_channels()})
+                # CORRECTION to an earlier theory in this investigation:
+                # PIOS_gcsrcvr_Supervisor (the GCSReceiver staleness
+                # watchdog) is confirmed a DEAD mechanism on posix -
+                # PIOS_RTC_RegisterTickCallback() is a documented no-op
+                # there (pios_rtc.c: "no periodic RTC tick to drive
+                # registered callbacks from on posix... holding the last
+                # commanded value forever is the behavior we want"). Direct
+                # C-side tracing (gcsreceiver_updated()/receiver.c
+                # instrumentation) confirmed cmd.Connected stays TRUE and
+                # valid_input_detected stays TRUE throughout the stuck
+                # window - the -1.0 seen was never the failsafe branch, it
+                # was the NORMAL scaled output of a genuinely stale raw
+                # channel value (1000, coincidentally scaling to -1.0 same
+                # as our own FailsafeChannel.Throttle config - a red
+                # herring, not evidence of failsafe). gcsreceiver_updated()
+                # itself fires steadily (~36/s) throughout, meaning
+                # fw_simposix's UAVTalk dispatch isn't stalled either - so
+                # the backlog has to be BELOW that: PIOS_UDP_RxThread's
+                # recvfrom() loop (pios_udp.c) has no local buffering ("if
+                # the com buffer can't receive, data is discarded"), but
+                # the OS kernel's own socket receive queue is a separate,
+                # lower layer that drains in strict FIFO order - if that
+                # thread's own processing (uavobjectmanager.c's
+                # xSemaphoreTakeRecursive, contended by the main flight
+                # task) falls behind our send rate for any stretch, a
+                # kernel-level backlog of stale-but-valid packets would
+                # explain every symptom seen: steady processing, no drops,
+                # but multi-second-stale data. Neither ~50Hz nor ~400Hz
+                # GCSReceiver rates fixed it, so trying the opposite:
+                # throttling ALL the non-critical "extra" traffic well
+                # below the 400Hz Gyro/Accel/ActuatorCommand-request
+                # stream those three stay on (an established hard
+                # requirement - PIOS_SENSOR_RATE, CLAUDE.md), giving the RX
+                # thread real headroom instead of adding to what may
+                # already be saturating it.
+                if i % 20 == 0:
+                    extra_actions[(i // 20) % len(extra_actions)](client)
                 if i % 500 == 0 and latency_stats["samples"]:
                     if VERBOSE:
                         s = latency_stats["samples"]
@@ -1179,43 +1293,48 @@ def publish_fast_sensors(client, accel_body, gyro_dps):
                   f"accel=({accel_body[0]:.2f},{accel_body[1]:.2f},{accel_body[2]:.2f})", flush=True)
 
 
-def publish_slow_sensors(client):
-    # Baro/Mag/GPS are real hardware sensors that natively sample at tens
-    # of Hz, not gyro-rate hundreds of Hz - real Revolution firmware never
-    # asks StateEstimation to process Baro/Mag/GPS updates 500 times a
-    # second, so sending them at the same rate as Gyro/Accel put ~3x more
-    # UAVTalk packets per second through the single-simulated-core
-    # FreeRTOS-Posix cooperative scheduler (flight/pios/common/libraries/
-    # FreeRTOS/Source/portable/GCC/Posix/port.c - no real OS priority
-    # scheduling in effect, see its commented-out SCHED_FIFO setup) than
-    # any real board's own sensor task would ever generate. Called at a
-    # much lower rate than publish_fast_sensors from sender_loop.
-    #
-    # Every sensor here is sourced from a real Gazebo sensor plugin - no
-    # hand-computed fallback. Earlier versions fell back to
-    # meters_to_latlon()-derived values for the brief window before the
-    # first real message arrived, but a "safety net" computed value is
-    # exactly the class of bug (mismatched reference, wrong convention)
-    # this whole session was spent hunting down - simply skip sending an
-    # object until its real sensor has reported at least once, rather than
-    # ever synthesizing one. send_config()'s wait_for_mag/HomeLocation.Be
-    # step already blocks briefly at startup for the same reason.
+# Baro/Mag/GPS are real hardware sensors that natively sample at tens of
+# Hz, not gyro-rate hundreds of Hz - real Revolution firmware never asks
+# StateEstimation to process Baro/Mag/GPS updates 500 times a second. Each
+# is its own function (rather than one publish_slow_sensors() bundling all
+# four) so sender_loop's round-robin can put a real gap between them - see
+# its own "ROOT CAUSE" comment for why that gap actually matters on this
+# link.
+#
+# Every sensor here is sourced from a real Gazebo sensor plugin - no
+# hand-computed fallback. Earlier versions fell back to
+# meters_to_latlon()-derived values for the brief window before the first
+# real message arrived, but a "safety net" computed value is exactly the
+# class of bug (mismatched reference, wrong convention) this whole session
+# was spent hunting down - simply skip sending an object until its real
+# sensor has reported at least once, rather than ever synthesizing one.
+# send_config()'s wait_for_mag/HomeLocation.Be step already blocks briefly
+# at startup for the same reason.
+def publish_baro(client):
     have_baro, baro_alt = state.baro_snapshot()
     if have_baro:
         client.send_object("BaroSensor", {"Altitude": baro_alt, "Temperature": 25.0, "Pressure": 101.3})
 
+
+def publish_mag(client):
     have_mag, mag_body = state.mag_snapshot()
     if have_mag:
         client.send_object("MagSensor", {"x": mag_body[0], "y": mag_body[1], "z": mag_body[2], "temperature": 25.0})
 
+
+def publish_gps_velocity(client):
+    have_navsat, lat, lon, alt, vel_ned = state.gps_snapshot()
+    if have_navsat:
+        client.send_object("GPSVelocitySensor", {"North": vel_ned[0], "East": vel_ned[1], "Down": vel_ned[2]})
+
+
+def publish_gps_position(client):
     # Real navsat sensor data (gz-sim-navsat-system, see model.sdf/
     # quadcopter_ninjapilot.sdf) - a real sensor reading has none of the
     # lag a position-derivative introduces, which matters directly for
     # PositionHold's velocity-error feedback loop.
     have_navsat, lat, lon, alt, vel_ned = state.gps_snapshot()
     if have_navsat:
-        client.send_object("GPSVelocitySensor", {"North": vel_ned[0], "East": vel_ned[1], "Down": vel_ned[2]})
-
         groundspeed = math.sqrt(vel_ned[0] ** 2 + vel_ned[1] ** 2)
         heading = math.degrees(math.atan2(vel_ned[1], vel_ned[0]))
         client.send_object("GPSPositionSensor", bov.resolve_enum_values(client.db["GPSPositionSensor"], {
