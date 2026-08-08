@@ -35,6 +35,7 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <sys/time.h>
 #include <pios_udp_priv.h>
 
 /* We need a list of UDP devices */
@@ -104,8 +105,32 @@ void *PIOS_UDP_RxThread(void *udp_dev_n)
      * ~one tick (1ms) regardless of system load, matching the role this
      * thread plays on real hardware (ISR+DMA: drain immediately, never
      * make sensor bytes wait on application code). */
+    /* Lower bound on com-fifo free space, updated from every push's
+     * headroom out-parameter. The parser only ever DRAINS between our
+     * pushes, so a stale value understates the real free space - safe
+     * direction for the all-or-nothing check below. */
+    uint16_t fifo_headroom = 0xFFFF;
+    uint32_t whole_drops   = 0;
+    uint32_t datagrams     = 0;
+    uint32_t bytes_total   = 0;
+    uint32_t n11 = 0, n27 = 0, nOther = 0;
+    struct timeval dbg_tv;
+    gettimeofday(&dbg_tv, NULL);
+    uint32_t dbg_last_ms   = (uint32_t)(dbg_tv.tv_sec * 1000 + dbg_tv.tv_usec / 1000);
     while (1) {
         int received;
+        {
+            struct timeval tv2;
+            gettimeofday(&tv2, NULL);
+            uint32_t now_ms = (uint32_t)(tv2.tv_sec * 1000 + tv2.tv_usec / 1000);
+            if (now_ms - dbg_last_ms >= 1000) {
+                dbg_last_ms = now_ms;
+                printf("[SIMPOSIX-IFDEF-MARKER] pios_udp.c dev sock=%i: datagrams=%u bytes=%u drops=%u n11=%u n27=%u nOther=%u\n",
+                       udp_dev->socket, (unsigned)datagrams, (unsigned)bytes_total, (unsigned)whole_drops,
+                       (unsigned)n11, (unsigned)n27, (unsigned)nOther);
+                fflush(stdout);
+            }
+        }
         do {
             udp_dev->clientLength = sizeof(udp_dev->client);
             received = recvfrom(udp_dev->socket,
@@ -115,12 +140,57 @@ void *PIOS_UDP_RxThread(void *udp_dev_n)
                                 (struct sockaddr *)&udp_dev->client,
                                 (socklen_t *)&udp_dev->clientLength);
             if (received > 0) {
-                /* copy received data to buffer if possible */
-                /* we do NOT buffer data locally. If the com buffer can't receive, data is discarded! */
-                /* (thats what the USART driver does too!) */
-                bool rx_need_yield = false;
-                if (udp_dev->rx_in_cb) {
-                    (void)(udp_dev->rx_in_cb)(udp_dev->rx_in_context, udp_dev->rx_buffer, received, NULL, &rx_need_yield);
+                datagrams++;
+                bytes_total += (uint32_t)received;
+                if (received == 11) {
+                    n11++;
+                } else if (received == 27) {
+                    n27++;
+                    /* Corruption-signature trap: parse-side CRC failures
+                     * show a constant 0x01 where the checksum should be -
+                     * if 27-byte datagrams with a 0x01 tail exist HERE, the
+                     * corruption arrived off the wire; if they never do,
+                     * it happens between this push and the parser's read. */
+                    if (udp_dev->rx_buffer[26] == 0x01) {
+                        static uint32_t tail01 = 0;
+                        tail01++;
+                        if ((tail01 % 200) == 1) {
+                            printf("[SIMPOSIX-IFDEF-MARKER] pios_udp.c 27B datagram with 0x01 tail #%u:", (unsigned)tail01);
+                            for (int b = 0; b < 27; b++) {
+                                printf(" %02X", udp_dev->rx_buffer[b]);
+                            }
+                            printf("\n");
+                            fflush(stdout);
+                        }
+                    }
+                } else {
+                    nOther++;
+                }
+                /* ALL-OR-NOTHING per datagram. The com layer's
+                 * fifoBuf_putData() copies AS MUCH AS FITS and silently
+                 * truncates the rest - fine for a USART byte stream,
+                 * stream-corrupting for datagram framing: a truncated
+                 * UAVTalk packet fails CRC and throws the parser into a
+                 * resync scan that eats its NEIGHBORS too. Measured live
+                 * before this check existed: the last-in-burst object
+                 * (AccelSensor) arrived at ~3% while first-in-burst
+                 * (GyroSensor) arrived at ~100% - positional, systematic
+                 * loss. Dropping a WHOLE datagram when the fifo can't
+                 * take all of it keeps the stream clean: the parser
+                 * simply never sees that packet, and the next one parses
+                 * normally. */
+                if ((uint16_t)received > fifo_headroom) {
+                    whole_drops++;
+                    if ((whole_drops % 500) == 1) {
+                        printf("[SIMPOSIX-IFDEF-MARKER] pios_udp.c: whole-datagram drops=%u (com fifo full)\n",
+                               (unsigned)whole_drops);
+                        fflush(stdout);
+                    }
+                } else {
+                    bool rx_need_yield = false;
+                    if (udp_dev->rx_in_cb) {
+                        (void)(udp_dev->rx_in_cb)(udp_dev->rx_in_context, udp_dev->rx_buffer, received, &fifo_headroom, &rx_need_yield);
+                    }
                 }
             }
         } while (received > 0);

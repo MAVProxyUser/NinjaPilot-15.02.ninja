@@ -56,8 +56,28 @@
 #else
 #define STACK_SIZE_RADIO_RX_BYTES STACK_SIZE_RX_BYTES
 #endif
+#ifdef SIMPOSIX
+// On SimPosix with external physics (NINJAPILOT_EXTERNAL_PHYSICS=1),
+// telemetry IS the sensor bus: every GyroSensor/AccelSensor/BaroSensor/
+// etc UAVObject arrives through telemetryRxTask, and ActuatorCommand
+// reaches the physics sim back through telemetryTxTask. At the stock
+// (tskIDLE_PRIORITY + 2) these sat below the whole estimator/control
+// stack (FLIGHTCONTROL 3 .. STATEESTIMATION 6) - a self-throttling loop,
+// since the tasks starving the parser are the ones its data feeds:
+// confirmed live, filteraltitude.c's accel branch dropped to ~4Hz
+// (dT ~0.25s) while the vehicle climbed at 10 m/s, so the estimator
+// tracked fresh-but-unparsed data seconds behind reality. Placing the
+// simulated hardware-I/O plane at the top (alongside the UDP RX drain
+// task, all brief per-wakeup workers) mirrors real hardware, where
+// sensor bytes move at ISR/DMA priority above every application task.
+// Real boards keep the stock priority: there, telemetry genuinely is
+// low-priority GCS chatter and sensors have their own drivers.
+#define TASK_PRIORITY_RX          (tskIDLE_PRIORITY + 7)
+#define TASK_PRIORITY_TX          (tskIDLE_PRIORITY + 7)
+#else
 #define TASK_PRIORITY_RX          (tskIDLE_PRIORITY + 2)
 #define TASK_PRIORITY_TX          (tskIDLE_PRIORITY + 2)
+#endif
 #define TASK_PRIORITY_RADRX       (tskIDLE_PRIORITY + 2)
 #define REQ_TIMEOUT_MS            250
 #define MAX_RETRIES               2
@@ -434,7 +454,21 @@ static void telemetryRxTask(__attribute__((unused)) void *parameters)
 
         if (inputPort) {
             // Block until data are available
+#ifdef SIMPOSIX
+            // 250 bytes, not 16: on SimPosix the whole per-tick sensor
+            // burst (65+ bytes, delivered instantaneously by the UDP
+            // drain task) should be consumed in ONE read. The 16-byte
+            // chunking forced the burst through 5 reads with the final
+            // CRC byte alone in the last one, and a still-unidentified
+            // defect in that multi-read path corrupted exactly that byte
+            // (parser saw a constant stale value where the checksum
+            // belonged, ~350 packets/s - the last-in-burst object lost
+            // ~99% of its updates). Note UAVTalkProcessInputStream takes
+            // uint8_t length - chunk must stay < 256.
+            uint8_t serial_data[250];
+#else
             uint8_t serial_data[16];
+#endif
             uint16_t bytes_to_process;
 
             bytes_to_process = PIOS_COM_ReceiveBuffer(inputPort, serial_data, sizeof(serial_data), 500);

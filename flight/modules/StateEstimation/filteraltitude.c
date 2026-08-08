@@ -54,19 +54,6 @@
 #define DT_MAX                     1.0f
 #define DT_AVERAGE                 1e-3f
 
-// A real, sustained (not sensor-noise-transient) gap between accelState and
-// accelBiasState of this magnitude, held for this long, is treated as
-// needing the fast (InitializationAccelDriftKi) bias-catch-up rate instead
-// of the deliberately slow steady-state AccelDriftKi rate. A genuine climb
-// settles back to ~0 net accel within a second or two once thrust reaches
-// equilibrium; a gap that persists past SUSTAINED_GAP_DURATION_MS means
-// AccelDriftKi's slow tracking has fallen behind reality (stuck/saturated
-// thrust command, or genuine long-timescale bias drift) and needs to
-// re-converge quickly rather than let the untracked residual keep getting
-// double-integrated into velocityState/altitudeState.
-#define SUSTAINED_GAP_THRESHOLD_MPS2 1.0f
-#define SUSTAINED_GAP_DURATION_MS    2000
-
 static volatile bool reloadSettings;
 
 // Private types
@@ -86,16 +73,6 @@ struct data {
     portTickType initTimer;
     AltitudeFilterSettingsData settings;
     float gravity;
-
-    // sustained-accel-vs-bias divergence tracking (see SUSTAINED_GAP_*
-    // below): distinguishes "accel bias has drifted" (AccelDriftKi's slow
-    // default tracking is correct for this) from "a real, sustained
-    // maneuver is holding accelState away from accelBiasState" (which
-    // slow tracking cannot resolve, and which a fixed, weak BaroKp^2
-    // velocity-correction gain cannot out-pull either) - see filter()
-    // for the actual detection/fast-catch-up logic.
-    bool  gapActive;
-    portTickType gapStartTimer;
 };
 
 // Private variables
@@ -139,8 +116,6 @@ static int32_t init(stateFilter *self)
     this->baroLast  = 0.0f;
     this->accelLast = 0.0f;
     this->first_run = 1;
-    this->gapActive = false;
-    this->gapStartTimer = 0;
     HomeLocationg_eGet(&this->gravity);
     return 0;
 }
@@ -241,27 +216,24 @@ static filterResult filter(stateFilter *self, stateEstimation *state)
             // low pass filter accelerometers
             this->accelState = (1.0f - this->settings.AccelLowPassKp) * this->accelState + this->settings.AccelLowPassKp * current;
 
-            // track how long accelState has sat far from accelBiasState -
-            // a transient (a normal climb settling to equilibrium thrust
-            // within a second or two) clears itself; a gap that persists
-            // past SUSTAINED_GAP_DURATION_MS means AccelDriftKi's slow
-            // steady-state tracking has fallen behind reality and needs to
-            // re-converge at the fast (Initialization) rate instead of
-            // continuing to let the untracked residual get double-
-            // integrated into velocityState/altitudeState every step.
-            bool gapNow = fabsf(this->accelState - this->accelBiasState) > SUSTAINED_GAP_THRESHOLD_MPS2;
-            if (gapNow) {
-                if (!this->gapActive) {
-                    this->gapActive     = true;
-                    this->gapStartTimer = xTaskGetTickCount();
-                }
-            } else {
-                this->gapActive = false;
-            }
-            bool sustainedGap = this->gapActive
-                                 && ((xTaskGetTickCount() - this->gapStartTimer) / portTICK_RATE_MS) > SUSTAINED_GAP_DURATION_MS;
-
-            if (((xTaskGetTickCount() - this->initTimer) / portTICK_RATE_MS) < INITIALIZATION_DURATION_MS || sustainedGap) {
+            // NOTE: a "sustained-gap fast bias catch-up" heuristic briefly
+            // lived here (treat accelState sitting >1 m/s^2 from
+            // accelBiasState for >2s as bias drift and re-converge at the
+            // fast Initialization rate). REMOVED - it was designed against
+            // observations made while the transport layer was feeding this
+            // filter seconds-stale sensor data (the real root cause, since
+            // fixed: UDP RX priority/backlog + a com-layer chunked-read
+            // corruption killing ~99% of AccelSensor packets). With a
+            // clean 500Hz accel feed the heuristic became actively
+            // harmful: a real AltitudeVario climb holds genuine
+            // acceleration longer than 2s, the heuristic classified that
+            // REAL acceleration as bias and absorbed it at the fast rate,
+            // zeroing the filter's accel fast-path exactly when it was
+            // needed - measured: estimator altitude lagged truth by ~3.5m
+            // during a 2 m/s climb (pure BaroKp low-pass lag), where the
+            // stock complementary structure tracks it via accel
+            // integration. Stock slow AccelDriftKi tracking restored.
+            if (((xTaskGetTickCount() - this->initTimer) / portTICK_RATE_MS) < INITIALIZATION_DURATION_MS) {
                 // allow the offset to reach quickly the target value in case of small AccelDriftKi
                 this->accelBiasState = (1.0f - this->settings.InitializationAccelDriftKi) * this->accelBiasState + this->settings.InitializationAccelDriftKi * this->accelState;
             } else {

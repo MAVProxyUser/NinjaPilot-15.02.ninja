@@ -56,19 +56,40 @@
  */
 uint32_t pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_NONE];
 
-#define PIOS_COM_TELEM_RF_RX_BUF_LEN  512
-#define PIOS_COM_TELEM_RF_TX_BUF_LEN  512
+// Was 512/512 - sized for a 57600-baud radio link on real hardware. On
+// SimPosix with external physics this port carries the ENTIRE simulated
+// sensor bus (500Hz gyro + accel + baro/mag/GPS + GCS control, tens of
+// KB/s in per-tick bursts from pios_udp.c's drain loop), and at 512B the
+// com fifo's whole-packet-discard-on-full behavior systematically
+// destroyed the TAIL of each burst - measured live: gyroMatches=28464 vs
+// accelMatches=195 (99.7% of AccelSensor lost, because accel is sent
+// last in each tick's burst), which starved the altitude estimator's
+// accel-integration branch down to ~4Hz. 8KB absorbs many full ticks of
+// burst while the (SimPosix-elevated, see telemetry.c) parser drains.
+#define PIOS_COM_TELEM_RF_RX_BUF_LEN  8192
+#define PIOS_COM_TELEM_RF_TX_BUF_LEN  4096
 
-#define PIOS_COM_GPS_RX_BUF_LEN       32
+// Every remaining com buffer bumped to desktop-appropriate sizes for the
+// same reason as TELEM_RF above - and one of these tiny values was the
+// PROVEN mechanism behind the deterministic last-packet-in-burst CRC
+// kill: the per-tick sensor burst is 65 bytes (Accel 27 + ObjReq 11 +
+// Gyro 27) and a 65-byte fifo with the classic one-reserved-byte
+// circular design holds exactly 64 - the final byte (always the last
+// packet's CRC) fell off EVERY tick, confirmed by the parser reporting
+// perfectly-framed packets whose received "CRC" byte was a constant
+// stale value while computed checksums varied normally. On real
+// hardware these sizes are fine (real links pace bytes; SimPosix
+// delivers whole bursts instantaneously).
+#define PIOS_COM_GPS_RX_BUF_LEN       1024
 
-#define PIOS_COM_TELEM_USB_RX_BUF_LEN 65
-#define PIOS_COM_TELEM_USB_TX_BUF_LEN 65
+#define PIOS_COM_TELEM_USB_RX_BUF_LEN 8192
+#define PIOS_COM_TELEM_USB_TX_BUF_LEN 4096
 
-#define PIOS_COM_BRIDGE_RX_BUF_LEN    65
-#define PIOS_COM_BRIDGE_TX_BUF_LEN    12
+#define PIOS_COM_BRIDGE_RX_BUF_LEN    1024
+#define PIOS_COM_BRIDGE_TX_BUF_LEN    1024
 
-#define PIOS_COM_AUX_RX_BUF_LEN       512
-#define PIOS_COM_AUX_TX_BUF_LEN       512
+#define PIOS_COM_AUX_RX_BUF_LEN       8192
+#define PIOS_COM_AUX_TX_BUF_LEN       4096
 
 uint32_t pios_com_aux_id       = 0;
 uint32_t pios_com_gps_id       = 0;

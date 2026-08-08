@@ -1231,15 +1231,22 @@ def uavtalk_thread():
         time.sleep(0.2)
         send_reliable("MixerSettings", bov.resolve_enum_values(db["MixerSettings"], bov.mixer_settings()))
         time.sleep(0.2)
-        # firmware default AccelDriftKi=0.0005 is far too slow to track a
-        # real, fast accel transient (measured swinging ~0.25 to -9.81 and
-        # back within about a second during a PositionHold runaway) -
-        # accelBiasState stays stranded far from accelState for seconds,
-        # and the resulting "corrected acceleration" error double-integrates
-        # into a real runaway (see filteraltitude.c's own comment on this).
-        # Testing whether a much faster bias-tracking rate closes that gap.
+        # STOCK values, deliberately. An earlier session set
+        # AccelDriftKi=0.05 (100x the stock 0.0005) chasing a runaway that
+        # was ACTUALLY caused by the transport layer feeding the estimator
+        # seconds-stale sensor data (UDP RX starvation + a com-layer
+        # chunked-read bug killing ~99% of AccelSensor packets - both
+        # since fixed at the root). With clean 500Hz sensors, 0.05/sample
+        # is catastrophic: the bias tracker absorbs any REAL sustained
+        # acceleration within ~56ms, zeroing correctedAccel and blinding
+        # the filter's velocity fast-path exactly when it matters -
+        # measured: velocityState read 0.2 m/s during a real 3 m/s climb,
+        # so AltitudeVario's rate PID pinned thrust at max and ran away.
+        # The stock slow rate is slow BY DESIGN: real accel bias drifts
+        # over minutes, and everything faster than that is real motion the
+        # integrator needs to see.
         send_reliable("AltitudeFilterSettings", {
-            "AccelLowPassKp": 0.04, "AccelDriftKi": 0.05,
+            "AccelLowPassKp": 0.04, "AccelDriftKi": 0.0005,
             "InitializationAccelDriftKi": 0.2, "BaroKp": 0.04,
         })
         time.sleep(0.2)
@@ -1735,6 +1742,15 @@ def publish_accel(client, accel_body):
     # its own sleep), not just by other code running in between within
     # the same tick.
     client.send_object("AccelSensor", {"x": accel_body[0], "y": accel_body[1], "z": accel_body[2], "temperature": 25.0})
+    _accel_send_count[0] += 1
+    now = time.time()
+    if now - _accel_send_count[1] > 1.0:
+        _accel_send_count[1] = now
+        if VERBOSE:
+            print(f"[acceldbg] t={now:.2f} total_accel_sends={_accel_send_count[0]}", flush=True)
+
+
+_accel_send_count = [0, 0.0]  # [total sends, last debug print time]
 
 
 # Baro/Mag/GPS are real hardware sensors that natively sample at tens of
