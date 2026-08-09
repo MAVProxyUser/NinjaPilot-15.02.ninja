@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="agriculture_world">
+    <static>true</static>
+
+    <!-- Placement. Two transforms are folded into the pose below.
+         1. YAW 180deg. Upstream's URDF spawns the mesh with rpy="0 0 pi" to
+            align the scene so X+ is east and Y+ is north (ENU), which is the
+            convention this world already uses. Keeping it means the farm's
+            north is our north.
+         2. TRANSLATION +22 +27 -0.25, which puts the flight area on an open
+            pad INSIDE the farm rather than beside it.
+
+            Picking that pad needs world-space geometry, and this mesh will
+            mislead you if you read it naively: most of its objects are
+            INSTANCED, so the raw <float_array> coordinates are local to each
+            object and cluster around (0,0). Reading them without walking the
+            <visual_scene> node transforms says the farm is 80m wide and dense
+            at the origin; walking the transforms says it actually spans
+            X -36..115, Y -59..101. A first attempt at this offset was chosen
+            from the un-transformed numbers and parked the vehicle at mesh
+            x=-40 - past the edge of the mesh, so the farm sat off to one side
+            with the star flying over nothing.
+
+            With transforms applied: the buildings cluster around mesh
+            (9, 16), the whole scene centres near (39, 21), and mesh (22, 27)
+            is a flat open pad - clear of anything above 1.5m out to an 11m
+            radius, ground varying only 0.25m. That is well inside the farm
+            and next to the built-up area, so the buildings, silos and crop
+            rows surround the mission instead of sitting behind it.
+
+            After the 180deg yaw, mesh (22, 27, 0.25) maps to world
+            (-22, -27, 0.25), so the model is translated by (+22, +27, -0.25)
+            to bring that pad to world (0, 0, 0). The star (radius 6m) and the
+            8/18/28m rings then fly over open ground with the farm as
+            surrounding scenery rather than as obstacles. -->
+    <pose>22 27 -0.25 0 0 3.14159265358979</pose>
+
+    <link name="link">
+      <collision name="collision">
+        <geometry>
+          <mesh><uri>meshes/agriculture_world.dae</uri></mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>100</mu>
+              <mu2>50</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>meshes/agriculture_world.dae</uri></mesh>
+        </geometry>
+      </visual>
+    </link>
+  </model>
+</sdf>

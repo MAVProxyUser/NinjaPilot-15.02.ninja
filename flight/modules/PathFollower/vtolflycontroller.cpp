@@ -93,6 +93,8 @@ void VtolFlyController::Activate(void)
         vtolEmergencyFallback = 0.0f;
         vtolEmergencyFallbackSwitch = false;
         mYawCommandActive = false;
+        mPreTurnActive    = false;
+        mPreTurnBearing   = 0.0f;
     }
 }
 
@@ -188,104 +190,80 @@ void VtolFlyController::UpdateVelocityDesired()
     struct path_status progress;
     path_progress(pathDesired, cur, &progress, true);
 
-    // ================= CORNER CONTROLLER =================
-    // ONE owner for the whole corner. Every earlier attempt split the job -
-    // a yaw-gated translation lock here, a lookahead yaw steer there - and
-    // the two pulled against each other, producing loops and boxy spirals
-    // at every waypoint. The lesson (and what ArduPilot's S-curve and
-    // iNav's turn smoothing both do) is that position, speed and heading
-    // through a corner are one problem.
+    // ================= CORNER LOOKAHEAD (heading only) =================
+    // Scope note, learned expensively: this steers YAW and NOTHING ELSE.
     //
-    // The sequence, entirely inside this block:
-    //   APPROACH  decelerate ALONG THE LEG LINE on a stopping profile, so
-    //             the vehicle slides in straight instead of coasting past
-    //   ARRIVE    hold the waypoint with a BOUNDED command - bounded is
-    //             what keeps it stable through a dwell, which is what the
-    //             mission's confirmed-arrival policy needs
-    //   TURN      rotate on the spot; a quad is omnidirectional, so this
-    //             costs no translation and must not gate it
-    //   DEPART    release to normal leg following
+    // An earlier version of this block also rewrote translation through the
+    // corner (an APPROACH braking profile plus a bounded ARRIVE park). That
+    // code could never run - it was gated on pathDesired->ModeParameters[3],
+    // which nothing in the firmware ever set - so it sat here for many runs
+    // looking like the thing that was flying the corners while paths.c's
+    // trapezoidal profile actually was. The first flight in which it did run
+    // (star78, once the planner started publishing the bearing) stuck at
+    // waypoint 1, drifted 4.1m past the point and swung altitude over a 7.6m
+    // range. The reason is structural: `progress` is shared with controlDown,
+    // so rewriting path_vector[0]/[1] and correction_vector[0]/[1] here while
+    // leaving [2] and fractional_progress as path_progress computed them
+    // hands the vertical controller an inconsistent path. It has been removed
+    // rather than left disabled.
     //
-    // Yaw NEVER gates translation. That coupling was the original sin: a
-    // hover plus a rotation cannot move a quadcopter sideways, so if it
-    // spirals, translation is being driven by the turn - which was exactly
-    // the bug.
+    // Braking into a corner is already owned by the leg speed profile in
+    // paths.c, and stopping ON the point is owned by the mission's
+    // confirmed-arrival policy (pathplanner.c conditionDistanceToTarget).
+    // Those two produced 0.11m mean arrival accuracy with this block inert.
+    // What was genuinely missing was heading: the follower only knew the leg
+    // it was on, so it met each corner with no rotation started and left it
+    // still turning, which bent the first metres of the next leg.
+    mPreTurnActive = false;
     if (vtolPathFollowerSettings->YawControl == VTOLPATHFOLLOWERSETTINGS_YAWCONTROL_PATHDIRECTION
         || vtolPathFollowerSettings->YawControl == VTOLPATHFOLLOWERSETTINGS_YAWCONTROL_MOVEMENTDIRECTION) {
-        float legN = pathDesired->End.North - pathDesired->Start.North;
-        float legE = pathDesired->End.East - pathDesired->Start.East;
+        float legN   = pathDesired->End.North - pathDesired->Start.North;
+        float legE   = pathDesired->End.East - pathDesired->Start.East;
         float legLen = sqrtf(legN * legN + legE * legE);
 
-        // Only corners get this treatment: a straight-through waypoint (or
-        // the last leg, which has no successor) is flown normally.
-        bool turnAhead = false;
-        if (pathDesired->ModeParameters[3] > 0.5f && legLen > 1e-3f) {
-            float turn = pathDesired->ModeParameters[2] - RAD2DEG(atan2f(legE, legN));
+        // Only real corners get a lookahead: a straight-through waypoint, or
+        // the last leg (which has no successor and so no valid bearing), is
+        // flown with the ordinary leg heading.
+        if (pathDesired->ModeParameters[PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_NEXTBEARINGVALID] > 0.5f && legLen > 1e-3f) {
+            float turn = pathDesired->ModeParameters[PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_NEXTBEARING] - RAD2DEG(atan2f(legE, legN));
             while (turn > 180.0f) {
                 turn -= 360.0f;
             }
             while (turn < -180.0f) {
                 turn += 360.0f;
             }
-            turnAhead = fabsf(turn) > 25.0f;
-        }
+            if (fabsf(turn) > 25.0f) {
+                float dN = pathDesired->End.North - positionState.North;
+                float dE = pathDesired->End.East - positionState.East;
+                float distToEnd = sqrtf(dN * dN + dE * dE);
 
-        if (turnAhead) {
-            float dN = pathDesired->End.North - positionState.North;
-            float dE = pathDesired->End.East - positionState.East;
-            float distToEnd = sqrtf(dN * dN + dE * dE);
-
-            // Deceleration the vehicle can actually deliver. Asking for
-            // more than this is what saturated the attitude loop and tipped
-            // it over in earlier attempts.
-            const float A_BRAKE     = 0.55f;
-            // Bound on the hold command. UNBOUNDED was the instability: at
-            // a few metres of error a 2.5x gain demanded more speed than
-            // the vehicle could take, and holding that through a dwell
-            // diverged (a leg entered at 11.3m ended 25.6m out).
-            const float HOLD_V_MAX  = 0.8f;
-            // 0.6m. Raising this to 1.2 (to beat the acceptance radius and
-            // stop the corner being cut) destabilised the VERTICAL channel:
-            // the vehicle climbed through its target to 10.9m and then fell
-            // to the ground in 2s without ever translating. The corner
-            // controller shares `progress` with controlDown, so widening
-            // the window where it rewrites that structure has vertical
-            // consequences - any change here must be re-tested for
-            // altitude, not just for path.
-            const float ARRIVE_DIST = 1.2f;
-
-            if (distToEnd > ARRIVE_DIST) {
-                // APPROACH: cap the along-track speed at what can still be
-                // bled to zero by the waypoint, and keep the feed-forward
-                // pointing ALONG THE LEG (not at the vehicle-to-waypoint
-                // vector) so the slide-in stays on the drawn line.
-                float vStop = sqrtf(2.0f * A_BRAKE * (distToEnd - ARRIVE_DIST));
-                float along = sqrtf(squaref(progress.path_vector[0])
-                                    + squaref(progress.path_vector[1]));
-                if (along > 1e-6f && vStop < along) {
-                    float k = vStop / along;
-                    progress.path_vector[0] *= k;
-                    progress.path_vector[1] *= k;
+                // Distance at which the nose starts swinging to the NEXT leg.
+                // The turn has to be FINISHED on arrival, so the vehicle lands
+                // on the point already pointing down the next leg and can
+                // accelerate straight out of it. A 144deg hairpin takes 4.1s at
+                // the 35deg/s slew, so the lookahead has to cover at least that
+                // much flying time.
+                //
+                // What makes 3.5m safe now is that it is no longer 3.5m of
+                // CRUISING. An early attempt at 4.0m (star79) rotated the
+                // vehicle while it was still at full leg speed and cost the
+                // vertical channel badly (altitude peak-to-peak 0.08 -> 0.65m).
+                // With PATH_ARRIVAL_GAIN lowered to 0.45 the vehicle is already
+                // decelerating from ~2.2m out, so most of the rotation now
+                // happens while it is slowing onto the point rather than while
+                // it is crossing the leg.
+                // The yaw command slews at yawSlewDps (35 deg/s) and a star
+                // hairpin is ~144 deg = ~4.1s; the last few metres of a
+                // decelerating approach take about that long. Measured on
+                // star77, before this existed: the vehicle was still rotating
+                // 106->180 deg as it reached the final waypoint and settled
+                // only at the instant the waypoint switched - a hook in the
+                // landing, and a bend at the start of every leg.
+                const float PRETURN_DIST = 3.5f;
+                if (distToEnd < PRETURN_DIST) {
+                    mPreTurnBearing = pathDesired->ModeParameters[PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_NEXTBEARING];
+                    mPreTurnActive  = true;
                 }
-            } else {
-                // ARRIVE + TURN: park on the waypoint. Bounded command, so
-                // this is stable no matter how long the turn (or a
-                // mission-requested dwell) takes.
-                float vN = dN;
-                float vE = dE;
-                float mag = sqrtf(vN * vN + vE * vE);
-                if (mag > 1e-6f) {
-                    float v = mag * 1.5f;
-                    if (v > HOLD_V_MAX) {
-                        v = HOLD_V_MAX;
-                    }
-                    vN *= v / mag;
-                    vE *= v / mag;
-                }
-                progress.path_vector[0]      = vN;
-                progress.path_vector[1]      = vE;
-                progress.correction_vector[0] = dN;
-                progress.correction_vector[1] = dE;
             }
         }
     }
@@ -487,7 +465,14 @@ void VtolFlyController::UpdateAutoPilot()
     // to the pathDesired to initiate a Landing sequence. This is the simpliest approach. plans.c
     // can't manage this.  And pathplanner whilst similar does not manage this as it is not a
     // waypoint traversal and is not aware of flight modes other than path plan.
-    if ((uint8_t)pathDesired->ModeParameters[PATHDESIRED_MODEPARAMETER_GOTOENDPOINT_NEXTCOMMAND] == FLIGHTMODESETTINGS_RETURNTOBASENEXTCOMMAND_LAND) {
+    // The mode check is NOT redundant. ModeParameters is a union of per-mode
+    // payloads, so slot 0 only means "next command" when the mode is
+    // GoToEndpoint; in other modes it holds something else entirely (a
+    // FollowVector leg cruise speed of 1.5 m/s casts to (uint8_t)1, which is
+    // exactly RETURNTOBASENEXTCOMMAND_LAND). Without this guard the vehicle
+    // flew its first waypoint and then landed itself in mid-mission.
+    if (pathDesired->Mode == PATHDESIRED_MODE_GOTOENDPOINT
+        && (uint8_t)pathDesired->ModeParameters[PATHDESIRED_MODEPARAMETER_GOTOENDPOINT_NEXTCOMMAND] == FLIGHTMODESETTINGS_RETURNTOBASENEXTCOMMAND_LAND) {
         if (pathStatus->fractional_progress > RTB_LAND_FRACTIONAL_PROGRESS_START_CHECKS) {
             if (fabsf(pathStatus->correction_direction_north) < RTB_LAND_NE_DISTANCE_REQUIRED_TO_START_LAND_SEQUENCE && fabsf(pathStatus->correction_direction_east) < RTB_LAND_NE_DISTANCE_REQUIRED_TO_START_LAND_SEQUENCE) {
                 plan_setup_land();
@@ -572,6 +557,19 @@ uint8_t VtolFlyController::RunAutoPilot()
             // yaw ultimate period at 560ms vs 114ms for roll - yaw is ~5x
             // slower to respond, so the command must be correspondingly
             // gentler or the loop is forever chasing a target it cannot reach.
+            // 35 deg/s, and this is a CEILING set by the airframe, not a
+            // preference. Relay autotune measured this vehicle's yaw ultimate
+            // period at 560ms vs 114ms for roll - yaw responds ~5x slower, so
+            // a command slewed faster than the loop can track is just an error
+            // signal the loop chases and overshoots.
+            //
+            // Tried 60 deg/s (star80) to make a 144deg hairpin take 2.4s
+            // instead of 4.1s, so the turn could finish while parked on the
+            // waypoint. It bought the best cross-track and arrival numbers of
+            // the session (0.17m / 0.09m) and paid for them in exactly the
+            // place the ultimate period predicted: yaw RMS 8.4 -> 15.3 deg,
+            // peak-to-peak 48 -> 90 deg, and the mission stretched 118s ->
+            // 169s as waypoints waited out the hunting. Reverted.
             const float yawSlewDps = 35.0f;
             float dT = vtolPathFollowerSettings->UpdatePeriod * 0.001f;
             if (!mYawCommandActive) {
@@ -675,6 +673,12 @@ float VtolFlyController::updatePathBearing()
     // made the nose whip around at every waypoint. The leg direction is
     // constant for the whole leg and only steps at waypoint transitions,
     // where the yaw command slew smooths it.
+    // Inside the corner, aim at the leg we are about to fly, not the one we
+    // are finishing. See PRETURN_DIST in UpdateVelocityDesired.
+    if (mPreTurnActive) {
+        return mPreTurnBearing;
+    }
+
     float dn = pathDesired->End.North - pathDesired->Start.North;
     float de = pathDesired->End.East - pathDesired->Start.East;
 

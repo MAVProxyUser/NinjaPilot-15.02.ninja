@@ -132,9 +132,20 @@
   </gz-gui>
 </plugin>
 <plugin filename="CameraTracking" name="Camera Tracking">
-      <!-- Calmer chase cam: further back and higher for a view of the whole
-           grid, and low gains so it eases after the vehicle instead of
-           snapping to it. -->
+      <!-- Chase cam settings are kept, but following is NOT armed at startup.
+           gz-rendering's camera stores a single followOffset and eases the
+           camera toward target+offset every frame (BaseCamera::SetFollowOffset
+           / followPGain), so while follow is active it rewrites the camera
+           pose continuously - a manual scroll-wheel zoom is undone on the
+           next frame, which is the "snaps back to the original view" effect.
+           There is no stock setting that keeps continuous follow AND honours
+           manual zoom; the two are the same control.
+
+           Note the follow is armed by the BRIDGE, not by this file - it calls
+           the /gui/follow service on startup (gazebo_bridge.py, gui_follow()).
+           Set NINJAPILOT_GUI_FOLLOW=0 to leave the camera free, or turn the
+           chase cam on by hand with right-click on the vehicle -> Follow. The
+           offset and gain below are what either path uses. -->
       <follow_offset>-14 -14 9</follow_offset>
       <follow_pgain>0.008</follow_pgain>
       <follow_worldframe>true</follow_worldframe>
@@ -369,149 +380,34 @@
             </plane>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <plane>
-              <normal>0 0 1</normal>
-              <size>100 100</size>
-            </plane>
-          </geometry>
-          <material>
-            <ambient>0.8 0.8 0.8 1</ambient>
-            <diffuse>0.8 0.8 0.8 1</diffuse>
-            <specular>0.8 0.8 0.8 1</specular>
-          </material>
-        </visual>
+        <!-- Collision only, no visual. The farm mesh supplies the ground the
+             eye sees, and its field surface is offset to sit at z=0; a grey
+             100x100 plane drawn at the same height would z-fight with it and
+             hide the scene. The plane is KEPT for collision so takeoff and
+             landing still happen against a guaranteed-flat, guaranteed-level
+             floor rather than against triangle edges - physics behaviour is
+             unchanged from every run before this world swap. -->
       </link>
     </model>
 
 
     <!-- ================= SCENERY =================
-         Placed OUTSIDE the mission envelope (star radius 6m, rings at
-         8/18/28m) so they give the eye something to judge motion and
-         altitude against without becoming obstacles. -->
+         Clearpath Robotics' agricultural world (cpr_agriculture_gazebo),
+         ported from Gazebo Classic. It replaced a handful of hand-built
+         primitives (three cone-trees, a box hangar, a tower, a windsock)
+         that read as placeholders from the air.
 
-    <model name="tree_1">
-      <static>true</static>
-      <pose>14 9 0 0 0 0.4</pose>
-      <link name="trunk">
-        <pose>0 0 1.6 0 0 0</pose>
-        <collision name="c"><geometry><cylinder><radius>0.28</radius><length>3.2</length></cylinder></geometry></collision>
-        <visual name="v">
-          <geometry><cylinder><radius>0.28</radius><length>3.2</length></cylinder></geometry>
-          <material><ambient>0.30 0.20 0.11 1</ambient><diffuse>0.36 0.24 0.13 1</diffuse></material>
-        </visual>
-      </link>
-      <link name="canopy">
-        <pose>0 0 4.3 0 0 0</pose>
-        <collision name="c"><geometry><sphere><radius>2.1</radius></sphere></geometry></collision>
-        <visual name="v">
-          <geometry><sphere><radius>2.1</radius></sphere></geometry>
-          <material><ambient>0.10 0.32 0.10 1</ambient><diffuse>0.14 0.44 0.14 1</diffuse></material>
-        </visual>
-      </link>
-    </model>
+         The port was cheap because the upstream scene is ONE baked COLLADA
+         mesh with no Classic plugins attached - see
+         models/agriculture_world/model.config. The model is offset so its
+         open field, not its farmyard, sits under the mission envelope; the
+         reasoning is in models/agriculture_world/model.sdf.
 
-    <model name="tree_2">
-      <static>true</static>
-      <pose>-16 -11 0 0 0 1.1</pose>
-      <link name="trunk">
-        <pose>0 0 2.1 0 0 0</pose>
-        <collision name="c"><geometry><cylinder><radius>0.34</radius><length>4.2</length></cylinder></geometry></collision>
-        <visual name="v">
-          <geometry><cylinder><radius>0.34</radius><length>4.2</length></cylinder></geometry>
-          <material><ambient>0.28 0.18 0.10 1</ambient><diffuse>0.34 0.22 0.12 1</diffuse></material>
-        </visual>
-      </link>
-      <link name="canopy">
-        <pose>0 0 5.6 0 0 0</pose>
-        <collision name="c"><geometry><sphere><radius>2.8</radius></sphere></geometry></collision>
-        <visual name="v">
-          <geometry><sphere><radius>2.8</radius></sphere></geometry>
-          <material><ambient>0.09 0.28 0.09 1</ambient><diffuse>0.12 0.38 0.12 1</diffuse></material>
-        </visual>
-      </link>
-    </model>
-
-    <model name="tree_3">
-      <static>true</static>
-      <pose>-13 15 0 0 0 2.2</pose>
-      <link name="trunk">
-        <pose>0 0 1.3 0 0 0</pose>
-        <collision name="c"><geometry><cylinder><radius>0.22</radius><length>2.6</length></cylinder></geometry></collision>
-        <visual name="v">
-          <geometry><cylinder><radius>0.22</radius><length>2.6</length></cylinder></geometry>
-          <material><ambient>0.30 0.20 0.11 1</ambient><diffuse>0.36 0.24 0.13 1</diffuse></material>
-        </visual>
-      </link>
-      <link name="canopy">
-        <pose>0 0 3.6 0 0 0</pose>
-        <collision name="c"><geometry><sphere><radius>1.7</radius></sphere></geometry></collision>
-        <visual name="v">
-          <geometry><sphere><radius>1.7</radius></sphere></geometry>
-          <material><ambient>0.11 0.34 0.11 1</ambient><diffuse>0.15 0.46 0.15 1</diffuse></material>
-        </visual>
-      </link>
-    </model>
-
-    <!-- A hangar-ish structure: gives a hard vertical scale reference and
-         a roofline to judge the 8m ring against. -->
-    <model name="hangar">
-      <static>true</static>
-      <pose>18 -14 0 0 0 -0.35</pose>
-      <link name="walls">
-        <pose>0 0 2.5 0 0 0</pose>
-        <collision name="c"><geometry><box><size>10 7 5</size></box></geometry></collision>
-        <visual name="v">
-          <geometry><box><size>10 7 5</size></box></geometry>
-          <material><ambient>0.55 0.55 0.58 1</ambient><diffuse>0.72 0.72 0.75 1</diffuse></material>
-        </visual>
-      </link>
-      <link name="roof">
-        <pose>0 0 5.4 0 0 0</pose>
-        <collision name="c"><geometry><box><size>10.6 7.6 0.8</size></box></geometry></collision>
-        <visual name="v">
-          <geometry><box><size>10.6 7.6 0.8</size></box></geometry>
-          <material><ambient>0.35 0.12 0.10 1</ambient><diffuse>0.52 0.17 0.14 1</diffuse></material>
-        </visual>
-      </link>
-    </model>
-
-    <!-- Control tower: tall enough (16m) to reference the 18m ring. -->
-    <model name="tower">
-      <static>true</static>
-      <pose>-19 4 0 0 0 0</pose>
-      <link name="shaft">
-        <pose>0 0 8 0 0 0</pose>
-        <collision name="c"><geometry><cylinder><radius>1.4</radius><length>16</length></cylinder></geometry></collision>
-        <visual name="v">
-          <geometry><cylinder><radius>1.4</radius><length>16</length></cylinder></geometry>
-          <material><ambient>0.62 0.62 0.60 1</ambient><diffuse>0.80 0.80 0.78 1</diffuse></material>
-        </visual>
-      </link>
-      <link name="cab">
-        <pose>0 0 17 0 0 0</pose>
-        <collision name="c"><geometry><box><size>4 4 2.4</size></box></geometry></collision>
-        <visual name="v">
-          <geometry><box><size>4 4 2.4</size></box></geometry>
-          <material><ambient>0.15 0.25 0.35 1</ambient><diffuse>0.22 0.38 0.55 1</diffuse></material>
-        </visual>
-      </link>
-    </model>
-
-    <!-- Windsock mast: a visual anchor near the pad for the wind sliders. -->
-    <model name="windsock_mast">
-      <static>true</static>
-      <pose>9 -9 0 0 0 0</pose>
-      <link name="mast">
-        <pose>0 0 3 0 0 0</pose>
-        <collision name="c"><geometry><cylinder><radius>0.09</radius><length>6</length></cylinder></geometry></collision>
-        <visual name="v">
-          <geometry><cylinder><radius>0.09</radius><length>6</length></cylinder></geometry>
-          <material><ambient>0.85 0.45 0.05 1</ambient><diffuse>0.95 0.55 0.08 1</diffuse></material>
-        </visual>
-      </link>
-    </model>
+         Physics, wind, GPS noise, the GUI panels and the vehicle model are
+         all untouched by this swap. -->
+    <include>
+      <uri>model://agriculture_world</uri>
+    </include>
 
     <include>
       <uri>

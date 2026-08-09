@@ -19,8 +19,60 @@ echo "--- board log: decode from the FC's own flash ---"
 echo "--- score (flown vs planned, dense board samples) ---"
 "$PY" "$HERE/score.py" "$LABEL" "$OUT"
 
+# Cross-track answers "were the legs straight", which is NOT the same question
+# as "did we actually touch the corners" - a run can score beautiful legs and
+# still cut every waypoint by a metre.
+echo "--- waypoint arrival (did it actually get ON the point, and stop there) ---"
+"$PY" "$HERE/wp_arrival.py" "$OUT" 2>/dev/null
+
 echo "--- oscillation (is it porpoising/hunting, and at what frequency) ---"
 "$PY" "$HERE/porpoise.py" "$OUT" 2>/dev/null | sed -n '1,7p'
+
+echo "--- yaw: tracking error vs the bearing it was told to hold ---"
+"$PY" - "$OUT" <<'PYEOF2'
+import json, sys, math
+recs=[json.loads(l) for l in open(sys.argv[1])]
+t0=recs[0]["t_us"]/1e6
+att=[(r["t_us"]/1e6-t0, r["data"]["Yaw"]) for r in recs if r.get("object")=="AttitudeState"]
+pos=[(r["t_us"]/1e6-t0, r["data"]["North"], r["data"]["East"]) for r in recs if r.get("object")=="PositionState"]
+pos.sort()
+def dist_to(t, tgt):
+    # nearest position sample to time t, distance to tgt
+    best=None; bd=1e9
+    for (tp,n,e) in pos:
+        d=abs(tp-t)
+        if d<bd: bd=d; best=(n,e)
+        elif tp>t+1.0: break
+    return math.hypot(best[0]-tgt[0], best[1]-tgt[1]) if best else 1e9
+wpa=[(r["t_us"]/1e6-t0, r["data"]["Index"]) for r in recs if r.get("object")=="WaypointActive"]
+att.sort(); wpa.sort()
+STAR=[]
+_p=[(6*math.cos(math.radians(72*k)),6*math.sin(math.radians(72*k))) for k in range(5)]
+for k in [0,2,4,1,3,0]: STAR.append((_p[k][0],_p[k][1]))
+STAR.append((0.0,0.0))
+allerr=[]
+for i,(t,idx) in enumerate(wpa):
+    if idx<1 or idx>len(STAR)-1: continue
+    tend = wpa[i+1][0] if i+1<len(wpa) else (att[-1][0] if att else t)
+    a,b = STAR[idx-1], STAR[idx]
+    if math.hypot(b[0]-a[0], b[1]-a[1]) < 0.5: continue
+    bearing = math.degrees(math.atan2(b[1]-a[1], b[0]-a[0]))
+    # Measure only the SETTLED middle of the leg. Both ends are commanded
+    # turns, not tracking error: the first 5s is the nose coming round onto
+    # this leg, and the last stretch is the deliberate pre-turn onto the NEXT
+    # leg (PRETURN_DIST in vtolflycontroller), which is a feature. Counting
+    # either as error made this number meaningless - it read 66deg on a run
+    # whose legs were visibly straight.
+    errs=[abs((y-bearing+180)%360-180) for (ta,y) in att
+          if t+5.0 <= ta <= tend and dist_to(ta, b) > 3.0]
+    allerr += errs
+if allerr:
+    print("  settled on-leg yaw error: mean %.2f deg  max %.2f deg" % (
+        sum(allerr)/len(allerr), max(allerr)))
+    print("  (raw yaw RMS above includes the commanded 144deg corner turns)")
+else:
+    print("  (no settled leg samples)")
+PYEOF2
 
 echo "--- estimator health: filtered position vs its own GPS input ---"
 "$PY" - "$OUT" <<'PYEOF'

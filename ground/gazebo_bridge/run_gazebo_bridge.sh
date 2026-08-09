@@ -20,6 +20,12 @@ VENV_PY="$HERE/venv/bin/python3"
 # copy of the X3 model (adds a real IMU sensor - see models/x3_ninjapilot).
 export GZ_SIM_RESOURCE_PATH="$HERE/models${GZ_SIM_RESOURCE_PATH:+:$GZ_SIM_RESOURCE_PATH}"
 
+# Lets the world's <gui> block find our Wind and GPS-noise panels. Without
+# this the GUI still comes up, but silently minus those two plugins
+# ("Failed to load plugin [WindControl] : couldn't find shared library") -
+# which looked like the panels had broken rather than simply not been found.
+export GZ_GUI_PLUGIN_PATH="$HERE/gui_plugins/WindControl/build${GZ_GUI_PLUGIN_PATH:+:$GZ_GUI_PLUGIN_PATH}"
+
 if [ ! -x "$ELF" ]; then
     echo "error: $ELF not found." >&2
     echo "Build it first: cd \"$REPO_ROOT\" && make fw_simposix" >&2

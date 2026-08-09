@@ -84,6 +84,11 @@ private:
     // never be fed to the attitude loop as a step).
     float mYawCommand;
     bool mYawCommandActive;
+    // Pre-turn: aim yaw at the NEXT leg while still sliding into the corner,
+    // so the rotation is finished by the time the vehicle is released onto
+    // that leg. Set by the corner controller, consumed by updatePathBearing.
+    float mPreTurnBearing;
+    bool mPreTurnActive;
 };
 
 #endif // VTOLFLYCONTROLLER_H

@@ -28,20 +28,65 @@
 #include <pios_math.h>
 #include <mathmisc.h>
 
-// Along-track accel/decel used by path_vector()'s trapezoidal speed
-// profile (see comment there). Deliberately gentle - a multirotor at
-// mission speeds has a few m/s^2 available, but this constant does more
-// than bound acceleration: because braking follows v=sqrt(v_end^2+2*a*d),
-// it also sets how fast the vehicle is still moving a given distance
-// SHORT of the waypoint - which is where the plan actually advances (the
-// acceptance radius). At 0.6 the vehicle was still doing ~1.0 m/s at a
-// 0.8m radius and overshot every corner by 1.15m. 0.35 brakes earlier and
-// arrives genuinely slow.
-#define PATH_LEG_ACCEL 0.6f
+// Along-leg acceleration used by path_vector()'s trapezoidal speed profile,
+// m/s^2.
+//
+// This constant used to be doing two jobs at once. Besides bounding
+// acceleration it set how fast the vehicle was still travelling a given
+// distance SHORT of the waypoint (braking follows v=sqrt(v_end^2+2*a*d)), and
+// since the plan advanced the moment the vehicle clipped a wide acceptance
+// radius, that arrival speed WAS the corner accuracy - hence the earlier note
+// here about lowering it to brake sooner and "arrive genuinely slow".
+//
+// Arrival is no longer its problem. The mission now advances on a confirmed
+// stop (a tight sphere plus a speed-and-dwell test, pathplanner.c
+// conditionDistanceToTarget) and path_endpoint tapers its feed-forward to
+// zero at the point, so the vehicle stops ON the waypoint regardless of this
+// value. That frees the constant to do only its real job, and to be sized for
+// the leg rather than for the corner: 0.6 -> 0.8.
+//
+// Bigger is not better here. 1.2 was tried alongside a 1.5 m/s cruise
+// (star85) and the pair destabilised the vehicle - braking 1.5->0.5 m/s in
+// (1.5^2-0.5^2)/(2*1.2) = 0.83m is a sharp tilt transient right where the
+// vehicle is trying to settle on a waypoint, and it showed up as pitch RMS
+// 0.9 -> 6.4 deg, altitude peak-to-peak 0.17 -> 1.82m, and a plan that stuck
+// at the second waypoint for 43s. At 0.8 the same deceleration is spread over
+// 1.25m and the profile is gentle enough for the velocity loop to track.
+#define PATH_LEG_ACCEL 0.8f
+
+// Arrival slope, m/s per metre remaining. Caps commanded speed near a
+// waypoint so it decays LINEARLY with distance instead of on the braking
+// curve's sqrt.
+//
+// The sqrt curve v=sqrt(2*a*d) is the right shape for the physics and the
+// wrong shape for the loop that has to fly it: its slope is infinite at d=0,
+// so in the last few centimetres the command collapses far faster than the
+// velocity loop can follow, and the vehicle carries its lag straight through
+// the point. Measured with a full-stop corner and no cap (star87): every
+// waypoint overshot by 0.32-0.82m, then got dragged back by endpoint homing
+// while the nose was still turning - which is why the recovery looked like
+// the vehicle orbiting the waypoint - and each pass reset the arrival
+// confirmation, costing 4-8s per corner.
+//
+// A linear cap makes the last stretch a first-order settle, which is exactly
+// what a P-controlled velocity loop tracks without lag error. It only binds
+// inside v/PATH_ARRIVAL_GAIN metres, so it shapes the arrival without
+// slowing the leg.
+//
+// 0.7 -> 0.45. This slope also decides how much TIME the vehicle spends
+// slowing down, and that time is what the corner turn has to happen in. At
+// 0.7 the cap only began biting 1.4m from the waypoint, so the vehicle was
+// still at cruise when the nose started coming round and only ~2s of the
+// 4.1s hairpin turn happened before arrival - it reached the point still
+// rotating. At 0.45 braking starts 2.2m out and the last 2m take ~5s, so the
+// turn can be flown ON the way in, like a car steering into a corner rather
+// than stopping and then pivoting.
+#define PATH_ARRIVAL_GAIN 0.45f
 
 #include "uavobjectmanager.h" // <--.
 #include "pathdesired.h" // <-- needed only for correct ENUM macro usage with path modes (PATHDESIRED_MODE_xxx,
 #include "paths.h"
+#include "plans.h" // ModeParameters slot names
 // no direct UAVObject usage allowed in this file
 
 // private functions
@@ -131,10 +176,32 @@ static void path_endpoint(PathDesiredData *path, float *cur_point, struct path_s
     status->correction_vector[1] = diff[1];
     status->correction_vector[2] = diff[2];
 
-    // base movement direction in this mode is a constant velocity offset on top of correction in the same direction
-    status->path_vector[0] = path->EndingVelocity * status->correction_vector[0] / dist_diff;
-    status->path_vector[1] = path->EndingVelocity * status->correction_vector[1] / dist_diff;
-    status->path_vector[2] = path->EndingVelocity * status->correction_vector[2] / dist_diff;
+    // Base movement direction is a velocity offset toward the endpoint, on
+    // top of the correction in the same direction - but TAPERED as the
+    // endpoint gets close.
+    //
+    // The original was a unit vector times EndingVelocity, i.e. a constant
+    // full-speed command toward the target no matter how near it was: 0.5 m/s
+    // demanded at 0.5m out, and still 0.5 m/s demanded at 0.05m out. With the
+    // position correction added on top by the follower, that cannot settle -
+    // the vehicle drives through the point, turns around, drives through it
+    // again. Measured on star81, at the two waypoints where it caught: the
+    // vehicle sat 0.16-0.56m from the point with speed cycling 0.22-0.80 m/s
+    // for 11.7s and 8.3s, because the mission's confirm-arrival gate wants
+    // speed under 0.4 m/s and the buzzing never held it there. It is also
+    // what put a hook in the path just before landing, and it is what the
+    // FollowVector past-the-endpoint fallback inherits.
+    //
+    // Tapering makes the feed-forward vanish as the error vanishes and leaves
+    // the fine settling to the follower's position loop, which is what that
+    // loop is for. See PATH_ARRIVAL_GAIN for why the slope is linear.
+    float speed = path->EndingVelocity;
+    if (speed > PATH_ARRIVAL_GAIN * dist_diff) {
+        speed = PATH_ARRIVAL_GAIN * dist_diff;
+    }
+    status->path_vector[0] = speed * status->correction_vector[0] / dist_diff;
+    status->path_vector[1] = speed * status->correction_vector[1] / dist_diff;
+    status->path_vector[2] = speed * status->correction_vector[2] / dist_diff;
 }
 
 /**
@@ -217,9 +284,33 @@ static void path_vector(PathDesiredData *path, float *cur_point, struct path_sta
         float d_gone   = progress * dist_path;
         float d_left   = dist_path - d_gone;
         float cruise   = fmaxf(path->StartingVelocity, path->EndingVelocity);
+        // Optional LEG CRUISE SPEED, independent of the endpoint speeds.
+        //
+        // Without it a leg can never travel faster than its own endpoints,
+        // because both limits above are endpoint velocities. That is fine for
+        // a fly-through waypoint but wrong for a corner-to-corner leg: in the
+        // star EVERY vertex is a 144deg hairpin, so both endpoints carry the
+        // slow corner speed and the whole 11.4m leg crawled at it - measured
+        // 0.53 m/s median while MISSION_SPEED was 1.5. The mission was asking
+        // for a fast leg between slow corners and had no way to say so.
+        // ModeParameters[0] says it. Zero (or anything below the endpoint
+        // speeds) keeps the historic behaviour exactly.
+        // Slot 1, not slot 0: slot 0 aliases GOTOENDPOINT_NEXTCOMMAND and a
+        // speed parked there triggers the RTB landing sequence (see plans.h).
+        if (path->Mode == PATHDESIRED_MODE_FOLLOWVECTOR
+            && path->ModeParameters[PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_CRUISESPEED] > cruise) {
+            cruise = path->ModeParameters[PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_CRUISESPEED];
+        }
         float accel_lim = sqrtf(squaref(path->StartingVelocity) + 2.0f * PATH_LEG_ACCEL * d_gone);
         float brake_lim = sqrtf(squaref(path->EndingVelocity) + 2.0f * PATH_LEG_ACCEL * d_left);
         velocity = fminf(cruise, fminf(accel_lim, brake_lim));
+        // Linear arrival cap, so the vehicle settles ON the endpoint instead
+        // of carrying its loop lag through it. Only meaningful for a leg that
+        // ends stopped or nearly so - with a fly-through EndingVelocity the
+        // brake limit never drops that low anyway.
+        if (velocity > path->EndingVelocity + PATH_ARRIVAL_GAIN * d_left) {
+            velocity = path->EndingVelocity + PATH_ARRIVAL_GAIN * d_left;
+        }
     }
     status->path_vector[0] = velocity * status->path_vector[0] / dist_path;
     status->path_vector[1] = velocity * status->path_vector[1] / dist_path;

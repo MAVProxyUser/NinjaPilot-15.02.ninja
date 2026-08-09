@@ -396,6 +396,44 @@ void updatePathDesired()
     pathDesired.ModeParameters[3] = pathAction.ModeParameters[3];
     pathDesired.UID = waypointActive.Index;
 
+    // Publish the bearing of the NEXT leg, so the path follower can see the
+    // corner BEFORE it arrives:
+    //     ModeParameters[2] = bearing of leg (this wp -> next wp), degrees
+    //     ModeParameters[3] = 1 when that bearing is meaningful
+    // Without this the follower only ever knows the leg it is currently on,
+    // so it learns about a corner at the instant the waypoint switches -
+    // which is precisely too late to have turned for it, and the vehicle
+    // leaves the corner still rotating. That residual rotation is what bends
+    // the start of the next leg.
+    //
+    // Only for the line-following modes: Land and the Circle modes carry
+    // real payload in ModeParameters (Land's are velN/velE/velDown/options),
+    // and clobbering those would break the landing.
+    if (pathDesired.Mode == PATHDESIRED_MODE_FOLLOWVECTOR
+        || pathDesired.Mode == PATHDESIRED_MODE_GOTOENDPOINT) {
+        pathDesired.ModeParameters[PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_NEXTBEARING] = 0.0f;
+        pathDesired.ModeParameters[PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_NEXTBEARINGVALID] = 0.0f;
+
+        PathPlanData pathPlan;
+        PathPlanGet(&pathPlan);
+        uint16_t nextIdx = waypointActive.Index + 1;
+        if (nextIdx < pathPlan.WaypointCount) {
+            WaypointData nextWaypoint;
+            WaypointInstGet(nextIdx, &nextWaypoint);
+            float nN = nextWaypoint.Position.North - waypoint.Position.North;
+            float nE = nextWaypoint.Position.East - waypoint.Position.East;
+            // A zero-length next leg (a duplicated waypoint - missions end in
+            // one so they can terminate in a Land action) has no bearing at
+            // all. Reporting atan2f(0,0)=0 would claim "next leg heads due
+            // North" and make the follower turn for a corner that does not
+            // exist.
+            if ((nN * nN + nE * nE) > 1e-4f) {
+                pathDesired.ModeParameters[PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_NEXTBEARING] = RAD2DEG(atan2f(nE, nN));
+                pathDesired.ModeParameters[PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_NEXTBEARINGVALID] = 1.0f;
+            }
+        }
+    }
+
     if (waypointActive.Index == 0) {
         PositionStateData positionState;
         PositionStateGet(&positionState);

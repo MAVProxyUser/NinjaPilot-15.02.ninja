@@ -1079,7 +1079,28 @@ def _crc8_07(crc, data):
     return crc
 
 
-MISSION_SPEED = 1.5  # m/s, straight-line cruise (2.0 raced corners hard enough to dip into the ground at the 5m ring)
+# m/s, straight-line leg cruise. 1.5 -> 2.5. The old note here said 2.0
+# "raced corners hard enough to dip into the ground" - that was when leg speed
+# and corner speed were the same number and the vehicle arrived at a corner
+# still carrying cruise momentum. They are now separate: this is the speed
+# BETWEEN corners (paths.c reads it from ModeParameters[0]), while the corner
+# itself is entered at _corner_speed() and confirmed stopped before the plan
+# advances.
+#
+# 2.5 was tried (star83) and is past what this tune can hold: roll RMS 1.1 ->
+# 8.0 deg with 77deg peak-to-peak, altitude swinging 9.6m, 4.5m of overshoot
+# at the first corner, and the plan stalled. The velocity loop is the limit -
+# HorizontalVelPID Kp is already at its measured ceiling of 4.0 (6.5 tumbled
+# the vehicle outright), so a faster leg just means a larger velocity error
+# feeding the same gain and a bigger tilt demand.
+#
+# 1.5 was then tried properly (star85, after the slot-0 landing bug was
+# fixed) and still would not hold: pitch RMS 6.4 deg and the plan stuck 43s at
+# a corner. This tune's ceiling for a DELIVERED leg speed is somewhere under
+# that, so 1.0 it is - which is still roughly double the 0.53 m/s median the
+# star actually flew for its whole history, when leg speed was pinned to the
+# hairpin endpoint velocities and this constant meant nothing.
+MISSION_SPEED = 1.0
 # Waypoint acceptance radius (m). Level legs use a 2D horizontal check
 # (ConditionParameters[1]=0), vertical-transition legs use 3D ([1]=1).
 # Mission 12 flew a 3D check on LEVEL legs with radius 1.0 and flew away:
@@ -1093,6 +1114,39 @@ MISSION_SPEED = 1.5  # m/s, straight-line cruise (2.0 raced corners hard enough 
 # immediately and skip the climb).
 MISSION_WP_RADIUS = 1.0
 
+# Arrival policy. A 1.0m acceptance sphere is a FLY-THROUGH rule: the plan
+# advances the instant the vehicle clips the boundary, so at a corner the
+# vehicle turns away 1m short and never visits the point at all. Measured on
+# star75/76: closest approach to every one of the 6 star points was
+# 0.86-1.15m, i.e. exactly the radius, with 0.0s spent inside 0.5m and
+# never once passing the point. That is the "dwelling in the waypoint spot
+# is off, sometimes short clearly a meter" the eye picks up in the trail.
+#
+# So corners get a PRECISE policy instead: a tight sphere plus the
+# confirm-speed/dwell arrival test (pathplanner.c conditionDistanceToTarget
+# ConditionParameters[2]/[3]) that was already implemented but left off.
+# Fly-through waypoints keep the historic rule - clipping the sphere at
+# cruise is the correct behaviour there, and demanding a slow arrival on a
+# waypoint whose own leg velocity is 1.5 m/s would stall the plan forever.
+# 0.5 -> 0.3. With the arrival cap in place the vehicle no longer overshoots
+# (0.45m mean overshoot -> 0.09m), but it now approaches asymptotically, so a
+# 0.5m sphere let the plan confirm while it was still 0.32-0.45m short at
+# three of the corners. A tighter sphere is what asks it to actually finish
+# the arrival, and is only affordable BECAUSE the overshoot is gone.
+# 0.3 -> 0.15. The sphere is now the thing that decides how close it gets:
+# with the arrival tapered there is no overshoot to carry it through the
+# point, so it stops the moment the plan is satisfied. star89 confirmed at
+# 0.20-0.26m from every corner and at_retire equalled closest approach at all
+# of them - it was not failing to arrive, it was being told it had arrived.
+MISSION_WP_RADIUS_PRECISE = 0.15  # m, corner acceptance sphere
+MISSION_CONFIRM_SPEED = 0.4       # m/s, at-or-below counts as stopped
+MISSION_DWELL_S = 0.5             # s it must hold that before advancing
+# 0.3 -> 0.8 -> 0.5s. The dwell was widened when the corner turn still had to
+# finish while parked. It does not any more: PRETURN_DIST starts the rotation
+# 3.5m out and the vehicle now arrives already pointing down the next leg, so
+# the dwell is back to being pure arrival confirmation. Every 0.1s here costs
+# 0.8s of mission time across the 8 waypoints.
+
 
 def _corner_speed(theta_deg):
     """Arrival speed at a waypoint as a function of how sharply the path
@@ -1102,22 +1156,29 @@ def _corner_speed(theta_deg):
     the vehicle decelerate INTO the turn and re-accelerate out of it - the
     momentum that GoToEndpoint carried straight through the corner (2-4m of
     overshoot at 1.5 m/s) never builds up."""
-    # With the point-turn gate the vehicle STOPS to rotate at every real
-    # corner anyway, so arrival speed only needs to be low enough to stop
-    # cleanly - it no longer has to be low enough to carve the turn.
+    # These are ARRIVAL speeds - the speed the leg profile brakes to AT the
+    # waypoint - and for a real corner the right answer is zero.
+    #
+    # They used to be small-but-nonzero (0.5 at a hairpin) on the theory that
+    # the vehicle only had to arrive "slow enough to stop cleanly". It does not
+    # work: paths.c brakes to exactly this speed at the waypoint, so the
+    # vehicle reaches the point still moving and sails through it. Measured on
+    # star86 with a 0.5 m/s hairpin arrival: every one of the 8 waypoints
+    # overshot, by 0.58-0.86m, and then spent 7-20s recovering - which is why
+    # RAISING the cruise speed made the mission SLOWER overall (252s against
+    # 122s). The overshoot, not the cruise, was the time sink.
+    #
+    # Zero costs nothing, because leg speed no longer comes from the endpoints
+    # (ModeParameters[1] carries the cruise). The profile becomes the trapezoid
+    # it should always have been: accelerate out of the corner, cruise, brake
+    # to a standstill ON the point, turn, accelerate out again.
     if theta_deg < 25.0:
         return MISSION_SPEED         # straight-through: keep cruising
     if theta_deg < 70.0:
-        return 0.8                   # gentle turn (octagon vertices, 45deg)
+        return 0.4                   # gentle turn (octagon vertices, 45deg)
     if theta_deg < 115.0:
-        return 0.6                   # right-angle turns (letter strokes)
-    return 0.5                       # hairpins: the point-turn has to kill
-                                     # whatever speed arrives here. Braking
-                                     # harder at the corner tips the vehicle
-                                     # over (star 31), so the only safe lever
-                                     # is arriving slower - measured 5.7m
-                                     # excursion on the leg after a 0.8 m/s
-                                     # hairpin arrival.
+        return 0.15                  # right-angle turns (letter strokes)
+    return 0.0                       # hairpin: stop on the point
 
 
 def build_mission():
@@ -1187,64 +1248,96 @@ def _finish_mission(pts):
         dot = sum(a * b for a, b in zip(v_in, v_out)) / (li * lo)
         return math.degrees(math.acos(max(-1.0, min(1.0, dot))))
 
+    # FollowVector instead of GoToEndpoint: tracks the LINE between
+    # waypoints (correction_vector = cross-track error only) and honors the
+    # Starting->EndingVelocity speed ramp along the leg. GoToEndpoint flew at
+    # constant EndingVelocity until the acceptance radius tripped, then
+    # swapped legs with 1.5+ m/s of momentum - that momentum was the 2-4m
+    # corner overshoot.
+    #
+    # Actions are generated per arrival policy rather than hard-coded, so a
+    # waypoint that wants a precise confirmed stop and one that wants a
+    # fly-through can coexist in the same plan. Identical policies share an
+    # action (PathAction slots are a limited resource on real hardware).
+    actions = []
+    _seen = {}
+
+    def _action(mode3d, radius, confirm, dwell):
+        key = (bool(mode3d), round(radius, 3), round(confirm, 3), round(dwell, 3))
+        if key not in _seen:
+            _seen[key] = len(actions)
+            actions.append(
+                {"Mode": "FollowVector",
+                 # [0] = leg cruise speed (paths.c). Without it a leg is capped
+                 # at its own endpoint speeds, and in the star both endpoints
+                 # are slow hairpins, so every leg crawled at the corner
+                 # speed. [2]/[3] are filled in by the planner with the next
+                 # leg's bearing.
+                 # [1] = leg cruise speed. NOT [0]: slot 0 aliases
+                 # GoToEndpoint's NEXTCOMMAND, and a 1.5 there casts to 1 ==
+                 # RETURNTOBASENEXTCOMMAND_LAND, which lands the aircraft
+                 # mid-mission (star84). [2]/[3] are filled in by the planner
+                 # with the next leg's bearing.
+                 "ModeParameters": [0, MISSION_SPEED, 0, 0],
+                 "EndCondition": "DistanceToTarget",
+                 "ConditionParameters": [radius, 1.0 if mode3d else 0.0,
+                                         confirm, dwell],
+                 "Command": "OnConditionNextWaypoint",
+                 "JumpDestination": 0, "ErrorDestination": 0})
+        return _seen[key]
+
     wps = []
     last = len(pts) - 1
     for i, (n, e, d) in enumerate(pts):
-        if i == 0:
-            vel = 0.8  # mission entry from the staging hover
-        elif i >= last - 1:
-            vel = 0.5  # slow into the pre-land center point (and the Land wp)
-        else:
-            vel = _corner_speed(turn_angle(i))
-        # Action selection: Land for the terminator; 3D acceptance for legs
-        # that MOVE vertically (climbs between rings, the pre-land descent -
-        # their horizontal distance check would trip at the start); 2D for
-        # level legs (immune to vertical estimator wobble - see
-        # MISSION_WP_RADIUS comment). wp0's leg climbs in from the ~4m
+        theta = 180.0 if (i == 0 or i >= last - 1) else turn_angle(i)
+        # theta is 180 for the entry waypoint and for the pre-land pair, so
+        # all three come out as full stops - which is what they want.
+        vel = _corner_speed(theta)
+
+        # 3D acceptance for legs that MOVE vertically (climbs between rings,
+        # the pre-land descent - their horizontal distance check would trip at
+        # the start); 2D for level legs (immune to vertical estimator wobble -
+        # see MISSION_WP_RADIUS comment). wp0's leg climbs in from the ~4m
         # staging hover, so it counts as vertical too.
+        prev_d = -4.0 if i == 0 else pts[i - 1][2]
+        mode3d = abs(d - prev_d) > 2.0
+
         if i == last:
-            act = 2
+            act = None  # Land, resolved below once its index is known
+        elif theta < 25.0:
+            # Fly-through: clip the sphere at cruise, keep the momentum.
+            act = _action(mode3d, MISSION_WP_RADIUS, 0.0, 0.0)
         else:
-            prev_d = -4.0 if i == 0 else pts[i - 1][2]
-            act = 1 if abs(d - prev_d) > 2.0 else 0
+            # A real corner. Require the vehicle to BE on the point and be
+            # stopped there. The confirm speed must not be below what the
+            # leg profile can deliver or the plan stalls (pathplanner.c says
+            # so) - the corner controller's ARRIVE park is what actually
+            # brings the speed down inside ARRIVE_DIST, well under this.
+            confirm = max(MISSION_CONFIRM_SPEED, 0.0)
+            # Vertical legs keep the wide sphere: a tight 3D sphere is
+            # unreachable when the vertical estimator wobbles, and a missed
+            # sphere used to be fatal. The confirm/dwell test is what makes
+            # the arrival precise there, not the radius.
+            radius = MISSION_WP_RADIUS if mode3d else MISSION_WP_RADIUS_PRECISE
+            act = _action(mode3d, radius, confirm, MISSION_DWELL_S)
         wps.append({"Position": [n, e, d], "Velocity": vel, "Action": act})
 
-    actions = [
-        # FollowVector instead of GoToEndpoint: tracks the LINE between
-        # waypoints (correction_vector = cross-track error only) and honors
-        # the Starting->EndingVelocity speed ramp along the leg. GoToEndpoint
-        # flew at constant EndingVelocity until the acceptance radius
-        # tripped, then swapped legs with 1.5+ m/s of momentum - that
-        # momentum was the 2-4m corner overshoot.
-        # [0] level legs: 2D horizontal acceptance.
-        {"Mode": "FollowVector", "ModeParameters": [0, 0, 0, 0],
-         "EndCondition": "DistanceToTarget",
-         # [2]/[3] = confirm-arrival speed + dwell. Firmware supports it
-         # (pathplanner conditionDistanceToTarget), but it is OFF here:
-         # it needs a STABLE corner hold to be useful, and the current
-         # 2.5x unbounded hold diverges when held for a dwell. See the
-         # commit message for the full result.
-         "ConditionParameters": [MISSION_WP_RADIUS, 0.0, 0, 0],
-         "Command": "OnConditionNextWaypoint",
-         "JumpDestination": 0, "ErrorDestination": 0},
-        # [1] vertical-transition legs: 3D acceptance.
-        {"Mode": "FollowVector", "ModeParameters": [0, 0, 0, 0],
-         "EndCondition": "DistanceToTarget",
-         "ConditionParameters": [MISSION_WP_RADIUS, 1.0, 0, 0],
-         "Command": "OnConditionNextWaypoint",
-         "JumpDestination": 0, "ErrorDestination": 0},
-        # Land ModeParameters = [velN, velE, velDOWN, options] (plans.h
-        # PATHDESIRED_MODEPARAMETER_LAND_*): velDown 0.6 m/s (matches the
-        # FlightModeSettings.LandingVelocity default - all-zero parameters
-        # left vtollandfsm's targetDescentRate at ~0.065 m/s, a 2.5-minute
-        # landing), options=1 = LAND_OPTION_HORIZONTAL_PH (hold horizontal
-        # position during the descent - without it the vehicle drifted
-        # ~9m downwind while landing).
+    # Land ModeParameters = [velN, velE, velDOWN, options] (plans.h
+    # PATHDESIRED_MODEPARAMETER_LAND_*): velDown 0.6 m/s (matches the
+    # FlightModeSettings.LandingVelocity default - all-zero parameters left
+    # vtollandfsm's targetDescentRate at ~0.065 m/s, a 2.5-minute landing),
+    # options=1 = LAND_OPTION_HORIZONTAL_PH (hold horizontal position during
+    # the descent - without it the vehicle drifted ~9m downwind while
+    # landing).
+    land_idx = len(actions)
+    actions.append(
         {"Mode": "Land", "ModeParameters": [0, 0, 0.6, 1],
          "EndCondition": "None", "ConditionParameters": [0, 0, 0, 0],
          "Command": "OnConditionNextWaypoint",
-         "JumpDestination": 0, "ErrorDestination": 0},
-    ]
+         "JumpDestination": 0, "ErrorDestination": 0})
+    for w in wps:
+        if w["Action"] is None:
+            w["Action"] = land_idx
     return wps, actions
 
 
@@ -1904,7 +1997,18 @@ def publish_planned_trail(node, wps):
 def gui_follow(node, model=GAZEBO_MODEL, offset=(-14.0, -14.0, 9.0)):
     """Make the Gazebo GUI camera follow the vehicle (same as right-click ->
     Follow) so nobody has to re-click it every run. Idempotent; errors are
-    cosmetic and ignored."""
+    cosmetic and ignored.
+
+    OFF by request when NINJAPILOT_GUI_FOLLOW=0. While follow is active,
+    gz-rendering eases the camera toward target+offset EVERY frame, so it
+    overwrites manual pan/zoom on the next frame - the camera appears to snap
+    back to the chase view as soon as you scroll out. Continuous follow and
+    free manual zoom are the same control, so this has to be a choice; the
+    chase cam is still one right-click away when it is off."""
+    if os.environ.get("NINJAPILOT_GUI_FOLLOW", "1") == "0":
+        print("[gui] camera follow disabled (NINJAPILOT_GUI_FOLLOW=0) - "
+              "pan/zoom freely, right-click the vehicle -> Follow to chase")
+        return
     from gz.msgs10.stringmsg_pb2 import StringMsg
     from gz.msgs10.boolean_pb2 import Boolean
     from gz.msgs10.vector3d_pb2 import Vector3d
@@ -2642,6 +2746,11 @@ def uavtalk_thread():
             # send_config writes StabilizationSettingsBank1 (persistent) -
             # writing the StabilizationBank mirror alone gets stomped on
             # every mode change.
+            # MaximumRate.Yaw stays 45. Raised to 90 in star80 to allow a
+            # 60deg/s heading slew; the slew itself proved to be the problem
+            # (yaw RMS 8.4 -> 15.3 deg) and was reverted, so the higher ceiling
+            # has nothing left to buy and only widens the saturation budget
+            # Kp * MaximumRate that stars 21-23 and 32 crashed against.
             "ManualRate": [150, 150, 175], "MaximumRate": [180, 180, 45],
             "StickExpo": [0, 0, 0],
             # AUTOTUNED against the Gazebo X3 (relay identification,
@@ -2669,7 +2778,13 @@ def uavtalk_thread():
             # 2.25x full range the vehicle dropped 7.4m -> 0m in 4s the
             # moment a 144 deg hairpin turn started (star 32). Keep
             # Kp * MaximumRate <~ 0.5: 0.010 x 45 = 0.45.
-            "YawRatePID": [0.010, 0.020, 0.00005, 0.3],
+            # Kd 0.00005 -> 0.0006. The yaw rate loop had essentially NO
+            # damping, and the board log shows yaw oscillating at ~10 deg
+            # RMS (3.5s period) while roll and pitch sit at 1.6-2.3 deg.
+            # That wander matters beyond looking untidy: yaw rotates the
+            # NE->body mapping in UpdateStabilizationDesired, so it pushes
+            # the vehicle laterally off the line and BOWS the long legs.
+            "YawRatePID": [0.010, 0.020, 0.0006, 0.3],
             # STOCK 2.5 restored. This was halved to 1.2 mid-investigation
             # when a divergent ~0.5Hz pitch oscillation appeared during
             # sustained hover - but that oscillation was observed while the
@@ -2697,6 +2812,14 @@ def uavtalk_thread():
             # +/-9 deg oscillation at ~3.5s period along every leg. Putting
             # it back cut yaw direction-reversals from 0.33/s to 0.08/s and
             # tightened altitude hold from ~1.8m to 0.27m peak-to-peak.
+            # Ki stays 0. Tried 0.6 to chase the ~5 deg steady-state yaw lag on
+            # a leg (star76): it made things WORSE, 5.03 -> 7.88 deg on-leg
+            # error. The integrator winds up across the commanded 144 deg
+            # corner turn - which is a slew, not a disturbance - and then has
+            # to bleed that charge off over the first seconds of the new leg.
+            # An integral term only helps against a *persistent* offset; here
+            # the offset is just slew lag, so it charges on exactly the wrong
+            # signal.
             "YawPI": [1.5, 0, 50],
             "AcroInsanityFactor": 0.4,
             "ThrustPIDScaleCurve": [0.3, 0.15, 0, -0.15, -0.3],

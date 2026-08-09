@@ -90,6 +90,23 @@ void plan_setup_assistedcontrol(uint8_t timeout_occurred);
 #define PATHDESIRED_MODEPARAMETER_GOTOENDPOINT_UNUSED1            1
 #define PATHDESIRED_MODEPARAMETER_GOTOENDPOINT_UNUSED2            2
 #define PATHDESIRED_MODEPARAMETER_GOTOENDPOINT_UNUSED3            3
+
+// FollowVector. Note slot 0 is deliberately left alone: it aliases
+// GOTOENDPOINT_NEXTCOMMAND, and vtolflycontroller compares that slot against
+// FLIGHTMODESETTINGS_RETURNTOBASENEXTCOMMAND_LAND (== 1). A leg cruise speed
+// of 1.5 m/s parked in slot 0 casts to (uint8_t)1 and triggered a real
+// landing sequence in mid-mission - the vehicle flew to its first waypoint
+// and then descended to the ground under control, which reads as a crash but
+// is the RTB-land path firing on a number that was never a command.
+#define PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_UNUSED0            0
+// Leg cruise speed (m/s). 0 = no opinion, leg is capped by its endpoint
+// velocities as it always was.
+#define PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_CRUISESPEED        1
+// Bearing of the NEXT leg (degrees) and whether it is meaningful. Published
+// by the path planner so the follower can turn for a corner before reaching
+// it instead of discovering it at the waypoint switch.
+#define PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_NEXTBEARING        2
+#define PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_NEXTBEARINGVALID   3
 /**
  * @brief setup pathfollower for positionvario
  */
