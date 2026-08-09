@@ -19,6 +19,7 @@
 import json
 import math
 import os
+import random
 import struct
 import sys
 import time
@@ -1991,6 +1992,7 @@ def mission_test():
     # flown path (cyan) appended live during the flight. Camera follows the
     # vehicle so the user never has to right-click -> Follow manually.
     trail_node = transport.Node()
+    subscribe_gps_noise(trail_node)
     publish_planned_trail(trail_node, wps)
     gui_follow(trail_node)
     flown = FlownTrail(trail_node)
@@ -3087,10 +3089,40 @@ def publish_mag(client):
         client.send_object("MagSensor", {"x": mag_body[0], "y": mag_body[1], "z": mag_body[2], "temperature": 25.0})
 
 
+# --- GPS noise injection (driven by the GpsNoise panel in the Gazebo GUI) --
+# Gazebo's navsat is effectively a perfect fix, which flatters the
+# estimator. These sigmas let a real degraded fix be simulated so the
+# filter and the controllers can be tested against one. Applied HERE
+# because the GPS the flight controller sees is synthesised by this
+# bridge - the panel only states the requested standard deviations.
+_gps_noise = {"pos": 0.0, "vel": 0.0}
+
+
+def _on_gps_noise(msg):
+    _gps_noise["pos"] = float(msg.x)
+    _gps_noise["vel"] = float(msg.y)
+
+
+def subscribe_gps_noise(node):
+    try:
+        from gz.msgs10.vector3d_pb2 import Vector3d
+        node.subscribe(Vector3d, "/ninjapilot/gps_noise", _on_gps_noise)
+        print("[gpsnoise] listening on /ninjapilot/gps_noise")
+    except Exception as exc:
+        print("[gpsnoise] not subscribed (%s)" % exc)
+
+
+def _noisy(value, sigma):
+    return value if sigma <= 0.0 else value + random.gauss(0.0, sigma)
+
+
 def publish_gps_velocity(client):
     have_navsat, lat, lon, alt, vel_ned = state.gps_snapshot()
     if have_navsat:
-        client.send_object("GPSVelocitySensor", {"North": vel_ned[0], "East": vel_ned[1], "Down": vel_ned[2]})
+        sv = _gps_noise["vel"]
+        client.send_object("GPSVelocitySensor", {"North": _noisy(vel_ned[0], sv),
+                                                 "East": _noisy(vel_ned[1], sv),
+                                                 "Down": _noisy(vel_ned[2], sv)})
 
 
 def publish_gps_position(client):
@@ -3100,6 +3132,14 @@ def publish_gps_position(client):
     # PositionHold's velocity-error feedback loop.
     have_navsat, lat, lon, alt, vel_ned = state.gps_snapshot()
     if have_navsat:
+        # Requested position noise, applied in METRES and converted back to
+        # degrees here - a fixed degree offset would be a different distance
+        # north/south than east/west.
+        sp = _gps_noise["pos"]
+        if sp > 0.0:
+            lat = lat + random.gauss(0.0, sp) / 111320.0
+            lon = lon + random.gauss(0.0, sp) / (111320.0 * math.cos(math.radians(lat)))
+            alt = alt + random.gauss(0.0, sp)
         groundspeed = math.sqrt(vel_ned[0] ** 2 + vel_ned[1] ** 2)
         heading = math.degrees(math.atan2(vel_ned[1], vel_ned[0]))
         client.send_object("GPSPositionSensor", bov.resolve_enum_values(client.db["GPSPositionSensor"], {

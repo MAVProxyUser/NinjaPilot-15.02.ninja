@@ -292,6 +292,30 @@ export GZ_GUI_PLUGIN_PATH="$PWD/gui_plugins/WindControl/build:$GZ_GUI_PLUGIN_PAT
 gz sim -g
 ```
 
+## GPS noise
+
+The panel LEFT of the wind panel injects GPS noise, so the estimator can be
+tested against a degraded fix instead of Gazebo's effectively perfect one:
+position sigma 0-5 m, velocity sigma 0-2 m/s, plus a "Clean fix" button.
+
+The noise is NOT applied in Gazebo. The GPS the flight controller sees is
+synthesised by the bridge from truth, so the panel only publishes the
+requested sigmas on `/ninjapilot/gps_noise` (gz.msgs.Vector3d: x = position
+sigma in metres, y = velocity sigma) and `gazebo_bridge.py` adds the noise
+as it builds GPSPositionSensor/GPSVelocitySensor. Position noise is applied
+in METRES and converted to degrees per-sample, because a fixed degree
+offset is a different distance north/south than east/west.
+
+Without the GUI:
+
+```bash
+gz topic -t /ninjapilot/gps_noise -m gz.msgs.Vector3d -p "x: 1.5, y: 0.3"
+```
+
+Worth knowing when reading results: with a clean fix the estimator tracks
+its GPS input to ~0.02m, so path error is controller error. Turn this up
+and that stops being true - which is the point of the slider.
+
 To publish wind without the GUI (speed v m/s FROM bearing B):
 `linear_velocity.x = -v*sin(B)`, `.y = -v*cos(B)`, and `enable_wind: true`
 or WindEffects applies nothing. Links need `<enable_wind>` to be pushed.

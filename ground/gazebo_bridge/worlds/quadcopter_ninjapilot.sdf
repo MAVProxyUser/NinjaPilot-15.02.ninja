@@ -322,6 +322,26 @@
       <topic>/world/quadcopter/wind</topic>
     </plugin>
 
+    <!-- GPS noise panel, anchored LEFT of the wind panel. Publishes the
+         requested sigmas on /ninjapilot/gps_noise; the bridge applies them
+         when it synthesises GPSPositionSensor/GPSVelocitySensor, because
+         that is where the flight controller's GPS actually comes from. -->
+    <plugin filename="GpsNoise" name="GPS noise">
+      <gz-gui>
+        <title>GPS noise</title>
+        <property type="bool" key="showTitleBar">true</property>
+        <property type="bool" key="resizable">true</property>
+        <property type="double" key="width">330</property>
+        <property type="double" key="height">210</property>
+        <property type="string" key="state">floating</property>
+        <anchors target="Wind">
+          <line own="right" target="left"/>
+          <line own="top" target="top"/>
+        </anchors>
+      </gz-gui>
+      <topic>/ninjapilot/gps_noise</topic>
+    </plugin>
+
     </gui>
 
     <light type="directional" name="sun">

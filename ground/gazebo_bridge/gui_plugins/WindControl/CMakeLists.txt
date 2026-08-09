@@ -15,12 +15,23 @@ find_package(gz-plugin2 REQUIRED COMPONENTS register)
 find_package(Qt5 REQUIRED COMPONENTS Core Quick QuickControls2)
 
 qt5_wrap_cpp(WIND_MOC WindControl.hh)
+qt5_wrap_cpp(GPS_MOC GpsNoise.hh)
 
-add_library(WindControl SHARED WindControl.cc ${WIND_MOC} WindControl.qrc)
-target_include_directories(WindControl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(WindControl
-  PRIVATE gz-gui8::gz-gui8
-  PRIVATE gz-msgs10::gz-msgs10
-  PRIVATE gz-transport13::gz-transport13
-  PRIVATE gz-plugin2::register
-  PRIVATE Qt5::Core Qt5::Quick Qt5::QuickControls2)
+# ONE LIBRARY PER PLUGIN. GZ_ADD_PLUGIN emits a per-library registration
+# hook, so two registrations linked into the same library collide with a
+# "duplicate symbol _GzPluginHook" error.
+foreach(plugin WindControl GpsNoise)
+  if(plugin STREQUAL "WindControl")
+    set(plugin_moc ${WIND_MOC})
+  else()
+    set(plugin_moc ${GPS_MOC})
+  endif()
+  add_library(${plugin} SHARED ${plugin}.cc ${plugin_moc} ${plugin}.qrc)
+  target_include_directories(${plugin} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(${plugin}
+    PRIVATE gz-gui8::gz-gui8
+    PRIVATE gz-msgs10::gz-msgs10
+    PRIVATE gz-transport13::gz-transport13
+    PRIVATE gz-plugin2::register
+    PRIVATE Qt5::Core Qt5::Quick Qt5::QuickControls2)
+endforeach()

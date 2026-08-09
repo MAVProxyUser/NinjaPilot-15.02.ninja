@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/GpsNoise">
+    <file>GpsNoise.qml</file>
+  </qresource>
+</RCC>
