@@ -242,6 +242,28 @@ built from the same navsat data) would exercise the REAL GPS module
 end-to-end. Reference implementation: ArduPilot's sim_gps. Deliberately
 sidelined on 2026-08-08 - do not start it without being asked.
 
+**PATHPLANNER WAYPOINT MISSIONS: WORKING** (commit ba13c9b45). Full
+GCS-style autonomous mission flies end-to-end: 29-waypoint star (8m) ->
+octagon (18m) -> letters 'KF' (28m) -> Land action (0.6 m/s, horizontal
+PH) to auto-disarm, 177s. Upload path is exactly the GCS interface:
+multi-instance Waypoint/PathAction objects + PathPlan CRC-8 (poly 0x07
+over packed instance bytes, waypoints then actions) validated by the
+FLIGHT side before engaging. Engage sequence: upload -> arm -> vario
+staging climb -> PositionHold (activates PathFollower) -> switch
+position 4 = PathPlanner (FlightModeNumber is 5 now - at 4, the
+position-4 channel value silently clamped into the PositionHold bin).
+Key flight-code fix: pidcontroldown.cpp RateLimit() clamp was
+`accel *= rateLimit/accel` == "always +rateLimit", sign discarded -
+any large DOWNWARD setpoint change ramped UPWARD forever (confirmed in
+exact +2 m/s^2 steps). It was upstream dead code activated by an
+earlier session's smoothing fix. Translucent planned(amber)/flown(cyan)
+trails render via Gazebo's /marker LINE_STRIP service.
+`NINJAPILOT_TEST_MODE=mission` runs the whole thing supervised with
+real ground-truth pass/fail. Known polish item: corner tracking is
+loose (+/-2-4m overshoots); 5m-altitude rings clip the ground during
+aggressive corners - keep shape rings >= 8m until PathFollower
+horizontal tuning gets its own pass.
+
 STILL OPEN (quality-of-life, not blockers):
 - The full outdoor EKF (INS13) attitude degrades in flight on sim-clean
   sensors (covariance sanity resets; EKFConfiguration Q/R expect real
