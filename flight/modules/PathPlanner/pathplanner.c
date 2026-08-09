@@ -86,6 +86,7 @@ static WaypointActiveData waypointActive;
 static WaypointData waypoint;
 static PathActionData pathAction;
 static bool pathplanner_active = false;
+static uint16_t arrivalDwell = 0;   // ticks confirmed at the waypoint
 static FrameType_t frameType;
 static bool mode3D;
 
@@ -539,10 +540,47 @@ static uint8_t conditionDistanceToTarget()
                          + powf(waypoint.Position.East - positionState.East, 2));
     }
 
-    if (distance <= pathAction.ConditionParameters[0]) {
-        return true;
+    if (distance > pathAction.ConditionParameters[0]) {
+        arrivalDwell = 0;
+        return false;
     }
-    return false;
+
+    // CONFIRM ARRIVAL. Distance alone is not arrival: a vehicle crossing
+    // the acceptance sphere at speed satisfies it while still travelling,
+    // so the plan advances early and the next leg begins from the wrong
+    // place. How a corner should be taken is a property of the MISSION,
+    // not of the airframe or the controller, so it is expressed per
+    // waypoint:
+    //     ConditionParameters[2] = speed at/below which arrival counts (m/s)
+    //     ConditionParameters[3] = how long it must hold that (seconds)
+    // Both 0 keeps the historic distance-only behaviour, which is what a
+    // fly-through waypoint (or a fixed-wing spline/loiter turn) wants. A
+    // multirotor hairpin asks for a low speed and a short dwell and gets a
+    // precise, confirmed stop on the point. Same firmware, same plan
+    // format, different vehicles - the plan decides.
+    //
+    // NOTE the waypoint's own Velocity must be <= ConditionParameters[2],
+    // or the leg's speed profile never lets the vehicle satisfy this and
+    // the plan stalls at that waypoint (learned the hard way).
+    float confirmSpeed = pathAction.ConditionParameters[2];
+    if (confirmSpeed > 0.0f) {
+        VelocityStateData velocityState;
+        VelocityStateGet(&velocityState);
+        float speed = sqrtf(velocityState.North * velocityState.North
+                            + velocityState.East * velocityState.East);
+        if (speed > confirmSpeed) {
+            arrivalDwell = 0;
+            return false;
+        }
+        uint16_t needed = (uint16_t)(pathAction.ConditionParameters[3] * 1000.0f
+                                     / PATH_PLANNER_UPDATE_RATE_MS);
+        if (arrivalDwell < needed) {
+            arrivalDwell++;
+            return false;
+        }
+    }
+    arrivalDwell = 0;
+    return true;
 }
 
 

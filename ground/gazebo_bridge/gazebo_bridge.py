@@ -1214,6 +1214,11 @@ def _finish_mission(pts):
         # [0] level legs: 2D horizontal acceptance.
         {"Mode": "FollowVector", "ModeParameters": [0, 0, 0, 0],
          "EndCondition": "DistanceToTarget",
+         # [2]/[3] = confirm-arrival speed + dwell. Firmware supports it
+         # (pathplanner conditionDistanceToTarget), but it is OFF here:
+         # it needs a STABLE corner hold to be useful, and the current
+         # 2.5x unbounded hold diverges when held for a dwell. See the
+         # commit message for the full result.
          "ConditionParameters": [MISSION_WP_RADIUS, 0.0, 0, 0],
          "Command": "OnConditionNextWaypoint",
          "JumpDestination": 0, "ErrorDestination": 0},
@@ -2626,6 +2631,11 @@ def uavtalk_thread():
             # guesswork. Ki left at 0 (the autotuned Ki risks windup on an
             # axis this weak, and roll/pitch hold fine without it).
             "RollPI": [2.5, 0, 50], "PitchPI": [2.5, 0, 50],
+            # 0.75 is the AUTOTUNED value. It was doubled to 1.5 during a speed
+            # push, and that is what made yaw HUNT: the board log showed
+            # +/-9 deg oscillation at ~3.5s period along every leg. Putting
+            # it back cut yaw direction-reversals from 0.33/s to 0.08/s and
+            # tightened altitude hold from ~1.8m to 0.27m peak-to-peak.
             "YawPI": [1.5, 0, 50],
             "AcroInsanityFactor": 0.4,
             "ThrustPIDScaleCurve": [0.3, 0.15, 0, -0.15, -0.3],
