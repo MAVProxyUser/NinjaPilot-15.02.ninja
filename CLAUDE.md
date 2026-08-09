@@ -210,6 +210,38 @@ order of discovery:
 - `NINJAPILOT_TEST_MODE=poshold` = fast (~2min) PositionHold iteration
   test with real ground-truth pass criteria.
 
+## GPS fidelity: the sim GPS is idealized-ublox-grade, not NMEA-grade
+
+Facts confirmed in this fork's source (relevant whenever GPS behavior is
+questioned, per feedback from a former OpenPilot project founder):
+- **GPSVelocitySensor is published ONLY by flight/modules/GPS/UBX.c**
+  (parse_ubx_nav_velned, NAV-PVT on newer receivers). NMEA.c publishes
+  no velocity objects at all - NMEA course/speed-over-ground has no
+  vertical velocity. The outdoor EKF fuses GPS velocity as a measurement
+  (filterekf.c vel import -> HORIZ_SENSORS|VERT_SENSORS), so on real
+  hardware it REQUIRES ublox binary protocol. ubx_autoconfig.c handles
+  UBX_HW_VERSION_7/8 explicitly (per-version max nav rates).
+- **The SITL bridge bypasses the protocol layer entirely**: it injects
+  the POST-parser UAVObjects (GPSPositionSensor with Fix3D/PDOP/sats
+  passing filterlla's gates, GPSVelocitySensor with full 3D NED velocity
+  from gz-navsat's velocity_north/east/up) at 10Hz. In substance the
+  filters receive exactly what a ublox-8 delivers after UBX.c parses it
+  - which is why sim PositionHold can hit 4cm. Gazebo itself has NO UBX
+  serial-protocol emulation (navsat is protobuf-only); the only mature
+  open-source simulated-UBX-byte-stream generator known is ArduPilot
+  SITL's GPS backend (SIM_GPS_TYPE can emit real u-blox binary).
+
+SIDELINED FUTURE TASK - "real UBX path" fidelity milestone: the
+injection shortcut skips GPS.c/UBX.c/ubx_autoconfig.c completely
+(parser timing, status transitions, DOP behavior, autoconfig dance all
+unexercised). The clean implementation path already exists: the
+firmware's SECOND UDP socket is the GPS port (bound at boot, currently
+receiving zero traffic - "udp dev 1" in the boot log), so a small UBX
+encoder in the bridge (SOL/POSLLH/VELNED/DOP set, or a single NAV-PVT,
+built from the same navsat data) would exercise the REAL GPS module
+end-to-end. Reference implementation: ArduPilot's sim_gps. Deliberately
+sidelined on 2026-08-08 - do not start it without being asked.
+
 STILL OPEN (quality-of-life, not blockers):
 - The full outdoor EKF (INS13) attitude degrades in flight on sim-clean
   sensors (covariance sanity resets; EKFConfiguration Q/R expect real
