@@ -1040,6 +1040,97 @@ def run_test_sequence():
     print("[test] sequence done")
 
 
+# ---------------------------------------------------------------------------
+# Waypoint mission support (NINJAPILOT_TEST_MODE=mission)
+# ---------------------------------------------------------------------------
+
+# CRC-8 poly 0x07 (MSB-first), init 0 - byte-identical to
+# flight/pios/common/pios_crc.c's table. pathplanner.c's checkPathPlan()
+# validates PathPlan.Crc as this CRC over the PACKED instance bytes of
+# every Waypoint instance 0..WaypointCount-1, then every PathAction
+# instance 0..PathActionCount-1, in that order. The bridge's
+# objdef.pack() produces exactly the firmware's packed instance layout
+# (proven by every UAVTalk send round-tripping), so computing the same
+# CRC here is just packing in the same order.
+def _crc8_07(crc, data):
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x07) & 0xFF if (crc & 0x80) else (crc << 1) & 0xFF
+    return crc
+
+
+MISSION_SPEED = 1.5  # m/s, every leg (2.0 raced corners hard enough to dip into the ground at the 5m ring)
+# Waypoint acceptance radius (m). ConditionParameters[1]=1 makes the
+# distance check 3D so altitude transitions must actually complete too.
+MISSION_WP_RADIUS = 1.5
+
+
+def build_mission():
+    """The requested flight: a 5-point star at 5m inside the visible grid,
+    up 10m to an octagon at 15m, up 10m more to trace the letters K F at
+    25m, then return to center and land. All NED, Down negative = up.
+    Returns (waypoints, actions) as lists of plain dicts (enums as
+    strings - resolved at send/pack time)."""
+    wps = []
+
+    def wp(n, e, d, action=0):
+        wps.append({"Position": [round(n, 3), round(e, 3), float(d)],
+                    "Velocity": MISSION_SPEED, "Action": action})
+
+    # --- Star at 5m: radius 6m, outer points every 72deg from North,
+    # visited in 0-2-4-1-3 order (that ORDER is what draws a star), then
+    # close back at the first point.
+    star_pts = []
+    for k in range(5):
+        a = math.radians(72 * k)
+        star_pts.append((6.0 * math.cos(a), 6.0 * math.sin(a)))
+    for k in [0, 2, 4, 1, 3, 0]:
+        wp(star_pts[k][0], star_pts[k][1], -8.0)
+
+    # --- Octagon at 15m: radius 6m, 8 vertices + close. The first vertex
+    # also carries the 10m climb (3D GoToEndpoint handles the ramp).
+    for k in list(range(8)) + [0]:
+        a = math.radians(45 * k)
+        wp(6.0 * math.cos(a), 6.0 * math.sin(a), -18.0)
+
+    # --- Letters K F at 25m, viewed from above: North = the letters' "up",
+    # East = reading direction. Strokes are retraced where a pen-lift
+    # would be (a flying quad has no pen to lift).
+    # K: spine E=-6, arms out to E=-2.
+    for n, e in [(4, -6), (-4, -6), (0, -6), (4, -2), (0, -6), (-4, -2)]:
+        wp(n, e, -28.0)
+    # F: spine E=1, bars out to E=5 (top) and E=4 (middle).
+    for n, e in [(-4, 1), (4, 1), (4, 5), (4, 1), (0, 1), (0, 4)]:
+        wp(n, e, -28.0)
+
+    # --- Return to center, descend to 6m, then a Land action (plans wrap
+    # around at the end in pathplanner.c, so the mission MUST terminate in
+    # a Land action or it would loop back to the star forever).
+    wp(0.0, 0.0, -8.0)
+    wp(0.0, 0.0, -8.0, action=1)
+
+    actions = [
+        {"Mode": "GoToEndpoint", "ModeParameters": [0, 0, 0, 0],
+         "EndCondition": "DistanceToTarget",
+         "ConditionParameters": [MISSION_WP_RADIUS, 1.0, 0, 0],
+         "Command": "OnConditionNextWaypoint",
+         "JumpDestination": 0, "ErrorDestination": 0},
+        # Land ModeParameters = [velN, velE, velDOWN, options] (plans.h
+        # PATHDESIRED_MODEPARAMETER_LAND_*): velDown 0.6 m/s (matches the
+        # FlightModeSettings.LandingVelocity default - all-zero parameters
+        # left vtollandfsm's targetDescentRate at ~0.065 m/s, a 2.5-minute
+        # landing), options=1 = LAND_OPTION_HORIZONTAL_PH (hold horizontal
+        # position during the descent - without it the vehicle drifted
+        # ~9m downwind while landing).
+        {"Mode": "Land", "ModeParameters": [0, 0, 0.6, 1],
+         "EndCondition": "None", "ConditionParameters": [0, 0, 0, 0],
+         "Command": "OnConditionNextWaypoint",
+         "JumpDestination": 0, "ErrorDestination": 0},
+    ]
+    return wps, actions
+
+
 def poshold_test():
     """Fast-iteration 3D PositionHold test (NINJAPILOT_TEST_MODE=poshold):
     gate on estimator readiness, arm, real AltitudeVario climb to ~3m,
@@ -1107,6 +1198,240 @@ def poshold_test():
           f"max_lateral_err={max_lat_err:.2f}m")
     land()
     print("[test] poshold_test: sequence done")
+
+
+_waypoint_active = [None]   # latest WaypointActive.Index from telemetry
+_mission_client = [None]    # set by on_connected for mission upload
+
+
+# --- Translucent flight-path trails via Gazebo's Marker API ------------------
+# gz-sim's GUI runs a MarkerManager listening on the /marker service:
+# LINE_STRIP markers with an RGBA material render as persistent translucent
+# polylines in the 3D scene. Two markers: id=1 the PLANNED path (amber),
+# id=2 the ACTUAL flown path (cyan), so plan-vs-flight is visible at a
+# glance. NED -> Gazebo ENU: x=E, y=N, z=-D.
+
+def _marker_base(marker_id, rgba):
+    from gz.msgs10.marker_pb2 import Marker
+    m = Marker()
+    m.ns = "ninjapilot_trail"
+    m.id = marker_id
+    m.action = Marker.ADD_MODIFY
+    m.type = Marker.LINE_STRIP
+    for tgt in (m.material.ambient, m.material.diffuse, m.material.emissive):
+        tgt.r, tgt.g, tgt.b, tgt.a = rgba
+    return m
+
+
+def _marker_send(node, m):
+    from gz.msgs10.boolean_pb2 import Boolean
+    try:
+        node.request("/marker", m, type(m), Boolean, 300)
+    except Exception:
+        pass  # trail is cosmetic - never let it interfere with flight
+
+
+def publish_planned_trail(node, wps):
+    m = _marker_base(1, (1.0, 0.7, 0.0, 0.45))  # translucent amber
+    for w in wps:
+        n, e, d = w["Position"]
+        p = m.point.add()
+        p.x, p.y, p.z = e, n, -d
+    _marker_send(node, m)
+
+
+class FlownTrail(object):
+    """Appends the vehicle's ground-truth position to a translucent cyan
+    LINE_STRIP every ~0.4s while active."""
+
+    def __init__(self, node):
+        self.node = node
+        self.points = []
+        self.last = 0.0
+
+    def tick(self):
+        now = time.time()
+        if now - self.last < 1.0:
+            return
+        self.last = now
+        have_pose, pos_ned, _, _, _, _ = state.snapshot()
+        if not have_pose:
+            return
+        self.points.append((pos_ned[1], pos_ned[0], -pos_ned[2]))
+        m = _marker_base(2, (0.1, 0.9, 1.0, 0.5))  # translucent cyan
+        for x, y, z in self.points:
+            p = m.point.add()
+            p.x, p.y, p.z = x, y, z
+        _marker_send(self.node, m)
+
+
+def upload_mission(client):
+    """Send PathActions + Waypoints as multi-instance objects (firmware
+    auto-creates instances on unpack), then PathPlan with counts + the
+    CRC pathplanner.c will recompute. Returns the (waypoints, actions)
+    lists. Validation is confirmed by the flight side itself: the
+    PathPlan alarm goes OK only when checkPathPlan() passes."""
+    wps, actions = build_mission()
+    db = client.db
+    wp_def = db["Waypoint"]
+    act_def = db["PathAction"]
+
+    crc = 0
+    for i, w in enumerate(wps):
+        resolved = bov.resolve_enum_values(wp_def, w)
+        client.send_object("Waypoint", resolved, inst_id=i)
+        time.sleep(0.02)
+        client.send_object("Waypoint", resolved, inst_id=i)  # cheap loss hedge
+        time.sleep(0.02)
+        crc = _crc8_07(crc, wp_def.pack(resolved))
+    for i, a in enumerate(actions):
+        resolved = bov.resolve_enum_values(act_def, a)
+        client.send_object("PathAction", resolved, inst_id=i)
+        time.sleep(0.02)
+        client.send_object("PathAction", resolved, inst_id=i)
+        time.sleep(0.02)
+        crc = _crc8_07(crc, act_def.pack(resolved))
+
+    plan = {"WaypointCount": len(wps), "PathActionCount": len(actions), "Crc": crc}
+    client.send_object("PathPlan", plan)
+    time.sleep(0.05)
+    client.send_object("PathPlan", plan)
+    print(f"[test] mission uploaded: {len(wps)} waypoints, {len(actions)} actions, crc={crc}")
+    return wps, actions
+
+
+def wait_for_pathplan_ok(timeout=15.0):
+    """PathPlan alarm OK == the FLIGHT side validated instance counts and
+    recomputed the same CRC - the authoritative 'mission accepted'."""
+    idx = ALARM_NAMES.index("PathPlan")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        alarms = _last_alarms[0]
+        if alarms is not None and alarms[idx] == "OK":
+            print("[test] flight side validated the path plan (PathPlan alarm OK)")
+            return True
+        time.sleep(0.25)
+    alarms = _last_alarms[0]
+    print(f"[test] ERROR: path plan not accepted "
+          f"(PathPlan alarm: {alarms[idx] if alarms else 'never reported'})")
+    return False
+
+
+def mission_test():
+    """NINJAPILOT_TEST_MODE=mission: upload the star/octagon/KF/land plan,
+    arm, climb to a staging hover, hand the vehicle to PathPlanner, and
+    supervise against ground truth until the Land action puts it on the
+    floor. Aborts land() on ceiling breach, crash, or stalled progress."""
+    print("[test] mission_test: waiting 3s for link + config to settle...")
+    time.sleep(3.0)
+    if not wait_for_attitude_ok():
+        return
+    client = _mission_client[0]
+    wps, _ = upload_mission(client)
+    if not wait_for_pathplan_ok():
+        return
+    last_idx = len(wps) - 1
+
+    # Translucent trails in the Gazebo scene: planned path (amber) now,
+    # flown path (cyan) appended live during the flight.
+    trail_node = transport.Node()
+    publish_planned_trail(trail_node, wps)
+    flown = FlownTrail(trail_node)
+
+    print("[test] mission_test: arming")
+    control.mode_position = 0
+    control.throttle = 0.0
+    control.armed = True
+    time.sleep(2.0)
+    if not vario_climb_and_hold(4.0, 1, "mission staging hover (Stabilized2)", 5.0):
+        print("[test] mission_test: FAIL - staging climb failed")
+        return
+    ok, _ = _wait_for_vertical_settle("PathPlanner engage")
+    if not ok:
+        return
+
+    # Engage PositionHold FIRST: its activation path (pathfollowerhandler ->
+    # plan_setup_positionHold -> controller Activate()) is proven solid by
+    # the dedicated poshold test. Switching to PathPlanner from a stable,
+    # already-activated PathFollower means the mode change only swaps the
+    # PathDesired source. Engaging PathPlanner straight from Stabilized2
+    # left the vehicle translating toward wp0 while slowly sinking to the
+    # ground - consistent with the fly-controller's thrust path not being
+    # activated by that direct transition.
+    print("[test] mission_test: engaging PositionHold to activate PathFollower...")
+    control.mode_position = 3
+    time.sleep(4.0)
+    print(f"[test] mission_test: engaging PathPlanner - {len(wps)} waypoints, "
+          f"star@8m -> octagon@18m -> 'KF'@28m -> land")
+    control.mode_position = 4  # PathPlanner
+
+    start = time.time()
+    last_log = 0.0
+    last_progress = time.time()
+    last_seen_idx = None
+    landed_grace = None
+    while True:
+        now = time.time()
+        flown.tick()
+        have_pose, alt, _climb = state.pose_alt_climb()
+        have_pose2, pos_ned, _, _, _, _ = state.snapshot()
+        n, e = (pos_ned[0], pos_ned[1]) if have_pose2 else (0.0, 0.0)
+        idx = _waypoint_active[0]
+        if idx != last_seen_idx:
+            last_seen_idx = idx
+            last_progress = now
+        # During the final Land action the waypoint index CANNOT advance -
+        # progress there is the descent itself. An earlier version timed
+        # out and aborted a perfectly healthy landing at 4m for "no
+        # waypoint progress".
+        if idx == last_idx and _climb < -0.05:
+            last_progress = now
+        if alt > 40.0:
+            print(f"[test] mission_test: FAIL - ceiling breach alt={alt:.1f}m - landing")
+            land()
+            return
+        have_att, roll, pitch, _, _ = fc_state.snapshot()
+        if have_att and (abs(roll) > 60 or abs(pitch) > 60) and alt > 0.5:
+            print(f"[test] mission_test: FAIL - tilt-over roll={roll:.0f} pitch={pitch:.0f} - cutting")
+            control.throttle = 0.0
+            control.armed = False
+            return
+        if idx is not None and idx != last_idx and alt < 0.25:
+            if not hasattr(mission_test, "_grounded_since") or mission_test._grounded_since is None:
+                mission_test._grounded_since = now
+            elif now - mission_test._grounded_since > 5.0:
+                print(f"[test] mission_test: FAIL - unplanned ground contact at wp{idx} - aborting")
+                control.throttle = 0.0
+                control.armed = False
+                return
+        else:
+            mission_test._grounded_since = None
+        if now - last_progress > 90.0:
+            print(f"[test] mission_test: FAIL - no waypoint progress for 90s "
+                  f"(stuck at index {idx}) - landing")
+            land()
+            return
+        # Success: the final Land-action waypoint is active and the vehicle
+        # is genuinely on the floor (ground truth), stably (2s grace).
+        if idx == last_idx and alt < 0.25:
+            if landed_grace is None:
+                landed_grace = now
+            elif now - landed_grace > 2.0:
+                control.throttle = 0.0
+                control.armed = False
+                dur = now - start
+                print(f"[test] mission_test: PASS - mission complete in {dur:.0f}s, "
+                      f"landed at N={n:.2f} E={e:.2f}, disarmed")
+                return
+        else:
+            landed_grace = None
+        if now - last_log > 2.0:
+            last_log = now
+            tgt = wps[idx]["Position"] if (idx is not None and 0 <= idx <= last_idx) else None
+            tgt_s = f" -> wp{idx} N={tgt[0]:.1f} E={tgt[1]:.1f} alt={-tgt[2]:.0f}m" if tgt else ""
+            print(f"[test] mission_test: t+{now - start:.0f}s alt={alt:.2f}m "
+                  f"N={n:.2f} E={e:.2f}{tgt_s}", flush=True)
+        time.sleep(0.2)
 
 
 def manual_hover_test():
@@ -1366,7 +1691,7 @@ def uavtalk_thread():
             "ChannelNeutral": [1050, 1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500],
             "ChannelMax": [2000] * 9,
             "ResponseTime": [0] * 7, "Deadband": 0.02, "DeadbandAssistedControl": 0.08,
-            "FlightModeNumber": 4, "FailsafeFlightModeSwitchPosition": -1,
+            "FlightModeNumber": 5, "FailsafeFlightModeSwitchPosition": -1,
             "FailsafeChannel": [-1, 0, 0, 0, 0, 0, 0, 0],
         })
         time.sleep(0.2)
@@ -1569,8 +1894,10 @@ def uavtalk_thread():
     def on_connected():
         send_config()
         configured["done"] = True
+        _mission_client[0] = client
         target = {"manual_hover": manual_hover_test,
-                  "poshold": poshold_test}.get(TEST_MODE, run_test_sequence)
+                  "poshold": poshold_test,
+                  "mission": mission_test}.get(TEST_MODE, run_test_sequence)
         threading.Thread(target=target, daemon=True).start()
 
     def on_object(objdef, inst_id, decoded):
@@ -1610,6 +1937,17 @@ def uavtalk_thread():
             if VERBOSE:
                 print(f"[dbg] t={ts:.2f} AccelState(firmware-internal) xyz=", decoded["x"], decoded["y"], decoded["z"])
             fc_state.update_accel((decoded["x"], decoded["y"], decoded["z"]))
+        elif objdef.name == "WaypointActive":
+            _waypoint_active[0] = decoded["Index"]
+        elif objdef.name == "PathDesired":
+            if VERBOSE:
+                e = decoded["End"]
+                print(f"[pathdbg] t={ts:.2f} PathDesired End=({e[0]:.2f},{e[1]:.2f},{e[2]:.2f}) "
+                      f"Mode={decoded['Mode']} UID={decoded['UID']}", flush=True)
+        elif objdef.name == "PathStatus":
+            if VERBOSE:
+                print(f"[pathdbg] t={ts:.2f} PathStatus Status={decoded['Status']} UID={decoded['UID']} "
+                      f"fractional={decoded.get('fractional_progress', '?')}", flush=True)
         elif objdef.name == "SystemAlarms":
             cur = decoded["Alarm"]
             prev = _last_alarms[0]
@@ -1695,6 +2033,9 @@ def uavtalk_thread():
         ]
         slow_extra_actions = [
             lambda c: c.request_object("GyroState"),
+            lambda c: c.request_object("WaypointActive"),
+            lambda c: c.request_object("PathDesired"),
+            lambda c: c.request_object("PathStatus"),
             lambda c: c.request_object("SystemAlarms"),
             lambda c: c.request_object("FlightStatus"),
             lambda c: c.request_object("AccelState"),

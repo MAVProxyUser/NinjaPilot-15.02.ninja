@@ -70,7 +70,7 @@ MODEL_DIR = os.path.join(HERE, "..", "openpilotgcs", "share", "openpilotgcs", "m
 DIAGRAM_DIR = os.path.join(HERE, "..", "openpilotgcs", "share", "openpilotgcs", "diagrams", "default")
 TELEMETRY_IMG_DIR = os.path.join(HERE, "..", "openpilotgcs", "src", "plugins", "telemetry", "images")
 
-FLIGHT_MODE_NUMBER = 4  # Stabilized1 (configurable below), Stabilized2/3 (fixed presets), PositionHold
+FLIGHT_MODE_NUMBER = 5  # Stabilized1 (configurable), Stabilized2/3 (presets), PositionHold, PathPlanner
 FLIGHT_MODE_NAMES = ["Stabilized1", "Stabilized2", "Stabilized3", "PositionHold"]
 
 # The full set of per-axis stabilization modes real hardware offers
@@ -146,7 +146,7 @@ FLIGHT_MODE_SETTINGS_DEFAULTS = {
     # code's own pathFollowerHandler() auto-captures the current position
     # as the hold point on entry (plan_setup_positionHold()), no PathDesired
     # write needed from here.
-    "FlightModePosition": ["Stabilized1", "Stabilized2", "Stabilized3", "PositionHold", "Stabilized5", "Stabilized6"],
+    "FlightModePosition": ["Stabilized1", "Stabilized2", "Stabilized3", "PositionHold", "PathPlanner", "Stabilized6"],
     "DisableSanityChecks": "FALSE",
     "ReturnToBaseNextCommand": "Hold",
 }

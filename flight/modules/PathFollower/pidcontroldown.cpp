@@ -301,8 +301,22 @@ void PIDControlDown::RateLimit(float *spDesired, float *spCurrent, float rateLim
     // Calculate the rate of change
     float accelerationDesired = velocity_delta / deltaTime;
 
-    if (fabsf(accelerationDesired) > rateLimit) {
-        accelerationDesired *= rateLimit / accelerationDesired;
+    // Two-sided clamp. The original line here was
+    //   accelerationDesired *= rateLimit / accelerationDesired;
+    // which is algebra for "accelerationDesired = rateLimit" - ALWAYS
+    // POSITIVE, sign discarded. Whenever the setpoint needed to move
+    // DOWNWARD by more than the limit, this ramped it UPWARD at
+    // +rateLimit forever instead - confirmed live: velocityDesired.Down
+    // grew 4.2 -> 14.2 -> 24.2 in exact +2 m/s^2 * 5s = +10 steps
+    // (rateLimit=2) while the clamped target sat at +/-1.5, driving the
+    // vehicle into the ground under full commanded descent during every
+    // PathPlanner leg. Upstream never hit this because RateLimit() was
+    // dead code (every call site commented out) - wiring it in for
+    // setpoint smoothing activated the latent bug.
+    if (accelerationDesired > rateLimit) {
+        accelerationDesired = rateLimit;
+    } else if (accelerationDesired < -rateLimit) {
+        accelerationDesired = -rateLimit;
     }
 
     if (fabsf(accelerationDesired) < 0.1f) {

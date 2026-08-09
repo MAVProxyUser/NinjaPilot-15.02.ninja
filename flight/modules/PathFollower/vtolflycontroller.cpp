@@ -29,6 +29,9 @@ extern "C" {
 #include <callbackinfo.h>
 
 #include <math.h>
+#ifdef SIMPOSIX
+#include <stdio.h>
+#endif
 #include <pid.h>
 #include <CoordinateConversions.h>
 #include <sin_lookup.h>
@@ -196,6 +199,22 @@ void VtolFlyController::UpdateVelocityDesired()
     if (!mManualThrust) {
         velocityDesired.Down = controlDown.GetVelocityDesired();
     } else { velocityDesired.Down = 0.0f; }
+
+#ifdef SIMPOSIX
+    {
+        static uint32_t dbgCount = 0;
+        if ((dbgCount++ % 100) == 0) {
+            printf("[SIMPOSIX-IFDEF-MARKER] vtolfly: posD=%.2f velD_state=%.2f corr=(%.2f,%.2f,%.2f) "
+                   "pathv=(%.2f,%.2f,%.2f) velDesired=(%.2f,%.2f,%.2f) manualThrust=%d\n",
+                   (double)positionState.Down, (double)velocityState.Down,
+                   (double)progress.correction_vector[0], (double)progress.correction_vector[1], (double)progress.correction_vector[2],
+                   (double)progress.path_vector[0], (double)progress.path_vector[1], (double)progress.path_vector[2],
+                   (double)velocityDesired.North, (double)velocityDesired.East, (double)velocityDesired.Down,
+                   (int)mManualThrust);
+            fflush(stdout);
+        }
+    }
+#endif
 
     // update pathstatus
     pathStatus->error = progress.error;
