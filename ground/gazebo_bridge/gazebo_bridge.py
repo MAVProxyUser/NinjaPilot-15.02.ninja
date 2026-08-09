@@ -1094,12 +1094,19 @@ def _crc8_07(crc, data):
 # the vehicle outright), so a faster leg just means a larger velocity error
 # feeding the same gain and a bigger tilt demand.
 #
-# 1.5 was then tried properly (star85, after the slot-0 landing bug was
-# fixed) and still would not hold: pitch RMS 6.4 deg and the plan stuck 43s at
-# a corner. This tune's ceiling for a DELIVERED leg speed is somewhere under
-# that, so 1.0 it is - which is still roughly double the 0.53 m/s median the
-# star actually flew for its whole history, when leg speed was pinned to the
-# hairpin endpoint velocities and this constant meant nothing.
+# 1.5 failed once (star85) but that was against a very different corner: a
+# 0.5 m/s arrival speed that guaranteed overshoot, a sqrt braking curve the
+# velocity loop could not track, and a yaw turn ramped at a fixed rate. All
+# three are gone - corners are true stops, the arrival is a linear settle,
+# and the turn is blended by distance - so the old ceiling is worth
+# re-testing rather than inheriting. Retested at 1.4 (star93): overshoot came
+# back at 0.60m mean and cross-track went 0.13 -> 0.28m, for six seconds saved
+# on a 153s mission. CourseFeedForward is already 1.0s, so that overshoot is
+# the velocity loop's own tracking lag and there is no lead left to buy. 1.2
+# 1.2 was no better (star94): overshoot 0.53m, cross-track 0.27m, and 164s -
+# slower than the 153s it was meant to beat, because every corner it overshot
+# had to be re-approached. Higher cruise costs more at the corner than it
+# saves on the leg, at least until the velocity loop itself is faster. 1.0.
 MISSION_SPEED = 1.0
 # Waypoint acceptance radius (m). Level legs use a 2D horizontal check
 # (ConditionParameters[1]=0), vertical-transition legs use 3D ([1]=1).
@@ -1139,8 +1146,18 @@ MISSION_WP_RADIUS = 1.0
 # 0.20-0.26m from every corner and at_retire equalled closest approach at all
 # of them - it was not failing to arrive, it was being told it had arrived.
 MISSION_WP_RADIUS_PRECISE = 0.15  # m, corner acceptance sphere
-MISSION_CONFIRM_SPEED = 0.4       # m/s, at-or-below counts as stopped
-MISSION_DWELL_S = 0.5             # s it must hold that before advancing
+MISSION_WP_RADIUS_3D = 0.35       # m, sphere for legs that move vertically
+# 0.4 -> 0.6 m/s. This gate decides WHICH pass through the waypoint counts as
+# an arrival, and 0.4 was rejecting the best one. The vehicle's first approach
+# puts it within ~0.3m of the point at ~0.5 m/s - closer than it manages
+# afterwards - but 0.5 > 0.4, so the plan declined it and waited, and what it
+# waited through was the lead-term cycle swinging the vehicle back out to
+# ~0.9m and in again. Every corner cost 8-10s of that. Accepting the first
+# pass is also nearer what was asked for: slide into the corner already
+# pointing down the next leg, touch the point, accelerate out - a racing line
+# rather than a full stop and pivot.
+MISSION_CONFIRM_SPEED = 0.6       # m/s, at-or-below counts as stopped
+MISSION_DWELL_S = 0.3             # s it must hold that before advancing
 # 0.3 -> 0.8 -> 0.5s. The dwell was widened when the corner turn still had to
 # finish while parked. It does not any more: PRETURN_DIST starts the rotation
 # 3.5m out and the vehicle now arrives already pointing down the next leg, so
@@ -1192,9 +1209,20 @@ def build_mission():
     def wp(n, e, d):
         pts.append((round(n, 3), round(e, 3), float(d)))
 
+    # --- Climb straight up over the pad to mission altitude BEFORE going
+    # anywhere. The first waypoint used to be the star's first point, so the
+    # leg out of the 4m staging hover was a diagonal that climbed 4m and
+    # translated 6m at the same time. It works, but it looks wrong and it
+    # mixes the vertical transient into the first leg's tracking. A dedicated
+    # vertical waypoint separates the two: climb here, then fly the star
+    # level.
+    wp(0.0, 0.0, -8.0)
+
     # --- Star at 5m: radius 6m, outer points every 72deg from North,
     # visited in 0-2-4-1-3 order (that ORDER is what draws a star), then
-    # close back at the first point.
+    # close back at the first point. The traversal still both starts and ends
+    # at star point 0 - that is what closes the shape - but point 0 is now
+    # reached by a level leg from the centre rather than by the climb.
     star_pts = []
     for k in range(5):
         a = math.radians(72 * k)
@@ -1318,7 +1346,18 @@ def _finish_mission(pts):
             # unreachable when the vertical estimator wobbles, and a missed
             # sphere used to be fatal. The confirm/dwell test is what makes
             # the arrival precise there, not the radius.
-            radius = MISSION_WP_RADIUS if mode3d else MISSION_WP_RADIUS_PRECISE
+            # Vertical legs used a 1.0m sphere because a tight 3D sphere is
+            # unreachable if the vertical estimator wobbles, and a missed
+            # sphere used to be fatal. Neither still holds: the estimator
+            # tracks its own GPS to ~0.02m and paths.c falls back to endpoint
+            # homing rather than sailing away. Meanwhile 1.0m of slack on the
+            # climb waypoint meant the vehicle started the star a metre low -
+            # it confirmed the climb at 7.02m of an 8.00m target and spent the
+            # whole first leg still climbing, which is the entire 0.90m
+            # altitude peak-to-peak of star98 (the star's own legs held
+            # 7.96-7.99m). Still looser than the horizontal sphere, out of
+            # respect for the original lesson.
+            radius = MISSION_WP_RADIUS_3D if mode3d else MISSION_WP_RADIUS_PRECISE
             act = _action(mode3d, radius, confirm, MISSION_DWELL_S)
         wps.append({"Position": [n, e, d], "Velocity": vel, "Action": act})
 
@@ -2569,7 +2608,27 @@ def uavtalk_thread():
         # without saturating thrust in the first place.
         vtol_pf = {
             "TreatCustomCraftAs": "VTOL",
-            "HorizontalVelMax": 3.0, "VerticalVelMax": 1.5, "CourseFeedForward": 1.0,
+            "HorizontalVelMax": 3.0, "VerticalVelMax": 1.5,
+            # CourseFeedForward 1.0 -> 0.25 s. The follower does not hand
+            # path_progress the vehicle's position - it hands it
+            # position + velocity*CourseFeedForward, a lead term meant to damp
+            # line following. At 1.0s and a 1.0 m/s leg that lead is a whole
+            # METRE, which is the entire length of the final approach, so on
+            # the way into a waypoint the PREDICTED point crosses the target
+            # while the vehicle is still a metre short. fractional_progress
+            # goes past 1, path_vector falls through to endpoint homing from
+            # the far side, and the commanded velocity reverses. The vehicle
+            # slows, the lead shrinks with it, the prediction falls short
+            # again, and it accelerates - a self-sustaining cycle, measured at
+            # wp3 in star95 as 0.99m -> 0.32m -> 0.67m -> 0.94m over 5s.
+            #
+            # Shortening the lead to 0.25s (star96) is the WRONG fix: the lead
+            # is also what brakes the vehicle for the waypoint at all, and
+            # without it every corner overshot by 0.95m and the mission took
+            # 286s. The lead stays at 1.0s and vtolflycontroller clamps it to
+            # half the remaining distance instead, so it cannot predict past
+            # the target.
+            "CourseFeedForward": 1.0,
             # HorizontalPosP 0.25->0.15 and HorizontalVelPID P 8->4, D 1->0:
             # measured divergent oscillation in PositionHold (commanded
             # roll/pitch amplitude tripling per cycle, 0.04->5.4deg in ~8s,
@@ -2784,7 +2843,19 @@ def uavtalk_thread():
             # That wander matters beyond looking untidy: yaw rotates the
             # NE->body mapping in UpdateStabilizationDesired, so it pushes
             # the vehicle laterally off the line and BOWS the long legs.
-            "YawRatePID": [0.010, 0.020, 0.0006, 0.3],
+            # Ki 0.020 -> 0.008. With Kp 0.010 the old pair is an integral time of
+            # Kp/Ki = 0.5s, and relay autotune measured this airframe's yaw
+            # ultimate period at 560ms - so the integrator was being asked to
+            # act about as fast as the loop itself can respond, which is the
+            # textbook recipe for a limit cycle rather than for damping. The
+            # vehicle duly limit-cycled +/-6 deg at ~3s while PARKED on a
+            # waypoint with a constant heading target (star90). That is not
+            # cosmetic: yaw rotates the NE->body mapping, so a nose wandering
+            # +/-6 deg swings the position correction with it and walks the
+            # vehicle around the point - the "orbiting" visible at every
+            # corner. 0.008 puts the integral time at 1.25s, comfortably
+            # slower than the loop.
+            "YawRatePID": [0.010, 0.008, 0.0006, 0.3],
             # STOCK 2.5 restored. This was halved to 1.2 mid-investigation
             # when a divergent ~0.5Hz pitch oscillation appeared during
             # sustained hover - but that oscillation was observed while the

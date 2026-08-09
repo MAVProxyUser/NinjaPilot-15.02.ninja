@@ -183,10 +183,20 @@ void VtolFlyController::UpdateVelocityDesired()
 
     VelocityDesiredData velocityDesired;
 
-    // look ahead kFF seconds
-    float cur[3] = { positionState.North + (velocityState.North * vtolPathFollowerSettings->CourseFeedForward),
-                     positionState.East + (velocityState.East * vtolPathFollowerSettings->CourseFeedForward),
-                     positionState.Down + (velocityState.Down * vtolPathFollowerSettings->CourseFeedForward) };
+    // Look ahead kFF seconds.
+    //
+    // The lead term is what lets the follower brake for a waypoint in time,
+    // and it earns its keep: cutting it 1.0s -> 0.25s (star96) let the vehicle
+    // sail 0.95m past every corner and stretched the mission to 286s.
+    // Clamping it to half the remaining distance so the prediction can never
+    // cross the target (star97) is the same trade in milder form - 0.69m of
+    // overshoot, 198s. Predicting PAST the waypoint is not a bug to be
+    // engineered away here; it is the signal that stops the vehicle. Left
+    // alone it gives the smallest overshoot measured, 0.21m.
+    float kFF = vtolPathFollowerSettings->CourseFeedForward;
+    float cur[3] = { positionState.North + (velocityState.North * kFF),
+                     positionState.East + (velocityState.East * kFF),
+                     positionState.Down + (velocityState.Down * kFF) };
     struct path_status progress;
     path_progress(pathDesired, cur, &progress, true);
 
@@ -237,31 +247,33 @@ void VtolFlyController::UpdateVelocityDesired()
                 float dE = pathDesired->End.East - positionState.East;
                 float distToEnd = sqrtf(dN * dN + dE * dE);
 
-                // Distance at which the nose starts swinging to the NEXT leg.
-                // The turn has to be FINISHED on arrival, so the vehicle lands
-                // on the point already pointing down the next leg and can
-                // accelerate straight out of it. A 144deg hairpin takes 4.1s at
-                // the 35deg/s slew, so the lookahead has to cover at least that
-                // much flying time.
-                //
-                // What makes 3.5m safe now is that it is no longer 3.5m of
-                // CRUISING. An early attempt at 4.0m (star79) rotated the
-                // vehicle while it was still at full leg speed and cost the
-                // vertical channel badly (altitude peak-to-peak 0.08 -> 0.65m).
-                // With PATH_ARRIVAL_GAIN lowered to 0.45 the vehicle is already
-                // decelerating from ~2.2m out, so most of the rotation now
-                // happens while it is slowing onto the point rather than while
-                // it is crossing the leg.
-                // The yaw command slews at yawSlewDps (35 deg/s) and a star
-                // hairpin is ~144 deg = ~4.1s; the last few metres of a
-                // decelerating approach take about that long. Measured on
-                // star77, before this existed: the vehicle was still rotating
-                // 106->180 deg as it reached the final waypoint and settled
-                // only at the instant the waypoint switched - a hook in the
-                // landing, and a bend at the start of every leg.
-                const float PRETURN_DIST = 3.5f;
+                // Distance over which the nose swings from this leg's bearing
+                // to the next one's.
+                const float PRETURN_DIST = 4.0f;
                 if (distToEnd < PRETURN_DIST) {
-                    mPreTurnBearing = pathDesired->ModeParameters[PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_NEXTBEARING];
+                    // Blend the heading as a function of DISTANCE REMAINING,
+                    // not at a fixed rate.
+                    //
+                    // Snapping the target to the next leg's bearing and
+                    // letting the slew limiter ramp through it at a constant
+                    // 35 deg/s produced a visibly jagged S on the way into
+                    // every corner: the vehicle starts rotating abruptly,
+                    // turns at a rate unrelated to how fast it is closing,
+                    // and then stops just as abruptly. Because yaw rotates
+                    // the NE->body mapping, each of those rate steps kicks
+                    // the translation sideways.
+                    //
+                    // Keying the blend to distance ties the rotation to the
+                    // approach itself: the nose leads the corner in and is
+                    // exactly on the new bearing at the point, whatever speed
+                    // the vehicle happens to be doing. Smoothstep makes the
+                    // rate start and finish at zero, so there is no step at
+                    // either end - which is the difference between a car
+                    // steering into a corner and one that yanks the wheel.
+                    float frac = (PRETURN_DIST - distToEnd) / PRETURN_DIST;
+                    frac = boundf(frac, 0.0f, 1.0f);
+                    frac = frac * frac * (3.0f - 2.0f * frac);
+                    mPreTurnBearing = RAD2DEG(atan2f(legE, legN)) + frac * turn;
                     mPreTurnActive  = true;
                 }
             }
@@ -563,14 +575,15 @@ uint8_t VtolFlyController::RunAutoPilot()
             // a command slewed faster than the loop can track is just an error
             // signal the loop chases and overshoots.
             //
-            // Tried 60 deg/s (star80) to make a 144deg hairpin take 2.4s
-            // instead of 4.1s, so the turn could finish while parked on the
-            // waypoint. It bought the best cross-track and arrival numbers of
-            // the session (0.17m / 0.09m) and paid for them in exactly the
-            // place the ultimate period predicted: yaw RMS 8.4 -> 15.3 deg,
-            // peak-to-peak 48 -> 90 deg, and the mission stretched 118s ->
-            // 169s as waypoints waited out the hunting. Reverted.
-            const float yawSlewDps = 35.0f;
+            // 35 -> 50, but its ROLE changed. It used to be the thing that
+            // shaped the corner turn, ramping a stepped target at a constant
+            // rate; now the corner blend above shapes the turn as a smooth
+            // function of distance and this is only a safety cap for the rest
+            // of the time. A pure rate limit set too high is dangerous: 60
+            // deg/s driving a stepped target (star80) took yaw RMS from 8.4
+            // to 15.3 deg and stretched the mission to 169s. Driving a
+            // smoothly blended target it should rarely bind at all.
+            const float yawSlewDps = 50.0f;
             float dT = vtolPathFollowerSettings->UpdatePeriod * 0.001f;
             if (!mYawCommandActive) {
                 AttitudeStateData attitude;

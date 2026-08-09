@@ -29,7 +29,7 @@ echo "--- oscillation (is it porpoising/hunting, and at what frequency) ---"
 "$PY" "$HERE/porpoise.py" "$OUT" 2>/dev/null | sed -n '1,7p'
 
 echo "--- yaw: tracking error vs the bearing it was told to hold ---"
-"$PY" - "$OUT" <<'PYEOF2'
+HERE="$HERE" "$PY" - "$OUT" <<'PYEOF2'
 import json, sys, math
 recs=[json.loads(l) for l in open(sys.argv[1])]
 t0=recs[0]["t_us"]/1e6
@@ -46,10 +46,9 @@ def dist_to(t, tgt):
     return math.hypot(best[0]-tgt[0], best[1]-tgt[1]) if best else 1e9
 wpa=[(r["t_us"]/1e6-t0, r["data"]["Index"]) for r in recs if r.get("object")=="WaypointActive"]
 att.sort(); wpa.sort()
-STAR=[]
-_p=[(6*math.cos(math.radians(72*k)),6*math.sin(math.radians(72*k))) for k in range(5)]
-for k in [0,2,4,1,3,0]: STAR.append((_p[k][0],_p[k][1]))
-STAR.append((0.0,0.0))
+import os
+sys.path.insert(0, os.environ["HERE"])
+from star_geom import ORDER as STAR
 allerr=[]
 for i,(t,idx) in enumerate(wpa):
     if idx<1 or idx>len(STAR)-1: continue

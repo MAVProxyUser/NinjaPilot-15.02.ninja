@@ -9,11 +9,9 @@ usage: score.py <label> <fclog.jsonl>
 """
 import json, math, sys
 
-STAR = []
-_p = [(6*math.cos(math.radians(72*k)), 6*math.sin(math.radians(72*k))) for k in range(5)]
-for _k in [0,2,4,1,3,0]:
-    STAR.append((_p[_k][0], _p[_k][1]))
-STAR.append((0.0,0.0))
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from star_geom import ORDER as STAR
 
 def xtrack(p, a, b):
     dn, de = b[0]-a[0], b[1]-a[1]

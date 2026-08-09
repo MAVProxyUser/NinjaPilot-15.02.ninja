@@ -73,15 +73,28 @@
 // inside v/PATH_ARRIVAL_GAIN metres, so it shapes the arrival without
 // slowing the leg.
 //
-// 0.7 -> 0.45. This slope also decides how much TIME the vehicle spends
-// slowing down, and that time is what the corner turn has to happen in. At
-// 0.7 the cap only began biting 1.4m from the waypoint, so the vehicle was
-// still at cruise when the nose started coming round and only ~2s of the
-// 4.1s hairpin turn happened before arrival - it reached the point still
-// rotating. At 0.45 braking starts 2.2m out and the last 2m take ~5s, so the
-// turn can be flown ON the way in, like a car steering into a corner rather
-// than stopping and then pivoting.
-#define PATH_ARRIVAL_GAIN 0.45f
+// 0.7 -> 0.45 -> 0.85. This slope also sets how long the final approach
+// takes, and 0.45 made it far too long: a first-order settle with a 2.2s time
+// constant spent 9s creeping the last 0.46m onto the waypoint, which was most
+// of a 175s mission (star90 - speed during that crawl was 0.02-0.28 m/s, so
+// the hold-up was distance, never the arrival speed gate).
+//
+// 0.45 was chosen to buy TIME for the corner turn. That is no longer how the
+// turn is paced: vtolflycontroller now blends the heading as a function of
+// distance remaining, so the nose arrives on the new bearing whatever speed
+// the vehicle closes at. With the turn decoupled from the clock, this
+// constant is free to be what it should be - fast enough to actually finish
+// the arrival, gentle enough that the velocity loop tracks it without
+// carrying lag through the point.
+//
+// 0.85 -> 1.10. The remaining per-corner cost is the tail of this settle:
+// a first-order approach never quite arrives, and at 0.85 the last metre
+// took ~2.2s of every corner. Raising the slope shortens the tail
+// proportionally. It is bounded by overshoot - the law demands a
+// deceleration of gain^2 * d, which at 1.10 and a 1.2 m/s cruise is about
+// 1.3 m/s^2, still well under the ~4.6 m/s^2 the tilt limit allows, so the
+// binding constraint is loop tracking rather than authority.
+#define PATH_ARRIVAL_GAIN 0.85f
 
 #include "uavobjectmanager.h" // <--.
 #include "pathdesired.h" // <-- needed only for correct ENUM macro usage with path modes (PATHDESIRED_MODE_xxx,
@@ -301,7 +314,18 @@ static void path_vector(PathDesiredData *path, float *cur_point, struct path_sta
             && path->ModeParameters[PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_CRUISESPEED] > cruise) {
             cruise = path->ModeParameters[PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_CRUISESPEED];
         }
-        float accel_lim = sqrtf(squaref(path->StartingVelocity) + 2.0f * PATH_LEG_ACCEL * d_gone);
+        // The acceleration limit needs a floor, or a leg that begins stopped
+        // AT its own start point can never begin: accel_lim = sqrt(v0^2 +
+        // 2*a*d_gone) is exactly zero when v0 and d_gone are both zero, the
+        // profile commands no speed, the vehicle does not move, d_gone stays
+        // zero. Deadlock. It went unnoticed while every waypoint carried a
+        // nonzero arrival velocity, and appeared the moment corners became
+        // true stops AND a leg started from a standstill exactly on its Start
+        // - a vertical climb waypoint directly over the pad, which hung for
+        // 93s without ever leaving the ground (star91). Treating the vehicle
+        // as already a few centimetres along is enough to break the tie.
+        float accel_lim = sqrtf(squaref(path->StartingVelocity)
+                                + 2.0f * PATH_LEG_ACCEL * fmaxf(d_gone, 0.05f));
         float brake_lim = sqrtf(squaref(path->EndingVelocity) + 2.0f * PATH_LEG_ACCEL * d_left);
         velocity = fminf(cruise, fminf(accel_lim, brake_lim));
         // Linear arrival cap, so the vehicle settles ON the endpoint instead

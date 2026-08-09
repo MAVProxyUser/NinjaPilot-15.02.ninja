@@ -10,17 +10,18 @@ usage: star_plot.py <fclog.jsonl> <out.png>
 """
 import json
 import math
+import os
 import sys
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-STAR = []
-_p = [(6 * math.cos(math.radians(72 * k)), 6 * math.sin(math.radians(72 * k))) for k in range(5)]
-for _k in [0, 2, 4, 1, 3, 0]:
-    STAR.append((_p[_k][0], _p[_k][1]))
-STAR.append((0.0, 0.0))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from star_geom import ORDER, OUTLINE
+
+# Planned path as flown: climb at centre, the star, then home.
+STAR = ORDER
 
 
 def main():

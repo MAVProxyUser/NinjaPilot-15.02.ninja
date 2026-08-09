@@ -43,6 +43,29 @@ under `ground/pyuavtalk/` and `ground/gazebo_bridge/`). Rules below exist
 because they were each learned the hard way in earlier sessions - read
 them before making changes, not after something breaks.
 
+## RULE: SHOW the top-down plot after every run
+
+Analysing the three logs is not finished until the planned-vs-flown picture
+has been put in front of the user. `tools/analyze_run.sh` writes it to
+`$TMPDIR/<label>.png` (top-down planned vs actual, plus the altitude profile
+with waypoint transitions marked) and the path is printed at the end of the
+run; send that file, every time, without being asked.
+
+Numbers and picture answer different questions. A rounded corner, a bowed
+leg, an altitude sag and a yaw-induced S all score similarly in a mean
+cross-track figure and look nothing alike on the plot - and the altitude
+trace is the fastest way to catch a vertical regression that a horizontal
+score cannot see at all. Several conclusions this session came from the
+shape, not the number.
+
+One more trap the plot cannot save you from: the analysis tools score
+against the mission geometry in `tools/star_geom.py`. If the mission changes
+and that file does not, every tool keeps scoring the OLD shape and reports
+confident nonsense - a mission change once read as 1.76m of cross-track
+error that was purely a stale planned path. It is the single source of
+truth for all of score.py, wp_arrival.py, star_plot.py and analyze_run.sh;
+keep it in step with `build_mission()`.
+
 ## Lineage: OpenPilot -> NinjaPilot (NOT LibrePilot)
 
 - **OpenPilot** was the original project; 15.02 was its final-era
