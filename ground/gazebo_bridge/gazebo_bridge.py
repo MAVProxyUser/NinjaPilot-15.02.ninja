@@ -1528,6 +1528,14 @@ FC_LOG_OBJECTS_MISSION = [
     ("AttitudeState", "periodic", 100),
     ("PathStatus", "periodic", 200),
     ("StabilizationDesired", "periodic", 200),
+    # VelocityDesired is what the path layer ASKED for, as opposed to
+    # VelocityState which is what the vehicle did. Without both you cannot
+    # tell a path that commands a bad shape from a vehicle that fails to fly
+    # a good one - which is exactly the question at a corner, where the
+    # vehicle was seen swinging back and forth around the waypoint. Logged at
+    # the same 100ms as VelocityState so the two can be compared sample for
+    # sample.
+    ("VelocityDesired", "periodic", 100),
 ]
 
 FC_LOG_OBJECTS_AUTOTUNE = [
@@ -2635,6 +2643,13 @@ def uavtalk_thread():
             # 286s. The lead stays at 1.0s and vtolflycontroller clamps it to
             # half the remaining distance instead, so it cannot predict past
             # the target.
+            #
+            # Settled at 0.4s. The lead only has to damp line-following now;
+            # it is no longer doing the braking, because PATH_LEG_DECEL brakes
+            # from 1.43m out instead of 0.63m. Keeping it small is what stops
+            # v*kFF from ever approaching the remaining distance, which is the
+            # condition that lets progress run past the endpoint and start the
+            # oscillation.
             "CourseFeedForward": 1.0,
             # HorizontalPosP 0.25->0.15 and HorizontalVelPID P 8->4, D 1->0:
             # measured divergent oscillation in PositionHold (commanded
@@ -2669,7 +2684,28 @@ def uavtalk_thread():
             # both fixed (i.e. against a clean airframe) and it still
             # tumbled the vehicle into the ground at wp6 - roll p2p 192deg.
             # Do not raise it without changing something else first.
-            "HorizontalVelPID": [4.0, 0.5, 0.0, 15], "VerticalVelPID": [0.6, 0.45, 0.08, 1.0],
+            # Ki stays 0.5. Zeroing it (star107) was a clean test of integrator
+            # windup as the cause of the velocity loop overrunning its command,
+            # and it is NOT the cause: commanded still peaked at 1.51 m/s on a
+            # 1.0 cruise and actual at 2.25, essentially unchanged.
+            # Kp 4.0 -> 7.0 and Kd 0.0 -> 0.9.
+            #
+            # The loop was not short of AUTHORITY, it was short of GAIN. In
+            # the braking zone (within 3m of a waypoint) the follower was
+            # commanding a median tilt of 3.4 deg and a maximum of 9.0 deg
+            # against a 25 deg limit - not one sample within 15 deg of the
+            # limit, on runs where the vehicle was overshooting waypoints by
+            # up to 0.8m. It had ~2.7x the braking authority it was asking
+            # for, so it arrived carrying speed the path never commanded, sailed
+            # through the point and got pulled back. That is the orbit.
+            #
+            # Kp alone cannot be raised: 6.5 tumbled the vehicle outright
+            # (roll peak-to-peak 192 deg). That is the signature of a P-only
+            # loop pushed past its stability margin, and Kd is exactly 0 here -
+            # so the fix is to add the damping first and then take the gain.
+            # ILimit stays 15; windup was tested and ruled out (star107, Ki=0
+            # changed nothing).
+            "HorizontalVelPID": [7.0, 0.5, 0.9, 15], "VerticalVelPID": [0.6, 0.45, 0.08, 1.0],
             # ThrustLimits.Neutral is the altitude-hold PID's hover-point
             # baseline (vtolflycontroller.cpp: controlDown.UpdateNeutralThrust
             # uses it directly) - the XML's 0.5 default assumes a much

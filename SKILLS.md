@@ -28,6 +28,22 @@ CLAUDE.md for the specific cases).
 Concrete, copy-pasteable workflows. CLAUDE.md has the *why*; this has
 the *how*. Keep both in sync when workflows change.
 
+## RULE: purge the previous flight's slots before every run
+
+Use `ground/gazebo_bridge/run_star.sh <label>` rather than hand-typing the
+launch sequence. It kills the previous processes, WAITS for them to actually
+exit, deletes `~/ninjapilot-build/fcwd/233CDC*.o*`, verifies the directory is
+empty, resets the scene, flies, and analyses - and it refuses to run if any
+of that fails.
+
+The slot files persist between runs, and `decode_fcwd.py` can only tell
+flights apart by the low nibble of the filename, so flight N and flight N+16
+alias onto each other and merge. A merged pair does not look broken: it
+decodes cleanly and reports a flight containing two missions, with a 4162s
+"dwell" and a 0.3Hz sample rate (star100). decode_fcwd now warns when the
+kept flight spans more than 600s, but the warning is a backstop - the purge
+is the fix.
+
 ## RULE: SHOW the top-down plot after every run
 
 Analysing the three logs is not finished until the planned-vs-flown picture

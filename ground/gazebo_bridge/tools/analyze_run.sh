@@ -25,6 +25,11 @@ echo "--- score (flown vs planned, dense board samples) ---"
 echo "--- waypoint arrival (did it actually get ON the point, and stop there) ---"
 "$PY" "$HERE/wp_arrival.py" "$OUT" 2>/dev/null
 
+# Distinguishes a path layer that COMMANDS an orbit from a vehicle that fails
+# to fly a clean command. Needs VelocityDesired in the log.
+echo "--- corner: is the orbit commanded, or flown? ---"
+"$PY" "$HERE/corner_probe.py" "$OUT" 2>/dev/null
+
 echo "--- oscillation (is it porpoising/hunting, and at what frequency) ---"
 "$PY" "$HERE/porpoise.py" "$OUT" 2>/dev/null | sed -n '1,7p'
 

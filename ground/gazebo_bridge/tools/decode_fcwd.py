@@ -68,6 +68,17 @@ if recs:
     print("flights present: %s -> keeping flight %d (%d of %d records)"
           % (sorted({r["flight"] for r in recs}), want, len(kept), len(recs)))
     recs = kept
+    # Even after picking one flight, shout if its span is implausible. The
+    # filename only carries the flight number modulo 16, so flight N and
+    # flight N+16 are indistinguishable and merge silently - and a merged
+    # pair still looks like a valid decode, just with a mission's worth of
+    # dead time in the middle. A star run is ~2-5 minutes.
+    if kept:
+        span = (max(r["t_us"] for r in kept) - min(r["t_us"] for r in kept)) / 1e6
+        if span > 600:
+            print("  !!! WARNING: kept flight spans %.0fs - almost certainly two "
+                  "runs merged (flight number aliases mod 16). Purge %s before "
+                  "the run; see run_star.sh." % (span, sys.argv[1]))
 recs.sort(key=lambda r: r["t_us"])
 with open(sys.argv[2], "w") as out:
     for r in recs:

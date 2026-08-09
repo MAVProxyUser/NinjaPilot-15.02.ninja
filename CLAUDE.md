@@ -43,6 +43,54 @@ under `ground/pyuavtalk/` and `ground/gazebo_bridge/`). Rules below exist
 because they were each learned the hard way in earlier sessions - read
 them before making changes, not after something breaks.
 
+## OPEN: the NE velocity loop overruns its own command by ~50-75%
+
+Measured with VelocityDesired logged alongside VelocityState (both at 100ms,
+compared pairwise):
+
+| run | commanded max | actual max | cruise |
+|-----|---------------|------------|--------|
+| star102 | 1.04 m/s | 1.83 m/s | 1.0 |
+| star106 | 1.57 m/s | 2.49 m/s | 1.0 |
+| star107 | 1.51 m/s | 2.25 m/s | 1.0 |
+
+The vehicle arrives at a waypoint carrying speed the path never asked for,
+sails through, and gets pulled back - which is the "orbiting" seen from the
+Gazebo trail. Every attempt to fix this by reshaping the COMMAND changed the
+shape of the swing without removing it, because the command was not the
+problem:
+
+- lead term 1.0 -> 0.25s: overshoot 0.21m -> 0.95m, 286s
+- lead clamped so it cannot predict past the endpoint: 0.69m, 198s
+- along-leg progress ratchet: drove progress regression to exactly 0.000 at
+  every waypoint, and the orbit stayed (and the ratchet forces endpoint-homing
+  mode early, where correction_vector is the FULL vector to End and the
+  position term escapes the leg's cruise cap - that is how star106/107
+  commanded 1.5 m/s on a 1.0 cruise)
+- HorizontalVelPID Ki 0.5 -> 0: ruled integrator windup OUT, ratio unchanged
+
+What has NOT been tried: damping in the velocity loop itself. Kd is 0.0, and
+the loop is a bare P+I at Kp 4.0 against an airframe with real momentum. Note
+`UpdateVelocitySetpoint` clamps only to HorizontalVelMax (3.0), never to the
+leg's own cruise speed, so any large position error commands up to 3 m/s
+regardless of what the mission asked for - worth fixing on its own.
+
+## RULE: purge the previous flight's slots before every run
+
+Use `ground/gazebo_bridge/run_star.sh <label>` rather than hand-typing the
+launch sequence. It kills the previous processes, WAITS for them to actually
+exit, deletes `~/ninjapilot-build/fcwd/233CDC*.o*`, verifies the directory is
+empty, resets the scene, flies, and analyses - and it refuses to run if any
+of that fails.
+
+The slot files persist between runs, and `decode_fcwd.py` can only tell
+flights apart by the low nibble of the filename, so flight N and flight N+16
+alias onto each other and merge. A merged pair does not look broken: it
+decodes cleanly and reports a flight containing two missions, with a 4162s
+"dwell" and a 0.3Hz sample rate (star100). decode_fcwd now warns when the
+kept flight spans more than 600s, but the warning is a backstop - the purge
+is the fix.
+
 ## RULE: SHOW the top-down plot after every run
 
 Analysing the three logs is not finished until the planned-vs-flown picture
