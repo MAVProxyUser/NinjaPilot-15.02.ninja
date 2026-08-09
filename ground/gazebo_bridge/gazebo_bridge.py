@@ -1106,7 +1106,14 @@ def _crc8_07(crc, data):
 # 1.2 was no better (star94): overshoot 0.53m, cross-track 0.27m, and 164s -
 # slower than the 153s it was meant to beat, because every corner it overshot
 # had to be re-approached. Higher cruise costs more at the corner than it
-# saves on the leg, at least until the velocity loop itself is faster. 1.0.
+# saves on the leg - but that was measured when a corner cost 8-10s and any
+# overshoot was expensive. Corners now cost 1-4s, so the trade is worth
+# re-running. Re-ran it at 1.3 with cheap corners (star100): still worse -
+# 147s against 126s, cross-track 0.18 -> 0.27m, overshoot 0.16 -> 0.40m. The
+# limit is the velocity loop, whose Kp is already at its measured ceiling of
+# 4.0, so above ~1 m/s the vehicle simply cannot track the braking profile
+# and every corner pays for it. 1.0 is this airframe's speed until that loop
+# gets faster.
 MISSION_SPEED = 1.0
 # Waypoint acceptance radius (m). Level legs use a 2D horizontal check
 # (ConditionParameters[1]=0), vertical-transition legs use 3D ([1]=1).
