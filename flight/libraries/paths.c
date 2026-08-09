@@ -28,6 +28,13 @@
 #include <pios_math.h>
 #include <mathmisc.h>
 
+// Along-track accel/decel used by path_vector()'s trapezoidal speed
+// profile (see comment there). Deliberately gentle - a multirotor at
+// mission speeds has ~2 m/s^2 of attitude-limited authority, and 0.6
+// keeps the braking zone into a 0.45 m/s hairpin from a 1.5 m/s cruise
+// at ~1.7m, well inside a typical leg.
+#define PATH_LEG_ACCEL 0.6f
+
 #include "uavobjectmanager.h" // <--.
 #include "pathdesired.h" // <-- needed only for correct ENUM macro usage with path modes (PATHDESIRED_MODE_xxx,
 #include "paths.h"
@@ -164,6 +171,20 @@ static void path_vector(PathDesiredData *path, float *cur_point, struct path_sta
         status->fractional_progress = 1;
         return;
     }
+    // Past the endpoint the infinite-line projection is a trap: track_point
+    // extends BEYOND End and path_vector keeps pushing along the leg's
+    // extension forever, so a vehicle that crosses the waypoint outside its
+    // acceptance radius just sails away at EndingVelocity (missions 12 and
+    // 18 did exactly this - 30m and 12m respectively - until a ground-side
+    // guard intervened). Fall back to endpoint behaviour instead: home in
+    // on End at EndingVelocity, which brings the vehicle back through the
+    // acceptance radius and lets the plan advance.
+    if (status->fractional_progress >= 1.0f) {
+        path_endpoint(path, cur_point, status, mode3D);
+        status->fractional_progress = 1.0f;
+        return;
+    }
+
     // Compute point on track that is closest to our current position.
     track_point[0] = status->fractional_progress * status->path_vector[0] + path->Start.North;
     track_point[1] = status->fractional_progress * status->path_vector[1] + path->Start.East;
@@ -175,8 +196,27 @@ static void path_vector(PathDesiredData *path, float *cur_point, struct path_sta
 
     status->error = vector_lengthf(status->correction_vector, 3);
 
-    // correct movement vector to current velocity
-    velocity = path->StartingVelocity + boundf(status->fractional_progress, 0.0f, 1.0f) * (path->EndingVelocity - path->StartingVelocity);
+    // Trapezoidal speed profile instead of the original linear
+    // StartingVelocity -> EndingVelocity interpolation. The linear ramp
+    // starts slowing toward the corner speed from the moment the leg
+    // begins, so a 12m leg into a 0.45 m/s hairpin crawled its whole
+    // length. Here the leg accelerates away from the previous corner at
+    // PATH_LEG_ACCEL, cruises at the faster of the two endpoint speeds,
+    // and only brakes inside the distance actually needed to reach
+    // EndingVelocity - the standard v^2 = v0^2 + 2*a*d braking curve.
+    // Legs with equal endpoint speeds (fixed-wing cruise, slow letter
+    // strokes) behave exactly as before: all three limits equal the
+    // endpoint speed. Past the endpoint (fractional_progress > 1) the
+    // profile holds EndingVelocity, same as the old code.
+    {
+        float progress = boundf(status->fractional_progress, 0.0f, 1.0f);
+        float d_gone   = progress * dist_path;
+        float d_left   = dist_path - d_gone;
+        float cruise   = fmaxf(path->StartingVelocity, path->EndingVelocity);
+        float accel_lim = sqrtf(squaref(path->StartingVelocity) + 2.0f * PATH_LEG_ACCEL * d_gone);
+        float brake_lim = sqrtf(squaref(path->EndingVelocity) + 2.0f * PATH_LEG_ACCEL * d_left);
+        velocity = fminf(cruise, fminf(accel_lim, brake_lim));
+    }
     status->path_vector[0] = velocity * status->path_vector[0] / dist_path;
     status->path_vector[1] = velocity * status->path_vector[1] / dist_path;
     status->path_vector[2] = velocity * status->path_vector[2] / dist_path;

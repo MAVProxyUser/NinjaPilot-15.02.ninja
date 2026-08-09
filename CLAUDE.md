@@ -462,3 +462,73 @@ SKILLS.md).
   /marker service quirks: reply type is Empty, the call often reports
   ok=False YET the marker registers (verify via /marker/list);
   DELETE_ALL per-namespace clears stale trails.
+
+## Yaw-following waypoints, autotune, and the tuning traps (2026-08-09)
+
+Goal: fly waypoint legs with the nose pointed along the leg. What that
+took, and the traps that cost the most time:
+
+- **`StabilizationBank` is a VOLATILE MIRROR.** stabilization.c's
+  SettingsBankUpdatedCb re-copies StabilizationSettingsBank1/2/3 (per
+  FlightModeMap) over it on EVERY flight-mode change. The bridge wrote
+  only the mirror for months, so every stab-bank value silently reverted
+  to XML defaults at the first mode switch. Caught only when an onboard
+  log showed yaw slewing at ~118 deg/s under a "20 deg/s" cap. ALWAYS
+  write `StabilizationSettingsBank1`. Any pre-2026-08-09 conclusion of
+  the form "we tuned bank value X and it helped" is suspect.
+- **Whole-object writes stomp each other.** The bridge re-sends the
+  entire FlightModeSettings on every arm/disarm transition; that wiped a
+  custom FlightModePosition mapping the instant the test armed (two
+  autotune runs flew their whole window in the WRONG FLIGHT MODE).
+  `_fms_position_override` now survives the re-send. Lesson: after
+  writing any settings object, VERIFY via readback or FlightStatus, do
+  not assume the write stuck.
+- **`updatePathBearing()` must use the LEG direction, not
+  `progress.path_vector`.** path_vector is a velocity vector that points
+  from the vehicle AT the endpoint (GoToEndpoint, and FollowVector once
+  past the endpoint), so it swings wildly - and spins - as the vehicle
+  passes near a waypoint. Feeding it to the yaw attitude loop whipped the
+  nose around at every waypoint and wrecked path tracking (leg reversals,
+  32s crawls). Using `End - Start` is constant per leg. This single fix
+  turned an oscillating mess into monotonic legs.
+- **Point-turn**: UpdateVelocityDesired scales `path_vector` (the
+  along-track feed-forward) to zero while the yaw error exceeds 30 deg,
+  ramping back in by 10 deg. The vehicle holds its place on the line,
+  rotates, THEN flies the leg - which also removes the yaw/translation
+  coupling (the NE->body rotation used by UpdateStabilizationDesired was
+  previously changing under the velocity controller mid-leg).
+- **Yaw command must be SLEWED, never stepped.** A hairpin steps the leg
+  bearing ~144 deg; as a step it saturates the yaw loop for seconds and
+  starves the mixer of roll/pitch authority - three consecutive
+  tip-overs (65-81 deg) traced to exactly this, at several MaximumRate
+  caps. vtolflycontroller slews the yaw COMMAND at 20 deg/s.
+- **Saturation budget is the real yaw constraint**: yaw command ~=
+  RateKp * MaximumRate.Yaw. Autotune's yaw Kp of 0.0416 at 90 deg/s
+  demands 3.7x full actuator range. Keep RateKp * MaxRate <~ 0.4 so the
+  mixer always retains roll/pitch headroom.
+
+### Relay Autotune (resurrected - see SKILLS.md for how to run it)
+
+flight/modules/Autotune + relay_tuning.c were amputated upstream in
+Nov 2014 (OP-1588, present in the OpenPilot checkout's history). Both are
+restored and modernized for 15.02 (banks, named-field structs, plus a YAW
+relay state the original never had). Findings:
+
+- Measured X3 (reproducible across two independent flights): roll
+  113ms/77.2, pitch 155ms/37.5, yaw 560ms/10.2. The roll:pitch period
+  ratio 1.37 matches sqrt(Iyy/Ixx)=1.42 from the model's own inertia
+  tensor - an independent physics check that the numbers are real.
+- **Yaw authority is ~8x weaker than roll** and ~5x slower. This is the
+  root physical reason yaw-facing flight is hard on this airframe, and it
+  is a property of the MODEL (momentConstant 0.016), not of the firmware.
+- **The ZN gain derivation is too aggressive to use as-is.** Applying the
+  autotuned rate gains wholesale (Ki 5-8x stock) produced violent
+  along-leg oscillation and leg reversals. Reverted to stock rate PIDs.
+  The DIAGNOSTIC value of the tune was the win, not its gain recipe.
+- **Firmware ticks != wall clock.** The autotune state machine advances
+  on FreeRTOS ticks while the bridge times windows on wall clock; the sim
+  runs slower than real time, so each relay axis actually ran ~24s
+  starting ~4-6s later than the bridge assumed. Consequence: the YAW
+  measurement never converged (its gain was still climbing when the
+  bridge landed) - treat the yaw numbers as a lower bound.
+

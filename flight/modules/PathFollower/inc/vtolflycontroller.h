@@ -79,6 +79,11 @@ private:
     uint8_t mMode;
     float vtolEmergencyFallback;
     bool vtolEmergencyFallbackSwitch;
+    // Slewed yaw command state for the bearing-following YawControl modes
+    // (see the FOLLOWER_REGULAR yaw handling for why the raw bearing must
+    // never be fed to the attitude loop as a step).
+    float mYawCommand;
+    bool mYawCommandActive;
 };
 
 #endif // VTOLFLYCONTROLLER_H

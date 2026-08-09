@@ -92,6 +92,7 @@ void VtolFlyController::Activate(void)
 
         vtolEmergencyFallback = 0.0f;
         vtolEmergencyFallbackSwitch = false;
+        mYawCommandActive = false;
     }
 }
 
@@ -186,6 +187,44 @@ void VtolFlyController::UpdateVelocityDesired()
                      positionState.Down + (velocityState.Down * vtolPathFollowerSettings->CourseFeedForward) };
     struct path_status progress;
     path_progress(pathDesired, cur, &progress, true);
+
+    // POINT-TURN: when a bearing-following yaw mode is active, rotate onto
+    // the leg heading BEFORE translating along it. path_vector is the
+    // along-track feed-forward velocity; scaling it to zero while the nose
+    // is still swinging leaves only the cross-track correction, so the
+    // vehicle holds its position on the line and simply turns in place.
+    // Once aligned the gate opens and it accelerates down the leg.
+    //
+    // This also removes the yaw/translation coupling that made corners
+    // messy: previously the vehicle flew a new leg while still rotating,
+    // so the NE->body rotation used by UpdateStabilizationDesired was
+    // changing under the velocity controller the whole time.
+    if (vtolPathFollowerSettings->YawControl == VTOLPATHFOLLOWERSETTINGS_YAWCONTROL_PATHDIRECTION
+        || vtolPathFollowerSettings->YawControl == VTOLPATHFOLLOWERSETTINGS_YAWCONTROL_MOVEMENTDIRECTION) {
+        AttitudeStateData attitudeState;
+        AttitudeStateGet(&attitudeState);
+        float yawError = updatePathBearing() - attitudeState.Yaw;
+        while (yawError > 180.0f) {
+            yawError -= 360.0f;
+        }
+        while (yawError < -180.0f) {
+            yawError += 360.0f;
+        }
+        yawError = fabsf(yawError);
+
+        // Fully stopped beyond ALIGN_STOP, full speed inside ALIGN_GO,
+        // linear in between so the leg starts smoothly rather than lurching.
+        const float ALIGN_STOP = 30.0f;
+        const float ALIGN_GO   = 10.0f;
+        float gate = 1.0f;
+        if (yawError > ALIGN_STOP) {
+            gate = 0.0f;
+        } else if (yawError > ALIGN_GO) {
+            gate = (ALIGN_STOP - yawError) / (ALIGN_STOP - ALIGN_GO);
+        }
+        progress.path_vector[0] *= gate;
+        progress.path_vector[1] *= gate;
+    }
 
     controlNE.ControlPositionWithPath(&progress);
     if (!mManualThrust) {
@@ -445,6 +484,53 @@ uint8_t VtolFlyController::RunAutoPilot()
             break;
         }
 
+        if (yaw_attitude) {
+            // Slew the yaw COMMAND toward the selected bearing instead of
+            // feeding the attitude loop a step. A waypoint switch flips the
+            // path bearing instantly (a hairpin by ~144 degrees); presented
+            // as a step, the yaw loop saturates its rate demand for seconds
+            // and the fight for mixer authority on weak-yaw-torque
+            // airframes costs roll/pitch control - three consecutive
+            // tip-overs at the same star hairpin (roll/pitch reaching
+            // 65-81 degrees) traced to exactly this, at several different
+            // MaximumRate.Yaw caps. With the command slewed the loop error
+            // stays small at all times and yaw authority is never
+            // saturated. 30 deg/s crosses a hairpin in ~5s, matching the
+            // corner-deceleration speeds the missions fly.
+            // 20 deg/s, matched under MaximumRate.Yaw (25) so the yaw
+            // loop always has tracking headroom above the command it is
+            // being asked to follow. Relay autotune measured this airframe's
+            // yaw ultimate period at 560ms vs 114ms for roll - yaw is ~5x
+            // slower to respond, so the command must be correspondingly
+            // gentler or the loop is forever chasing a target it cannot reach.
+            const float yawSlewDps = 20.0f;
+            float dT = vtolPathFollowerSettings->UpdatePeriod * 0.001f;
+            if (!mYawCommandActive) {
+                AttitudeStateData attitude;
+                AttitudeStateGet(&attitude);
+                mYawCommand = attitude.Yaw;
+                mYawCommandActive = true;
+            }
+            float step = yaw - mYawCommand;
+            while (step > 180.0f) {
+                step -= 360.0f;
+            }
+            while (step < -180.0f) {
+                step += 360.0f;
+            }
+            step = boundf(step, -yawSlewDps * dT, yawSlewDps * dT);
+            mYawCommand += step;
+            while (mYawCommand > 180.0f) {
+                mYawCommand -= 360.0f;
+            }
+            while (mYawCommand < -180.0f) {
+                mYawCommand += 360.0f;
+            }
+            yaw = mYawCommand;
+        } else {
+            mYawCommandActive = false;
+        }
+
         result = UpdateStabilizationDesired(yaw_attitude, yaw);
 
         if (!result) {
@@ -511,19 +597,28 @@ float VtolFlyController::updateCourseBearing()
  */
 float VtolFlyController::updatePathBearing()
 {
-    PositionStateData positionState;
+    // Bearing of the LEG ITSELF (Start -> End), not of progress.path_vector.
+    // path_vector is a *velocity* vector: for GoToEndpoint (and for
+    // FollowVector once past the endpoint, where path_progress falls back to
+    // endpoint homing) it points from the vehicle AT the endpoint, so it
+    // swings through large angles - and spins outright - as the vehicle
+    // passes close to the waypoint. Feeding that to the yaw attitude loop
+    // made the nose whip around at every waypoint. The leg direction is
+    // constant for the whole leg and only steps at waypoint transitions,
+    // where the yaw command slew smooths it.
+    float dn = pathDesired->End.North - pathDesired->Start.North;
+    float de = pathDesired->End.East - pathDesired->Start.East;
 
-    PositionStateGet(&positionState);
-
-    float cur[3] = { positionState.North,
-                     positionState.East,
-                     positionState.Down };
-    struct path_status progress;
-
-    path_progress(pathDesired, cur, &progress, true);
+    if ((dn * dn + de * de) < 1e-6f) {
+        // Degenerate leg (e.g. a pure climb, or a hold): keep current heading
+        // rather than yawing to a meaningless bearing.
+        AttitudeStateData attitude;
+        AttitudeStateGet(&attitude);
+        return attitude.Yaw;
+    }
 
     // atan2f always returns in between + and - 180 degrees
-    return RAD2DEG(atan2f(progress.path_vector[1], progress.path_vector[0]));
+    return RAD2DEG(atan2f(de, dn));
 }
 
 

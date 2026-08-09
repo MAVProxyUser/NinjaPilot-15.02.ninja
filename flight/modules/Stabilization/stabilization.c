@@ -44,6 +44,8 @@
 #include <stabilizationsettingsbank1.h>
 #include <stabilizationsettingsbank2.h>
 #include <stabilizationsettingsbank3.h>
+#include <relaytuning.h>
+#include <relaytuningsettings.h>
 #include <ratedesired.h>
 #include <sin_lookup.h>
 #include <stabilization.h>
@@ -107,6 +109,8 @@ int32_t StabilizationInitialize()
     RateDesiredInitialize();
     ManualControlCommandInitialize(); // only used for PID bank selection based on flight mode switch
     sin_lookup_initalize();
+    RelayTuningSettingsInitialize();
+    RelayTuningInitialize();
 
     stabilizationOuterloopInit();
     stabilizationInnerloopInit();
@@ -164,6 +168,14 @@ static void StabilizationDesiredUpdatedCb(__attribute__((unused)) UAVObjEvent *e
         case STABILIZATIONDESIRED_STABILIZATIONMODE_RATTITUDE:
             StabilizationStatusOuterLoopToArray(status.OuterLoop)[t] = STABILIZATIONSTATUS_OUTERLOOP_RATTITUDE;
             StabilizationStatusInnerLoopToArray(status.InnerLoop)[t] = STABILIZATIONSTATUS_INNERLOOP_RATE;
+            break;
+        case STABILIZATIONDESIRED_STABILIZATIONMODE_RELAYRATE:
+            StabilizationStatusOuterLoopToArray(status.OuterLoop)[t] = STABILIZATIONSTATUS_OUTERLOOP_DIRECT;
+            StabilizationStatusInnerLoopToArray(status.InnerLoop)[t] = STABILIZATIONSTATUS_INNERLOOP_RELAYTUNING;
+            break;
+        case STABILIZATIONDESIRED_STABILIZATIONMODE_RELAYATTITUDE:
+            StabilizationStatusOuterLoopToArray(status.OuterLoop)[t] = STABILIZATIONSTATUS_OUTERLOOP_ATTITUDE;
+            StabilizationStatusInnerLoopToArray(status.InnerLoop)[t] = STABILIZATIONSTATUS_INNERLOOP_RELAYTUNING;
             break;
         case STABILIZATIONDESIRED_STABILIZATIONMODE_ALTITUDEHOLD:
             StabilizationStatusOuterLoopToArray(status.OuterLoop)[t] = STABILIZATIONSTATUS_OUTERLOOP_ALTITUDE;

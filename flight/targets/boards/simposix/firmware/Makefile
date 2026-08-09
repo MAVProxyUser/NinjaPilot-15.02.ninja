@@ -52,6 +52,7 @@ MODULES += PathPlanner
 MODULES += PathFollower
 MODULES += Telemetry
 MODULES += Logging
+MODULES += Autotune
 MODULES += FirmwareIAP
 MODULES += StateEstimation
 MODULES += Sensors/simulated/Sensors
@@ -177,6 +178,13 @@ BLONLY_CDEFS += -DFW_DESC_SIZE=$(FW_DESC_SIZE)
 # Since we are simulating all this firmware the code needs to know what the BL would
 # normally contain
 CFLAGS += $(BLONLY_CDEFS)
+
+# Declare all non-optional modules as built-in (same semantics as
+# make/apps-defs.mk for the ARM targets) - modules like Autotune check
+# MODULE_<NAME>_BUILTIN to skip the HwSettings.OptionalModules gate.
+MODNAMES := $(notdir $(MODULES))
+MODULES_BUILTIN := $(foreach mod, $(MODNAMES), -DMODULE_$(shell echo $(mod) | tr '[:lower:]' '[:upper:]')_BUILTIN)
+CFLAGS += $(MODULES_BUILTIN)
 
 ifeq ($(DEBUG),YES)
 CFLAGS += -O0

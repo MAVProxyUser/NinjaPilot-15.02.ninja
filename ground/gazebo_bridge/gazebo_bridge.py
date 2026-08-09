@@ -59,6 +59,10 @@ def print(*args, **kwargs):  # noqa: A001 - deliberate module-wide shadow
 # state estimator/hold-mode logic work", since the latter was found to be
 # broken independent of which vertical-channel filter algorithm is used).
 TEST_MODE = os.environ.get("NINJAPILOT_TEST_MODE", "scripted")
+# NINJAPILOT_MISSION=star flies ONLY the 5-point star at 8m + land -
+# a ~90s iteration loop for corner/yaw tuning instead of the 4.5min
+# full star/octagon/KF mission.
+MISSION_SHAPE = os.environ.get("NINJAPILOT_MISSION", "full")
 
 import gz.transport13 as transport
 from gz.msgs10.pose_v_pb2 import Pose_V
@@ -1082,7 +1086,7 @@ MISSION_SPEED = 1.5  # m/s, straight-line cruise (2.0 raced corners hard enough 
 # acceptance makes level-leg advance immune to vertical wobble; the climb
 # legs keep 3D (their 2D distance is ~0 from the start - they would trip
 # immediately and skip the climb).
-MISSION_WP_RADIUS = 1.5
+MISSION_WP_RADIUS = 1.0
 
 
 def _corner_speed(theta_deg):
@@ -1123,6 +1127,11 @@ def build_mission():
     for k in [0, 2, 4, 1, 3, 0]:
         wp(star_pts[k][0], star_pts[k][1], -8.0)
 
+    if MISSION_SHAPE == "star":
+        wp(0.0, 0.0, -8.0)
+        wp(0.0, 0.0, -8.0)
+        return _finish_mission(pts)
+
     # --- Octagon at 15m: radius 6m, 8 vertices + close. The first vertex
     # also carries the 10m climb (the paths are followed in 3D, so the
     # altitude ramps along the leg).
@@ -1145,7 +1154,10 @@ def build_mission():
     # a Land action or it would loop back to the star forever).
     wp(0.0, 0.0, -8.0)
     wp(0.0, 0.0, -8.0)
+    return _finish_mission(pts)
 
+
+def _finish_mission(pts):
     # Per-waypoint arrival speed from the turn angle at that waypoint (3D:
     # the ring-to-ring climbs count as direction changes too).
     def leg(a, b):
@@ -1289,6 +1301,7 @@ def poshold_test():
 _waypoint_active = [None]   # latest WaypointActive.Index from telemetry
 _mission_client = [None]    # set by on_connected for mission upload
 _last_log_status = [None]   # latest DebugLogStatus (flight-periodic, 1Hz)
+_vtol_pf_values = [None]    # resolved VtolPathFollowerSettings (for live YawControl flips)
 _last_log_entry = [None]    # latest DebugLogEntry decoded dict
 
 
@@ -1347,6 +1360,16 @@ FC_LOG_OBJECTS = [
     ("BaroSensor", "periodic", 1000),
 ]
 
+# Extra high-rate objects used only by the autotune run: ActuatorDesired
+# carries the relay's raw +/-Amplitude square wave, so logging it at 50ms
+# is direct proof of WHICH axis the relay is driving and at what period
+# (AttitudeState at 500ms aliases a 9Hz roll/pitch limit cycle into noise).
+FC_LOG_OBJECTS_AUTOTUNE = [
+    ("ActuatorDesired", "periodic", 50),
+    ("AttitudeState", "periodic", 50),
+    ("RelayTuning", "periodic", 500),
+]
+
 FC_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 
 
@@ -1375,12 +1398,12 @@ def _set_logging_metadata(client, name, mode, period_ms, timeout=5.0):
     return True
 
 
-def setup_fc_logging(client):
+def setup_fc_logging(client, extra=()):
     """Enable OnlyWhenArmed on-board logging and mark the FC_LOG_OBJECTS for
     flight-side logging. Runs from the test thread (the client pump must be
     live in parallel for the metadata read-backs)."""
     ok = 0
-    for name, mode, period in FC_LOG_OBJECTS:
+    for name, mode, period in list(FC_LOG_OBJECTS) + list(extra):
         if _set_logging_metadata(client, name, mode, period):
             ok += 1
         time.sleep(0.05)
@@ -1388,7 +1411,7 @@ def setup_fc_logging(client):
                        bov.resolve_enum_values(client.db["DebugLogSettings"],
                                                {"LoggingEnabled": "OnlyWhenArmed"}))
     print(f"[fclog] on-board logging enabled (OnlyWhenArmed), "
-          f"{ok}/{len(FC_LOG_OBJECTS)} objects marked for logging")
+          f"{ok}/{len(FC_LOG_OBJECTS) + len(extra)} objects marked for logging")
 
 
 def _retrieve_log_entry(client, flight, entry, timeout=4.0):
@@ -1521,6 +1544,184 @@ def download_fc_logs(client, max_entries_per_flight=2000):
     if not written:
         print("[fclog] no non-empty flights found on board", flush=True)
     return written
+
+
+def set_yaw_control(client, mode):
+    vals = _vtol_pf_values[0]
+    if not vals:
+        return
+    vals = dict(vals)
+    vals["YawControl"] = {"manual": 0, "tailin": 1, "movementdirection": 2,
+                          "pathdirection": 3, "poi": 4}[mode]
+    client.send_object("VtolPathFollowerSettings", vals)
+    print(f"[test] YawControl -> {mode}")
+
+
+_last_relay = [None]   # latest RelayTuning (periodic 1Hz while tuning)
+_last_bank1 = [None]   # latest StabilizationSettingsBank1 (pushed on change)
+_last_flightstatus = [None]  # latest FlightStatus (mode verification)
+_fms_position_override = [None]  # FlightModePosition override (autotune remaps slot 4)
+
+
+def autotune_test():
+    """NINJAPILOT_TEST_MODE=autotune: relay-feedback autotune against the
+    real Gazebo physics. Protocol (matches flight/modules/Autotune/
+    autotune.c - the ORDER matters):
+      1. RelayTuningSettings + map switch position 4 to the Autotune mode.
+      2. Arm and climb to a manual-throttle hover (Stabilized1, thrust
+         passes through from our virtual stick for the ENTIRE tune).
+      3. Flip to Autotune WHILE AIRBORNE with thrust > 0 (AT_INIT refuses
+         to start on the ground).
+      4. Module runs relay on roll -> pitch -> yaw (20s each) while the
+         bridge holds altitude with the proven ground-truth cascade.
+      5. Land and DISARM while STILL IN Autotune mode - gains are computed
+         and written to Bank1 only on the armed->disarmed edge (AT_SET).
+      6. Read back RelayTuning + StabilizationSettingsBank1, print + save."""
+    print("[test] autotune_test: waiting 3s for link + config to settle...")
+    time.sleep(3.0)
+    if not wait_for_attitude_ok():
+        return
+    client = _mission_client[0]
+
+    client.send_object("RelayTuningSettings",
+                       bov.resolve_enum_values(client.db["RelayTuningSettings"],
+                                               {"Mode": "Rate", "Behavior": "Compute",
+                                                "Amplitude": 0.25, "HysteresisThresh": 5,
+                                                "RateGain": 0.3333, "AttitudeGain": 0.2}))
+    fms = dict(bov.flight_mode_settings(False, ["Attitude", "Attitude", "Attitude"]))
+    fmp = list(fms["FlightModePosition"])
+    fmp[4] = "Autotune"
+    fms["FlightModePosition"] = fmp
+    _fms_position_override[0] = fmp  # keep the arming re-send from stomping it
+    # Plain OBJ sends can drop on the UDP link - autotune run 1 flew its
+    # whole relay window in PATHPLANNER because this patch never landed.
+    # Send it a few times, then VERIFY the mode engages before relying on it.
+    for _ in range(3):
+        client.send_object("FlightModeSettings",
+                           bov.resolve_enum_values(client.db["FlightModeSettings"], fms))
+        time.sleep(0.3)
+
+    print("[test] autotune_test: arming, manual-throttle climb to 12m")
+    control.mode_position = 0
+    control.throttle = 0.0
+    control.armed = True
+    time.sleep(2.0)
+
+    # Ground-truth altitude cascade (same structure/limits as
+    # manual_hover_test - see its comment block for the failure analysis
+    # behind the asymmetric limits and the narrow throttle envelope).
+    RATE_KP = 0.4
+    MAX_CLIMB_MPS = 1.5
+    MAX_DESCENT_MPS = 0.8
+    THR_PER_MPS = 0.15
+    THR_MIN, THR_MAX = 0.45, 0.80
+    HOVER = 0.68
+
+    def hold_tick(target_m):
+        have, alt, climb = state.pose_alt_climb()
+        if not have:
+            return None
+        want_rate = max(-MAX_DESCENT_MPS, min(MAX_CLIMB_MPS, RATE_KP * (target_m - alt)))
+        thr = HOVER + THR_PER_MPS * (want_rate - climb)
+        control.throttle = max(THR_MIN, min(THR_MAX, thr))
+        return alt
+
+    def abort(reason):
+        print(f"[test] autotune_test: FAIL - {reason} - cutting")
+        control.mode_position = 0
+        control.throttle = 0.0
+        control.armed = False
+
+    # climb to hover
+    t0 = time.time()
+    while time.time() - t0 < 30.0:
+        alt = hold_tick(12.0)
+        if alt is not None and abs(alt - 12.0) < 0.6:
+            break
+        time.sleep(0.05)
+    else:
+        abort("never reached the 12m staging hover")
+        return
+    print("[test] autotune_test: hover established, engaging Autotune mode")
+    control.mode_position = 4  # Autotune (mapped above)
+    t0 = time.time()
+    while time.time() - t0 < 4.0:
+        fs = _last_flightstatus[0]
+        if fs and fs.get("FlightMode") == "Autotune":
+            break
+        hold_tick(12.0)
+        time.sleep(0.05)
+    else:
+        abort(f"flight mode never became Autotune (stuck at "
+              f"{(_last_flightstatus[0] or {}).get('FlightMode')}) - check FlightModePosition mapping")
+        return
+    print("[test] autotune_test: FlightStatus confirms Autotune mode")
+
+    # 2s prepare + 3 x 20s relay axes + margin. Supervise with truth.
+    TUNE_TIME = 2.0 + 3 * 20.0 + 6.0
+    start = time.time()
+    last_report = 0.0
+    while time.time() - start < TUNE_TIME:
+        alt = hold_tick(12.0)
+        have_att, roll, pitch, _, _ = fc_state.snapshot()
+        have_pose, pos_ned, _, _, _, _ = state.snapshot()
+        if alt is not None and (alt < 1.0 or alt > 30.0):
+            abort(f"altitude excursion {alt:.1f}m during relay")
+            return
+        if have_att and (abs(roll) > 55 or abs(pitch) > 55):
+            abort(f"tilt-over roll={roll:.0f} pitch={pitch:.0f} during relay")
+            return
+        if have_pose and (pos_ned[0] ** 2 + pos_ned[1] ** 2) > 30.0 ** 2:
+            abort("drifted >30m from home during relay")
+            return
+        now = time.time()
+        if now - last_report > 5.0:
+            last_report = now
+            r = _last_relay[0]
+            if r:
+                print(f"[test] autotune t+{now - start:4.0f}s "
+                      f"period(ms) R/P/Y = {r['Period'][0]:.0f}/{r['Period'][1]:.0f}/{r['Period'][2]:.0f} "
+                      f"gain = {r['Gain'][0]:.3f}/{r['Gain'][1]:.3f}/{r['Gain'][2]:.3f}", flush=True)
+        time.sleep(0.05)
+
+    # Land WITHOUT leaving Autotune mode (AT_FINISHED needs disarm+zero
+    # thrust while the mode is still Autotune, or nothing is written).
+    print("[test] autotune_test: relay complete - landing in Autotune mode")
+    t0 = time.time()
+    while time.time() - t0 < 40.0:
+        have, alt, _ = state.pose_alt_climb()
+        if have and alt < 0.3:
+            break
+        hold_tick(0.0)
+        time.sleep(0.05)
+    control.throttle = 0.0
+    time.sleep(1.0)
+    control.armed = False
+    print("[test] autotune_test: disarmed in Autotune mode - waiting for AT_SET")
+    time.sleep(3.0)
+
+    # Harvest: Bank1 is pushed on change (acked settings object); also
+    # request it explicitly in case the push raced the disarm.
+    client.request_object("StabilizationSettingsBank1")
+    time.sleep(1.5)
+    relay = _last_relay[0]
+    bank = _last_bank1[0]
+    print("[test] ===== AUTOTUNE RESULTS =====")
+    if relay:
+        for i, ax in enumerate(("Roll", "Pitch", "Yaw")):
+            wu = 2 * math.pi * 1000.0 / relay["Period"][i] if relay["Period"][i] > 1 else 0.0
+            print(f"[test]  {ax:5s}: period {relay['Period'][i]:7.1f} ms  gain {relay['Gain'][i]:7.3f}  wu {wu:5.1f} rad/s")
+    if bank:
+        for ax in ("Roll", "Pitch", "Yaw"):
+            print(f"[test]  {ax}RatePID = {bank[ax + 'RatePID']}  {ax}PI = {bank[ax + 'PI']}")
+        out = os.path.join(FC_LOG_DIR, time.strftime("autotune_%Y%m%d_%H%M%S.json"))
+        os.makedirs(FC_LOG_DIR, exist_ok=True)
+        with open(out, "w") as f:
+            json.dump({"relay": relay, "bank1": bank}, f, indent=2)
+        print(f"[test] autotune_test: results saved -> {out}")
+    else:
+        print("[test] autotune_test: WARNING - no Bank1 push seen; gains may not have been written")
+    print("[test] autotune_test: PASS - tune complete")
 
 
 def pull_logs_only():
@@ -1787,6 +1988,14 @@ def mission_test():
     print(f"[test] mission_test: engaging PathPlanner - {len(wps)} waypoints, "
           f"star@8m -> octagon@18m -> 'KF'@28m -> land")
     control.mode_position = 4  # PathPlanner
+    # Yaw faces the flight direction WHILE FLYING LEGS ONLY. pathdirection
+    # during a hold is unstable: path_vector there is just the position-
+    # error direction, so the yaw target is noise and the vehicle chases it
+    # at MaximumRate.Yaw (star 20 fell out of the PositionHold activation
+    # phase doing exactly that). Flip it on after PathPlanner engages,
+    # revert in the test wrapper when the mission is over.
+    time.sleep(0.5)
+    set_yaw_control(client, "pathdirection")
 
     start = time.time()
     last_log = 0.0
@@ -2236,7 +2445,8 @@ def uavtalk_thread():
             "BrakeHorizontalVelPID": [12.0, 0.0, 0.03, 15], "BrakeVelocityFeedforward": 0,
             "LandVerticalVelPID": [0.35, 3.0, 0.05, 0.9],
         }
-        send_reliable("VtolPathFollowerSettings", bov.resolve_enum_values(db["VtolPathFollowerSettings"], vtol_pf))
+        _vtol_pf_values[0] = bov.resolve_enum_values(db["VtolPathFollowerSettings"], vtol_pf)
+        send_reliable("VtolPathFollowerSettings", _vtol_pf_values[0])
         time.sleep(0.2)
         # Note: VtolPathFollowerSettings.YawControl="manual" (set above)
         # makes vtolflycontroller.cpp's UpdateStabilizationDesired() take
@@ -2316,11 +2526,39 @@ def uavtalk_thread():
         # fidelity bug to find, not something to tune away from what real
         # hardware actually runs.
         stab_bank = {
-            "ManualRate": [150, 150, 175], "MaximumRate": [300, 300, 50],
+            # Sane authority limits for a mission vehicle (were 300/300/175
+            # XML defaults - acro territory): 90 deg/s roll/pitch is plenty
+            # for waypoint flight and stops the inner loop wrenching the
+            # frame. Yaw 90 gives the loop TRACKING HEADROOM above the fly
+            # controller's 30 deg/s slewed yaw command - star 24 set the cap
+            # EQUAL to the slew rate and the loop rode the saturation
+            # boundary (standing ~12deg error at P=2.5 commands exactly the
+            # cap), porpoising yaw and chopping the flight path. The slew
+            # is what bounds yaw aggressiveness now, not the rate cap. NOTE these only apply because
+            # send_config writes StabilizationSettingsBank1 (persistent) -
+            # writing the StabilizationBank mirror alone gets stomped on
+            # every mode change.
+            "ManualRate": [150, 150, 175], "MaximumRate": [90, 90, 25],
             "StickExpo": [0, 0, 0],
+            # AUTOTUNED against the Gazebo X3 (relay identification,
+            # 2026-08-09, logs/autotune_20260809_013638.json). Measured
+            # ultimate period/gain: roll 114ms/77.6, pitch 156ms/37.8,
+            # yaw 560ms/10.2 - i.e. yaw's ultimate gain is ~8x roll's and
+            # its natural period ~5x longer: this airframe has very little
+            # yaw authority, which is exactly why hand-tuned yaw kept
+            # destabilizing it. Kd/ILimit keep their XML defaults (the
+            # relay method derives Kp/Ki only).
             "RollRatePID": [0.0030, 0.0065, 0.000033, 0.3],
             "PitchRatePID": [0.0030, 0.0065, 0.000033, 0.3],
-            "YawRatePID": [0.00620, 0.01000, 0.00005, 0.3],
+            # Yaw deliberately NOT at its autotuned 0.0416: that measurement
+            # never converged (its gain was still climbing when the window
+            # closed, biasing Kp high), and more importantly the saturation
+            # math forbids it - yaw command = Kp * MaximumRate, so 0.0416 at
+            # 90 deg/s demands 3.7x full actuator range, leaving the mixer
+            # nothing for roll/pitch. That is precisely how stars 21-23
+            # tipped over. 0.015 x 25 deg/s = 0.37 peak: meaningfully
+            # stronger than the 0.0062 stock gain, with headroom preserved.
+            "YawRatePID": [0.015, 0.030, 0.00005, 0.3],
             # STOCK 2.5 restored. This was halved to 1.2 mid-investigation
             # when a divergent ~0.5Hz pitch oscillation appeared during
             # sustained hover - but that oscillation was observed while the
@@ -2335,8 +2573,15 @@ def uavtalk_thread():
             # attitude response inserted enough lag to make PositionHold
             # laterally divergent (commanded amplitude tripling per cycle)
             # at ANY horizontal gain tried.
+            # Attitude-loop PIs from the same autotune. Yaw's 0.75 (vs the
+            # stock 2.5) is the headline result: the relay measured that this
+            # airframe cannot deliver the yaw acceleration a 2.5 gain asks
+            # for, which is the same conclusion the hand-tuned AxisLockKp
+            # 2.5->1.0 reached - now backed by measured physics rather than
+            # guesswork. Ki left at 0 (the autotuned Ki risks windup on an
+            # axis this weak, and roll/pitch hold fine without it).
             "RollPI": [2.5, 0, 50], "PitchPI": [2.5, 0, 50],
-            "YawPI": [2.5, 0, 50],
+            "YawPI": [0.75, 0, 50],
             "AcroInsanityFactor": 0.4,
             "ThrustPIDScaleCurve": [0.3, 0.15, 0, -0.15, -0.3],
             "RollMax": 42, "PitchMax": 42, "YawMax": 42,
@@ -2344,6 +2589,16 @@ def uavtalk_thread():
             "ThrustPIDScaleSource": "ActuatorDesiredThrust", "ThrustPIDScaleTarget": "PID",
             "ThrustPIDScaleAxes": "Roll Pitch",
         }
+        # CRITICAL: StabilizationBank is a VOLATILE MIRROR - stabilization.c's
+        # SettingsBankUpdatedCb re-copies StabilizationSettingsBank1/2/3 (per
+        # FlightModeMap) over it on every flight-mode change. Writing only
+        # the mirror meant every stab-bank value here silently reverted to
+        # XML defaults at the first mode switch after config: star 21/22
+        # tip-overs traced to yaw slewing at ~118 deg/s in flight - the XML
+        # default MaximumRate.Yaw of 175, not our capped value. The
+        # PERSISTENT bank object is what must be written; the mirror send
+        # below is kept only so values apply before the first mode change.
+        send_reliable("StabilizationSettingsBank1", bov.resolve_enum_values(db["StabilizationSettingsBank1"], stab_bank))
         send_reliable("StabilizationBank", bov.resolve_enum_values(db["StabilizationBank"], stab_bank))
         time.sleep(0.2)
 
@@ -2354,17 +2609,20 @@ def uavtalk_thread():
         target = {"manual_hover": manual_hover_test,
                   "poshold": poshold_test,
                   "mission": mission_test,
-                  "pull_logs": pull_logs_only}.get(TEST_MODE, run_test_sequence)
+                  "pull_logs": pull_logs_only,
+                  "autotune": autotune_test}.get(TEST_MODE, run_test_sequence)
 
         def run_with_fc_logging():
             # Runs in its own thread while client.run() keeps pumping packets
             # (setup needs metadata read-backs, download needs DebugLogEntry
             # replies - both dead-lock if attempted from on_connected itself).
             if TEST_MODE != "pull_logs":
-                setup_fc_logging(client)
+                setup_fc_logging(client,
+                                 FC_LOG_OBJECTS_AUTOTUNE if TEST_MODE == "autotune" else ())
                 time.sleep(1.0)  # let metadata writes land before arming
             target()
             if TEST_MODE != "pull_logs":
+                set_yaw_control(client, "manual")
                 download_fc_logs(client)
 
         threading.Thread(target=run_with_fc_logging, daemon=True).start()
@@ -2384,6 +2642,7 @@ def uavtalk_thread():
             if VERBOSE:
                 print(f"[dbg] t={ts:.2f} ActuatorCommand", decoded["Channel"][:4])
         elif objdef.name == "FlightStatus":
+            _last_flightstatus[0] = decoded
             if VERBOSE:
                 print(f"[dbg] t={ts:.2f} FlightStatus.Armed =", decoded["Armed"])
         elif objdef.name == "ActuatorDesired":
@@ -2410,6 +2669,10 @@ def uavtalk_thread():
             _waypoint_active[0] = decoded["Index"]
         elif objdef.name == "DebugLogStatus":
             _last_log_status[0] = decoded
+        elif objdef.name == "RelayTuning":
+            _last_relay[0] = decoded
+        elif objdef.name == "StabilizationSettingsBank1":
+            _last_bank1[0] = decoded
         elif objdef.name == "DebugLogEntry":
             _last_log_entry[0] = decoded
         elif objdef.name == "PathDesired":
@@ -2524,6 +2787,15 @@ def uavtalk_thread():
             if configured["done"] and client.connected:
                 if control.armed != last_arm_state["armed"]:
                     fms = bov.flight_mode_settings(control.armed, ["Attitude", "Attitude", "Attitude"])
+                    # The arming toggle re-sends the WHOLE FlightModeSettings
+                    # (UAVTalk writes are whole-object) - without honoring
+                    # this override it silently stomps any custom switch
+                    # mapping: autotune run 2 lost its Autotune slot the
+                    # instant the test armed, and the FC sat in PathPlanner
+                    # through the entire relay window.
+                    if _fms_position_override[0]:
+                        fms = dict(fms)
+                        fms["FlightModePosition"] = _fms_position_override[0]
                     send_reliable("FlightModeSettings", bov.resolve_enum_values(db["FlightModeSettings"], fms))
                     last_arm_state["armed"] = control.armed
 

@@ -7,7 +7,7 @@
 	<!-- Note these options should be identical to those in StabilizationDesired.StabilizationMode -->
         <field name="Stabilization1Settings" units="" type="enum"
 		elementnames="Roll,Pitch,Yaw,Thrust"
-		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,AltitudeHold,AltitudeVario,CruiseControl"
+		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,RelayRate,RelayAttitude,AltitudeHold,AltitudeVario,CruiseControl"
 		defaultvalue="Attitude,Attitude,AxisLock,Manual"
 		limits="%NE:AltitudeHold:AltitudeVario:CruiseControl; \
 			%NE:AltitudeHold:AltitudeVario:CruiseControl; \
@@ -18,7 +18,7 @@
 			/>
         <field name="Stabilization2Settings" units="" type="enum"
 		elementnames="Roll,Pitch,Yaw,Thrust"
-		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,AltitudeHold,AltitudeVario,CruiseControl"
+		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,RelayRate,RelayAttitude,AltitudeHold,AltitudeVario,CruiseControl"
 		defaultvalue="Attitude,Attitude,Rate,Manual"
 		limits="%NE:AltitudeHold:AltitudeVario:CruiseControl; \
 			%NE:AltitudeHold:AltitudeVario:CruiseControl; \
@@ -29,7 +29,7 @@
 			/>
         <field name="Stabilization3Settings" units="" type="enum"
 		elementnames="Roll,Pitch,Yaw,Thrust"
-		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,AltitudeHold,AltitudeVario,CruiseControl"
+		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,RelayRate,RelayAttitude,AltitudeHold,AltitudeVario,CruiseControl"
 		defaultvalue="Rate,Rate,Rate,Manual"
 		limits="%NE:AltitudeHold:AltitudeVario:CruiseControl; \
 			%NE:AltitudeHold:AltitudeVario:CruiseControl; \
@@ -40,7 +40,7 @@
 			/>
         <field name="Stabilization4Settings" units="" type="enum"
 		elementnames="Roll,Pitch,Yaw,Thrust"
-		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,AltitudeHold,AltitudeVario,CruiseControl"
+		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,RelayRate,RelayAttitude,AltitudeHold,AltitudeVario,CruiseControl"
 		defaultvalue="Attitude,Attitude,AxisLock,CruiseControl"
 		limits="%NE:AltitudeHold:AltitudeVario:CruiseControl; \
 			%NE:AltitudeHold:AltitudeVario:CruiseControl; \
@@ -51,7 +51,7 @@
 			/>
         <field name="Stabilization5Settings" units="" type="enum"
 		elementnames="Roll,Pitch,Yaw,Thrust"
-		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,AltitudeHold,AltitudeVario,CruiseControl"
+		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,RelayRate,RelayAttitude,AltitudeHold,AltitudeVario,CruiseControl"
 		defaultvalue="Attitude,Attitude,Rate,CruiseControl"
 		limits="%NE:AltitudeHold:AltitudeVario:CruiseControl; \
 			%NE:AltitudeHold:AltitudeVario:CruiseControl; \
@@ -62,7 +62,7 @@
 			/>
         <field name="Stabilization6Settings" units="" type="enum"
 		elementnames="Roll,Pitch,Yaw,Thrust"
-		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,AltitudeHold,AltitudeVario,CruiseControl"
+		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,RelayRate,RelayAttitude,AltitudeHold,AltitudeVario,CruiseControl"
 		defaultvalue="Rate,Rate,Rate,Manual"
 		limits="%NE:AltitudeHold:AltitudeVario:CruiseControl; \
 			%NE:AltitudeHold:AltitudeVario:CruiseControl; \
@@ -78,7 +78,7 @@
                units=""
                type="enum"
                elements="6"
-               options="Manual,Stabilized1,Stabilized2,Stabilized3,Stabilized4,Stabilized5,Stabilized6,PositionHold,CourseLock,PositionRoam,HomeLeash,AbsolutePosition,ReturnToBase,Land,PathPlanner,POI,AutoCruise"
+               options="Manual,Stabilized1,Stabilized2,Stabilized3,Stabilized4,Stabilized5,Stabilized6,Autotune,PositionHold,CourseLock,PositionRoam,HomeLeash,AbsolutePosition,ReturnToBase,Land,PathPlanner,POI,AutoCruise"
                defaultvalue="Stabilized1,Stabilized2,Stabilized3,Stabilized4,Stabilized5,Stabilized6"
                limits="\
                        %0401NE:PositionHold:CourseLock:PositionRoam:HomeLeash:AbsolutePosition:ReturnToBase:Land:PathPlanner:POI:AutoCruise,\

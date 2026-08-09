@@ -113,6 +113,63 @@ grep "accel integrator" /tmp/run.log | awk -F'[= ]' \
   '{for(i=1;i<=NF;i++){if($i=="t"){t=$(i+1)}}; if (t+0>=T1 && t+0<=T2) print}'
 ```
 
+
+## Analysis tools (ground/gazebo_bridge/tools/)
+
+These survive sessions - do NOT recreate them in a scratchpad. All run
+under the bridge venv (`ground/gazebo_bridge/venv/bin/python3`).
+
+| tool | what it answers |
+|---|---|
+| `reset_world.py` | reset the Gazebo scene AND wipe stale flight trails (every run goes through this) |
+| `accuracy.py <bridge.log> <fclog.jsonl>` | fused scorecard: truth cross-track per leg, FC's own PathStatus error, estimator bias, yaw-vs-bearing |
+| `decode_fcwd.py <fcwd_dir> <out.jsonl>` | decode on-"flash" log slots directly (fallback when a telemetry pull was interrupted, or to peek MID-flight) |
+| `relay_proof.py <fclog.jsonl>` | which axis the autotune relay actually drove, per window, from the raw square wave |
+| `mission_corners.py` / `star_report.py` | corner overshoot + per-leg stats for full/star missions |
+| `yaw_stream.py` | 15s of ground-truth heading (span/stdev) - quantifies yaw limit cycles |
+
+**The iteration loop that actually works:**
+
+```bash
+cd ground/gazebo_bridge && ./venv/bin/python3 tools/accuracy.py \
+  /tmp/star_NN.log logs/fclog_<newest>_flight0.jsonl
+```
+
+Truth says where it flew; the board log says what the FC believed. When
+they disagree the problem is the ESTIMATOR; when they agree but both are
+off the plan, it is the CONTROLLER. Never tune without checking which.
+
+**Peeking mid-flight** (the FC writes slots continuously; no need to wait
+for the post-flight pull):
+
+```bash
+./venv/bin/python3 tools/decode_fcwd.py ~/ninjapilot-build/fcwd /tmp/peek.jsonl
+```
+
+## Run the relay Autotune
+
+```bash
+cd ground/gazebo_bridge && NINJAPILOT_TEST_MODE=autotune ./venv/bin/python3 gazebo_bridge.py
+```
+
+Protocol is strict and ORDER MATTERS (autotune.c's state machine):
+1. RelayTuningSettings (Mode=Rate, Behavior=Compute|Save) + map a switch
+   position to the Autotune flight mode.
+2. Arm, climb to hover on MANUAL throttle (thrust passes through the whole
+   tune).
+3. Switch to Autotune WHILE AIRBORNE with thrust > 0 - AT_INIT refuses to
+   start on the ground. VERIFY FlightStatus.FlightMode actually became
+   Autotune (two runs silently flew the window in PathPlanner).
+4. Relay runs roll -> pitch -> yaw, ~20s each in FIRMWARE TICKS (which lag
+   wall clock in this sim - budget ~24s/axis and give yaw extra time or it
+   will not converge).
+5. Land and DISARM while STILL in Autotune mode - gains are written only
+   on the armed->disarmed edge. Leaving the mode first discards everything.
+
+Results land in `logs/autotune_<ts>.json`. **Treat the derived gains as a
+diagnostic, not a drop-in**: the ZN recipe is too aggressive for this
+airframe (see CLAUDE.md).
+
 ## Ground-truth verification (independent of the bridge)
 
 ```python

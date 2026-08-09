@@ -84,6 +84,17 @@ static const controlHandler handler_STABILIZED = {
 
 
 #ifndef PIOS_EXCLUDE_ADVANCED_FEATURES
+// Autotune: the Autotune module owns StabilizationDesired directly while
+// this mode is active - the control chain runs stabilization only.
+static const controlHandler handler_AUTOTUNE = {
+    .controlChain      = {
+        .Stabilization = true,
+        .PathFollower  = false,
+        .PathPlanner   = false,
+    },
+    .handler           = NULL,
+};
+
 static const controlHandler handler_PATHFOLLOWER = {
     .controlChain      = {
         .Stabilization = true,
@@ -429,6 +440,9 @@ static void manualControlTask(void)
     case FLIGHTSTATUS_FLIGHTMODE_POI:
     case FLIGHTSTATUS_FLIGHTMODE_AUTOCRUISE:
         handler = &handler_PATHFOLLOWER;
+        break;
+    case FLIGHTSTATUS_FLIGHTMODE_AUTOTUNE:
+        handler = &handler_AUTOTUNE;
         break;
     case FLIGHTSTATUS_FLIGHTMODE_PATHPLANNER:
         handler = &handler_PATHPLANNER;
