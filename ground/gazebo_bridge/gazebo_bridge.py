@@ -32,7 +32,11 @@ from uavtalk_client import UAVTalkClient, UdpTransport
 # Python, no version-specific syntax, safe to import under a different
 # interpreter than the one board_orientation_viz.py itself normally runs
 # under.
-import board_orientation_viz as bov
+# Pure configuration module. This used to be board_orientation_viz, which
+# also ran a web viewer with its OWN UAVTalk client on this same telemetry
+# port - it stole the bridge's packets and produced unexplained flyaways.
+# The viewer is gone; only the configuration survives.
+import flight_config as bov
 
 # The [dbg]/[piddbg]/[posdbg]/[navsatdbg]/[barodbg]/[gyrodbg]/[sendtiming]/
 # [latency] prints below fire at up to ~500Hz combined (every ActuatorCommand,
@@ -3142,29 +3146,7 @@ def publish_motor_speeds(channels):
     gz_motor_pub.publish(msg)
 
 
-def warn_if_telemetry_contended():
-    """The firmware replies to whichever client last talked to it, so a
-    second UAVTalk client on the same UDP port silently steals this
-    bridge's packets - missions that fly fine alone then fail with runaways
-    or ground contact. Cheap check, loud warning: this cost a run of
-    otherwise-inexplicable crashes."""
-    try:
-        import subprocess
-        out = subprocess.run(["pgrep", "-fl", "board_orientation_viz.py"],
-                             capture_output=True, text=True, timeout=3).stdout.strip()
-        if out and "--wind-only" not in out:
-            print("=" * 72)
-            print("WARNING: board_orientation_viz.py is running WITHOUT --wind-only.")
-            print("It shares UDP %d with this bridge and will steal telemetry," % UDP_PORT)
-            print("which shows up as unexplained flyaways / ground contact.")
-            print("Stop it, or restart it with --wind-only.")
-            print("=" * 72)
-    except Exception:
-        pass
-
-
 def main():
-    warn_if_telemetry_contended()
     global gz_motor_pub
 
     node = transport.Node()
