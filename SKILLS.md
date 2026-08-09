@@ -249,6 +249,30 @@ print(n.request('/gui/follow', s, StringMsg, Boolean, 1000))"
   print span/stdev over 15s.
 
 
+## Getting the board log (do NOT wait for a telemetry pull)
+
+On simposix the flashfs backend is pios_dosfs_logfs.c, so the log slots are
+already files in the firmware's CWD (`~/ninjapilot-build/fcwd`). Decoding
+all of them takes ~0.2s:
+
+```bash
+./venv/bin/python3 tools/decode_fcwd.py ~/ninjapilot-build/fcwd out.jsonl
+```
+
+The post-flight TELEMETRY pull is therefore OFF by default - it fetches the
+same data one DebugLogControl request at a time and costs minutes of dead
+time after every flight. To exercise that path (it is the only way to get a
+log off REAL hardware, so it must not rot):
+
+```bash
+NINJAPILOT_PULL_LOGS=1 NINJAPILOT_TEST_MODE=mission ./venv/bin/python3 gazebo_bridge.py
+# or the dedicated mode, which pulls without flying:
+NINJAPILOT_TEST_MODE=pull_logs ./venv/bin/python3 gazebo_bridge.py
+```
+
+`rm -f ~/ninjapilot-build/fcwd/*.o*` before each run, or slots from the
+previous flight are still sitting there.
+
 ## Analyse EVERY run (bridge + board + gazebo)
 
 ```bash

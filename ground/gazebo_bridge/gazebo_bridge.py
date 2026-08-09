@@ -2702,7 +2702,23 @@ def uavtalk_thread():
             target()
             if TEST_MODE != "pull_logs":
                 set_yaw_control(client, "manual")
-                download_fc_logs(client)
+                # The post-flight TELEMETRY pull is off by default. On
+                # simposix the flashfs backend is pios_dosfs_logfs.c, so the
+                # very same log slots are already sitting on disk in the
+                # firmware's CWD, and tools/decode_fcwd.py reads all of them
+                # in ~0.2s. Pulling them back one DebugLogControl request at
+                # a time instead costs MINUTES of dead time after every
+                # flight, for identical data.
+                #
+                # It is kept, and still exercised by NINJAPILOT_TEST_MODE=
+                # pull_logs, because on real hardware telemetry is the only
+                # way to get the log off the board - that path must not rot.
+                if os.environ.get("NINJAPILOT_PULL_LOGS") == "1":
+                    download_fc_logs(client)
+                else:
+                    print("[fclog] telemetry pull skipped - decode from disk instead:")
+                    print("[fclog]   tools/decode_fcwd.py ~/ninjapilot-build/fcwd out.jsonl")
+                    print("[fclog]   (set NINJAPILOT_PULL_LOGS=1 to exercise the telemetry path)")
 
         threading.Thread(target=run_with_fc_logging, daemon=True).start()
 
