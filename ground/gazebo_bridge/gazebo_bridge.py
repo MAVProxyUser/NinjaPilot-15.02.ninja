@@ -1112,9 +1112,13 @@ def _crc8_07(crc, data):
 # 147s against 126s, cross-track 0.18 -> 0.27m, overshoot 0.16 -> 0.40m. The
 # limit is the velocity loop, whose Kp is already at its measured ceiling of
 # 4.0, so above ~1 m/s the vehicle simply cannot track the braking profile
-# and every corner pays for it. 1.0 is this airframe's speed until that loop
-# gets faster.
-MISSION_SPEED = 1.0
+# and every corner pays for it.
+#
+# That loop then GOT faster (HorizontalVelPID Kd 0 -> 0.9, Kp 4 -> 7), which
+# is precisely the condition those tests were waiting on: every one of them
+# failed by overshooting the corner, and overshoot fell 0.18m -> 0.03m. So the
+# ceiling is worth re-measuring rather than inherited. 1.5.
+MISSION_SPEED = 1.5
 # Waypoint acceptance radius (m). Level legs use a 2D horizontal check
 # (ConditionParameters[1]=0), vertical-transition legs use 3D ([1]=1).
 # Mission 12 flew a 3D check on LEVEL legs with radius 1.0 and flew away:
@@ -2705,7 +2709,13 @@ def uavtalk_thread():
             # so the fix is to add the damping first and then take the gain.
             # ILimit stays 15; windup was tested and ruled out (star107, Ki=0
             # changed nothing).
-            "HorizontalVelPID": [7.0, 0.5, 0.9, 15], "VerticalVelPID": [0.6, 0.45, 0.08, 1.0],
+            #
+            # Kd 0.9 -> 1.4 with the cruise raised to 1.5 m/s. At the higher
+            # leg speed the same loop works harder to hold the line - pitch
+            # RMS went 2.34 -> 4.34 deg and cross-track 0.09 -> 0.17m (star110)
+            # - which is the loop running closer to its margin, exactly what
+            # more derivative is for.
+            "HorizontalVelPID": [7.0, 0.5, 1.4, 15], "VerticalVelPID": [0.6, 0.45, 0.08, 1.0],
             # ThrustLimits.Neutral is the altitude-hold PID's hover-point
             # baseline (vtolflycontroller.cpp: controlDown.UpdateNeutralThrust
             # uses it directly) - the XML's 0.5 default assumes a much
