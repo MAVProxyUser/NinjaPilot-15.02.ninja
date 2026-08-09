@@ -30,10 +30,13 @@
 
 // Along-track accel/decel used by path_vector()'s trapezoidal speed
 // profile (see comment there). Deliberately gentle - a multirotor at
-// mission speeds now has ~8 m/s^2 available (MaxRollPitch 40 deg), so
-// 2.0 is comfortably within what the vehicle can actually deliver while
-// keeping the braking zone from a 4 m/s cruise to a 1.2 m/s corner at
-// ~3.6m - still inside a typical 10m+ leg.
+// mission speeds has a few m/s^2 available, but this constant does more
+// than bound acceleration: because braking follows v=sqrt(v_end^2+2*a*d),
+// it also sets how fast the vehicle is still moving a given distance
+// SHORT of the waypoint - which is where the plan actually advances (the
+// acceptance radius). At 0.6 the vehicle was still doing ~1.0 m/s at a
+// 0.8m radius and overshot every corner by 1.15m. 0.35 brakes earlier and
+// arrives genuinely slow.
 #define PATH_LEG_ACCEL 0.6f
 
 #include "uavobjectmanager.h" // <--.

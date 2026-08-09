@@ -2439,6 +2439,11 @@ def uavtalk_thread():
             # than the vehicle took to reach the floor. Double P for
             # authority against velocity error, triple Ki so a standing
             # deficit is closed in ~2s, not ~10.
+            # Kp 4.0 is a measured ceiling, not a leftover workaround: 6.5 was
+            # re-tested after the yaw frame error and yaw saturation were
+            # both fixed (i.e. against a clean airframe) and it still
+            # tumbled the vehicle into the ground at wp6 - roll p2p 192deg.
+            # Do not raise it without changing something else first.
             "HorizontalVelPID": [4.0, 0.5, 0.0, 15], "VerticalVelPID": [0.6, 0.45, 0.08, 1.0],
             # ThrustLimits.Neutral is the altitude-hold PID's hover-point
             # baseline (vtolflycontroller.cpp: controlDown.UpdateNeutralThrust

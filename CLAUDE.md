@@ -532,3 +532,49 @@ relay state the original never had). Findings:
   measurement never converged (its gain was still climbing when the
   bridge landed) - treat the yaw numbers as a lower bound.
 
+
+## Star-mission tuning: what is settled, and the measured ceilings (2026-08-09)
+
+Best config, verified over four runs (score.py, dense 100ms board log):
+xtrack **mean 0.20-0.26 m, p95 0.52-0.74, max 0.70-1.21**. Run-to-run
+noise is +/-0.03 m on the mean, so DO NOT read a 0.05 m "improvement" as
+real without repeating the run.
+
+Settled values (all re-tested against a clean airframe, i.e. after the
+yaw frame error and the yaw saturation budget were both fixed):
+
+| knob | value | why not higher/lower |
+|---|---|---|
+| MISSION_SPEED | 1.5 m/s | 3.0-4.0 flew but bought wavy lines and tip-overs |
+| MaxRollPitch | 25 deg | at 40 the attitude loop overshot to 61 and tipped |
+| MISSION_WP_RADIUS | 0.8 m | 0.4 scored 0.27 - inside noise, no gain |
+| PATH_LEG_ACCEL | 0.6 | 0.35 (with r0.4) scored 0.30, worse |
+| HorizontalVelPID Kp | 4.0 | **6.5 tumbles it into the ground (roll p2p 192 deg)** |
+| HOLD_GAIN (corner) | 2.5 | the single biggest win: 0.42 -> 0.25 mean |
+
+The corner architecture that works: FollowVector legs + per-corner
+arrival speed + point-turn gate + a FIRM hold at the waypoint during the
+turn. The hold must apply ONLY above ALIGN_STOP - blending it across the
+whole gate band pulls the vehicle backwards on any mid-leg yaw wander
+and makes the legs visibly curved.
+
+Known residual: the vehicle still bulges ~0.5-0.7m past each star point.
+Cause is structural, not a gain: the plan advances at the acceptance
+radius, which is BEFORE the waypoint, so the hold target is still ahead
+of the vehicle and briefly commands it forward. Fixing this properly
+needs lookahead to the next leg (decide the turn before arriving), which
+the fly controller does not currently have.
+
+### Measurement discipline (three separate false conclusions came from this)
+
+- decode_fcwd.py: the log filename packs `flight + 16*(slot/256)` in one
+  byte. Misreading it as the flight discarded 3/4 of every log; one run
+  "scored" 1.92 m on a 23s fragment that actually scored 0.25 m.
+- accuracy.py: comparing mean radius across two DIFFERENT sample sets
+  (bridge vs board) invented a 0.4 m "estimator bias" that does not
+  exist. Paired on a shared clock the filter tracks its GPS input to
+  0.020 m. Remaining path error is CONTROLLER error.
+- A zero-length final leg (plan ends on two identical centre waypoints)
+  reported landing drift as cross-track error.
+- Change ONE variable per run. Star 38 changed radius AND accel together
+  and the result was uninterpretable until both were isolated.
