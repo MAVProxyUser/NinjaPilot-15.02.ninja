@@ -51,6 +51,15 @@ else:
     print("  (no GPS/position pairs)")
 PYEOF
 
+echo "--- gazebo SERVER log: physics/plugin complaints ---"
+GZLOG="${GZLOG:-/tmp/gzserver.log}"
+if [ -f "$GZLOG" ]; then
+  if grep -iE "error|warn|unable|fail|dropped|violat" "$GZLOG" | grep -viE "deprecat" | tail -5; then :; fi
+  grep -ciE "error|warn|unable|fail" "$GZLOG" | xargs echo "  total complaint lines:"
+else
+  echo "  (no server log at $GZLOG - set GZLOG=<path>)"
+fi
+
 echo "--- gazebo: truth vs board (do they agree?) ---"
 "$PY" - "$BRIDGE" "$OUT" <<'PYEOF'
 import json, re, sys, math

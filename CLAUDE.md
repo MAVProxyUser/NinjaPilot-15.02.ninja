@@ -1,5 +1,42 @@
 # Working on this repo
 
+## RULE: every flight is judged on THREE logs, never one
+
+Every single run compares:
+
+1. **the flight controller's own log** (simposix DebugLog) - what the FC
+   believed and commanded
+2. **the bridge log** - Gazebo ground truth and what the harness did
+3. **the Gazebo server log** - physics/plugin complaints
+
+`tools/analyze_run.sh` does all three and the bridge now runs it
+automatically as each flight ends, so it cannot be skipped:
+
+```bash
+NINJAPILOT_BRIDGE_LOG=/tmp/star_NN.log NINJAPILOT_RUN_LABEL=starNN \
+  NINJAPILOT_TEST_MODE=mission ./venv/bin/python3 gazebo_bridge.py
+```
+
+This is not ceremony. Judging a run on one log has produced wrong
+conclusions repeatedly in this project:
+
+- a phantom "0.4m estimator bias" that was a statistics artifact of
+  comparing two different sample sets, and which sent tuning down a blind
+  alley until the board log's GPS-vs-filtered pairing disproved it
+- a "vertical channel destabilisation" blamed on a controller constant that
+  was really tilt costing lift (and, for three runs, a second telemetry
+  client stealing the bridge's packets)
+- corner "control bugs" that were the harness starving the sensor thread
+
+Truth says where it flew; the board log says what the FC believed; the
+server log says whether the simulator itself was unhappy. Disagreement
+between them IS the diagnosis.
+
+Note the board log does NOT come over telemetry by default - on simposix
+the same slots are files on disk and decode in ~0.2s (see SKILLS.md). The
+telemetry path is real-hardware-only and is exercised on request.
+
+
 This is `NinjaPilot-15.02.ninja`, an OpenPilot-derived flight controller
 codebase (SimPosix SITL target + a Python UAVTalk/UAVObjects ground tool
 under `ground/pyuavtalk/` and `ground/gazebo_bridge/`). Rules below exist

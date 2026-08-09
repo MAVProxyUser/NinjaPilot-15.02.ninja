@@ -1,0 +1,1 @@
+t=   333.683s  TEXT  FlightStatus Armed: On board logging enabled.

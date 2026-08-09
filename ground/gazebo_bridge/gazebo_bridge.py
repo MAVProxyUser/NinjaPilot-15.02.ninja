@@ -1756,6 +1756,39 @@ def autotune_test():
     print("[test] autotune_test: PASS - tune complete")
 
 
+def run_post_flight_analysis():
+    """Compare ALL THREE logs at the end of every run, automatically.
+
+    A run judged on the bridge log alone cannot tell a controller problem
+    from an estimator problem from a physics/plugin problem - and each of
+    those has been misdiagnosed as another during this project. So this is
+    not left to whoever is driving: the board log is decoded from the
+    firmware's own flash, scored against the plan, and cross-checked
+    against bridge ground truth and the Gazebo server log, as the flight
+    ends.
+    """
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    script = os.path.join(here, "tools", "analyze_run.sh")
+    if not os.path.exists(script):
+        print("[analyze] tools/analyze_run.sh missing - skipping")
+        return
+    label = os.environ.get("NINJAPILOT_RUN_LABEL", "run")
+    bridge_log = os.environ.get("NINJAPILOT_BRIDGE_LOG", "")
+    if not bridge_log:
+        print("[analyze] set NINJAPILOT_BRIDGE_LOG=<this run's log> for the full comparison;"
+              " running board-log analysis only")
+        bridge_log = "/dev/null"
+    try:
+        out = subprocess.run([script, label, bridge_log], capture_output=True,
+                             text=True, timeout=180)
+        print(out.stdout)
+        if out.stderr.strip():
+            print(out.stderr.strip())
+    except Exception as exc:
+        print("[analyze] failed (%s)" % exc)
+
+
 def pull_logs_only():
     """NINJAPILOT_TEST_MODE=pull_logs: no flying - just download whatever the
     on-board log currently holds (useful after a crash or a manual run)."""
@@ -2716,9 +2749,8 @@ def uavtalk_thread():
                 if os.environ.get("NINJAPILOT_PULL_LOGS") == "1":
                     download_fc_logs(client)
                 else:
-                    print("[fclog] telemetry pull skipped - decode from disk instead:")
-                    print("[fclog]   tools/decode_fcwd.py ~/ninjapilot-build/fcwd out.jsonl")
-                    print("[fclog]   (set NINJAPILOT_PULL_LOGS=1 to exercise the telemetry path)")
+                    print("[fclog] telemetry pull skipped (data is already on disk)")
+                run_post_flight_analysis()
 
         threading.Thread(target=run_with_fc_logging, daemon=True).start()
 

@@ -1,5 +1,30 @@
 # SKILLS.md - operational recipes for this repo
 
+## RULE: analyse all three logs on EVERY run
+
+Board log (what the FC believed) + bridge log (ground truth + harness) +
+Gazebo server log (physics/plugin complaints). The bridge runs this
+automatically at the end of every flight; give it the bridge log path so
+the comparison is complete:
+
+```bash
+cd ground/gazebo_bridge
+NINJAPILOT_BRIDGE_LOG=/tmp/star_NN.log NINJAPILOT_RUN_LABEL=starNN \
+  NINJAPILOT_TEST_MODE=mission NINJAPILOT_MISSION=star \
+  ./venv/bin/python3 gazebo_bridge.py > /tmp/star_NN.log 2>&1
+```
+
+Or after the fact:
+
+```bash
+GZLOG=/tmp/gzserver.log tools/analyze_run.sh starNN /tmp/star_NN.log
+```
+
+One log is not enough to tell a controller fault from an estimator fault
+from a harness fault - all three have masqueraded as each other here (see
+CLAUDE.md for the specific cases).
+
+
 Concrete, copy-pasteable workflows. CLAUDE.md has the *why*; this has
 the *how*. Keep both in sync when workflows change.
 
