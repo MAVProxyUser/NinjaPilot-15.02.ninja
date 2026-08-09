@@ -2538,8 +2538,19 @@ def uavtalk_thread():
             # past the commanded lean angle during every crash this
             # session. cruisecontrol.c's own comment: "set MaxPowerFactor
             # to 1.0 to effectively disable boost" - doing that here.
-            "CruiseControlMinThrust": 5, "CruiseControlMaxThrust": 90, "CruiseControlMaxAngle": 105,
-            "CruiseControlMaxPowerFactor": 1.0, "CruiseControlPowerTrim": 100.0,
+            "CruiseControlMinThrust": 5, "CruiseControlMaxThrust": 90, "CruiseControlMaxAngle": 40,
+            # Tilt-compensated thrust, RE-ENABLED and bounded. Braking into a
+            # corner requires tilt, and tilt costs lift (cos of the tilt
+            # angle) - that is why widening the corner braking window
+            # improved the PATH but doubled altitude error (0.59 -> 1.53m
+            # p2p). CruiseControl multiplies thrust by 1/cos(tilt), which is
+            # exactly the missing term.
+            #   MaxPowerFactor 1.25 covers tilts to ~37 deg, above our 25 deg
+            #   MaxRollPitch, so the whole normal envelope is compensated.
+            #   MaxAngle 40 is the safety: beyond that the vehicle is not
+            #   manoeuvring, it is tumbling, and boosting thrust into a
+            #   tumble is what got this disabled in the first place.
+            "CruiseControlMaxPowerFactor": 1.25, "CruiseControlPowerTrim": 100.0,
             "CruiseControlPowerDelayComp": 0.25,
             "CruiseControlFlightModeSwitchPosEnable": ["FALSE"] * 6,
             "CruiseControlInvertedThrustReversing": "Unreversed",
