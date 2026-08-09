@@ -248,6 +248,68 @@ print(n.request('/gui/follow', s, StringMsg, Boolean, 1000))"
   scratchpad yaw_stream.py pattern - subscribe pose, extract yaw,
   print span/stdev over 15s.
 
+
+## Analyse EVERY run (bridge + board + gazebo)
+
+```bash
+cd ground/gazebo_bridge
+TMPDIR=/tmp tools/analyze_run.sh <label> /tmp/<bridge>.log
+```
+
+Prints, in one shot: mission outcome, board-log decode, cross-track score,
+oscillation spectrum, estimator health (filtered position vs its own GPS
+input, paired on the board's clock) and a gazebo-vs-board sanity check. A
+score without the board log cannot separate controller error from estimator
+error - the estimator has measured 0.006-0.044m throughout, so path error
+has been controller error every time.
+
+Individual tools: `score.py` (one line per run, stackable into a table),
+`star_plot.py` (planned vs flown PNG - the same picture the Gazebo trails
+show), `porpoise.py` (detrended RMS + dominant period per channel),
+`decode_fcwd.py` (decode the FC's own flash slots directly - instant, no
+telemetry pull needed, and works mid-flight).
+
+## Do NOT run a second UAVTalk client during a mission
+
+There is no longer a viewer to trip over (it was deleted), but the failure
+mode is worth knowing: any second client on UDP 9000 steals the bridge's
+packets, because the firmware answers whichever client contacted it last.
+Symptom is a mission that flies fine alone and then fails - runaway, ground
+contact - with nothing in the logs to explain it.
+
+Same class of hazard: marker publishing is a BLOCKING gz request. Do not
+raise the mission supervision loop rate or the trail density much; at 20Hz
+with 0.35m segments it starved the sensor-feed thread and crashed the
+vehicle. Current safe values: 10Hz loop, 0.5m segments, 50ms marker timeout.
+
+## Wind
+
+Sliders live in the Gazebo window (`gui_plugins/WindControl`, built with
+`cmake .. -DCMAKE_PREFIX_PATH=/opt/homebrew/opt/qt@5`). Launch the GUI with:
+
+```bash
+export GZ_GUI_PLUGIN_PATH="$PWD/gui_plugins/WindControl/build:$GZ_GUI_PLUGIN_PATH"
+gz sim -g
+```
+
+To publish wind without the GUI (speed v m/s FROM bearing B):
+`linear_velocity.x = -v*sin(B)`, `.y = -v*cos(B)`, and `enable_wind: true`
+or WindEffects applies nothing. Links need `<enable_wind>` to be pushed.
+
+## Star mission: current settled values
+
+| knob | value | note |
+|---|---|---|
+| MISSION_SPEED | 1.5 m/s | 3-4 m/s flew but bought wavy legs and tip-overs |
+| MaxRollPitch | 25 deg | 40 overshot to 61 deg and tipped |
+| MISSION_WP_RADIUS | 0.8 m | must be SMALLER than ARRIVE_DIST |
+| ARRIVE_DIST | 1.2 m | corner hold window; larger than the radius |
+| HorizontalVelPID Kp | 4.0 | 6.5 tumbles it into the ground |
+| CruiseControl | 1.25 / 40 deg | compensates tilt-lift; off = 2.5x worse altitude |
+
+Change ONE variable per run, and repeat a config before believing a 0.05m
+difference - that is inside the noise.
+
 ## Git hygiene for experiments
 
 - Experiment branches live in separate worktrees

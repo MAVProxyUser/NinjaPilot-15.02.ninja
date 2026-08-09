@@ -578,3 +578,88 @@ the fly controller does not currently have.
   reported landing drift as cross-track error.
 - Change ONE variable per run. Star 38 changed radius AND accel together
   and the result was uninterpretable until both were isolated.
+
+## Corner controller, tilt-lift, and the harness bug that faked a control bug (2026-08-09, later)
+
+Best measured star: **0.23m mean / 0.68 p95 / 0.85m max cross-track, altitude
+0.20m peak-to-peak, 108s** (star70). Run-to-run noise is +/-0.03m on the mean.
+
+### The harness bug FIRST - it invalidates any run it touched
+
+`board_orientation_viz.py` opened a second UAVTalk client on the SAME UDP
+telemetry port as the bridge. The firmware answers whichever client
+contacted it last, so the two silently stole each other's packets: missions
+that flew fine alone failed with runaways and ground contact whenever the
+viewer was open, and NOTHING in the flight logs points at it - it reads as
+a control bug. Three consecutive runs were lost, and a "vertical channel
+destabilisation" was wrongly blamed on a controller constant.
+
+The viewer is DELETED. Its configuration data survives as
+`ground/pyuavtalk/flight_config.py`, which opens no sockets. If anything
+ever reintroduces a second UAVTalk client on port 9000, expect exactly this
+signature: healthy solo runs, inexplicable failures when the other tool is
+open.
+
+Related, same class: **marker publishing is a BLOCKING gz request**. Running
+the mission supervision loop at 20Hz with 0.35m trail segments starved the
+thread feeding sensors to the firmware and flew the vehicle into the ground.
+The trail is cosmetic; it must never compete with flight-critical threads.
+Settled at 10Hz / 0.5m / 50ms marker timeout.
+
+### Corner controller (vtolflycontroller.cpp)
+
+ONE block owns the whole corner - approach, arrival, turn, departure.
+Splitting the job (yaw-gated translation lock in one place, lookahead yaw
+steering in another) is what produced loops and boxy spirals: the two pulled
+against each other. Sequence:
+
+  APPROACH  cap along-track speed at sqrt(2*a*(d - ARRIVE_DIST)), keeping
+            the feed-forward pointing ALONG THE LEG so the slide-in stays
+            on the drawn line
+  ARRIVE    park on the waypoint with a BOUNDED command (bounded is what
+            keeps it stable through a dwell; the earlier unbounded 2.5x
+            hold diverged - a leg entered at 11.3m ended 25.6m out)
+  TURN      rotate on the spot
+  DEPART    release to normal leg following
+
+**Yaw NEVER gates translation.** A quad is omnidirectional; a hover plus a
+rotation cannot move it sideways. If it spirals, translation is being driven
+by the turn - that coupling was the original sin behind every spiral.
+
+ARRIVE_DIST (1.2m) must EXCEED the mission acceptance radius (0.8m), or the
+plan retires the waypoint before the hold can pull the vehicle onto it and
+corners get cut.
+
+### Tilt costs lift - CruiseControl is the missing term
+
+`controlDown` reads only `path_vector[2]`/`correction_vector[2]`, which the
+corner controller never writes, so vertical coupling is NOT in the code. It
+is physical: braking into a corner needs tilt, and tilt costs lift by
+cos(angle). A wider braking window means more time tilted:
+
+    ARRIVE 0.6, CC off : 0.26 mean xtrack, alt p2p 0.59m
+    ARRIVE 1.2, CC off : 0.23 mean xtrack, alt p2p 1.53m
+    ARRIVE 1.2, CC on  : 0.23 mean xtrack, alt p2p 0.20m
+
+CruiseControl multiplies thrust by 1/cos(tilt). Bounded at MaxPowerFactor
+1.25 (covers ~37 deg, above the 25 deg MaxRollPitch) and MaxAngle 40 - past
+that the vehicle is tumbling, not manoeuvring, and boosting thrust into a
+tumble is why it was disabled originally.
+
+### Lookahead: plumbed, deliberately unused
+
+pathplanner publishes the next leg's bearing in PathDesired
+ModeParameters[2]/[3]. iNav (nextTurnAngle) and ArduPilot (next_destination
+splines) both steer with it - but on controllers that own the ENTIRE corner
+(position, velocity and acceleration through it). Bolted onto a follower
+that only owns the current leg, every variant was worse: 0.27-0.51m mean
+versus 0.23m without. Useful foundation if a full S-curve corner controller
+is ever written; not wired in until then.
+
+### Gazebo GUI
+
+Declaring `<gui>` in the world **REPLACES** Gazebo's defaults, it does not
+add to them. A hand-written short list dropped MarkerManager and the flight
+trails vanished; a single-plugin block left the wind panel filling the whole
+window. The world now embeds gz-sim's own `gui.config` verbatim and appends
+only the wind panel (anchored top-right).
