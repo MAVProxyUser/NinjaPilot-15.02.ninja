@@ -69,9 +69,20 @@
 // these describe *uncertainty*, not a fixed blend rate - the Kalman gain
 // each step is derived from these plus the propagated covariance, not
 // picked directly.
-#define ACCEL_NOISE_VAR_MPS2SQ 1e-2f  // accelerometer measurement noise variance, (m/s^2)^2
+// Process noise for the velocity/altitude states. This is NOT just
+// accelerometer sensor noise: the predict step frequently runs with a stale
+// accel sample (see accelBitOnEntry diagnostics), so during maneuvers the
+// model error is on the order of the vehicle's actual acceleration. The
+// original 1e-2 (0.1 m/s^2 sigma) let the covariance collapse after ~20s of
+// quiet, consistent measurements - P[1][1] << R meant K ~ 0 and the filter
+// went deaf: mission 14's onboard log shows GPS reporting a real 1 m/s
+// descent at the first corner while the over-confident velocity state read
+// "climbing 0.3" and ignored every innovation, trimming thrust into the
+// floor. 1.0 (1 m/s^2 sigma) keeps the gains alive through maneuvers.
+#define ACCEL_NOISE_VAR_MPS2SQ 1.0f   // unmodeled-acceleration process noise variance, (m/s^2)^2
 #define BIAS_NOISE_VAR_MPS2SQ  1e-7f  // accel-bias random-walk variance per second, (m/s^2)^2/s - deliberately small, bias drifts slowly
 #define BARO_NOISE_VAR_M2      0.25f  // barometer measurement noise variance, m^2 (~0.5m std dev)
+#define GPSVEL_NOISE_VAR_M2S2  0.04f  // GPS vertical-velocity measurement noise variance, (m/s)^2 (~0.2 m/s std dev - u-blox VELNED grade)
 #define INITIAL_P_ALT          1.0f
 #define INITIAL_P_VEL          1.0f
 #define INITIAL_P_BIAS         1.0f
@@ -239,6 +250,40 @@ static void kfCorrectBaro(struct data *this, float baroMeas)
     }
 }
 
+/**
+ * Correct step: scalar measurement update from GPS vertical velocity
+ * (H = [0,1,0]). Without this, the velocity state is nearly inert: the
+ * predict step frequently runs with stale accel (see the accelBitOnEntry
+ * diagnostics) and baro's velocity-correction gain K[1] is small, so under
+ * a REAL sustained climb the velocity state lagged reality by many seconds
+ * - mission 12/13 onboard logs showed baro at 10m climbing 3 m/s while
+ * x[1] read "descending 2 m/s", and the vertical loop closed a slow
+ * porpoise/runaway through that wrong-sign damping. GPS Down velocity is
+ * exactly the measurement the state needs (on real hardware this is u-blox
+ * VELNED - the same source the UBX parser feeds GPSVelocitySensor from).
+ * Also makes the accel-bias state observable from two independent
+ * measurements instead of baro alone.
+ */
+static void kfCorrectVel(struct data *this, float velMeas)
+{
+    float S = this->P[1][1] + GPSVEL_NOISE_VAR_M2S2;
+    float K[3] = { this->P[0][1] / S, this->P[1][1] / S, this->P[2][1] / S };
+
+    float y = velMeas - this->x[1];
+
+    this->x[0] += K[0] * y;
+    this->x[1] += K[1] * y;
+    this->x[2] += K[2] * y;
+
+    // P = (I - K*H) * P, H picks row 1
+    float P1[3] = { this->P[1][0], this->P[1][1], this->P[1][2] };
+    for (int i = 0; i < 3; i++) {
+        this->P[i][0] -= K[i] * P1[0];
+        this->P[i][1] -= K[i] * P1[1];
+        this->P[i][2] -= K[i] * P1[2];
+    }
+}
+
 static filterResult filter(stateFilter *self, stateEstimation *state)
 {
     struct data *this = (struct data *)self->localdata;
@@ -285,6 +330,12 @@ static filterResult filter(stateFilter *self, stateEstimation *state)
             this->vel[0]  = state->vel[0];
             this->vel[1]  = state->vel[1];
             this->vel[2]  = state->vel[2];
+            // Use the incoming GPS vertical velocity as a measurement
+            // before publishing the filtered state (NED down -> filter's
+            // altitude-up frame). The improved x[0] rides out through the
+            // frequent accel/baro branches; deliberately NOT marking pos
+            // updated here so downstream chain filters keep their cadence.
+            kfCorrectVel(this, -this->vel[2]);
             state->vel[2] = -this->x[1];
         }
         if (IS_SET(state->updated, SENSORUPDATES_accel)) {
