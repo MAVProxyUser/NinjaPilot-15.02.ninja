@@ -1455,6 +1455,12 @@ def main():
     ap.add_argument("--http-port", type=int, default=8765, help="local web page port (default 8765)")
     ap.add_argument("--xml-dir", default=default_xml_dir(), help="path to shared/uavobjectdefinition")
     ap.add_argument("--open", action="store_true", help="open the page in a browser on startup")
+    ap.add_argument("--wind-only", action="store_true",
+                    help="serve the page WITHOUT connecting to flight telemetry. Use this "
+                         "while a Gazebo mission is running: the bridge owns UDP 9000, and a "
+                         "second client on that port steals its packets - the firmware answers "
+                         "whoever contacted it last. Symptom is a mission that flies fine alone "
+                         "and fails (runaway / ground contact) whenever this viewer is open.")
     args = ap.parse_args()
 
     if not os.path.isdir(IMAGES_DIR):
@@ -1462,8 +1468,12 @@ def main():
 
     state = SharedState()
     control = ControlState()
-    t = threading.Thread(target=uavtalk_thread, args=(state, control, args.host, args.port, args.xml_dir), daemon=True)
-    t.start()
+    if args.wind_only:
+        print("wind-only mode: NOT connecting to telemetry (safe to run during a mission)")
+    else:
+        t = threading.Thread(target=uavtalk_thread,
+                             args=(state, control, args.host, args.port, args.xml_dir), daemon=True)
+        t.start()
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.http_port), make_handler(state, control))
     url = "http://127.0.0.1:%d" % args.http_port

@@ -188,74 +188,105 @@ void VtolFlyController::UpdateVelocityDesired()
     struct path_status progress;
     path_progress(pathDesired, cur, &progress, true);
 
-    // POINT-TURN: when a bearing-following yaw mode is active, rotate onto
-    // the leg heading BEFORE translating along it. path_vector is the
-    // along-track feed-forward velocity; scaling it to zero while the nose
-    // is still swinging leaves only the cross-track correction, so the
-    // vehicle holds its position on the line and simply turns in place.
-    // Once aligned the gate opens and it accelerates down the leg.
+    // ================= CORNER CONTROLLER =================
+    // ONE owner for the whole corner. Every earlier attempt split the job -
+    // a yaw-gated translation lock here, a lookahead yaw steer there - and
+    // the two pulled against each other, producing loops and boxy spirals
+    // at every waypoint. The lesson (and what ArduPilot's S-curve and
+    // iNav's turn smoothing both do) is that position, speed and heading
+    // through a corner are one problem.
     //
-    // This also removes the yaw/translation coupling that made corners
-    // messy: previously the vehicle flew a new leg while still rotating,
-    // so the NE->body rotation used by UpdateStabilizationDesired was
-    // changing under the velocity controller the whole time.
+    // The sequence, entirely inside this block:
+    //   APPROACH  decelerate ALONG THE LEG LINE on a stopping profile, so
+    //             the vehicle slides in straight instead of coasting past
+    //   ARRIVE    hold the waypoint with a BOUNDED command - bounded is
+    //             what keeps it stable through a dwell, which is what the
+    //             mission's confirmed-arrival policy needs
+    //   TURN      rotate on the spot; a quad is omnidirectional, so this
+    //             costs no translation and must not gate it
+    //   DEPART    release to normal leg following
+    //
+    // Yaw NEVER gates translation. That coupling was the original sin: a
+    // hover plus a rotation cannot move a quadcopter sideways, so if it
+    // spirals, translation is being driven by the turn - which was exactly
+    // the bug.
     if (vtolPathFollowerSettings->YawControl == VTOLPATHFOLLOWERSETTINGS_YAWCONTROL_PATHDIRECTION
         || vtolPathFollowerSettings->YawControl == VTOLPATHFOLLOWERSETTINGS_YAWCONTROL_MOVEMENTDIRECTION) {
-        AttitudeStateData attitudeState;
-        AttitudeStateGet(&attitudeState);
-        float yawError = updatePathBearing() - attitudeState.Yaw;
-        while (yawError > 180.0f) {
-            yawError -= 360.0f;
-        }
-        while (yawError < -180.0f) {
-            yawError += 360.0f;
-        }
-        yawError = fabsf(yawError);
+        float legN = pathDesired->End.North - pathDesired->Start.North;
+        float legE = pathDesired->End.East - pathDesired->Start.East;
+        float legLen = sqrtf(legN * legN + legE * legE);
 
-        // Fully stopped beyond ALIGN_STOP, full speed inside ALIGN_GO,
-        // linear in between so the leg starts smoothly rather than lurching.
-        const float ALIGN_STOP = 30.0f;
-        const float ALIGN_GO   = 10.0f;
-        float gate = 1.0f;
-        if (yawError > ALIGN_STOP) {
-            gate = 0.0f;
-        } else if (yawError > ALIGN_GO) {
-            gate = (ALIGN_STOP - yawError) / (ALIGN_STOP - ALIGN_GO);
+        // Only corners get this treatment: a straight-through waypoint (or
+        // the last leg, which has no successor) is flown normally.
+        bool turnAhead = false;
+        if (pathDesired->ModeParameters[3] > 0.5f && legLen > 1e-3f) {
+            float turn = pathDesired->ModeParameters[2] - RAD2DEG(atan2f(legE, legN));
+            while (turn > 180.0f) {
+                turn -= 360.0f;
+            }
+            while (turn < -180.0f) {
+                turn += 360.0f;
+            }
+            turnAhead = fabsf(turn) > 25.0f;
         }
-        // Gate ONLY the along-track feed-forward, never the cross-track
-        // correction. Gating the correction too was tried (star 31) to kill
-        // the arrival momentum that carries the vehicle through a corner:
-        // it commands a velocity setpoint of 0 as a STEP, which demands an
-        // instant stop from cruise speed, saturates the attitude loop and
-        // tipped the vehicle over (roll -61, pitch 57) - the same failure
-        // mode as an over-large MaxRollPitch. Leaving the correction intact
-        // means the vehicle decelerates against a growing position error
-        // instead, which is gentler and self-limiting. The residual corner
-        // excursion is better attacked by lowering the ARRIVAL speed
-        // (_corner_speed in the mission) than by braking harder.
-        progress.path_vector[0] *= gate;
-        progress.path_vector[1] *= gate;
 
-        // HOLD STATION AT THE WAYPOINT while actually turning - and ONLY
-        // then. An earlier version blended this hold across the whole
-        // 10-30 deg gate band, so any yaw wander MID-LEG (12 deg is
-        // nothing) started pulling the vehicle back toward the previous
-        // waypoint: the legs came out visibly wavy instead of straight.
-        // Hold only above ALIGN_STOP, where the vehicle genuinely is
-        // executing a turn and should not be translating at all.
-        if (yawError > ALIGN_STOP) {
-            // HOLD_GAIN: the hold has to arrest arrival momentum, and the
-            // cruise position gain is deliberately soft (it is tuned for
-            // smooth line-following, not for stopping). At the cruise gain
-            // the vehicle coasted ~0.8m past each corner before the hold
-            // took hold, which is what rounds off the corners. Scaling the
-            // hold error makes the stop firm WITHOUT touching leg tracking.
-            // Still bounded by MaxRollPitch and HorizontalVelMax, so it
-            // cannot demand the instant stop that tipped the vehicle over
-            // when the correction was zeroed outright.
-            const float HOLD_GAIN = 2.5f;
-            progress.correction_vector[0] = HOLD_GAIN * (pathDesired->Start.North - positionState.North);
-            progress.correction_vector[1] = HOLD_GAIN * (pathDesired->Start.East - positionState.East);
+        if (turnAhead) {
+            float dN = pathDesired->End.North - positionState.North;
+            float dE = pathDesired->End.East - positionState.East;
+            float distToEnd = sqrtf(dN * dN + dE * dE);
+
+            // Deceleration the vehicle can actually deliver. Asking for
+            // more than this is what saturated the attitude loop and tipped
+            // it over in earlier attempts.
+            const float A_BRAKE     = 0.55f;
+            // Bound on the hold command. UNBOUNDED was the instability: at
+            // a few metres of error a 2.5x gain demanded more speed than
+            // the vehicle could take, and holding that through a dwell
+            // diverged (a leg entered at 11.3m ended 25.6m out).
+            const float HOLD_V_MAX  = 0.8f;
+            // 0.6m. Raising this to 1.2 (to beat the acceptance radius and
+            // stop the corner being cut) destabilised the VERTICAL channel:
+            // the vehicle climbed through its target to 10.9m and then fell
+            // to the ground in 2s without ever translating. The corner
+            // controller shares `progress` with controlDown, so widening
+            // the window where it rewrites that structure has vertical
+            // consequences - any change here must be re-tested for
+            // altitude, not just for path.
+            const float ARRIVE_DIST = 0.6f;
+
+            if (distToEnd > ARRIVE_DIST) {
+                // APPROACH: cap the along-track speed at what can still be
+                // bled to zero by the waypoint, and keep the feed-forward
+                // pointing ALONG THE LEG (not at the vehicle-to-waypoint
+                // vector) so the slide-in stays on the drawn line.
+                float vStop = sqrtf(2.0f * A_BRAKE * (distToEnd - ARRIVE_DIST));
+                float along = sqrtf(squaref(progress.path_vector[0])
+                                    + squaref(progress.path_vector[1]));
+                if (along > 1e-6f && vStop < along) {
+                    float k = vStop / along;
+                    progress.path_vector[0] *= k;
+                    progress.path_vector[1] *= k;
+                }
+            } else {
+                // ARRIVE + TURN: park on the waypoint. Bounded command, so
+                // this is stable no matter how long the turn (or a
+                // mission-requested dwell) takes.
+                float vN = dN;
+                float vE = dE;
+                float mag = sqrtf(vN * vN + vE * vE);
+                if (mag > 1e-6f) {
+                    float v = mag * 1.5f;
+                    if (v > HOLD_V_MAX) {
+                        v = HOLD_V_MAX;
+                    }
+                    vN *= v / mag;
+                    vE *= v / mag;
+                }
+                progress.path_vector[0]      = vN;
+                progress.path_vector[1]      = vE;
+                progress.correction_vector[0] = dN;
+                progress.correction_vector[1] = dE;
+            }
         }
     }
 
