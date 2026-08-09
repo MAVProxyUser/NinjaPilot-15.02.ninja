@@ -6,7 +6,7 @@ import glob, json, os, struct, sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "pyuavtalk"))
 import uavtalk
-import board_orientation_viz as bov
+import flight_config as bov
 
 HDR = struct.Struct("<IIHHHHB")  # FlightTime, ObjectID, Flight, Entry, InstanceID, Size, Type
 db = uavtalk.UAVObjectDB(bov.default_xml_dir())

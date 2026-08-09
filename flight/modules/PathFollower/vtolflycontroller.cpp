@@ -252,7 +252,7 @@ void VtolFlyController::UpdateVelocityDesired()
             // the window where it rewrites that structure has vertical
             // consequences - any change here must be re-tested for
             // altitude, not just for path.
-            const float ARRIVE_DIST = 0.6f;
+            const float ARRIVE_DIST = 1.2f;
 
             if (distToEnd > ARRIVE_DIST) {
                 // APPROACH: cap the along-track speed at what can still be
