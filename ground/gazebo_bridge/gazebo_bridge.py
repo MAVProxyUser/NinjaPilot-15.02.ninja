@@ -43,6 +43,15 @@ import board_orientation_viz as bov
 # are unaffected - those are low-frequency and always worth seeing.
 VERBOSE = os.environ.get("NINJAPILOT_VERBOSE", "0") == "1"
 
+# Force flush on every print in this module: with stdout redirected to a log
+# file Python block-buffers, and unflushed PASS/FAIL/abort lines sat in the
+# buffer for many minutes while monitors watched the file for exactly those
+# lines (mission 14's ground-contact abort was invisible for 19 minutes).
+_print = print
+def print(*args, **kwargs):  # noqa: A001 - deliberate module-wide shadow
+    kwargs.setdefault("flush", True)
+    _print(*args, **kwargs)
+
 # NINJAPILOT_TEST_MODE=manual_hover runs manual_hover_test() instead of the
 # scripted run_test_sequence() - see manual_hover_test()'s own docstring for
 # why this exists (isolating "can the physical vehicle actually be flown to
@@ -1061,10 +1070,36 @@ def _crc8_07(crc, data):
     return crc
 
 
-MISSION_SPEED = 1.5  # m/s, every leg (2.0 raced corners hard enough to dip into the ground at the 5m ring)
-# Waypoint acceptance radius (m). ConditionParameters[1]=1 makes the
-# distance check 3D so altitude transitions must actually complete too.
+MISSION_SPEED = 1.5  # m/s, straight-line cruise (2.0 raced corners hard enough to dip into the ground at the 5m ring)
+# Waypoint acceptance radius (m). Level legs use a 2D horizontal check
+# (ConditionParameters[1]=0), vertical-transition legs use 3D ([1]=1).
+# Mission 12 flew a 3D check on LEVEL legs with radius 1.0 and flew away:
+# a vertical estimator wobble >1m at the moment of horizontal arrival makes
+# the 3D sphere unreachable, and a missed sphere is fatal under FollowVector
+# - paths.c projects onto the INFINITE line, so past the endpoint nothing
+# ever pulls back along-track; the vehicle sailed the wp0->wp1 line
+# extension 30+ meters at EndingVelocity until the stall timeout. 2D
+# acceptance makes level-leg advance immune to vertical wobble; the climb
+# legs keep 3D (their 2D distance is ~0 from the start - they would trip
+# immediately and skip the climb).
 MISSION_WP_RADIUS = 1.5
+
+
+def _corner_speed(theta_deg):
+    """Arrival speed at a waypoint as a function of how sharply the path
+    turns there. paths.c's FollowVector interpolates leg speed linearly from
+    StartingVelocity (= previous waypoint's Velocity) to EndingVelocity
+    (= this waypoint's Velocity), so a low Velocity on a sharp corner makes
+    the vehicle decelerate INTO the turn and re-accelerate out of it - the
+    momentum that GoToEndpoint carried straight through the corner (2-4m of
+    overshoot at 1.5 m/s) never builds up."""
+    if theta_deg < 25.0:
+        return MISSION_SPEED         # straight-through: keep cruising
+    if theta_deg < 70.0:
+        return 0.8                   # gentle turn (octagon vertices, 45deg)
+    if theta_deg < 115.0:
+        return 0.6                   # right-angle turns (letter strokes)
+    return 0.45                      # hairpins (star points, stroke retraces)
 
 
 def build_mission():
@@ -1073,11 +1108,10 @@ def build_mission():
     25m, then return to center and land. All NED, Down negative = up.
     Returns (waypoints, actions) as lists of plain dicts (enums as
     strings - resolved at send/pack time)."""
-    wps = []
+    pts = []  # ordered (n, e, d) mission geometry; velocities derived after
 
-    def wp(n, e, d, action=0):
-        wps.append({"Position": [round(n, 3), round(e, 3), float(d)],
-                    "Velocity": MISSION_SPEED, "Action": action})
+    def wp(n, e, d):
+        pts.append((round(n, 3), round(e, 3), float(d)))
 
     # --- Star at 5m: radius 6m, outer points every 72deg from North,
     # visited in 0-2-4-1-3 order (that ORDER is what draws a star), then
@@ -1090,7 +1124,8 @@ def build_mission():
         wp(star_pts[k][0], star_pts[k][1], -8.0)
 
     # --- Octagon at 15m: radius 6m, 8 vertices + close. The first vertex
-    # also carries the 10m climb (3D GoToEndpoint handles the ramp).
+    # also carries the 10m climb (the paths are followed in 3D, so the
+    # altitude ramps along the leg).
     for k in list(range(8)) + [0]:
         a = math.radians(45 * k)
         wp(6.0 * math.cos(a), 6.0 * math.sin(a), -18.0)
@@ -1109,10 +1144,60 @@ def build_mission():
     # around at the end in pathplanner.c, so the mission MUST terminate in
     # a Land action or it would loop back to the star forever).
     wp(0.0, 0.0, -8.0)
-    wp(0.0, 0.0, -8.0, action=1)
+    wp(0.0, 0.0, -8.0)
+
+    # Per-waypoint arrival speed from the turn angle at that waypoint (3D:
+    # the ring-to-ring climbs count as direction changes too).
+    def leg(a, b):
+        return (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+
+    def turn_angle(i):
+        v_in = leg(pts[i - 1], pts[i])
+        v_out = leg(pts[i], pts[i + 1])
+        li = math.sqrt(sum(c * c for c in v_in))
+        lo = math.sqrt(sum(c * c for c in v_out))
+        if li < 1e-6 or lo < 1e-6:
+            return 180.0  # degenerate (duplicate waypoint): treat as hairpin
+        dot = sum(a * b for a, b in zip(v_in, v_out)) / (li * lo)
+        return math.degrees(math.acos(max(-1.0, min(1.0, dot))))
+
+    wps = []
+    last = len(pts) - 1
+    for i, (n, e, d) in enumerate(pts):
+        if i == 0:
+            vel = 0.8  # mission entry from the staging hover: arrive gently
+        elif i >= last - 1:
+            vel = 0.5  # slow into the pre-land center point (and the Land wp)
+        else:
+            vel = _corner_speed(turn_angle(i))
+        # Action selection: Land for the terminator; 3D acceptance for legs
+        # that MOVE vertically (climbs between rings, the pre-land descent -
+        # their horizontal distance check would trip at the start); 2D for
+        # level legs (immune to vertical estimator wobble - see
+        # MISSION_WP_RADIUS comment). wp0's leg climbs in from the ~4m
+        # staging hover, so it counts as vertical too.
+        if i == last:
+            act = 2
+        else:
+            prev_d = -4.0 if i == 0 else pts[i - 1][2]
+            act = 1 if abs(d - prev_d) > 2.0 else 0
+        wps.append({"Position": [n, e, d], "Velocity": vel, "Action": act})
 
     actions = [
-        {"Mode": "GoToEndpoint", "ModeParameters": [0, 0, 0, 0],
+        # FollowVector instead of GoToEndpoint: tracks the LINE between
+        # waypoints (correction_vector = cross-track error only) and honors
+        # the Starting->EndingVelocity speed ramp along the leg. GoToEndpoint
+        # flew at constant EndingVelocity until the acceptance radius
+        # tripped, then swapped legs with 1.5+ m/s of momentum - that
+        # momentum was the 2-4m corner overshoot.
+        # [0] level legs: 2D horizontal acceptance.
+        {"Mode": "FollowVector", "ModeParameters": [0, 0, 0, 0],
+         "EndCondition": "DistanceToTarget",
+         "ConditionParameters": [MISSION_WP_RADIUS, 0.0, 0, 0],
+         "Command": "OnConditionNextWaypoint",
+         "JumpDestination": 0, "ErrorDestination": 0},
+        # [1] vertical-transition legs: 3D acceptance.
+        {"Mode": "FollowVector", "ModeParameters": [0, 0, 0, 0],
          "EndCondition": "DistanceToTarget",
          "ConditionParameters": [MISSION_WP_RADIUS, 1.0, 0, 0],
          "Command": "OnConditionNextWaypoint",
@@ -1254,6 +1339,12 @@ FC_LOG_OBJECTS = [
     ("FlightStatus", "periodic", 2000),
     ("WaypointActive", "onchange", 0),
     ("SystemAlarms", "onchange", 0),
+    # Raw sensor inputs alongside the fused states: lets a post-flight
+    # analysis separate "estimator diverged from its sensors" from "sensors
+    # were wrong" (mission 12's vertical runaway analysis needed exactly
+    # this and didn't have it).
+    ("GPSVelocitySensor", "periodic", 1000),
+    ("BaroSensor", "periodic", 1000),
 ]
 
 FC_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
@@ -1460,45 +1551,139 @@ def _marker_base(marker_id, rgba):
 
 
 def _marker_send(node, m):
-    from gz.msgs10.boolean_pb2 import Boolean
+    # NOTE: the /marker service acknowledges with gz.msgs.Empty and the call
+    # frequently reports ok=False even though the marker IS registered
+    # (verified via /marker/list) - so the return value is deliberately
+    # ignored. The original version asked for a Boolean reply; that mismatch
+    # made every call "fail" silently and nobody noticed the trails were
+    # missing from the GUI until a user actually looked for them.
+    from gz.msgs10.empty_pb2 import Empty
     try:
-        node.request("/marker", m, type(m), Boolean, 300)
+        node.request("/marker", m, type(m), Empty, 300)
     except Exception:
         pass  # trail is cosmetic - never let it interfere with flight
 
 
-def publish_planned_trail(node, wps):
-    m = _marker_base(1, (1.0, 0.7, 0.0, 0.45))  # translucent amber
-    for w in wps:
-        n, e, d = w["Position"]
-        p = m.point.add()
-        p.x, p.y, p.z = e, n, -d
+def _marker_sphere(marker_id, x, y, z, rgba, diameter=0.5):
+    from gz.msgs10.marker_pb2 import Marker
+    m = _marker_base(marker_id, rgba)
+    m.type = Marker.SPHERE
+    m.scale.x = m.scale.y = m.scale.z = diameter
+    m.pose.position.x, m.pose.position.y, m.pose.position.z = x, y, z
+    return m
+
+
+# Trail tubes are as wide as the craft (X3 is ~0.45m across) - gz renders
+# LINE_STRIP at 1px regardless of scale, which is invisible at scene
+# distances (user-confirmed), so every trail segment is a translucent
+# CYLINDER instead: "fairly opaque, but still transparent".
+TRAIL_DIAMETER = 0.22
+
+
+def _marker_tube(marker_id, a, b, rgba, diameter=TRAIL_DIAMETER):
+    """A cylinder marker spanning points a->b (gz cylinders are axis-Z, so
+    rotate +Z onto the segment direction)."""
+    from gz.msgs10.marker_pb2 import Marker
+    dx, dy, dz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+    length = math.sqrt(dx * dx + dy * dy + dz * dz)
+    m = _marker_base(marker_id, rgba)
+    m.type = Marker.CYLINDER
+    m.scale.x = m.scale.y = diameter
+    m.scale.z = max(length, 0.01)
+    m.pose.position.x = (a[0] + b[0]) / 2.0
+    m.pose.position.y = (a[1] + b[1]) / 2.0
+    m.pose.position.z = (a[2] + b[2]) / 2.0
+    if length > 1e-6:
+        ux, uy, uz = dx / length, dy / length, dz / length
+        if uz > 0.99999:
+            q = (1.0, 0.0, 0.0, 0.0)
+        elif uz < -0.99999:
+            q = (0.0, 1.0, 0.0, 0.0)
+        else:
+            # axis = normalize(z cross u), angle = acos(z dot u)
+            ax, ay = -uy, ux
+            n = math.sqrt(ax * ax + ay * ay)
+            ax, ay = ax / n, ay / n
+            half = math.acos(uz) / 2.0
+            s = math.sin(half)
+            q = (math.cos(half), ax * s, ay * s, 0.0)
+        m.pose.orientation.w, m.pose.orientation.x, m.pose.orientation.y, m.pose.orientation.z = q
+    return m
+
+
+def _marker_clear(node):
+    """Delete every marker in our namespace (stale trails from the previous
+    mission would otherwise stack up in the scene)."""
+    from gz.msgs10.marker_pb2 import Marker
+    m = Marker()
+    m.ns = "ninjapilot_trail"
+    m.action = Marker.DELETE_ALL
     _marker_send(node, m)
 
 
+def publish_planned_trail(node, wps):
+    # Amber tube per leg + a translucent sphere at each waypoint.
+    _marker_clear(node)
+    pts = [(w["Position"][1], w["Position"][0], -w["Position"][2]) for w in wps]
+    for i in range(len(pts) - 1):
+        _marker_send(node, _marker_tube(1000 + i, pts[i], pts[i + 1],
+                                        (1.0, 0.7, 0.0, 0.28)))
+    for i, p in enumerate(pts):
+        _marker_send(node, _marker_sphere(100 + i, p[0], p[1], p[2],
+                                          (1.0, 0.6, 0.0, 0.3), 0.35))
+
+
+def gui_follow(node, model=GAZEBO_MODEL, offset=(-8.0, 0.0, 4.0)):
+    """Make the Gazebo GUI camera follow the vehicle (same as right-click ->
+    Follow) so nobody has to re-click it every run. Idempotent; errors are
+    cosmetic and ignored."""
+    from gz.msgs10.stringmsg_pb2 import StringMsg
+    from gz.msgs10.boolean_pb2 import Boolean
+    from gz.msgs10.vector3d_pb2 import Vector3d
+    try:
+        s = StringMsg()
+        s.data = model
+        node.request("/gui/follow", s, StringMsg, Boolean, 1000)
+        off = Vector3d()
+        off.x, off.y, off.z = offset
+        node.request("/gui/follow/offset", off, Vector3d, Boolean, 1000)
+        print(f"[gui] camera following '{model}' offset={offset}")
+    except Exception:
+        pass
+
+
 class FlownTrail(object):
-    """Appends the vehicle's ground-truth position to a translucent cyan
-    LINE_STRIP every ~0.4s while active."""
+    """Extends a cyan craft-width tube behind the vehicle: one cylinder
+    segment per ~1m of travel, appended incrementally (never re-sends the
+    whole trail)."""
+
+    SEG_MIN_M = 1.0
 
     def __init__(self, node):
         self.node = node
-        self.points = []
         self.last = 0.0
+        self._seg_id = 2000
+        self._last_pt = None
 
     def tick(self):
         now = time.time()
-        if now - self.last < 1.0:
+        if now - self.last < 0.5:
             return
         self.last = now
         have_pose, pos_ned, _, _, _, _ = state.snapshot()
         if not have_pose:
             return
-        self.points.append((pos_ned[1], pos_ned[0], -pos_ned[2]))
-        m = _marker_base(2, (0.1, 0.9, 1.0, 0.5))  # translucent cyan
-        for x, y, z in self.points:
-            p = m.point.add()
-            p.x, p.y, p.z = x, y, z
-        _marker_send(self.node, m)
+        pt = (pos_ned[1], pos_ned[0], -pos_ned[2])
+        if self._last_pt is None:
+            self._last_pt = pt
+            return
+        a = self._last_pt
+        if (pt[0] - a[0]) ** 2 + (pt[1] - a[1]) ** 2 + (pt[2] - a[2]) ** 2 < self.SEG_MIN_M ** 2:
+            return
+        _marker_send(self.node, _marker_tube(self._seg_id, a, pt,
+                                             (0.1, 0.9, 1.0, 0.33)))
+        self._seg_id += 1
+        self._last_pt = pt
 
 
 def upload_mission(client):
@@ -1569,9 +1754,11 @@ def mission_test():
     last_idx = len(wps) - 1
 
     # Translucent trails in the Gazebo scene: planned path (amber) now,
-    # flown path (cyan) appended live during the flight.
+    # flown path (cyan) appended live during the flight. Camera follows the
+    # vehicle so the user never has to right-click -> Follow manually.
     trail_node = transport.Node()
     publish_planned_trail(trail_node, wps)
+    gui_follow(trail_node)
     flown = FlownTrail(trail_node)
 
     print("[test] mission_test: arming")
@@ -1606,6 +1793,7 @@ def mission_test():
     last_progress = time.time()
     last_seen_idx = None
     landed_grace = None
+    leg_entry_dist = None
     while True:
         now = time.time()
         flown.tick()
@@ -1616,6 +1804,24 @@ def mission_test():
         if idx != last_seen_idx:
             last_seen_idx = idx
             last_progress = now
+            leg_entry_dist = None
+        # Flyaway guard (mission 12: a missed acceptance sphere under
+        # FollowVector means nothing ever pulls back toward the waypoint -
+        # the vehicle sailed the leg line's infinite extension 30+ m until
+        # the 90s stall timeout). If we are getting FARTHER from the active
+        # waypoint than when the leg began, plus margin, cut immediately.
+        if have_pose and have_pose2 and idx is not None and 0 <= idx <= last_idx:
+            tgt_p = wps[idx]["Position"]
+            dist = math.sqrt((n - tgt_p[0]) ** 2 + (e - tgt_p[1]) ** 2
+                             + (alt - (-tgt_p[2])) ** 2)
+            if leg_entry_dist is None:
+                leg_entry_dist = dist
+            if dist > leg_entry_dist + 8.0:
+                print(f"[test] mission_test: FAIL - flying AWAY from wp{idx} "
+                      f"(dist {dist:.1f}m vs {leg_entry_dist:.1f}m at leg entry) - landing",
+                      flush=True)
+                land()
+                return
         # During the final Land action the waypoint index CANNOT advance -
         # progress there is the descent itself. An earlier version timed
         # out and aborted a perfectly healthy landing at 4m for "no
@@ -1982,7 +2188,14 @@ def uavtalk_thread():
             # is exactly the delayed-feedback instability the manual hover
             # test hit vertically with navsat-derived rate. Softer gains
             # trade response speed for stability against that latency.
-            "HorizontalPosP": 0.15, "VerticalPosP": 0.25,
+            # (That 0.15 was tuned BEFORE the 90-degree yaw frame error was
+            # found - the "oscillation" it was softening was actually the
+            # rotated-correction spiral. Post-fix, hold is solid at 0.01m.)
+            # HorizontalPosP 0.15->0.35 for FollowVector missions: there the
+            # correction_vector is pure cross-track error, and 0.15 (a ~7s
+            # correction time constant) let the vehicle sag meters off the
+            # line in corners before pulling back.
+            "HorizontalPosP": 0.35, "VerticalPosP": 0.25,
             # VerticalVelPID Kp 0.3->0.6, Ki 0.15->0.45: measured in a real
             # PositionHold sag (truth 2.4m -> ground in ~10s), the vertical
             # velocity PID's output hovered at ~0.69 against a true hover
@@ -2047,7 +2260,14 @@ def uavtalk_thread():
             "VbarRollPI": [0.005, 0.002], "VbarPitchPI": [0.005, 0.002], "VbarYawPI": [0.005, 0.002],
             "VbarTau": 0.5, "VbarGyroSuppress": 30, "VbarPiroComp": "FALSE", "VbarMaxAngle": 10,
             "GyroTau": 0.005, "DerivativeCutoff": 20, "DerivativeGamma": 1,
-            "AxisLockKp": 2.5, "MaxAxisLock": 30, "MaxAxisLockRate": 2,
+            # AxisLockKp 2.5 -> 1.0: yaw porpoised +/-20deg at a 3.7s period
+            # through mission 15 (truth AND AttitudeState agree - the FC saw
+            # the oscillation and couldn't damp it). At Kp 2.5 a 20deg
+            # heading error demands 50deg/s - exactly the MaximumRate.Yaw
+            # cap - and the X3 model's weak rotor-drag yaw torque can't
+            # track that, so the axis-lock outer loop limit-cycled against
+            # rate saturation. 1.0 keeps demands inside trackable range.
+            "AxisLockKp": 1.0, "MaxAxisLock": 30, "MaxAxisLockRate": 2,
             "WeakLevelingKp": 0.1, "MaxWeakLevelingRate": 5,
             "RattitudeModeTransition": 80,
             # vtolflycontroller.cpp hardcodes StabilizationMode.Thrust =

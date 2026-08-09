@@ -401,3 +401,64 @@ SKILLS.md).
 - C-side (`[SIMPOSIX-IFDEF-MARKER]`, wall-clock stamped) and Python-side
   logs land in the SAME combined logfile - correlate by `t=` wall-clock,
   never by line order.
+
+## On-board DebugLog: the FC's own flight recorder (added 2026-08-08)
+
+- The Logging module compiles on simposix (same code as real boards).
+  The bridge enables it around EVERY test flight (OnlyWhenArmed - each
+  arm..disarm span is one "flight") and pulls/decodes the log after,
+  into `ground/gazebo_bridge/logs/fclog_<ts>_flight<N>.jsonl/.txt`.
+  `NINJAPILOT_TEST_MODE=pull_logs` downloads without flying. Full
+  recipes in SKILLS.md "On-board FC logs".
+- What gets logged is driven by per-object logging METADATA written over
+  UAVTalk to the metaobject (id = objid+1, 8-byte struct, logging mode
+  bits 8-9) - see FC_LOG_OBJECTS in gazebo_bridge.py. Raw sensors
+  (BaroSensor, GPSVelocitySensor) are logged ALONGSIDE fused states
+  precisely so post-crash analysis can separate "estimator diverged
+  from its sensors" from "sensors were wrong".
+- Slot decode gotcha: pios_debuglog.c packs FOLLOW-ON records into a
+  slot's Data (17-byte sub-headers) and only labels the slot
+  MultipleUAVObjects when it overflowed - a Printf flush leaves it
+  saying UAVObject with multiple records inside. Always walk the tail.
+- On simposix the flashfs backend is pios_dosfs_logfs.c: slots are ALSO
+  host files `233CDC00.oNN` in the firmware process CWD (we launch from
+  `~/ninjapilot-build/fcwd`; `rm` them pre-session for clean flight
+  numbering). The telemetry pull never touches them - it's the same
+  DebugLogControl/DebugLogEntry protocol GCS uses on hardware.
+
+## Mission corner smoothing + the estimator bugs it flushed out (2026-08-09)
+
+- Missions 12-16 chronology matters if touching FollowVector or the
+  vertical filter; the onboard log pull was the diagnostic tool for all
+  of it. Final state: mission 16 PASS - star hairpin overshoot 0.00m on
+  all five points (was 2-4m with GoToEndpoint@1.5m/s), yaw locked to
+  +/-0.1 deg (was +/-20 deg limit cycle).
+- Corner design (all in gazebo_bridge.py build_mission): FollowVector
+  mode + per-waypoint arrival speed from the 3D turn angle
+  (_corner_speed: 1.5 straight / 0.8 gentle / 0.6 right-angle / 0.45
+  hairpin); LEVEL legs use 2D acceptance, vertical-transition legs 3D
+  (a 3D sphere is unreachable when the vertical estimate wobbles >1m,
+  and FollowVector projects onto the INFINITE line - a missed sphere
+  sails away forever at EndingVelocity; mission supervision now has a
+  flyaway guard for exactly that).
+- filteraltitude.c V3 fixes (commit 1ab94cd69, flight code): (1)
+  kfCorrectVel() - GPS vertical velocity was received and DISCARDED;
+  without it the velocity state was inert (stale accel + tiny baro
+  K[1]) and read WRONG-SIGN during real climbs. (2) process noise
+  1e-2 -> 1.0 (m/s^2)^2 - at 1e-2 the covariance collapsed after ~20s
+  of agreeing measurements and the filter went deaf (ignored a real
+  1 m/s descent straight into the ground). Both invisible in
+  PositionHold, where vertical velocity is ~0 - which is where the
+  filter had been validated. Full forensics in the commit message.
+- Yaw in PathFollower modes is FORCED to AXISLOCK (vtolflycontroller
+  yaw_attitude=false branch). AxisLockKp 2.5 demanded 50 deg/s at 20
+  deg error = exactly the MaximumRate.Yaw cap, which the X3's weak
+  rotor-drag yaw torque can't track -> saturation limit cycle at ~3.7s
+  period. AxisLockKp 1.0 (bridge config) kills it.
+- Gazebo GUI niceties (bridge does these automatically at mission
+  start): camera follow via `/gui/follow` + `/gui/follow/offset`
+  services; planned/flown trails as craft-width translucent CYLINDER
+  markers (gz renders LINE_STRIP at 1px - invisible; user-confirmed).
+  /marker service quirks: reply type is Empty, the call often reports
+  ok=False YET the marker registers (verify via /marker/list);
+  DELETE_ALL per-namespace clears stale trails.

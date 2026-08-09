@@ -126,6 +126,71 @@ node.subscribe(Pose_V, "/world/quadcopter/pose/info", on_pose_cb)
 Never trust only the bridge's self-reported state for crash/altitude
 claims.
 
+
+## On-board FC logs (DebugLog): enable + pull + analyze
+
+The bridge does this automatically around every TEST_MODE flight:
+enables DebugLogSettings=OnlyWhenArmed + writes per-object logging
+metadata (FC_LOG_OBJECTS in gazebo_bridge.py), then after the flight
+pulls every slot over UAVTalk (DebugLogControl Retrieve -> OBJ_REQ
+DebugLogEntry) and writes:
+
+    ground/gazebo_bridge/logs/fclog_<ts>_flight<N>.jsonl   # machine
+    ground/gazebo_bridge/logs/fclog_<ts>_flight<N>.txt     # readable
+
+Manual pull without flying (after a crash, or of an old session):
+
+```bash
+cd ground/gazebo_bridge && NINJAPILOT_TEST_MODE=pull_logs ./venv/bin/python3 gazebo_bridge.py
+```
+
+- Objects logged: Position/Velocity/AttitudeState @500ms,
+  GPSPositionSensor/PathStatus/GPSVelocitySensor/BaroSensor @1s,
+  FlightStatus @2s, WaypointActive/SystemAlarms on-change, plus Text
+  entries (arm/disarm markers flush the slot buffer).
+- Analysis idiom - estimator vs its own sensors (this is how the
+  mission 12-14 vertical bugs were found): load the JSONL, bucket by
+  rounded t_us, print BaroSensor.Altitude / PositionState.Down /
+  VelocityState.Down / GPSVelocitySensor.Down side by side. Estimator
+  healthy = estDown tracks -baroAlt and estVelD tracks gpsVelD.
+- Timestamps are FC-side FlightTime (us since boot); t0 = first record
+  (the "Armed" text entry). Bridge-log t+ starts at PathPlanner engage,
+  ~25-30s later - align by matching the N coordinate, not by clock.
+- simposix flashfs = pios_dosfs_logfs.c host files (233CDC00.oNN, one
+  per slot) in the firmware CWD (~/ninjapilot-build/fcwd). rm them
+  before a session or old flights inflate the flight number. The pull
+  path never reads them - same telemetry protocol as real hardware.
+
+## Gazebo GUI: camera follow + mission trails
+
+- Camera follow (no more right-click -> Follow): bridge calls
+  `/gui/follow` {x3} + `/gui/follow/offset` at mission start
+  (gui_follow() in gazebo_bridge.py). Manual one-off:
+
+```bash
+cd ground/gazebo_bridge && ./venv/bin/python3 -c "
+import gz.transport13 as t
+from gz.msgs10.stringmsg_pb2 import StringMsg
+from gz.msgs10.boolean_pb2 import Boolean
+n=t.Node(); s=StringMsg(); s.data='x3'
+print(n.request('/gui/follow', s, StringMsg, Boolean, 1000))"
+```
+
+- Trails: planned (amber) and flown (cyan) are craft-width translucent
+  CYLINDER markers (TRAIL_DIAMETER 0.22, alpha ~0.3) - gz renders
+  LINE_STRIP at 1px which is invisible at scene distance. Flown tube
+  extends one segment per ~1m of travel.
+- /marker quirks (cost a lot of debugging): ack type is gz.msgs.Empty;
+  the request often returns ok=False even though the marker REGISTERED
+  - verify with `/marker/list` (Marker_V), never trust the ok flag.
+  DELETE_ALL with ns="ninjapilot_trail" clears stale trails (bridge
+  does this at each mission upload).
+- Entity tree "Atmosphere"/"Scene" items are world-level components
+  (inspect-only physics/render config), not selectable objects.
+- Truth heading sampler (yaw limit-cycle measurement):
+  scratchpad yaw_stream.py pattern - subscribe pose, extract yaw,
+  print span/stdev over 15s.
+
 ## Git hygiene for experiments
 
 - Experiment branches live in separate worktrees
@@ -136,20 +201,21 @@ claims.
   file and use `git commit -F <file>`.
 - Nothing is pushed anywhere; local branches only.
 
-## Current fix status (as of 2026-08-08 session end)
+## Current fix status (as of 2026-08-09)
 
-Landed in main tree AND ~/ninjapilot-build (built, ELF verified):
-- actuator.c rising-only thrust slew limiter (3.0/s).
-- outerloop.c on dedicated CALLBACK_TASK_STABILIZATIONOUTERLOOP;
-  configMAX_PRIORITIES 7→8 in all five FreeRTOSConfig.h.
-- gazebo_bridge.py manual_hover_test with P+I+D + saturation-aware
-  anti-windup + MAX_CLIMB_THROTTLE=0.75.
+Committed on branch `claude` (local only), built into ~/ninjapilot-build:
+- Onboard DebugLog enable/pull mechanism (commit 99621b0b4).
+- filteraltitude.c V3: GPS vertical-velocity Kalman update +
+  process-noise raise 1e-2 -> 1.0 (commit 1ab94cd69) - fixed the
+  inert/wrong-sign vertical velocity state AND the covariance collapse
+  that flew missions 12-14 into the ground/away.
+- Mission corner smoothing (bridge): FollowVector + per-corner arrival
+  speeds + 2D/3D acceptance split + flyaway guard; AxisLockKp 2.5->1.0
+  (yaw limit cycle +/-20deg -> +/-0.1deg); craft-width tube trails +
+  auto camera follow. Verified: missions 15 & 16 PASS end-to-end
+  (233s/256s), star hairpin overshoot 0.00m (was 2-4m).
 
-Verified working: ActuatorCommand ramps smoothly instead of snapping.
-NOT yet fixed (open): the ~12s AttitudeState startup gap (dead window
-remains, slew only softens the exit); the end-of-session discovery that
-a commanded throttle CUT lagged (ActuatorCommand stuck at 1731 while
-bridge commanded 0.0, with AttitudeState flowing - separate mechanism,
-uninvestigated); scripted estimator test still crashes; SIMPOSIX debug
-prints pending cleanup. Uncommitted changes sit in the main tree - see
-`git status`.
+Open: outerloop ~12s AttitudeState startup gap; throttle-cut lag
+mechanism; SIMPOSIX debug print cleanup; corner metric for shallow
+turns over-counts legitimate continuation; task #42 real-UBX path
+(deliberately sidelined - do not start unasked).
