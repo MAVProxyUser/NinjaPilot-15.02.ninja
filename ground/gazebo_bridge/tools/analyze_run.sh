@@ -60,6 +60,17 @@ else
   echo "  (no server log at $GZLOG - set GZLOG=<path>)"
 fi
 
+# The picture is not optional. Numbers say how far off; the plot says
+# WHERE and in what shape - a rounded corner, a wavy leg and an altitude
+# sag all score similarly but look nothing alike.
+echo "--- planned vs flown + altitude profile ---"
+PNG="${PNG_OUT:-${TMPDIR:-/tmp}/${LABEL}.png}"
+if "$PY" "$HERE/star_plot.py" "$OUT" "$PNG" 2>/dev/null; then
+  echo "  $PNG"
+else
+  echo "  (plot failed - is this a star mission?)"
+fi
+
 echo "--- gazebo: truth vs board (do they agree?) ---"
 "$PY" - "$BRIDGE" "$OUT" <<'PYEOF'
 import json, re, sys, math
