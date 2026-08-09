@@ -30,10 +30,11 @@
 
 // Along-track accel/decel used by path_vector()'s trapezoidal speed
 // profile (see comment there). Deliberately gentle - a multirotor at
-// mission speeds has ~2 m/s^2 of attitude-limited authority, and 0.6
-// keeps the braking zone into a 0.45 m/s hairpin from a 1.5 m/s cruise
-// at ~1.7m, well inside a typical leg.
-#define PATH_LEG_ACCEL 0.6f
+// mission speeds now has ~8 m/s^2 available (MaxRollPitch 40 deg), so
+// 2.0 is comfortably within what the vehicle can actually deliver while
+// keeping the braking zone from a 4 m/s cruise to a 1.2 m/s corner at
+// ~3.6m - still inside a typical 10m+ leg.
+#define PATH_LEG_ACCEL 2.0f
 
 #include "uavobjectmanager.h" // <--.
 #include "pathdesired.h" // <-- needed only for correct ENUM macro usage with path modes (PATHDESIRED_MODE_xxx,

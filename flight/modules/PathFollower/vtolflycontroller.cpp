@@ -222,6 +222,17 @@ void VtolFlyController::UpdateVelocityDesired()
         } else if (yawError > ALIGN_GO) {
             gate = (ALIGN_STOP - yawError) / (ALIGN_STOP - ALIGN_GO);
         }
+        // Gate ONLY the along-track feed-forward, never the cross-track
+        // correction. Gating the correction too was tried (star 31) to kill
+        // the arrival momentum that carries the vehicle through a corner:
+        // it commands a velocity setpoint of 0 as a STEP, which demands an
+        // instant stop from cruise speed, saturates the attitude loop and
+        // tipped the vehicle over (roll -61, pitch 57) - the same failure
+        // mode as an over-large MaxRollPitch. Leaving the correction intact
+        // means the vehicle decelerates against a growing position error
+        // instead, which is gentler and self-limiting. The residual corner
+        // excursion is better attacked by lowering the ARRIVAL speed
+        // (_corner_speed in the mission) than by braking harder.
         progress.path_vector[0] *= gate;
         progress.path_vector[1] *= gate;
     }
@@ -497,13 +508,18 @@ uint8_t VtolFlyController::RunAutoPilot()
             // stays small at all times and yaw authority is never
             // saturated. 30 deg/s crosses a hairpin in ~5s, matching the
             // corner-deceleration speeds the missions fly.
-            // 20 deg/s, matched under MaximumRate.Yaw (25) so the yaw
-            // loop always has tracking headroom above the command it is
-            // being asked to follow. Relay autotune measured this airframe's
+            // 60 deg/s under a MaximumRate.Yaw of 90, so the loop keeps
+            // tracking headroom above the command. This is aggressive for
+            // an airframe whose yaw is 8x weaker than roll, and it is only
+            // safe BECAUSE of the point-turn gate below: turns now happen
+            // while the vehicle is stationary, where roll/pitch need almost
+            // no mixer authority, so yaw may consume it. Before the gate,
+            // yaw and translation overlapped and this much yaw demand tipped
+            // the vehicle over. Relay autotune measured this airframe's
             // yaw ultimate period at 560ms vs 114ms for roll - yaw is ~5x
             // slower to respond, so the command must be correspondingly
             // gentler or the loop is forever chasing a target it cannot reach.
-            const float yawSlewDps = 20.0f;
+            const float yawSlewDps = 35.0f;
             float dT = vtolPathFollowerSettings->UpdatePeriod * 0.001f;
             if (!mYawCommandActive) {
                 AttitudeStateData attitude;

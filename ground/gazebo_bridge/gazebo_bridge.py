@@ -1074,7 +1074,7 @@ def _crc8_07(crc, data):
     return crc
 
 
-MISSION_SPEED = 1.5  # m/s, straight-line cruise (2.0 raced corners hard enough to dip into the ground at the 5m ring)
+MISSION_SPEED = 3.0  # m/s, straight-line cruise (2.0 raced corners hard enough to dip into the ground at the 5m ring)
 # Waypoint acceptance radius (m). Level legs use a 2D horizontal check
 # (ConditionParameters[1]=0), vertical-transition legs use 3D ([1]=1).
 # Mission 12 flew a 3D check on LEVEL legs with radius 1.0 and flew away:
@@ -1097,13 +1097,22 @@ def _corner_speed(theta_deg):
     the vehicle decelerate INTO the turn and re-accelerate out of it - the
     momentum that GoToEndpoint carried straight through the corner (2-4m of
     overshoot at 1.5 m/s) never builds up."""
+    # With the point-turn gate the vehicle STOPS to rotate at every real
+    # corner anyway, so arrival speed only needs to be low enough to stop
+    # cleanly - it no longer has to be low enough to carve the turn.
     if theta_deg < 25.0:
         return MISSION_SPEED         # straight-through: keep cruising
     if theta_deg < 70.0:
-        return 0.8                   # gentle turn (octagon vertices, 45deg)
+        return 1.5                   # gentle turn (octagon vertices, 45deg)
     if theta_deg < 115.0:
-        return 0.6                   # right-angle turns (letter strokes)
-    return 0.45                      # hairpins (star points, stroke retraces)
+        return 1.0                   # right-angle turns (letter strokes)
+    return 0.5                       # hairpins: the point-turn has to kill
+                                     # whatever speed arrives here. Braking
+                                     # harder at the corner tips the vehicle
+                                     # over (star 31), so the only safe lever
+                                     # is arriving slower - measured 5.7m
+                                     # excursion on the leg after a 0.8 m/s
+                                     # hairpin arrival.
 
 
 def build_mission():
@@ -1177,9 +1186,9 @@ def _finish_mission(pts):
     last = len(pts) - 1
     for i, (n, e, d) in enumerate(pts):
         if i == 0:
-            vel = 0.8  # mission entry from the staging hover: arrive gently
+            vel = 1.5  # mission entry from the staging hover
         elif i >= last - 1:
-            vel = 0.5  # slow into the pre-land center point (and the Land wp)
+            vel = 1.0  # slow into the pre-land center point (and the Land wp)
         else:
             vel = _corner_speed(turn_angle(i))
         # Action selection: Land for the terminator; 3D acceptance for legs
@@ -2385,7 +2394,7 @@ def uavtalk_thread():
         # without saturating thrust in the first place.
         vtol_pf = {
             "TreatCustomCraftAs": "VTOL",
-            "HorizontalVelMax": 3.0, "VerticalVelMax": 1.5, "CourseFeedForward": 1.0,
+            "HorizontalVelMax": 5.0, "VerticalVelMax": 1.5, "CourseFeedForward": 1.0,
             # HorizontalPosP 0.25->0.15 and HorizontalVelPID P 8->4, D 1->0:
             # measured divergent oscillation in PositionHold (commanded
             # roll/pitch amplitude tripling per cycle, 0.04->5.4deg in ~8s,
@@ -2441,7 +2450,15 @@ def uavtalk_thread():
             # and armed).
             "FlyawayEmergencyFallback": "disabled", "FlyawayEmergencyFallbackTriggerTime": 10.0,
             "EmergencyFallbackAttitude": [0, -20.0], "EmergencyFallbackYawRate": [2.0, 30.0],
-            "MaxRollPitch": 25.0, "UpdatePeriod": 50, "BrakeRate": 2.5, "BrakeMaxPitch": 25.0,
+            # MaxRollPitch 25 -> 32 deg: tilt IS lateral acceleration
+            # (a = g*tan(theta)): 25deg caps accel at ~4.6 m/s^2, 32deg
+            # gives ~6.1. NOT higher - at 40 deg the attitude loop
+            # OVERSHOT its own limit to 61 deg while braking into the
+            # first hairpin and tipped the vehicle over (star 29). The
+            # commanded limit must stay inside what the attitude loop can
+            # actually track during a hard stop, not just what the
+            # airframe can theoretically hold.
+            "MaxRollPitch": 32.0, "UpdatePeriod": 50, "BrakeRate": 2.5, "BrakeMaxPitch": 30.0,
             "BrakeHorizontalVelPID": [12.0, 0.0, 0.03, 15], "BrakeVelocityFeedforward": 0,
             "LandVerticalVelPID": [0.35, 3.0, 0.05, 0.9],
         }
@@ -2538,7 +2555,7 @@ def uavtalk_thread():
             # send_config writes StabilizationSettingsBank1 (persistent) -
             # writing the StabilizationBank mirror alone gets stomped on
             # every mode change.
-            "ManualRate": [150, 150, 175], "MaximumRate": [90, 90, 25],
+            "ManualRate": [150, 150, 175], "MaximumRate": [180, 180, 45],
             "StickExpo": [0, 0, 0],
             # AUTOTUNED against the Gazebo X3 (relay identification,
             # 2026-08-09, logs/autotune_20260809_013638.json). Measured
@@ -2558,7 +2575,14 @@ def uavtalk_thread():
             # nothing for roll/pitch. That is precisely how stars 21-23
             # tipped over. 0.015 x 25 deg/s = 0.37 peak: meaningfully
             # stronger than the 0.0062 stock gain, with headroom preserved.
-            "YawRatePID": [0.015, 0.030, 0.00005, 0.3],
+            # SATURATION BUDGET (violated once, cost a crash): the yaw rate
+            # command is ~ Kp * MaximumRate.Yaw, and the mixer normalizes
+            # whatever it is handed - so an over-budget yaw demand does not
+            # just yaw badly, it STEALS THRUST. At Kp 0.025 x 90 deg/s =
+            # 2.25x full range the vehicle dropped 7.4m -> 0m in 4s the
+            # moment a 144 deg hairpin turn started (star 32). Keep
+            # Kp * MaximumRate <~ 0.5: 0.010 x 45 = 0.45.
+            "YawRatePID": [0.010, 0.020, 0.00005, 0.3],
             # STOCK 2.5 restored. This was halved to 1.2 mid-investigation
             # when a divergent ~0.5Hz pitch oscillation appeared during
             # sustained hover - but that oscillation was observed while the
@@ -2581,7 +2605,7 @@ def uavtalk_thread():
             # guesswork. Ki left at 0 (the autotuned Ki risks windup on an
             # axis this weak, and roll/pitch hold fine without it).
             "RollPI": [2.5, 0, 50], "PitchPI": [2.5, 0, 50],
-            "YawPI": [0.75, 0, 50],
+            "YawPI": [1.5, 0, 50],
             "AcroInsanityFactor": 0.4,
             "ThrustPIDScaleCurve": [0.3, 0.15, 0, -0.15, -0.3],
             "RollMax": 42, "PitchMax": 42, "YawMax": 42,

@@ -19,13 +19,27 @@ ok, rep = node.request("/world/quadcopter/control", req, WorldControl, Boolean, 
 print("reset ok:", ok, "reply:", rep.data if ok else "n/a")
 
 # Wipe every marker namespace present (ours plus any left by ad-hoc probes).
+# Retried: if a previous run's bridge is still alive it keeps appending trail
+# segments, so a single DELETE_ALL races against it and leaves markers behind
+# (observed: 24 survivors). Callers should pkill the bridge first, but retry
+# here so a stale process can never silently dirty the next run's scene.
+import time
+
+for attempt in range(5):
+    found, lst = node.request("/marker/list", Empty(), Empty, Marker_V, 3000)
+    namespaces = {m.ns for m in lst.marker} if found else set()
+    remaining = len(lst.marker) if found else -1
+    if found and remaining == 0:
+        break
+    namespaces.add("ninjapilot_trail")
+    for ns in namespaces:
+        d = Marker()
+        d.ns = ns
+        d.action = Marker.DELETE_ALL
+        node.request("/marker", d, Marker, Empty, 500)
+    time.sleep(0.4)
+
 found, lst = node.request("/marker/list", Empty(), Empty, Marker_V, 3000)
-namespaces = {m.ns for m in lst.marker} if found else set()
-namespaces.add("ninjapilot_trail")
-for ns in namespaces:
-    d = Marker()
-    d.ns = ns
-    d.action = Marker.DELETE_ALL
-    node.request("/marker", d, Marker, Empty, 500)
-found, lst = node.request("/marker/list", Empty(), Empty, Marker_V, 3000)
-print("trails cleared: %d marker(s) remaining" % (len(lst.marker) if found else -1))
+remaining = len(lst.marker) if found else -1
+print("trails cleared: %d marker(s) remaining%s"
+      % (remaining, " (WARNING: a bridge may still be running)" if remaining > 0 else ""))
