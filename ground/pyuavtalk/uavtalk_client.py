@@ -102,6 +102,10 @@ class UAVTalkClient(object):
         self.db = db
         self.parser = uavtalk.UAVTalkParser()
         self.connected = False
+        # Metaobject (objId+1) payloads received from the flight side, keyed
+        # by the metaobject id. Metaobjects are not in the XML db, so run()
+        # stashes their raw 8-byte payloads here instead of dispatching them.
+        self.meta_payloads = {}
 
     def send_object(self, name, values, msg_type=uavtalk.TYPE_OBJ, inst_id=0):
         objdef = self.db[name]
@@ -111,6 +115,12 @@ class UAVTalkClient(object):
     def request_object(self, name, inst_id=0):
         objdef = self.db[name]
         self.transport.send(uavtalk.build_packet(uavtalk.TYPE_OBJ_REQ, objdef.obj_id, inst_id))
+
+    def send_raw(self, msg_type, obj_id, inst_id=0, payload=b""):
+        """Send a frame for an object id not in the XML db (e.g. metaobjects,
+        whose id is the parent object id + 1 and whose payload is the packed
+        8-byte UAVObjMetadata struct)."""
+        self.transport.send(uavtalk.build_packet(msg_type, obj_id, inst_id, payload))
 
     def _send_gcs_status(self, status):
         self.send_object("GCSTelemetryStats", {"Status": status})
@@ -140,6 +150,11 @@ class UAVTalkClient(object):
 
                 objdef = self.db.by_id.get(obj_id)
                 if objdef is None:
+                    # Metaobject reply (id = parent id + 1): stash for whoever
+                    # requested it via send_raw(TYPE_OBJ_REQ, ...).
+                    if (obj_id - 1) in self.db.by_id:
+                        self.meta_payloads[obj_id] = bytes(payload)
+                        continue
                     print("[recv] unknown object id 0x%08X (%d bytes)" % (obj_id, len(payload)))
                     continue
 

@@ -19,6 +19,7 @@
 import json
 import math
 import os
+import struct
 import sys
 import time
 import threading
@@ -1202,6 +1203,241 @@ def poshold_test():
 
 _waypoint_active = [None]   # latest WaypointActive.Index from telemetry
 _mission_client = [None]    # set by on_connected for mission upload
+_last_log_status = [None]   # latest DebugLogStatus (flight-periodic, 1Hz)
+_last_log_entry = [None]    # latest DebugLogEntry decoded dict
+
+
+# --- On-board DebugLog: enable + pull over telemetry -------------------------
+# The Logging module on simposix is the SAME code real boards run: entries go
+# through PIOS_DEBUGLOG into the PIOS_FLASHFS logfs (on simposix that's
+# pios_dosfs_logfs.c - one host file per slot, named from DebugLogEntry's
+# objid with the flight number in the low byte, in the firmware's CWD - but
+# we deliberately pull them over UAVTalk exactly like GCS does on hardware).
+#
+# Protocol (flight/modules/Logging/Logging.c):
+#   enable   : DebugLogSettings.LoggingEnabled = OnlyWhenArmed
+#              -> each arm..disarm span becomes one "flight"; the disarm
+#              callback's Printf flushes the pending buffer, so flights are
+#              always well terminated.
+#   what     : per-object logging metadata (UAVObjMetadata flags bits 8-9 +
+#              loggingUpdatePeriod), written over UAVTalk to the metaobject
+#              (id = object id + 1). telemetry.c re-registers the object's
+#              logging timer on metadata change, same as GCS's log settings.
+#   pull     : write DebugLogControl{Operation=Retrieve, Flight, Entry};
+#              Logging.c loads that slot into DebugLogEntry (Type=Empty when
+#              past the end); DebugLogEntry is flight-telemetry "manual" so
+#              it must be explicitly OBJ_REQ'd after each Retrieve.
+#
+# Slot payload: DebugLogEntryData is FlightTime u32, ObjectID u32, Flight
+# u16, Entry u16, InstanceID u16, Size u16, Type u8, Data u8[200] (fields
+# size-sorted like every UAVObject). UAVObject slots pack FOLLOW-ON records
+# inside Data: after the first object's Size bytes, each subsequent record
+# is a fresh 17-byte header + payload (pios_debuglog.c enqueue_data). The
+# outer Type only says MultipleUAVObjects when the buffer overflowed - a
+# Printf flush leaves it saying UAVObject even with several packed records -
+# so the decoder always walks the tail regardless of the outer Type.
+
+_META_STRUCT = struct.Struct("<HHHH")  # flags, telPeriod, gcsPeriod, logPeriod
+_LOG_SUBHDR = struct.Struct("<IIHHHHB")  # sub-record header inside Data
+_UAVOBJ_LOGGING_SHIFT = 8
+_LOGMODE = {"manual": 0, "periodic": 1, "onchange": 2, "throttled": 3}
+
+# What to log on the flight side, at what cadence. Periods in ms; "onchange"
+# entries log every genuine update (SystemAlarms/WaypointActive only Set on
+# real transitions, so they are cheap).
+FC_LOG_OBJECTS = [
+    ("PositionState", "periodic", 500),
+    ("VelocityState", "periodic", 500),
+    ("AttitudeState", "periodic", 500),
+    ("GPSPositionSensor", "periodic", 1000),
+    ("PathStatus", "periodic", 1000),
+    ("FlightStatus", "periodic", 2000),
+    ("WaypointActive", "onchange", 0),
+    ("SystemAlarms", "onchange", 0),
+]
+
+FC_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+
+
+def _set_logging_metadata(client, name, mode, period_ms, timeout=5.0):
+    """Read-modify-write one object's UAVObjMetadata over UAVTalk: set the
+    logging update mode bits and loggingUpdatePeriod, preserve everything
+    else. Returns True on success."""
+    objdef = client.db[name]
+    meta_id = objdef.obj_id + 1
+    client.meta_payloads.pop(meta_id, None)
+    deadline = time.time() + timeout
+    payload = None
+    while time.time() < deadline:
+        client.send_raw(uavtalk.TYPE_OBJ_REQ, meta_id)
+        time.sleep(0.15)
+        payload = client.meta_payloads.get(meta_id)
+        if payload is not None and len(payload) >= _META_STRUCT.size:
+            break
+    if payload is None or len(payload) < _META_STRUCT.size:
+        print(f"[fclog] WARN: no metadata reply for {name} - skipping", flush=True)
+        return False
+    flags, tel_p, gcs_p, _ = _META_STRUCT.unpack(payload[:_META_STRUCT.size])
+    flags = (flags & ~(0x3 << _UAVOBJ_LOGGING_SHIFT)) | (_LOGMODE[mode] << _UAVOBJ_LOGGING_SHIFT)
+    client.send_raw(uavtalk.TYPE_OBJ, meta_id, 0,
+                    _META_STRUCT.pack(flags, tel_p, gcs_p, period_ms & 0xFFFF))
+    return True
+
+
+def setup_fc_logging(client):
+    """Enable OnlyWhenArmed on-board logging and mark the FC_LOG_OBJECTS for
+    flight-side logging. Runs from the test thread (the client pump must be
+    live in parallel for the metadata read-backs)."""
+    ok = 0
+    for name, mode, period in FC_LOG_OBJECTS:
+        if _set_logging_metadata(client, name, mode, period):
+            ok += 1
+        time.sleep(0.05)
+    client.send_object("DebugLogSettings",
+                       bov.resolve_enum_values(client.db["DebugLogSettings"],
+                                               {"LoggingEnabled": "OnlyWhenArmed"}))
+    print(f"[fclog] on-board logging enabled (OnlyWhenArmed), "
+          f"{ok}/{len(FC_LOG_OBJECTS)} objects marked for logging")
+
+
+def _retrieve_log_entry(client, flight, entry, timeout=4.0):
+    """Ask the flight side to load slot (flight, entry) into DebugLogEntry and
+    pull it. Returns the decoded dict, or None on timeout. Matches on the
+    entry's own Flight/Entry fields so a stale DebugLogEntry (from a previous
+    slot, or from the Retrieve racing our OBJ_REQ) is never accepted."""
+    deadline = time.time() + timeout
+    last_send = 0.0
+    _last_log_entry[0] = None
+    while time.time() < deadline:
+        now = time.time()
+        if now - last_send > 0.4:
+            client.send_object("DebugLogControl",
+                               bov.resolve_enum_values(client.db["DebugLogControl"],
+                                                       {"Operation": "Retrieve",
+                                                        "Flight": flight, "Entry": entry}))
+            last_send = now
+            time.sleep(0.05)
+            client.request_object("DebugLogEntry")
+        got = _last_log_entry[0]
+        if got is not None and got.get("Flight") == flight and got.get("Entry") == entry:
+            return got
+        time.sleep(0.02)
+    return None
+
+
+def _decode_log_slot(raw, db):
+    """Decode one DebugLogEntry into a list of records. Text slots yield one
+    {"kind": "text"} record; UAVObject slots yield one record per packed
+    object, each with its own FlightTime timestamp."""
+    records = []
+    data = bytes(raw["Data"])
+    kind = raw["Type"]
+    if kind == "Text":
+        size = min(raw["Size"], len(data))
+        records.append({"kind": "text", "t_us": raw["FlightTime"],
+                        "text": data[:size].decode("utf-8", "replace")})
+        return records
+
+    def add_object(objid, instid, t_us, payload):
+        objdef = db.by_id.get(objid)
+        if objdef is None and (objid - 1) in db.by_id:
+            parent = db.by_id[objid - 1]
+            records.append({"kind": "metadata", "t_us": t_us,
+                            "object": parent.name + ".meta", "inst": instid,
+                            "data": {"raw": payload.hex()}})
+            return True
+        if objdef is None or len(payload) < objdef.size:
+            return False
+        records.append({"kind": "uavobject", "t_us": t_us,
+                        "object": objdef.name, "inst": instid,
+                        "data": objdef.describe(objdef.unpack(payload))})
+        return True
+
+    # First record uses the outer header; follow-ons are packed in the tail.
+    size0 = raw["Size"]
+    if not add_object(raw["ObjectID"], raw["InstanceID"], raw["FlightTime"], data[:size0]):
+        return records
+    off = size0
+    while off + _LOG_SUBHDR.size <= len(data):
+        t_us, objid, _f, _e, instid, size, sub_type = _LOG_SUBHDR.unpack_from(data, off)
+        if objid in (0xFFFFFFFF, 0) or sub_type != 2:  # 0xff filler / not UAVObject
+            break
+        payload = data[off + _LOG_SUBHDR.size: off + _LOG_SUBHDR.size + size]
+        if not add_object(objid, instid, t_us, payload):
+            break
+        off += _LOG_SUBHDR.size + size
+    return records
+
+
+def download_fc_logs(client, max_entries_per_flight=2000):
+    """Pull every on-board log flight over telemetry after the flight is
+    over, decode, and write JSONL + a human-readable transcript under
+    ground/gazebo_bridge/logs/. Returns the list of files written."""
+    # Finalize: dropping to Disabled makes Logging.c Printf-then-disable,
+    # which flushes any partly-filled buffer into its slot first. (After a
+    # disarm under OnlyWhenArmed this is a no-op - already flushed.)
+    client.send_object("DebugLogSettings",
+                       bov.resolve_enum_values(client.db["DebugLogSettings"],
+                                               {"LoggingEnabled": "Disabled"}))
+    time.sleep(1.0)
+
+    status = _last_log_status[0]
+    if status is None:
+        print("[fclog] no DebugLogStatus seen - cannot download", flush=True)
+        return []
+    top_flight = status["Flight"]
+    print(f"[fclog] downloading: DebugLogStatus Flight={top_flight} "
+          f"UsedSlots={status['UsedSlots']} FreeSlots={status['FreeSlots']}")
+
+    os.makedirs(FC_LOG_DIR, exist_ok=True)
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    written = []
+    for flight in range(top_flight + 1):
+        slots = []
+        for entry in range(max_entries_per_flight):
+            got = _retrieve_log_entry(client, flight, entry)
+            if got is None:
+                print(f"[fclog] flight {flight}: timeout at slot {entry} - stopping this flight", flush=True)
+                break
+            if got["Type"] == "Empty":
+                break
+            slots.append(got)
+        if not slots:
+            continue
+        records = []
+        for raw in slots:
+            for rec in _decode_log_slot(raw, client.db):
+                rec["flight"] = flight
+                rec["slot"] = raw["Entry"]
+                records.append(rec)
+        base = os.path.join(FC_LOG_DIR, f"fclog_{stamp}_flight{flight}")
+        with open(base + ".jsonl", "w") as f:
+            for rec in records:
+                f.write(json.dumps(rec) + "\n")
+        with open(base + ".txt", "w") as f:
+            for rec in records:
+                t = rec["t_us"] / 1e6
+                if rec["kind"] == "text":
+                    f.write(f"t={t:10.3f}s  TEXT  {rec['text']}\n")
+                else:
+                    vals = rec.get("data", {})
+                    f.write(f"t={t:10.3f}s  {rec.get('object', '?'):24s} {vals}\n")
+        n_obj = sum(1 for r in records if r["kind"] == "uavobject")
+        n_txt = sum(1 for r in records if r["kind"] == "text")
+        print(f"[fclog] flight {flight}: {len(slots)} slots -> {len(records)} records "
+              f"({n_obj} uavobject, {n_txt} text) -> {base}.jsonl/.txt")
+        written.append(base + ".jsonl")
+    if not written:
+        print("[fclog] no non-empty flights found on board", flush=True)
+    return written
+
+
+def pull_logs_only():
+    """NINJAPILOT_TEST_MODE=pull_logs: no flying - just download whatever the
+    on-board log currently holds (useful after a crash or a manual run)."""
+    print("[test] pull_logs: waiting 3s for link + config to settle...")
+    time.sleep(3.0)
+    download_fc_logs(_mission_client[0])
 
 
 # --- Translucent flight-path trails via Gazebo's Marker API ------------------
@@ -1897,8 +2133,21 @@ def uavtalk_thread():
         _mission_client[0] = client
         target = {"manual_hover": manual_hover_test,
                   "poshold": poshold_test,
-                  "mission": mission_test}.get(TEST_MODE, run_test_sequence)
-        threading.Thread(target=target, daemon=True).start()
+                  "mission": mission_test,
+                  "pull_logs": pull_logs_only}.get(TEST_MODE, run_test_sequence)
+
+        def run_with_fc_logging():
+            # Runs in its own thread while client.run() keeps pumping packets
+            # (setup needs metadata read-backs, download needs DebugLogEntry
+            # replies - both dead-lock if attempted from on_connected itself).
+            if TEST_MODE != "pull_logs":
+                setup_fc_logging(client)
+                time.sleep(1.0)  # let metadata writes land before arming
+            target()
+            if TEST_MODE != "pull_logs":
+                download_fc_logs(client)
+
+        threading.Thread(target=run_with_fc_logging, daemon=True).start()
 
     def on_object(objdef, inst_id, decoded):
         ts = time.time()
@@ -1939,6 +2188,10 @@ def uavtalk_thread():
             fc_state.update_accel((decoded["x"], decoded["y"], decoded["z"]))
         elif objdef.name == "WaypointActive":
             _waypoint_active[0] = decoded["Index"]
+        elif objdef.name == "DebugLogStatus":
+            _last_log_status[0] = decoded
+        elif objdef.name == "DebugLogEntry":
+            _last_log_entry[0] = decoded
         elif objdef.name == "PathDesired":
             if VERBOSE:
                 e = decoded["End"]
