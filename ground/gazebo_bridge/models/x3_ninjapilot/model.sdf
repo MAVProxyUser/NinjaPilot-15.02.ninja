@@ -2,6 +2,7 @@
     <model name="x3">
         <pose>0 0 0.053302 0 0 0</pose>
         <link name="X3/base_link">
+            <enable_wind>true</enable_wind>
             <pose frame="">0 0 0 0 -0 0</pose>
             <inertial>
                 <pose frame="">0 0 0 0 -0 0</pose>

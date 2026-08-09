@@ -454,6 +454,45 @@ def flight_mode_channel(position, n=FLIGHT_MODE_NUMBER):
     return int(round(1500 + norm * 500))
 
 
+# --- Wind publishing to Gazebo -------------------------------------------
+# The world runs gz-sim-wind-effects-system, which applies wind force to any
+# link declaring <enable_wind>. It takes gz.msgs.Wind on
+# /world/<world>/wind. Sliders state wind the way a pilot does - speed in
+# mph and the direction it comes FROM - so convert here:
+#   ENU vector the wind blows TOWARD = -(sin, cos) of the FROM-bearing.
+# Import lazily and fail soft: this viz is useful without Gazebo running,
+# and a missing gz install must not take the GUI down.
+_wind_pub = [None]
+
+
+def _publish_wind(wind):
+    try:
+        import math as _math
+        import gz.transport13 as _transport
+        from gz.msgs10.wind_pb2 import Wind
+        if _wind_pub[0] is None:
+            node = _transport.Node()
+            topic = "/world/%s/wind" % os.environ.get("NINJAPILOT_GZ_WORLD", "quadcopter")
+            _wind_pub[0] = (node, node.advertise(topic, Wind))
+        _node, pub = _wind_pub[0]
+        mps = float(wind.get("mph", 0.0)) * 0.44704
+        from_deg = float(wind.get("dir_deg", 0.0))
+        rad = _math.radians(from_deg)
+        msg = Wind()
+        # Blowing TOWARD the opposite of where it comes from. World is ENU:
+        # x = east, y = north.
+        msg.linear_velocity.x = -mps * _math.sin(rad)
+        msg.linear_velocity.y = -mps * _math.cos(rad)
+        msg.linear_velocity.z = 0.0
+        msg.enable_wind = mps > 0.01
+        pub.publish(msg)
+        print("[wind] %.0f mph from %.0f deg -> ENU (%.2f, %.2f) m/s"
+              % (wind.get("mph", 0.0), from_deg, msg.linear_velocity.x, msg.linear_velocity.y),
+              flush=True)
+    except Exception as exc:
+        print("[wind] not published (%s)" % exc, flush=True)
+
+
 def slider_channel(value):
     """value in -1..1 -> 1000..2000us, clamped."""
     value = max(-1.0, min(1.0, value))
@@ -469,6 +508,9 @@ class ControlState(object):
         self.mode_position = 0
         self.throttle = 0.0
         self.disturbance = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0}
+        # Wind is stated the way people state it: speed in mph and the
+        # direction it blows FROM (meteorological convention).
+        self.wind = {"mph": 0.0, "dir_deg": 0.0}
         self.stab1_modes = ["Attitude", "Attitude", "AxisLock"]
 
     def update(self, fields):
@@ -479,6 +521,11 @@ class ControlState(object):
                 self.mode_position = max(0, min(FLIGHT_MODE_NUMBER - 1, int(fields["mode_position"])))
             if "throttle" in fields:
                 self.throttle = max(0.0, min(1.0, float(fields["throttle"])))
+            if "wind" in fields:
+                for k in ("mph", "dir_deg"):
+                    if k in fields["wind"]:
+                        self.wind[k] = float(fields["wind"][k])
+                _publish_wind(self.wind)
             if "disturbance" in fields:
                 for axis in ("roll", "pitch", "yaw"):
                     if axis in fields["disturbance"]:
@@ -492,7 +539,8 @@ class ControlState(object):
         with self.lock:
             return {
                 "armed": self.armed, "mode_position": self.mode_position, "throttle": self.throttle,
-                "disturbance": dict(self.disturbance), "stab1_modes": list(self.stab1_modes),
+                "disturbance": dict(self.disturbance), "wind": dict(self.wind),
+                "stab1_modes": list(self.stab1_modes),
             }
 
     def gcs_channels(self):
@@ -825,6 +873,11 @@ PAGE = """<!doctype html>
       <input type="range" id="pitch" min="-1" max="1" step="0.02" value="0"></div>
     <div class="slider-row"><label>Yaw disturbance <span id="yawv">0</span></label>
       <input type="range" id="yaw" min="-1" max="1" step="0.02" value="0"></div>
+    <div class="slider-row" style="border-top:1px solid #2a2a2a;padding-top:12px;margin-top:4px">
+      <label>Wind speed <span id="windspeedv">0 mph</span></label>
+      <input type="range" id="windspeed" min="0" max="40" step="1" value="0"></div>
+    <div class="slider-row"><label>Wind from <span id="winddirv">N (0&deg;)</span></label>
+      <input type="range" id="winddir" min="0" max="359" step="5" value="0"></div>
   </div>
 
   <div id="boardcol" class="col">
@@ -1097,6 +1150,20 @@ let dragging = {roll:false, pitch:false, yaw:false};
 function postControl(fields) {
   fetch("/control", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(fields)});
 }
+
+const COMPASS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+function windLabel(deg) {
+  return COMPASS[Math.round(deg / 22.5) % 16] + " (" + deg + "\u00b0)";
+}
+function postWind() {
+  const mph = parseFloat(document.getElementById("windspeed").value);
+  const dir = parseFloat(document.getElementById("winddir").value);
+  document.getElementById("windspeedv").textContent = mph.toFixed(0) + " mph";
+  document.getElementById("winddirv").textContent = windLabel(dir);
+  postControl({wind: {mph: mph, dir_deg: dir}});
+}
+document.getElementById("windspeed").oninput = postWind;
+document.getElementById("winddir").oninput = postWind;
 
 const armToggle = document.getElementById("armToggle");
 function setArmToggleVisual(armed) {
