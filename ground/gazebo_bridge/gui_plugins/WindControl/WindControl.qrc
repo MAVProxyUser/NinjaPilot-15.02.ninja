@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/WindControl">
+    <file>WindControl.qml</file>
+  </qresource>
+</RCC>

@@ -71,3 +71,4 @@ RemoteSystemsTempFiles
 *.rej
 *.orig
 *.diff~
+ground/gazebo_bridge/gui_plugins/*/build/
