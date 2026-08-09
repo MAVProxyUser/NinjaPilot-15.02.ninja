@@ -2092,11 +2092,16 @@ def mission_test():
         # waypoint than when the leg began, plus margin, cut immediately.
         if have_pose and have_pose2 and idx is not None and 0 <= idx <= last_idx:
             tgt_p = wps[idx]["Position"]
-            dist = math.sqrt((n - tgt_p[0]) ** 2 + (e - tgt_p[1]) ** 2
-                             + (alt - (-tgt_p[2])) ** 2)
+            # HORIZONTAL distance only. A 3D measure false-alarms on the
+            # landing leg: the final waypoint sits at 8m, so simply
+            # descending to land grows the 3D distance by construction
+            # (observed 0.7m at leg entry -> 8.7m at touchdown, aborting a
+            # flight that scored 0.23m mean / 0.89m max). The guard also
+            # never arms on the final land waypoint for the same reason.
+            dist = math.sqrt((n - tgt_p[0]) ** 2 + (e - tgt_p[1]) ** 2)
             if leg_entry_dist is None:
                 leg_entry_dist = dist
-            if dist > leg_entry_dist + 8.0:
+            if idx != last_idx and dist > leg_entry_dist + 8.0:
                 print(f"[test] mission_test: FAIL - flying AWAY from wp{idx} "
                       f"(dist {dist:.1f}m vs {leg_entry_dist:.1f}m at leg entry) - landing",
                       flush=True)

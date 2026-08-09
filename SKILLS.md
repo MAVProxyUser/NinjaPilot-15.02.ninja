@@ -274,6 +274,36 @@ print(n.request('/gui/follow', s, StringMsg, Boolean, 1000))"
   print span/stdev over 15s.
 
 
+## NEVER wait unbounded on a log
+
+Waiting loops must have a deadline and must report what they gave up on.
+An unbounded `until grep ...; do sleep 2; done` hangs forever when the
+expected line never arrives (a crashed run, a changed message, a typo in
+the pattern) and looks identical to a slow run:
+
+```bash
+# WRONG - hangs forever if the string never appears
+until grep -q PASS /tmp/run.log; do sleep 3; done
+
+# RIGHT - bounded, and says why it stopped
+for i in $(seq 1 100); do
+  grep -qE "PASS|FAIL" /tmp/run.log && break
+  sleep 3
+done
+grep -qE "PASS|FAIL" /tmp/run.log || echo "TIMEOUT: no verdict after 300s - check the run"
+```
+
+Nothing in this project should take more than a few seconds to produce a
+log: the board log is decoded from disk in ~0.2s and the analysis runs
+automatically as the flight ends. If a wait is taking minutes, something is
+wrong - do not sit through it.
+
+Also verify edits actually landed. A `python3 - <<EOF` patch script that
+asserts AFTER a `.replace()` but BEFORE `open(...,"w")` throws away the
+whole edit on failure while looking like it half-worked - which has
+produced a commit whose message described a fix that was not in the tree.
+Assert first, write once, then `grep` the file to confirm.
+
 ## Getting the board log (do NOT wait for a telemetry pull)
 
 On simposix the flashfs backend is pios_dosfs_logfs.c, so the log slots are
