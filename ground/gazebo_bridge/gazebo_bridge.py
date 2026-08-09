@@ -1791,7 +1791,9 @@ def _marker_send(node, m):
     # missing from the GUI until a user actually looked for them.
     from gz.msgs10.empty_pb2 import Empty
     try:
-        node.request("/marker", m, type(m), Empty, 300)
+        # Short timeout: these are cosmetic, and a blocking call here
+        # competes with the threads that actually keep the vehicle flying.
+        node.request("/marker", m, type(m), Empty, 50)
     except Exception:
         pass  # trail is cosmetic - never let it interfere with flight
 
@@ -1865,7 +1867,7 @@ def publish_planned_trail(node, wps):
                                           (1.0, 0.6, 0.0, 0.3), 0.35))
 
 
-def gui_follow(node, model=GAZEBO_MODEL, offset=(-8.0, 0.0, 4.0)):
+def gui_follow(node, model=GAZEBO_MODEL, offset=(-14.0, -14.0, 9.0)):
     """Make the Gazebo GUI camera follow the vehicle (same as right-click ->
     Follow) so nobody has to re-click it every run. Idempotent; errors are
     cosmetic and ignored."""
@@ -1889,7 +1891,7 @@ class FlownTrail(object):
     segment per ~1m of travel, appended incrementally (never re-sends the
     whole trail)."""
 
-    SEG_MIN_M = 1.0
+    SEG_MIN_M = 0.5
 
     def __init__(self, node):
         self.node = node
@@ -1899,7 +1901,7 @@ class FlownTrail(object):
 
     def tick(self):
         now = time.time()
-        if now - self.last < 0.5:
+        if now - self.last < 0.25:
             return
         self.last = now
         have_pose, pos_ned, _, _, _, _ = state.snapshot()
@@ -2116,7 +2118,11 @@ def mission_test():
             tgt_s = f" -> wp{idx} N={tgt[0]:.1f} E={tgt[1]:.1f} alt={-tgt[2]:.0f}m" if tgt else ""
             print(f"[test] mission_test: t+{now - start:.0f}s alt={alt:.2f}m "
                   f"N={n:.2f} E={e:.2f}{tgt_s}", flush=True)
-        time.sleep(0.2)
+        # 10Hz. The trail is drawn from this loop, so this sleep caps how
+        # fluid the flown line can be - but do NOT push it to 20Hz: with
+        # marker sends being blocking gz requests, that starved the thread
+        # feeding sensors to the firmware and the vehicle hit the ground.
+        time.sleep(0.1)
 
 
 def manual_hover_test():

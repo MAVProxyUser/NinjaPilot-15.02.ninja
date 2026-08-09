@@ -132,6 +132,12 @@
   </gz-gui>
 </plugin>
 <plugin filename="CameraTracking" name="Camera Tracking">
+      <!-- Calmer chase cam: further back and higher for a view of the whole
+           grid, and low gains so it eases after the vehicle instead of
+           snapping to it. -->
+      <follow_offset>-14 -14 9</follow_offset>
+      <follow_pgain>0.008</follow_pgain>
+      <follow_worldframe>true</follow_worldframe>
   <gz-gui>
     <property key="resizable" type="bool">false</property>
     <property key="width" type="double">5</property>
@@ -296,20 +302,8 @@
 </plugin>
 
 <!-- Inspector -->
-<plugin filename="ComponentInspector" name="Component inspector">
-  <gz-gui>
-    <property type="bool" key="showTitleBar">false</property>
-    <property type="string" key="state">docked</property>
-  </gz-gui>
-</plugin>
 
 <!-- Entity tree -->
-<plugin filename="EntityTree" name="Entity tree">
-  <gz-gui>
-    <property type="bool" key="showTitleBar">false</property>
-    <property type="string" key="state">docked</property>
-  </gz-gui>
-</plugin>
     <!-- Wind panel (gui_plugins/WindControl). FLOATING and small: docked,
          it expands to fill the window and hides the 3D view. -->
     <plugin filename="WindControl" name="Wind">
@@ -319,9 +313,11 @@
         <property type="bool" key="resizable">true</property>
         <property type="double" key="width">330</property>
         <property type="double" key="height">210</property>
-        <property type="double" key="x">10</property>
-        <property type="double" key="y">10</property>
         <property type="string" key="state">floating</property>
+        <anchors target="3D View">
+          <line own="right" target="right"/>
+          <line own="top" target="top"/>
+        </anchors>
       </gz-gui>
       <topic>/world/quadcopter/wind</topic>
     </plugin>
