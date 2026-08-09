@@ -61,9 +61,17 @@ def main():
     allerr = []
     for wp in sorted(by_leg):
         errs = by_leg[wp]
-        allerr += errs
-        print("  leg->wp%-2d  mean %5.2f m  max %5.2f m  (n=%d)"
-              % (wp, sum(errs) / len(errs), max(errs), len(errs)))
+        a, b = STAR[wp - 1], STAR[wp]
+        # A zero-length "leg" (the plan ends on two identical centre
+        # waypoints) has no line to be off; cross_track degenerates to
+        # distance-from-point, which is landing drift, not tracking error.
+        # Report it, but keep it OUT of the overall figure.
+        degenerate = math.hypot(b[0] - a[0], b[1] - a[1]) < 0.5
+        if not degenerate:
+            allerr += errs
+        print("  leg->wp%-2d  mean %5.2f m  max %5.2f m  (n=%d)%s"
+              % (wp, sum(errs) / len(errs), max(errs), len(errs),
+                 "   [zero-length leg: this is landing drift, excluded]" if degenerate else ""))
     if allerr:
         print("  OVERALL   mean %5.2f m  max %5.2f m" % (sum(allerr) / len(allerr), max(allerr)))
 
@@ -82,18 +90,43 @@ def main():
             errs = agg[uid]
             print("  FC leg%-2d  mean %5.2f m  max %5.2f m" % (uid, sum(errs) / len(errs), max(errs)))
 
-    # Estimator bias: truth vs FC position, time-aligned by nearest sample.
-    pos = [(r["t_us"] / 1e6, r["data"]) for r in recs if r.get("object") == "PositionState"]
-    if pos and truth:
-        fc_t0 = pos[0][0]
-        # align by matching the flight's own N-extremes is fragile; instead
-        # compare distributions (bias in position magnitude over the flight)
-        fc_r = [math.hypot(d["North"], d["East"]) for _t, d in pos]
-        tr_r = [math.hypot(r["n"], r["e"]) for r in truth]
-        print("=== ESTIMATOR: truth vs FC position (accuracy ceiling) ===")
-        print("  radius-from-home  truth mean %5.2f m   FC mean %5.2f m   bias %+.2f m"
-              % (sum(tr_r) / len(tr_r), sum(fc_r) / len(fc_r),
-                 sum(fc_r) / len(fc_r) - sum(tr_r) / len(tr_r)))
+    # Estimator health, measured WITHOUT cross-log alignment: the board log
+    # carries the GPS input and the filtered output on the SAME clock, so
+    # pair them directly. (An earlier version compared mean radius over the
+    # bridge samples against mean radius over the board samples - different
+    # sample sets at different rates - and manufactured a phantom "0.4m
+    # inward bias" that sent tuning down a blind alley. Never compare
+    # distributions across logs; pair on a shared clock or do not claim it.)
+    import bisect
+    HOME_LAT, HOME_LON, EARTH_R = 37.7749, -122.4194, 6378137.0
+    gps = []
+    for r in recs:
+        if r.get("object") == "GPSPositionSensor":
+            d = r["data"]
+            dlat = math.radians(d["Latitude"] / 1e7 - HOME_LAT)
+            dlon = math.radians(d["Longitude"] / 1e7 - HOME_LON)
+            gps.append((r["t_us"] / 1e6, dlat * EARTH_R,
+                        dlon * EARTH_R * math.cos(math.radians(HOME_LAT))))
+    pos = [(r["t_us"] / 1e6, r["data"]["North"], r["data"]["East"])
+           for r in recs if r.get("object") == "PositionState"]
+    if gps and pos:
+        pt = [p[0] for p in pos]
+        offs = []
+        for (t, gn, ge) in gps:
+            i = bisect.bisect_left(pt, t)
+            cand = [j for j in (i - 1, i) if 0 <= j < len(pos)]
+            if not cand:
+                continue
+            j = min(cand, key=lambda j: abs(pos[j][0] - t))
+            if abs(pos[j][0] - t) > 0.6:
+                continue
+            offs.append(math.hypot(pos[j][1] - gn, pos[j][2] - ge))
+        if offs:
+            print("=== ESTIMATOR: filtered position vs its GPS input (same clock) ===")
+            print("  |offset| mean %.3f m  max %.3f m  (n=%d)  <- large means the"
+                  % (sum(offs) / len(offs), max(offs), len(offs)))
+            print("     filter is diverging from its own input; small means tracking")
+            print("     error is CONTROLLER error and tuning can still improve it")
 
     # Yaw alignment vs leg bearing
     wpa = [(r["t_us"] / 1e6, r["data"]["Index"]) for r in recs if r.get("object") == "WaypointActive"]

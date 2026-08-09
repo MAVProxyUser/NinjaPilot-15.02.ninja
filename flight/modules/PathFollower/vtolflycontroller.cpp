@@ -235,6 +235,28 @@ void VtolFlyController::UpdateVelocityDesired()
         // (_corner_speed in the mission) than by braking harder.
         progress.path_vector[0] *= gate;
         progress.path_vector[1] *= gate;
+
+        // HOLD STATION AT THE WAYPOINT while actually turning - and ONLY
+        // then. An earlier version blended this hold across the whole
+        // 10-30 deg gate band, so any yaw wander MID-LEG (12 deg is
+        // nothing) started pulling the vehicle back toward the previous
+        // waypoint: the legs came out visibly wavy instead of straight.
+        // Hold only above ALIGN_STOP, where the vehicle genuinely is
+        // executing a turn and should not be translating at all.
+        if (yawError > ALIGN_STOP) {
+            // HOLD_GAIN: the hold has to arrest arrival momentum, and the
+            // cruise position gain is deliberately soft (it is tuned for
+            // smooth line-following, not for stopping). At the cruise gain
+            // the vehicle coasted ~0.8m past each corner before the hold
+            // took hold, which is what rounds off the corners. Scaling the
+            // hold error makes the stop firm WITHOUT touching leg tracking.
+            // Still bounded by MaxRollPitch and HorizontalVelMax, so it
+            // cannot demand the instant stop that tipped the vehicle over
+            // when the correction was zeroed outright.
+            const float HOLD_GAIN = 2.5f;
+            progress.correction_vector[0] = HOLD_GAIN * (pathDesired->Start.North - positionState.North);
+            progress.correction_vector[1] = HOLD_GAIN * (pathDesired->Start.East - positionState.East);
+        }
     }
 
     controlNE.ControlPositionWithPath(&progress);

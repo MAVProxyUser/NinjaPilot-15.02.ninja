@@ -1074,7 +1074,7 @@ def _crc8_07(crc, data):
     return crc
 
 
-MISSION_SPEED = 3.0  # m/s, straight-line cruise (2.0 raced corners hard enough to dip into the ground at the 5m ring)
+MISSION_SPEED = 1.5  # m/s, straight-line cruise (2.0 raced corners hard enough to dip into the ground at the 5m ring)
 # Waypoint acceptance radius (m). Level legs use a 2D horizontal check
 # (ConditionParameters[1]=0), vertical-transition legs use 3D ([1]=1).
 # Mission 12 flew a 3D check on LEVEL legs with radius 1.0 and flew away:
@@ -1103,9 +1103,9 @@ def _corner_speed(theta_deg):
     if theta_deg < 25.0:
         return MISSION_SPEED         # straight-through: keep cruising
     if theta_deg < 70.0:
-        return 1.5                   # gentle turn (octagon vertices, 45deg)
+        return 0.8                   # gentle turn (octagon vertices, 45deg)
     if theta_deg < 115.0:
-        return 1.0                   # right-angle turns (letter strokes)
+        return 0.6                   # right-angle turns (letter strokes)
     return 0.5                       # hairpins: the point-turn has to kill
                                      # whatever speed arrives here. Braking
                                      # harder at the corner tips the vehicle
@@ -1186,9 +1186,9 @@ def _finish_mission(pts):
     last = len(pts) - 1
     for i, (n, e, d) in enumerate(pts):
         if i == 0:
-            vel = 1.5  # mission entry from the staging hover
+            vel = 0.8  # mission entry from the staging hover
         elif i >= last - 1:
-            vel = 1.0  # slow into the pre-land center point (and the Land wp)
+            vel = 0.5  # slow into the pre-land center point (and the Land wp)
         else:
             vel = _corner_speed(turn_angle(i))
         # Action selection: Land for the terminator; 3D acceptance for legs
@@ -1373,6 +1373,14 @@ FC_LOG_OBJECTS = [
 # carries the relay's raw +/-Amplitude square wave, so logging it at 50ms
 # is direct proof of WHICH axis the relay is driving and at what period
 # (AttitudeState at 500ms aliases a 9Hz roll/pitch limit cycle into noise).
+FC_LOG_OBJECTS_MISSION = [
+    ("PositionState", "periodic", 100),
+    ("VelocityState", "periodic", 100),
+    ("AttitudeState", "periodic", 100),
+    ("PathStatus", "periodic", 200),
+    ("StabilizationDesired", "periodic", 200),
+]
+
 FC_LOG_OBJECTS_AUTOTUNE = [
     ("ActuatorDesired", "periodic", 50),
     ("AttitudeState", "periodic", 50),
@@ -1431,20 +1439,25 @@ def _retrieve_log_entry(client, flight, entry, timeout=4.0):
     deadline = time.time() + timeout
     last_send = 0.0
     _last_log_entry[0] = None
+    # Retry cadence starts tight and only backs off if the flight side is
+    # genuinely slow: at 0.4s unconditional this loop set a floor of ~2
+    # minutes to pull a 300-slot flight, most of it spent waiting rather
+    # than transferring.
+    retry_after = 0.12
     while time.time() < deadline:
         now = time.time()
-        if now - last_send > 0.4:
+        if now - last_send > retry_after:
             client.send_object("DebugLogControl",
                                bov.resolve_enum_values(client.db["DebugLogControl"],
                                                        {"Operation": "Retrieve",
                                                         "Flight": flight, "Entry": entry}))
-            last_send = now
-            time.sleep(0.05)
             client.request_object("DebugLogEntry")
+            last_send = now
+            retry_after = min(retry_after * 1.8, 0.6)
         got = _last_log_entry[0]
         if got is not None and got.get("Flight") == flight and got.get("Entry") == entry:
             return got
-        time.sleep(0.02)
+        time.sleep(0.005)
     return None
 
 
@@ -1953,8 +1966,8 @@ def mission_test():
     arm, climb to a staging hover, hand the vehicle to PathPlanner, and
     supervise against ground truth until the Land action puts it on the
     floor. Aborts land() on ceiling breach, crash, or stalled progress."""
-    print("[test] mission_test: waiting 3s for link + config to settle...")
-    time.sleep(3.0)
+    print("[test] mission_test: waiting for link + config to settle...")
+    time.sleep(1.0)  # config burst only needs to land; the estimator gate below is the real wait
     if not wait_for_attitude_ok():
         return
     client = _mission_client[0]
@@ -1975,8 +1988,8 @@ def mission_test():
     control.mode_position = 0
     control.throttle = 0.0
     control.armed = True
-    time.sleep(2.0)
-    if not vario_climb_and_hold(4.0, 1, "mission staging hover (Stabilized2)", 5.0):
+    time.sleep(0.6)  # just long enough for the arm to be acked and applied
+    if not vario_climb_and_hold(4.0, 1, "mission staging hover (Stabilized2)", 1.5):
         print("[test] mission_test: FAIL - staging climb failed")
         return
     ok, _ = _wait_for_vertical_settle("PathPlanner engage")
@@ -1993,7 +2006,10 @@ def mission_test():
     # activated by that direct transition.
     print("[test] mission_test: engaging PositionHold to activate PathFollower...")
     control.mode_position = 3
-    time.sleep(4.0)
+    # PositionHold only has to ACTIVATE the PathFollower controllers, which
+    # happens on the first callback - it does not need to settle here (the
+    # vertical settle gate above already ran). 4s of hovering was dead time.
+    time.sleep(1.2)
     print(f"[test] mission_test: engaging PathPlanner - {len(wps)} waypoints, "
           f"star@8m -> octagon@18m -> 'KF'@28m -> land")
     control.mode_position = 4  # PathPlanner
@@ -2394,7 +2410,7 @@ def uavtalk_thread():
         # without saturating thrust in the first place.
         vtol_pf = {
             "TreatCustomCraftAs": "VTOL",
-            "HorizontalVelMax": 5.0, "VerticalVelMax": 1.5, "CourseFeedForward": 1.0,
+            "HorizontalVelMax": 3.0, "VerticalVelMax": 1.5, "CourseFeedForward": 1.0,
             # HorizontalPosP 0.25->0.15 and HorizontalVelPID P 8->4, D 1->0:
             # measured divergent oscillation in PositionHold (commanded
             # roll/pitch amplitude tripling per cycle, 0.04->5.4deg in ~8s,
@@ -2458,7 +2474,7 @@ def uavtalk_thread():
             # commanded limit must stay inside what the attitude loop can
             # actually track during a hard stop, not just what the
             # airframe can theoretically hold.
-            "MaxRollPitch": 32.0, "UpdatePeriod": 50, "BrakeRate": 2.5, "BrakeMaxPitch": 30.0,
+            "MaxRollPitch": 25.0, "UpdatePeriod": 50, "BrakeRate": 2.5, "BrakeMaxPitch": 30.0,
             "BrakeHorizontalVelPID": [12.0, 0.0, 0.03, 15], "BrakeVelocityFeedforward": 0,
             "LandVerticalVelPID": [0.35, 3.0, 0.05, 0.9],
         }
@@ -2642,7 +2658,8 @@ def uavtalk_thread():
             # replies - both dead-lock if attempted from on_connected itself).
             if TEST_MODE != "pull_logs":
                 setup_fc_logging(client,
-                                 FC_LOG_OBJECTS_AUTOTUNE if TEST_MODE == "autotune" else ())
+                                 FC_LOG_OBJECTS_AUTOTUNE if TEST_MODE == "autotune"
+                                 else (FC_LOG_OBJECTS_MISSION if TEST_MODE == "mission" else ()))
                 time.sleep(1.0)  # let metadata writes land before arming
             target()
             if TEST_MODE != "pull_logs":

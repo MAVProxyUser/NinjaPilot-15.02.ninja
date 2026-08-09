@@ -34,7 +34,7 @@
 // 2.0 is comfortably within what the vehicle can actually deliver while
 // keeping the braking zone from a 4 m/s cruise to a 1.2 m/s corner at
 // ~3.6m - still inside a typical 10m+ leg.
-#define PATH_LEG_ACCEL 2.0f
+#define PATH_LEG_ACCEL 0.6f
 
 #include "uavobjectmanager.h" // <--.
 #include "pathdesired.h" // <-- needed only for correct ENUM macro usage with path modes (PATHDESIRED_MODE_xxx,

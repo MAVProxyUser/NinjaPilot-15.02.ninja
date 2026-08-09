@@ -43,7 +43,31 @@ files = sorted(glob.glob(os.path.join(sys.argv[1], "233CDC*.o*")),
 for f in files:
     raw = open(f, "rb").read()
     if len(raw) >= HDR.size:
-        recs.extend(decode_slot(raw))
+        # pios_dosfs_logfs.c objectFilename():
+        #     prefix = obj_id + (slot / 256) * 16,  suffix = slot & 0xff
+        # and obj_id = 0x233CDC00 | flight (pios_debuglog.c). So the
+        # prefix's low byte is flight + 16*(slot/256) - NOT the flight.
+        # Decoding it as the flight made slot blocks look like separate
+        # flights (0, 16, 32, 48) and silently discarded 3/4 of the data.
+        base = os.path.basename(f)
+        low = int(base.split(".o")[0][-2:], 16)
+        flight = low % 16
+        for rec in decode_slot(raw):
+            rec["flight"] = flight
+            recs.append(rec)
+# Slots from DIFFERENT FLIGHTS live side by side in the same directory
+# (the filename's low byte is the flight number), and merging them produces
+# nonsense: one analysis showed corner timestamps of t=11s and t=4270s in
+# the same "flight". Keep only the flight with the most records unless one
+# is named explicitly as argv[3].
+from collections import Counter
+if recs:
+    want = int(sys.argv[3]) if len(sys.argv) > 3 else Counter(
+        r["flight"] for r in recs).most_common(1)[0][0]
+    kept = [r for r in recs if r["flight"] == want]
+    print("flights present: %s -> keeping flight %d (%d of %d records)"
+          % (sorted({r["flight"] for r in recs}), want, len(kept), len(recs)))
+    recs = kept
 recs.sort(key=lambda r: r["t_us"])
 with open(sys.argv[2], "w") as out:
     for r in recs:
