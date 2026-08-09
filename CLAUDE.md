@@ -43,37 +43,30 @@ under `ground/pyuavtalk/` and `ground/gazebo_bridge/`). Rules below exist
 because they were each learned the hard way in earlier sessions - read
 them before making changes, not after something breaks.
 
-## OPEN: the NE velocity loop overruns its own command by ~50-75%
+## SETTLED: the NE velocity loop had no damping, and that was the corner orbit
 
-Measured with VelocityDesired logged alongside VelocityState (both at 100ms,
-compared pairwise):
+The vehicle used to circle its waypoints instead of stopping on them. It was
+not the path planner, the lead term, or the acceptance logic - all of those
+were tried and are documented as dead ends in vtolflycontroller.cpp. In the
+braking zone the follower was commanding a median tilt of 3.4 deg and a
+maximum of 9.0 deg against a 25 deg limit: roughly 2.7x the braking authority
+it needed was sitting unused, so the vehicle arrived carrying speed the path
+never asked for, sailed through the point and was dragged back.
 
-| run | commanded max | actual max | cruise |
-|-----|---------------|------------|--------|
-| star102 | 1.04 m/s | 1.83 m/s | 1.0 |
-| star106 | 1.57 m/s | 2.49 m/s | 1.0 |
-| star107 | 1.51 m/s | 2.25 m/s | 1.0 |
+HorizontalVelPID Kd was exactly 0.0. That is also why Kp could never be
+raised - a P-only loop pushed past its margin tumbles, which is what 6.5 did
+historically. Damping first, then gain.
 
-The vehicle arrives at a waypoint carrying speed the path never asked for,
-sails through, and gets pulled back - which is the "orbiting" seen from the
-Gazebo trail. Every attempt to fix this by reshaping the COMMAND changed the
-shape of the swing without removing it, because the command was not the
-problem:
+WATCH THE MARGIN. Kd 1.4 with Kp 7.0 passed three consecutive runs (98s,
+cross-track 0.15m, zero overshoot) and then tumbled into the ground at wp3 on
+the fourth - roll peak-to-peak 170 deg, 7.25m to 0.06m in two seconds. Three
+passes are not evidence of margin. At Kp 5.5 the same tune is SMOOTHER on
+every axis and only slower: cross-track 0.15 -> 0.12m, commanded swing 0.67 ->
+0.53 m/s, pitch RMS 4.11 -> 2.49 deg, over three consecutive clean runs at
+115-123s. Kp 7.0 was buying 20s on credit.
 
-- lead term 1.0 -> 0.25s: overshoot 0.21m -> 0.95m, 286s
-- lead clamped so it cannot predict past the endpoint: 0.69m, 198s
-- along-leg progress ratchet: drove progress regression to exactly 0.000 at
-  every waypoint, and the orbit stayed (and the ratchet forces endpoint-homing
-  mode early, where correction_vector is the FULL vector to End and the
-  position term escapes the leg's cruise cap - that is how star106/107
-  commanded 1.5 m/s on a 1.0 cruise)
-- HorizontalVelPID Ki 0.5 -> 0: ruled integrator windup OUT, ratio unchanged
-
-What has NOT been tried: damping in the velocity loop itself. Kd is 0.0, and
-the loop is a bare P+I at Kp 4.0 against an airframe with real momentum. Note
-`UpdateVelocitySetpoint` clamps only to HorizontalVelMax (3.0), never to the
-leg's own cruise speed, so any large position error commands up to 3 m/s
-regardless of what the mission asked for - worth fixing on its own.
+Working values: HorizontalVelPID [5.5, 0.5, 1.4, 15], HorizontalPosP 0.35
+(0.60 was tried and is worse - see the note there), MISSION_SPEED 1.5.
 
 ## RULE: purge the previous flight's slots before every run
 

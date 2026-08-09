@@ -14,7 +14,10 @@ echo "--- bridge log: outcome + harness ---"
 grep -E "PASS|FAIL|flying AWAY|tilt-over|ground contact|ceiling" "$BRIDGE" | tail -3
 
 echo "--- board log: decode from the FC's own flash ---"
-"$PY" "$HERE/decode_fcwd.py" "$HOME/ninjapilot-build/fcwd" "$OUT" | tail -1
+# NOT `| tail -1`: that swallowed the "flights present" line and the
+# stale-merge/timestamp warnings, which is how a contaminated decode
+# reached the analysis unnoticed.
+"$PY" "$HERE/decode_fcwd.py" "$HOME/ninjapilot-build/fcwd" "$OUT"
 
 echo "--- score (flown vs planned, dense board samples) ---"
 "$PY" "$HERE/score.py" "$LABEL" "$OUT"

@@ -79,6 +79,23 @@ if recs:
             print("  !!! WARNING: kept flight spans %.0fs - almost certainly two "
                   "runs merged (flight number aliases mod 16). Purge %s before "
                   "the run; see run_star.sh." % (span, sys.argv[1]))
+# Drop timestamp outliers before anything downstream sees them. FlightTime is
+# a uint32 of MICROSECONDS, so it wraps every 2^32/1e6 = 4294.97s, and a
+# single wrapped or zero-stamped record stretches the apparent flight to that
+# full span - which silently ruins every rate and period in the analysis (a
+# 52s flight was reported as 4294.8s at 0.1Hz, and the porpoise detector duly
+# announced a 175s oscillation). Keep the dense cluster the flight actually
+# occupies.
+if len(recs) > 20:
+    ts = sorted(r["t_us"] for r in recs)
+    med = ts[len(ts) // 2]
+    WINDOW_US = 900 * 1000000  # 15 minutes either side is far beyond any run
+    keep = [r for r in recs if abs(r["t_us"] - med) < WINDOW_US]
+    if len(keep) != len(recs):
+        print("  dropped %d timestamp outlier(s) (uint32 microsecond wrap at "
+              "4294.97s ruins every rate downstream)" % (len(recs) - len(keep)))
+        recs = keep
+
 recs.sort(key=lambda r: r["t_us"])
 with open(sys.argv[2], "w") as out:
     for r in recs:

@@ -2673,6 +2673,14 @@ def uavtalk_thread():
             # correction_vector is pure cross-track error, and 0.15 (a ~7s
             # correction time constant) let the vehicle sag meters off the
             # line in corners before pulling back.
+            # 0.35, and 0.60 was tried and is worse (star112). It bought 0.01m
+            # of cross-track (0.15 -> 0.14m) and cost everything else: mission
+            # 98s -> 119s, mean overshoot 0.00 -> 0.15m, command reversals per
+            # corner 9 -> 24, roll RMS 1.15 -> 2.34 deg. Cross-track is a
+            # perpendicular error so a stiffer line-hold looked free, but the
+            # correction vector rotates as the vehicle passes a waypoint, and
+            # near the point a high gain on it fights the arrival instead of
+            # the line.
             "HorizontalPosP": 0.35, "VerticalPosP": 0.25,
             # VerticalVelPID Kp 0.3->0.6, Ki 0.15->0.45: measured in a real
             # PositionHold sag (truth 2.4m -> ground in ~10s), the vertical
@@ -2715,7 +2723,17 @@ def uavtalk_thread():
             # RMS went 2.34 -> 4.34 deg and cross-track 0.09 -> 0.17m (star110)
             # - which is the loop running closer to its margin, exactly what
             # more derivative is for.
-            "HorizontalVelPID": [7.0, 0.5, 1.4, 15], "VerticalVelPID": [0.6, 0.45, 0.08, 1.0],
+            #
+            # Kp 7.0 -> 5.5. 7.0 is MARGINAL, not safe: star109/110/111 all
+            # passed on it, and then star113 - identical except for a 1.25 m/s
+            # cruise - tumbled at wp3 and hit the ground, roll peak-to-peak
+            # 170deg, 9m of translation in the 2s it took to fall from 7.25m.
+            # That is the same failure the history records at Kp 6.5, so the
+            # damping raised the ceiling but did not raise it as far as 7.0.
+            # Three passes are not evidence of margin when the fourth crashes;
+            # back off and keep the damping, which is where the real gain came
+            # from.
+            "HorizontalVelPID": [5.5, 0.5, 1.4, 15], "VerticalVelPID": [0.6, 0.45, 0.08, 1.0],
             # ThrustLimits.Neutral is the altitude-hold PID's hover-point
             # baseline (vtolflycontroller.cpp: controlDown.UpdateNeutralThrust
             # uses it directly) - the XML's 0.5 default assumes a much
