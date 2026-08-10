@@ -136,6 +136,32 @@ else
   echo "  (plot failed - is this a star mission?)"
 fi
 
+# A flight recorder that stops before the flight does is worth shouting about:
+# it is exactly the run you most need it for. Two unexplained flyaways at wp3
+# were both un-diagnosable because the board log ended before the event.
+echo "--- recorder coverage: does the board log reach the end of the flight? ---"
+"$PY" - "$BRIDGE" "$OUT" <<'PYEOFCOV'
+import json, re, sys
+last_t = 0.0
+for line in open(sys.argv[1]):
+    m = re.search(r"t\+(\d+)s ", line)
+    if m:
+        last_t = max(last_t, float(m.group(1)))
+recs = [json.loads(l) for l in open(sys.argv[2])]
+if recs and last_t:
+    ts = [r["t_us"] / 1e6 for r in recs]
+    span = max(ts) - min(ts)
+    # the board log starts at arm, which precedes the bridge's t+0 by the
+    # staging climb, so board span should EXCEED the mission clock.
+    if span < last_t:
+        print("  !!! BOARD LOG STOPS EARLY: %.1fs of recording for a flight that "
+              "ran to t+%.0fs." % (span, last_t))
+        print("      The FC's own record does not cover the end of this flight, so "
+              "anything that happened there cannot be diagnosed from it.")
+    else:
+        print("  board log spans %.1fs, mission ran to t+%.0fs - covered" % (span, last_t))
+PYEOFCOV
+
 echo "--- gazebo: truth vs board (do they agree?) ---"
 "$PY" - "$BRIDGE" "$OUT" <<'PYEOF'
 import json, re, sys, math

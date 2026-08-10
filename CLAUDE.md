@@ -43,6 +43,37 @@ under `ground/pyuavtalk/` and `ground/gazebo_bridge/`). Rules below exist
 because they were each learned the hard way in earlier sessions - read
 them before making changes, not after something breaks.
 
+## OPEN: unexplained intermittent flyaway at wp3 (2026-08-09)
+
+Twice, on otherwise unremarkable runs, the vehicle departed from waypoint 3
+and hit the ground: ground truth goes 1.98,-6.09 at 7.91m -> 1.50,-10.26 at
+7.46m -> -9.97,-8.10 at 2.51m, i.e. ~11.5m of horizontal travel and 5m of
+altitude in two seconds. Roughly 2 occurrences in ~12 runs.
+
+What it is NOT:
+- Not a tumble. star113's "roll peak-to-peak 170 deg" was an artifact of 1045
+  timestamp-outlier records; filtered, its real attitude was roll p2p 7.0 deg
+  and pitch 19.7 deg - normal flight. A velocity-loop gain was reduced on the
+  strength of that false reading (the reduction turned out to be right on
+  other measured grounds, but the stated reason was wrong).
+- Not a collision. Nothing in the farm mesh comes within 3m of any star
+  waypoint; the nearest structure above 6m is 13.2m from the pad, due north,
+  and the flyaway went west.
+- Not visible to the flight controller. Its last logged state is a stable
+  hover at 7.96m with roll/pitch inside 8 deg and thrust 0.67-0.70, and the
+  estimator agrees with its own GPS input to 0.074m. Internally consistent,
+  externally wrong.
+
+The blocker is instrumentation: the board log ENDED BEFORE THE EVENT on both
+occasions, so there is no FC-side record of it. analyze_run.sh now compares
+the board log span against the mission clock and shouts when the recorder
+stopped early - the next occurrence should be diagnosable.
+
+First suspicion to test, given the signature (FC internally consistent while
+truth diverges): the sensor feed into the firmware stalling, which is the
+same class as the two harness bugs already recorded here - the second UAVTalk
+client stealing packets, and marker publishing starving the sensor thread.
+
 ## SETTLED: the NE velocity loop had no damping, and that was the corner orbit
 
 The vehicle used to circle its waypoints instead of stopping on them. It was

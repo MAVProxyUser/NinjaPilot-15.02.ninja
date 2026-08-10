@@ -87,8 +87,13 @@
 // the arrival, gentle enough that the velocity loop tracks it without
 // carrying lag through the point.
 //
-// 1.10 was tried and reverted with the rest of that experiment; 0.85 is the
-// value actually flown in every verified run.
+// 0.85, and 1.15 has now been tried TWICE and rejected twice. The second
+// attempt (star120) was made on the reasonable theory that the damped
+// velocity loop could finally track a steeper ramp - it recovered 20s of the
+// 32s that the tightened acceptance sphere cost, and gave back exactly what
+// that sphere was bought for: mean overshoot 0.00 -> 0.13m and cross-track
+// 0.08 -> 0.13m. Arriving cleanly on the point is the thing being optimised
+// for; buy time on the LEGS instead, where the tracking margin actually is.
 #define PATH_ARRIVAL_GAIN 0.85f
 
 // Floor on the arrival SPEED CAP (m/s), not on the speed itself.
