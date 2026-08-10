@@ -54,6 +54,11 @@
 #define TASK_PRIORITY               CALLBACK_TASK_NAVIGATION
 #define MAX_QUEUE_SIZE              2
 #define PATH_PLANNER_UPDATE_RATE_MS 100 // can be slow, since we listen to status updates as well
+// How far off to the side the vehicle may be when it crosses the waypoint
+// plane and still be credited with reaching it, as a multiple of the
+// acceptance radius. Generous enough that a legitimate swept corner counts,
+// tight enough that a flyaway crossing the plane 5m wide does not.
+#define CORRIDOR_FACTOR             3.0f
 
 // Private types
 
@@ -576,6 +581,43 @@ static uint8_t conditionDistanceToTarget()
     } else {
         distance = sqrtf(powf(waypoint.Position.North - positionState.North, 2)
                          + powf(waypoint.Position.East - positionState.East, 2));
+    }
+
+    // HALF-PLANE ARRIVAL. A waypoint is also reached the moment the vehicle
+    // CROSSES it - the plane through the waypoint perpendicular to the
+    // inbound leg - regardless of how close it got.
+    //
+    // Without this, a vehicle that passes the point by even a few centimetres
+    // is commanded straight back to it, because endpoint homing points at the
+    // waypoint from wherever you are. Coming back from beyond the vertex is a
+    // rotation the OPPOSITE way round from the corner itself, so the ground
+    // track hooks left into a right-hand turn, loops back, and only then
+    // departs. Measured: the commanded heading swings -25 deg (outbound) ->
+    // +146 deg (back up the inbound leg) as the vehicle crosses, and the
+    // actual track follows it round; five of six star corners hooked the
+    // wrong way. It is also most of the time spent at each waypoint.
+    //
+    // Crossing the plane means the waypoint is behind you and the mission's
+    // business there is finished. Bounded by the same acceptance radius as a
+    // corridor so a vehicle that sails past far off to one side is not
+    // credited with arriving.
+    if (waypointActive.Index > 0) {
+        WaypointData wpPrev;
+        WaypointInstGet(waypointActive.Index - 1, &wpPrev);
+        float legN = waypoint.Position.North - wpPrev.Position.North;
+        float legE = waypoint.Position.East - wpPrev.Position.East;
+        float legLen = sqrtf(legN * legN + legE * legE);
+        if (legLen > 0.5f) {
+            float un = legN / legLen, ue = legE / legLen;
+            float relN = positionState.North - waypoint.Position.North;
+            float relE = positionState.East - waypoint.Position.East;
+            float along = relN * un + relE * ue;            // >0 = past it
+            float cross = fabsf(-relN * ue + relE * un);    // lateral miss
+            if (along > 0.0f && cross < CORRIDOR_FACTOR * pathAction.ConditionParameters[0]) {
+                arrivalDwell = 0;
+                return true;
+            }
+        }
     }
 
     if (distance > pathAction.ConditionParameters[0]) {

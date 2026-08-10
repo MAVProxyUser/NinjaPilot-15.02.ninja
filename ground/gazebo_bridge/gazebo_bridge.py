@@ -38,6 +38,8 @@ from uavtalk_client import UAVTalkClient, UdpTransport
 # port - it stole the bridge's packets and produced unexplained flyaways.
 # The viewer is gone; only the configuration survives.
 import flight_config as bov
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+from star_geom import fillet_plan
 
 # The [dbg]/[piddbg]/[posdbg]/[navsatdbg]/[barodbg]/[gyrodbg]/[sendtiming]/
 # [latency] prints below fire at up to ~500Hz combined (every ActuatorCommand,
@@ -1162,7 +1164,24 @@ MISSION_WP_RADIUS = 1.0
 # Tightening only became affordable once path_endpoint stopped capping its
 # feed-forward at EndingVelocity=0 (PATH_ARRIVAL_MIN_CAP) - before that the
 # last 0.1m closed at ~0.01 m/s and a tighter sphere would simply have stalled.
-MISSION_WP_RADIUS_PRECISE = 0.15  # m, corner acceptance sphere
+# 0.15 -> 0.60. This is the APEX radius of a swept corner, not a "how close
+# did we get" tolerance.
+#
+# With a tight sphere the only thing commanding the vehicle near the vertex is
+# endpoint homing, and that has NO outbound component until the waypoint
+# retires - so the commanded heading just alternates between "forward to the
+# vertex" (+146 deg) and "back to the vertex" (-25 deg) and the vehicle bounces
+# across the point along the inbound line until the plan lets go. It never
+# turns while moving; it stops, wobbles, then leaves. That bounce is the loop
+# visible at every corner.
+#
+# Releasing the waypoint at 0.6m means the outbound leg becomes active while
+# the vehicle is still inbound and still carrying speed, so it TRANSLATES
+# through the corner on an arc - which is what a multirotor should do, and
+# what a stop-and-pivot cannot. It passes within ~0.6m of the point instead of
+# balancing on it, which is the trade that was explicitly accepted
+# ("overshooting a little is fine").
+MISSION_WP_RADIUS_PRECISE = 0.20  # m, corner acceptance sphere
 MISSION_WP_RADIUS_3D = 0.35       # m, sphere for legs that move vertically
 # 0.4 -> 0.6 m/s. This gate decides WHICH pass through the waypoint counts as
 # an arrival, and 0.4 was rejecting the best one. The vehicle's first approach
@@ -1222,7 +1241,15 @@ def _corner_speed(theta_deg):
         return 0.4                   # gentle turn (octagon vertices, 45deg)
     if theta_deg < 115.0:
         return 0.15                  # right-angle turns (letter strokes)
-    return 0.35                      # hairpin: SWEEP it, do not stop on it
+    return 0.0                       # hairpin: STOP. The full dataset says
+                                     # turn handedness is correct when the
+                                     # vehicle is slow at the vertex (star122
+                                     # full stops: 5/6 right) and a COIN FLIP
+                                     # when it carries speed through (every
+                                     # sweep variant: 0-2/6 with ~+200 deg
+                                     # left loops). The sweep experiments
+                                     # traded the corner's direction for
+                                     # speed without knowing it.
 
 
 def build_mission():
@@ -1256,6 +1283,65 @@ def build_mission():
         star_pts.append((6.0 * math.cos(a), 6.0 * math.sin(a)))
     for k in [0, 2, 4, 1, 3, 0]:
         wp(star_pts[k][0], star_pts[k][1], -8.0)
+
+    if MISSION_SHAPE == "star" and os.environ.get("NINJAPILOT_STAR_ARCS") == "1":
+        # ARC CORNERS - EXPERIMENTAL, and the first flight FAILED (star131:
+        # cross-track 6.56m mean, closest approach 4.65m, 254s, handedness
+        # forced at only 3/6). The fillet radii the geometry allows at these
+        # corner angles (0.09-0.22m for a 0.5m vertex miss) need 2-11 m/s^2
+        # of centripetal acceleration at real arrival speeds - untrackable,
+        # so the vehicle spirals hunting the ring and the 12 deg exit window
+        # releases it at a random azimuth. Usable only if entry speed is
+        # genuinely enforced AND a much larger miss is accepted. Kept for
+        # that future, off by default.
+        # Each vertex is a (tangent-entry, CircleRight-centre)
+        # pair from tools/star_geom.fillet_plan() - the single source of
+        # truth, shared with every scorer. The handedness of each corner is
+        # now a property of the PATH: the follower is handed a clockwise arc
+        # and exits it when the velocity points down the next leg
+        # (PointingTowardsNext). This replaces every prior attempt to coax a
+        # point-attractor into turning the right way, which star130 proved is
+        # a coin flip (yaw disabled: identical corners split 2 right / 4
+        # left).
+        plan = fillet_plan()
+        actions = [
+            # [0] climb: 3D acceptance, confirmed arrival
+            {"Mode": "FollowVector", "ModeParameters": [0, MISSION_SPEED, 0, 0],
+             "EndCondition": "DistanceToTarget",
+             "ConditionParameters": [MISSION_WP_RADIUS_3D, 1.0,
+                                     MISSION_CONFIRM_SPEED, MISSION_DWELL_S],
+             "Command": "OnConditionNextWaypoint",
+             "JumpDestination": 0, "ErrorDestination": 0},
+            # [1] leg to a tangent-entry: plain fly-through (the arc, not the
+            # entry point, owns the corner)
+            {"Mode": "FollowVector", "ModeParameters": [0, MISSION_SPEED, 0, 0],
+             "EndCondition": "DistanceToTarget",
+             "ConditionParameters": [0.45, 0, 0, 0],
+             "Command": "OnConditionNextWaypoint",
+             "JumpDestination": 0, "ErrorDestination": 0},
+            # [2] the arc itself: clockwise, exit when velocity is within
+            # 12 deg of the bearing to the next waypoint (= the next leg)
+            {"Mode": "CircleRight", "ModeParameters": [0, 0, 0, 0],
+             "EndCondition": "PointingTowardsNext",
+             "ConditionParameters": [12, 0, 0, 0],
+             "Command": "OnConditionNextWaypoint",
+             "JumpDestination": 0, "ErrorDestination": 0},
+            # [3] land (same parameters as ever)
+            {"Mode": "Land", "ModeParameters": [0, 0, 0.6, 1],
+             "EndCondition": "None", "ConditionParameters": [0, 0, 0, 0],
+             "Command": "OnConditionNextWaypoint",
+             "JumpDestination": 0, "ErrorDestination": 0},
+        ]
+        act_for = {"climb": 0, "entry": 1, "arc": 2, "home": 1, "land": 3}
+        wps = []
+        for w in plan:
+            if w["kind"] == "arc" and w["dir"] != "CircleRight":
+                raise AssertionError("star corner generated a LEFT arc - "
+                                     "geometry bug, do not fly this")
+            wps.append({"Position": [w["pos"][0], w["pos"][1], w["pos"][2]],
+                        "Velocity": w["vel"], "Action": act_for[w["kind"]],
+                        "_arc": w["kind"] == "arc"})
+        return wps, actions
 
     if MISSION_SHAPE == "star":
         wp(0.0, 0.0, -8.0)
@@ -2271,7 +2357,9 @@ def mission_test():
     # vehicle so the user never has to right-click -> Follow manually.
     trail_node = transport.Node()
     subscribe_gps_noise(trail_node)
-    publish_planned_trail(trail_node, wps)
+    # Arc-centre waypoints are control points, not places the vehicle goes -
+    # drawing lines through them would show a jagged phantom path.
+    publish_planned_trail(trail_node, [w for w in wps if not w.get("_arc")])
     gui_follow(trail_node)
     flown = FlownTrail(trail_node)
 
@@ -2311,7 +2399,14 @@ def mission_test():
     # phase doing exactly that). Flip it on after PathPlanner engages,
     # revert in the test wrapper when the mission is over.
     time.sleep(0.5)
-    set_yaw_control(client, "pathdirection")
+    # NINJAPILOT_YAW_MODE=manual is the isolation experiment for the left
+    # loop at every corner: the lateral drift that seeds the loop builds
+    # EXACTLY during the nose sweep (cross-track 0.04 -> 0.67m while yaw
+    # slews -54 -> +90 deg), every corner, always leftward - and every star
+    # corner turns right, so the nose always sweeps the same way. If the
+    # loop vanishes with yaw-following off, the cause is translate-while-
+    # yawing coupling, not path geometry.
+    set_yaw_control(client, os.environ.get("NINJAPILOT_YAW_MODE", "pathdirection"))
 
     start = time.time()
     last_log = 0.0

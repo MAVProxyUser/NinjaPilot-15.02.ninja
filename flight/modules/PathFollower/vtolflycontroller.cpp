@@ -50,6 +50,7 @@ extern "C" {
 #include <velocitydesired.h>
 #include <stabilizationdesired.h>
 #include <attitudestate.h>
+#include <gyrostate.h>
 #include <takeofflocation.h>
 #include <poilocation.h>
 #include <manualcontrolcommand.h>
@@ -371,7 +372,27 @@ int8_t VtolFlyController::UpdateStabilizationDesired(bool yaw_attitude, float ya
 
     controlNE.GetNECommand(&northCommand, &eastCommand);
 
-    float angle_radians = DEG2RAD(attitudeState.Yaw);
+    // Convert the NED command to body frame using PREDICTED yaw, not
+    // current yaw.
+    //
+    // The attitude loop takes ~130ms to achieve a commanded tilt (relay
+    // autotune: roll 113ms, pitch 155ms). If the body is yawing, the tilt is
+    // achieved in a frame that has rotated ~ yawRate*lag past the one it was
+    // computed in, so the applied acceleration lands rotated IN the yaw
+    // direction. While BRAKING (command anti-parallel to travel) a
+    // clockwise-rotated brake vector has an error component pointing LEFT of
+    // travel - integrate that over a 5s braking approach with the corner
+    // pre-turn sweeping yaw right at 35 deg/s and you get ~0.5m of leftward
+    // drift arriving at every corner. That drift seeded the left-handed
+    // "cursive-l" loop observed at star vertices across dozens of runs, and
+    // its isolation was empirical: identical stop-corner missions flew +570
+    // deg LEFT curls with yaw-following on (star132) and near-clean corners
+    // with it off (star133 control). Compensating with predicted yaw aims
+    // the thrust vector where it will be needed when it is actually achieved.
+    GyroStateData gyroState;
+    GyroStateGet(&gyroState);
+    const float YAW_LAG_COMP_S = 0.13f; // ~ attitude-loop time constant
+    float angle_radians = DEG2RAD(attitudeState.Yaw + gyroState.z * YAW_LAG_COMP_S);
     float cos_angle     = cosf(angle_radians);
     float sine_angle    = sinf(angle_radians);
     float maxPitch = vtolPathFollowerSettings->MaxRollPitch;

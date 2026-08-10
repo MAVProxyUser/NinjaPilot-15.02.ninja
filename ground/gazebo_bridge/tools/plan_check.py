@@ -29,7 +29,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from star_geom import ORDER
+from star_geom import ORDER, fillet_plan
 
 
 def main():
@@ -47,7 +47,7 @@ def main():
     legs = []
     for r in pd:
         d = r["data"]
-        if d.get("Mode") not in ("FollowVector", "Land"):
+        if d.get("Mode") not in ("FollowVector", "Land", "CircleRight", "CircleLeft"):
             continue
         # decode_fcwd emits vector fields as LISTS (N, E, D), not dicts.
         end = tuple(d["End"])
@@ -65,16 +65,31 @@ def main():
                  d.get("StartingVelocity", 0), d.get("EndingVelocity", 0),
                  mp[1] if len(mp) > 1 else 0, brg, d.get("Mode", "?")))
 
-    # Does the flown plan match what the scorers assume?
+    # Does the flown plan match what the scorers assume? Two known shapes:
+    # the default stop-corner star (ORDER) and the experimental fillet plan
+    # (NINJAPILOT_STAR_ARCS=1). Match whichever fits; warn only if NEITHER.
     flown = [(round(e[0], 2), round(e[1], 2)) for _, e, _ in legs]
-    assumed = [(round(p[0], 2), round(p[1], 2)) for p in ORDER]
+    cand_plain = [(round(q[0], 2), round(q[1], 2)) for q in ORDER]
+    cand_arcs = [(round(w["pos"][0], 2), round(w["pos"][1], 2))
+                 for w in fillet_plan()]
+
+    def fits(cand):
+        return (len(flown) == len(cand)
+                and all(math.hypot(f[0] - c[0], f[1] - c[1]) <= 0.05
+                        for f, c in zip(flown, cand)))
+    if fits(cand_plain):
+        assumed = cand_plain
+    elif fits(cand_arcs):
+        assumed = cand_arcs
+    else:
+        assumed = cand_plain  # report the mismatch against the default
     mismatch = [(i, f, a) for i, (f, a) in enumerate(zip(flown, assumed)) if
                 math.hypot(f[0] - a[0], f[1] - a[1]) > 0.05]
     if len(flown) != len(assumed) or mismatch:
         print("  !!! PLANNED PATH MISMATCH - every score in this run is being")
         print("      measured against the WRONG shape. Fix tools/star_geom.py")
         print("      to match build_mission() before believing any number.")
-        print("      logged legs %d, star_geom waypoints %d" % (len(flown), len(assumed)))
+        print("      logged legs %d, expected waypoints %d" % (len(flown), len(assumed)))
         for i, f, a in mismatch[:5]:
             print("      leg %d: flown to (%.2f, %.2f), star_geom says (%.2f, %.2f)"
                   % (i, f[0], f[1], a[0], a[1]))
