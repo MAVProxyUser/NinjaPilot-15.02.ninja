@@ -391,7 +391,7 @@ int8_t VtolFlyController::UpdateStabilizationDesired(bool yaw_attitude, float ya
     // the thrust vector where it will be needed when it is actually achieved.
     GyroStateData gyroState;
     GyroStateGet(&gyroState);
-    const float YAW_LAG_COMP_S = 0.13f; // ~ attitude-loop time constant
+    const float YAW_LAG_COMP_S = 0.26f; // PROBE: 2x - if this flips the residual drift RIGHT, bracket and interpolate
     float angle_radians = DEG2RAD(attitudeState.Yaw + gyroState.z * YAW_LAG_COMP_S);
     float cos_angle     = cosf(angle_radians);
     float sine_angle    = sinf(angle_radians);

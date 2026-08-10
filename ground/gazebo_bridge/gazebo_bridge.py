@@ -1181,7 +1181,12 @@ MISSION_WP_RADIUS = 1.0
 # what a stop-and-pivot cannot. It passes within ~0.6m of the point instead of
 # balancing on it, which is the trade that was explicitly accepted
 # ("overshooting a little is fine").
-MISSION_WP_RADIUS_PRECISE = 0.20  # m, corner acceptance sphere
+# 0.20 -> 0.13. The stop point sits at roughly the sphere radius, so this is
+# the vertex-touch distance: at 0.20 the corners read as clipping ~0.15m
+# inside the star's tips ("a bit boxy"). 0.13 targets ~0.10m. The settle-wait
+# risk that made tight spheres expensive is gone with yaw-following off - the
+# vehicle now parks cleanly on first approach (star133/136).
+MISSION_WP_RADIUS_PRECISE = 0.13  # m, corner acceptance sphere
 MISSION_WP_RADIUS_3D = 0.35       # m, sphere for legs that move vertically
 # 0.4 -> 0.6 m/s. This gate decides WHICH pass through the waypoint counts as
 # an arrival, and 0.4 was rejecting the best one. The vehicle's first approach
@@ -2406,7 +2411,24 @@ def mission_test():
     # corner turns right, so the nose always sweeps the same way. If the
     # loop vanishes with yaw-following off, the cause is translate-while-
     # yawing coupling, not path geometry.
-    set_yaw_control(client, os.environ.get("NINJAPILOT_YAW_MODE", "pathdirection"))
+    # DEFAULT IS "manual" (yaw-following OFF), decided by controlled
+    # experiment on 2026-08-09. Identical stop-corner missions:
+    #
+    #   yaw OFF  (star133)              xtrack 0.06m mean / 0.19m MAX -
+    #                                   cleanest run of the project, corners
+    #                                   are sharp points, 107s
+    #   yaw ON                (star132) 0.19 / 0.78m, +570 deg left mills
+    #   yaw ON + 0.13s comp   (star134) 0.17 / 0.50m
+    #   yaw ON + 0.26s comp   (star135) 0.14 / 0.45m - better but the drift
+    #                                   did NOT flip sign, so the frame-lag
+    #                                   model is incomplete and further blind
+    #                                   tuning is not justified
+    #
+    # Yawing the nose while translating measurably corrupts position by
+    # ~0.3-0.5m per corner even with predicted-yaw compensation. Until the
+    # residual mechanism is identified, nose-following costs 3x the tracking
+    # accuracy - set NINJAPILOT_YAW_MODE=pathdirection to accept that trade.
+    set_yaw_control(client, os.environ.get("NINJAPILOT_YAW_MODE", "manual"))
 
     start = time.time()
     last_log = 0.0

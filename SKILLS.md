@@ -448,36 +448,34 @@ To publish wind without the GUI (speed v m/s FROM bearing B):
 `linear_velocity.x = -v*sin(B)`, `.y = -v*cos(B)`, and `enable_wind: true`
 or WindEffects applies nothing. Links need `<enable_wind>` to be pushed.
 
-## Star mission: current settled values
+## Star mission: current settled values (2026-08-09, corner saga closed)
 
-Verified over three consecutive clean runs (star114/115/116): cross-track
-0.12-0.15 m mean, closest approach 0.10-0.12 m to every waypoint, overshoot
-0.01-0.04 m, roll RMS ~1.0 deg / pitch ~2.5 deg, 115-123 s.
+Best verified: **star136 - cross-track 0.05m mean / 0.12m MAX, zero
+overshoot, 109s** (and star133 at 0.06/0.19 before it). The single biggest
+factor is that PathFollower yaw stays in AxisLock: yawing while translating
+corrupts position ~0.3-0.5m per corner through attitude-lag frame rotation
+(see CLAUDE.md "cursive-l" section for mechanism + isolation table).
 
 | knob | value | note |
 |---|---|---|
-| MISSION_SPEED | 1.5 m/s | leg cruise, published in ModeParameters[1] |
-| MISSION_WP_RADIUS | 1.0 m | FLY-THROUGH waypoints only |
-| MISSION_WP_RADIUS_PRECISE | 0.15 m | corners, paired with confirm+dwell |
-| MISSION_WP_RADIUS_3D | 0.35 m | vertical legs (1.0 starts the star 1m low) |
-| MISSION_CONFIRM_SPEED | 0.6 m/s | 0.4 rejects the best (first) pass |
-| MISSION_DWELL_S | 0.3 s | each 0.1s costs ~0.8s of mission time |
-| HorizontalVelPID | [5.5, 0.5, 1.4, 15] | **Kd is the fix; Kp 7.0 tumbles** |
-| HorizontalPosP | 0.35 | 0.60 gives 24 command reversals vs 9 |
-| PATH_LEG_ACCEL | 0.8 | along-leg accel |
-| PATH_ARRIVAL_GAIN | 0.85 | linear arrival taper slope |
-| MaxRollPitch | 25 deg | 40 overshot to 61 deg and tipped |
-| yawSlewDps | 35 | airframe ceiling; 60 took yaw RMS 8.4 -> 15.3 deg |
-| CruiseControl | 1.25 / 40 deg | tilt-lift; off = 2.5x worse altitude |
+| Yaw during missions | AxisLock (default) | NINJAPILOT_YAW_MODE=pathdirection opts into nose-following at ~3x tracking cost |
+| Corner style | FULL STOP | carry-through corners flip a coin on turn direction |
+| MISSION_SPEED | 1.5 m/s | leg cruise, ModeParameters[1] |
+| MISSION_WP_RADIUS_PRECISE | 0.13 m | vertex-touch distance; half-plane backstop |
+| MISSION_CONFIRM_SPEED / DWELL | 0.9 / 0.1s | instant release - the anti-toilet-bowl half |
+| MISSION_WP_RADIUS_3D | 0.35 m | vertical legs |
+| HorizontalVelPID | [5.5, 0.5, 1.4, 15] | Kd is the load-bearing part |
+| HorizontalPosP | 0.35 | 0.60 fights the arrival |
+| PATH_LEG_ACCEL / ARRIVAL_GAIN | 0.8 / 0.85 | leg profile / linear arrival taper |
+| YAW_LAG_COMP_S | 0.26 | predicted-yaw conversion; helps, incomplete |
+| NINJAPILOT_STAR_ARCS=1 | experimental | CircleRight fillet corners; failed at these angles, kept for future |
 
-Change ONE variable per run, and repeat a config before believing a 0.05 m
-difference - that is inside the noise.
+Analysis additions: `corner_handedness.py` (vertex-centred turn direction -
+read its docstring for the three broken metrics it replaced), `plan_check.py`
+(logged plan vs star_geom, matches either mission shape), `wp_arrival.py`,
+`corner_probe.py`. run_star.sh purges slots after decode and caps kept logs.
 
-**Three passes are not margin.** Kp 7.0 passed star109/110/111 (98 s, zero
-overshoot) and then tumbled into the ground at wp3 on star113 - roll p2p
-170 deg, 7.25 m to 0.06 m in two seconds. At 5.5 the same tune is smoother on
-every axis and only slower. If a gain is near a known crash point, get several
-consecutive clean runs before quoting it.
+Change ONE variable per run; repeat before believing < 0.05m differences.
 
 ## Git hygiene for experiments
 

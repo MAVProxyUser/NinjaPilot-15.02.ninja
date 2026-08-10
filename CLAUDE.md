@@ -43,6 +43,60 @@ under `ground/pyuavtalk/` and `ground/gazebo_bridge/`). Rules below exist
 because they were each learned the hard way in earlier sessions - read
 them before making changes, not after something breaks.
 
+## SETTLED: the corner "cursive-l" - yawing while translating corrupts position (2026-08-09, late)
+
+The user reported a left-handed loop at every star vertex, run after run,
+while every corner of this star turns RIGHT. It took ~15 runs and three
+successively broken metrics to isolate, and the user's eyeball was right at
+every step where the metrics were wrong.
+
+THE MECHANISM: UpdateStabilizationDesired converted NED commands to body
+frame using CURRENT yaw. The attitude loop achieves a commanded tilt ~130ms
+later (relay autotune: roll 113ms / pitch 155ms), by which time the corner
+pre-turn has yawed the body ~4.6 deg further right - so the achieved thrust
+vector is rotated clockwise of the intended one. While BRAKING (command
+anti-parallel to travel) that rotation has an error component pointing LEFT
+of travel. Integrated over a ~5s braking approach: ~0.5m of leftward arrival
+drift, every corner, always the same side. Partially fixed with
+predicted-yaw conversion (attitudeState.Yaw + gyro.z * lag); 0.13s and
+0.26s both help but neither flips the drift sign, so the lag model is
+INCOMPLETE - candidates for the residual: velocity-estimate frame lag, the
+measured roll/pitch response asymmetry, model-level rotor effects. Do not
+blind-tune further; instrument first.
+
+THE ISOLATION (stop corners + instant release in all three, one variable):
+    star132  yaw-following ON        xtrack 0.19 / 0.78m   +570deg left mills
+    star133  yaw-following OFF       xtrack 0.06 / 0.19m   cleanest run of
+                                     the project by 3x; corners are points
+    star134  yaw ON + 0.13s comp     0.17 / 0.50m
+    star135  yaw ON + 0.26s comp     0.14 / 0.45m (no sign flip -> stop)
+
+CONSEQUENCE, now the default: PathFollower yaw stays in AxisLock
+("manual"); NINJAPILOT_YAW_MODE=pathdirection opts back into nose-following
+at a measured ~3x tracking cost. Corners are FULL STOPS with a 0.20m sphere,
+0.9 confirm, 0.1s dwell, and the half-plane arrival as backstop - the
+complete dataset says slow-at-vertex corners are clean while carry-through
+corners flip a coin on turn direction.
+
+DEAD ENDS with measured verdicts (do not retry without new information):
+  - Arc-fillet corners via CircleRight + PointingTowardsNext (stock
+    primitives, first-ever use): geometry at these corner angles forces
+    radii needing 2-11 m/s^2 centripetal at real arrival speeds. star131:
+    6.56m mean cross-track. Parked behind NINJAPILOT_STAR_ARCS=1.
+  - Rotating the follower's along-track feed-forward into the turn: near
+    the vertex it points down the NEXT leg while still on the current one.
+    star126: 2.22m cross-track, ground contact.
+  - Sweep corners (nonzero corner speed): 0-2/6 correct handedness across
+    four configs; the direction is decided by which side of the vertex the
+    vehicle happens to clip.
+
+METRIC LESSONS (three broken in a row, documented in
+tools/corner_handedness.py): a cross product computed in (North,East) order
+is MIRRORED vs the plot (x=East, y=North) and inverts every verdict;
+path-ratio metrics are confounded by arrival quality; leg-time windows miss
+corners once waypoints release early. The working metric is vertex-centred
+and time-clustered.
+
 ## OPEN: unexplained intermittent flyaway at wp3 (2026-08-09)
 
 Twice, on otherwise unremarkable runs, the vehicle departed from waypoint 3
