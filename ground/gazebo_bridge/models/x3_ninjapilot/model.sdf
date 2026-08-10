@@ -61,6 +61,115 @@
                     <reference_altitude>30.0</reference_altitude>
                 </air_pressure>
             </sensor>
+
+            <!-- ============ FPV CAMERA ARRAY ============================
+                 Three cameras on the airframe, for vision positioning (VPS)
+                 and for acquiring objects crossing the airspace.
+
+                 ORIENTATION. A Gazebo camera looks down its own +X axis, and
+                 these poses are relative to X3/base_link, whose +X is the
+                 nose. So a pose rotation about Y (pitch) aims the camera:
+                 pitch +90deg swings +X down to -Z, pitch -90deg swings it up
+                 to +Z. Signs are the usual trap here - if an image looks
+                 upside down or 180deg out, it is this line, not the code
+                 consuming it.
+
+                 These are SENSORS ON AN EXISTING LINK: no mass, no inertia,
+                 no new joints. The flight dynamics - and therefore every
+                 tuning value verified so far - are untouched. The only cost
+                 is render time, which is why the rates are modest and each
+                 camera can be turned off individually with <always_on>0.
+
+                 The Sensors system plugin (ogre2) is already loaded by
+                 worlds/quadcopter_ninjapilot.sdf; without it these sensors
+                 exist but never publish.
+
+                 TOPIC NAMING MATTERS: gz-sim derives the camera_info topic
+                 by replacing the LAST component of <topic>. With a flat
+                 name like X3/cam_down, all three cameras collapse onto one
+                 shared /X3/camera_info and you cannot tell whose intrinsics
+                 you are reading - verified, it really does this. Nesting as
+                 X3/<name>/image gives each its own
+                 X3/<name>/camera_info. Use those intrinsics for any
+                 pixel->bearing maths rather than hardcoding a focal
+                 length. -->
+
+            <!-- DOWNWARD: the VPS camera. Straight down at hover, so ground
+                 texture flows across the frame with vehicle translation -
+                 the input an optical-flow / feature-tracking position
+                 estimate needs. The farm world's ground has real texture to
+                 track, unlike the empty-plane world. 40Hz: flow estimation
+                 degrades fast when inter-frame motion gets large. -->
+            <sensor name="cam_down" type="camera">
+                <always_on>1</always_on>
+                <update_rate>40</update_rate>
+                <topic>X3/cam_down/image</topic>
+                <pose>0 0 -0.03 0 1.5707963 0</pose>
+                <camera>
+                    <horizontal_fov>1.5707963</horizontal_fov>
+                    <image>
+                        <width>640</width>
+                        <height>480</height>
+                        <format>R8G8B8</format>
+                    </image>
+                    <clip>
+                        <near>0.05</near>
+                        <far>100</far>
+                    </clip>
+                </camera>
+            </sensor>
+
+            <!-- UPWARD: the overhead-object camera. Aimed at the sky, where
+                 a target crossing above shows as a moving object against a
+                 near-uniform background - the easiest detection case there
+                 is. Wider FOV (110deg) because an object passing overhead
+                 crosses angle quickly and a narrow lens loses it between
+                 frames. -->
+            <sensor name="cam_up" type="camera">
+                <always_on>1</always_on>
+                <update_rate>30</update_rate>
+                <topic>X3/cam_up/image</topic>
+                <pose>0 0 0.03 0 -1.5707963 0</pose>
+                <camera>
+                    <horizontal_fov>1.9198622</horizontal_fov>
+                    <image>
+                        <width>640</width>
+                        <height>480</height>
+                        <format>R8G8B8</format>
+                    </image>
+                    <clip>
+                        <near>0.05</near>
+                        <far>300</far>
+                    </clip>
+                </camera>
+            </sensor>
+
+            <!-- FORWARD, TILTED 45deg UP from the body axis - the FPV racing
+                 convention. The tilt is measured against the AIRFRAME, and
+                 it exists because a quad flies forward by pitching NOSE
+                 DOWN: at a 45deg nose-down attitude this camera is looking
+                 level at the horizon, which is exactly when a pilot (or a
+                 tracker) most needs to see where it is going. At hover it
+                 looks 45deg up instead, so it also doubles as a second
+                 view on anything approaching from ahead and above. -->
+            <sensor name="cam_fpv45" type="camera">
+                <always_on>1</always_on>
+                <update_rate>30</update_rate>
+                <topic>X3/cam_fpv45/image</topic>
+                <pose>0.08 0 0.01 0 -0.7853982 0</pose>
+                <camera>
+                    <horizontal_fov>1.7453293</horizontal_fov>
+                    <image>
+                        <width>640</width>
+                        <height>480</height>
+                        <format>R8G8B8</format>
+                    </image>
+                    <clip>
+                        <near>0.05</near>
+                        <far>300</far>
+                    </clip>
+                </camera>
+            </sensor>
         </link>
         <link name="X3/rotor_0">
             <pose frame="">0.13 -0.22 0.023 0 -0 0</pose>

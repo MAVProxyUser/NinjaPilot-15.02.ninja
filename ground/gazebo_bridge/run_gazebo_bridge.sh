@@ -65,7 +65,10 @@ trap cleanup EXIT INT TERM
 # two separate processes: a headless server driving the actual simulation,
 # and a GUI client that just renders whatever the server is doing.
 echo "Starting Gazebo server with $WORLD ..."
-gz sim -s -r "$WORLD" &
+# --headless-rendering: camera sensors make the server open a visible
+# "OgreWindow (0)_0" render window on macOS. This keeps the context
+# offscreen - verified the cameras still publish real frames with it.
+gz sim -s -r --headless-rendering "$WORLD" &
 GZ_SERVER_PID=$!
 sleep 6
 

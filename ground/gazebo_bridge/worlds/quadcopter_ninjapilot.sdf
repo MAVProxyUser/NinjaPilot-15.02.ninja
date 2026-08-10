@@ -353,6 +353,85 @@
       <topic>/ninjapilot/gps_noise</topic>
     </plugin>
 
+    <!-- ============ FPV CAMERA VIEWS ==============================
+         The three airframe cameras, stacked in the BOTTOM-RIGHT corner,
+         bottom to top: Down, FPV 45deg, Up.
+
+         TWO RULES, both learned by getting them wrong:
+
+         1. <anchors target="X"> resolves against a panel whose plugin
+            name="X" AND <title>X</title> MATCH. With name="cam_down" but
+            title "Down (VPS)", the target never resolved and the panels
+            floated wherever Qt put them. The stock Wind/GPS panels work
+            precisely because their name and title are identical - copy
+            that pattern, and keep the two in step when renaming.
+
+         2. Declaration order is load-bearing: a target must already be
+            declared when referenced, so the bottom panel comes first and
+            each one above follows. Reordering the stack means editing both
+            the order AND the anchor targets.
+
+         topic_picker is TRUE deliberately: with it false, gz-gui replaces
+         the picker with a permanent "Subscribed to: <topic>" banner that
+         eats most of a small panel (that string is baked into
+         libImageDisplay.dylib; there is no separate switch for it).
+
+         The cameras DO render. An earlier note here claimed they were
+         blank on macOS - that was measured with the server running ALONE.
+         `gz sim -s` only renders once a GUI client has brought up a
+         context; with both up, frames carry real scene content. -->
+
+    <plugin filename="ImageDisplay" name="Down">
+      <gz-gui>
+        <title>Down</title>
+        <property type="bool" key="showTitleBar">true</property>
+        <property type="bool" key="resizable">true</property>
+        <property type="double" key="width">300</property>
+        <property type="double" key="height">225</property>
+        <property type="string" key="state">floating</property>
+        <anchors target="3D View">
+          <line own="bottom" target="bottom"/>
+          <line own="right" target="right"/>
+        </anchors>
+      </gz-gui>
+      <topic>/X3/cam_down/image</topic>
+      <topic_picker>true</topic_picker>
+    </plugin>
+
+    <plugin filename="ImageDisplay" name="FPV 45deg">
+      <gz-gui>
+        <title>FPV 45deg</title>
+        <property type="bool" key="showTitleBar">true</property>
+        <property type="bool" key="resizable">true</property>
+        <property type="double" key="width">300</property>
+        <property type="double" key="height">225</property>
+        <property type="string" key="state">floating</property>
+        <anchors target="Down">
+          <line own="bottom" target="top"/>
+          <line own="right" target="right"/>
+        </anchors>
+      </gz-gui>
+      <topic>/X3/cam_fpv45/image</topic>
+      <topic_picker>true</topic_picker>
+    </plugin>
+
+    <plugin filename="ImageDisplay" name="Up">
+      <gz-gui>
+        <title>Up</title>
+        <property type="bool" key="showTitleBar">true</property>
+        <property type="bool" key="resizable">true</property>
+        <property type="double" key="width">300</property>
+        <property type="double" key="height">225</property>
+        <property type="string" key="state">floating</property>
+        <anchors target="FPV 45deg">
+          <line own="bottom" target="top"/>
+          <line own="right" target="right"/>
+        </anchors>
+      </gz-gui>
+      <topic>/X3/cam_up/image</topic>
+      <topic_picker>true</topic_picker>
+    </plugin>
+
     </gui>
 
     <light type="directional" name="sun">
@@ -368,6 +447,32 @@
       </attenuation>
       <direction>-0.5 0.1 -0.9</direction>
     </light>
+
+    <!-- Scene as the CAMERA SENSORS see it. The <scene> element near the
+         top of this file belongs to the GUI's MinimalScene plugin and
+         styles only the interactive 3D view; sensor rendering never reads
+         it, which is why camera frames were a flat grey field while the GUI
+         looked fine.
+
+         <sky> is gz-sim's built-in procedural sky - a skybox and a sun
+         disc, drawn once per frame at effectively no cost (it is
+         background geometry with no lighting or physics contribution). It
+         replaces the uniform background colour that filled most of any
+         upward-looking frame. -->
+    <scene>
+      <ambient>0.6 0.6 0.6 1</ambient>
+      <background>0.55 0.72 0.92 1</background>
+      <sky></sky>
+      <shadows>true</shadows>
+    </scene>
+
+    <!-- NO ground visual here, deliberately. A 2km green quad was tried
+         to fill the horizon beyond the farm mesh and REVERTED: the farm's
+         own terrain dips below z=0 in places, so a plane high enough to be
+         seen at the horizon also punched up through the scene's real
+         textured grass. The farm mesh owns everything the eye sees on the
+         ground; anything added here has to sit below its LOWEST point to be
+         safe, which then reads as a cliff at the mesh edge. Left alone. -->
 
     <model name="ground_plane">
       <static>true</static>
