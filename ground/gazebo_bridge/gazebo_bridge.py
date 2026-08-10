@@ -1162,7 +1162,7 @@ MISSION_WP_RADIUS = 1.0
 # Tightening only became affordable once path_endpoint stopped capping its
 # feed-forward at EndingVelocity=0 (PATH_ARRIVAL_MIN_CAP) - before that the
 # last 0.1m closed at ~0.01 m/s and a tighter sphere would simply have stalled.
-MISSION_WP_RADIUS_PRECISE = 0.06  # m, corner acceptance sphere
+MISSION_WP_RADIUS_PRECISE = 0.15  # m, corner acceptance sphere
 MISSION_WP_RADIUS_3D = 0.35       # m, sphere for legs that move vertically
 # 0.4 -> 0.6 m/s. This gate decides WHICH pass through the waypoint counts as
 # an arrival, and 0.4 was rejecting the best one. The vehicle's first approach
@@ -1173,8 +1173,8 @@ MISSION_WP_RADIUS_3D = 0.35       # m, sphere for legs that move vertically
 # pass is also nearer what was asked for: slide into the corner already
 # pointing down the next leg, touch the point, accelerate out - a racing line
 # rather than a full stop and pivot.
-MISSION_CONFIRM_SPEED = 0.6       # m/s, at-or-below counts as stopped
-MISSION_DWELL_S = 0.3             # s it must hold that before advancing
+MISSION_CONFIRM_SPEED = 0.9       # m/s, at-or-below counts as arrived
+MISSION_DWELL_S = 0.1             # s it must hold that before advancing
 # 0.3 -> 0.8 -> 0.5s. The dwell was widened when the corner turn still had to
 # finish while parked. It does not any more: PRETURN_DIST starts the rotation
 # 3.5m out and the vehicle now arrives already pointing down the next leg, so
@@ -1202,17 +1202,27 @@ def _corner_speed(theta_deg):
     # RAISING the cruise speed made the mission SLOWER overall (252s against
     # 122s). The overshoot, not the cruise, was the time sink.
     #
-    # Zero costs nothing, because leg speed no longer comes from the endpoints
-    # (ModeParameters[1] carries the cruise). The profile becomes the trapezoid
-    # it should always have been: accelerate out of the corner, cruise, brake
-    # to a standstill ON the point, turn, accelerate out again.
+    # A full stop (0.0) was flown for many runs and is the WRONG shape. Coming
+    # to a standstill forces the vehicle to satisfy a tight acceptance sphere
+    # while slow, and because the arrival oscillates between roughly 0.06m and
+    # 0.35m it ends up waiting for the coincidence of "close enough AND slow
+    # enough" - 10-14s of circling the point at every corner, which is 49-72%%
+    # of the entire mission clock and is exactly the "toilet bowling" seen from
+    # the Gazebo trail. Raising the velocity gain does not fix it (star124: the
+    # loop just oscillates), because the problem is the demand, not the
+    # authority.
+    #
+    # A nonzero corner speed asks for the shape actually wanted: turn INTO the
+    # corner, let the tail come round while still moving, and accelerate out -
+    # a racing line rather than a stop-and-pivot. The vehicle still passes
+    # through the point; it simply never has to balance on it.
     if theta_deg < 25.0:
         return MISSION_SPEED         # straight-through: keep cruising
     if theta_deg < 70.0:
         return 0.4                   # gentle turn (octagon vertices, 45deg)
     if theta_deg < 115.0:
         return 0.15                  # right-angle turns (letter strokes)
-    return 0.0                       # hairpin: stop on the point
+    return 0.35                      # hairpin: SWEEP it, do not stop on it
 
 
 def build_mission():
@@ -2797,15 +2807,27 @@ def uavtalk_thread():
             # - which is the loop running closer to its margin, exactly what
             # more derivative is for.
             #
-            # Kp 7.0 -> 5.5. 7.0 is MARGINAL, not safe: star109/110/111 all
-            # passed on it, and then star113 - identical except for a 1.25 m/s
-            # cruise - tumbled at wp3 and hit the ground, roll peak-to-peak
-            # 170deg, 9m of translation in the 2s it took to fall from 7.25m.
-            # That is the same failure the history records at Kp 6.5, so the
-            # damping raised the ceiling but did not raise it as far as 7.0.
-            # Three passes are not evidence of margin when the fourth crashes;
-            # back off and keep the damping, which is where the real gain came
-            # from.
+            # Kp 7.0, restored. It was reduced to 5.5 on the strength of a
+            # star113 "tumble" - roll peak-to-peak 170deg - that NEVER HAPPENED:
+            # that reading came from 1045 timestamp-outlier records, and with
+            # them filtered the run's real attitude was roll p2p 7.0deg and
+            # pitch 19.7deg, i.e. ordinary flight. star113 was the same
+            # unexplained wp3 flyaway that later recurred at Kp 5.5 (star123),
+            # so it is not gain-related at all.
+            #
+            # The reason to want 7.0 back is measured: at 5.5 the vehicle
+            # arrives at 0.2m from the waypoint still doing 0.5 m/s against a
+            # 0.17 m/s commanded profile, overshoots to 0.35m, is pulled back,
+            # and takes 10-14s to settle - which is BOTH the visible loop at
+            # every corner and 49-72%% of the mission's total time. The
+            # tracking error is loop-lag x ramp-slope, and the lead term is
+            # already commanding ~0; what is missing is braking authority.
+            # (Note the codebase's own dedicated brake controller runs Kp 12.)
+            #
+            # Tested (star124) and it is NOT the lever: at 7.0 the loop is past
+            # its own stability margin - pitch RMS 2.4 -> 6.0 deg, peak-to-peak
+            # 41 deg, and overshoot 0.00 -> 0.13m. More gain just oscillates.
+            # The settling problem is not solvable by pushing this loop.
             "HorizontalVelPID": [5.5, 0.5, 1.4, 15], "VerticalVelPID": [0.6, 0.45, 0.08, 1.0],
             # ThrustLimits.Neutral is the altitude-hold PID's hover-point
             # baseline (vtolflycontroller.cpp: controlDown.UpdateNeutralThrust

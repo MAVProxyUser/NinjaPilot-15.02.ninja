@@ -297,6 +297,16 @@ void VtolFlyController::UpdateVelocityDesired()
                     frac = frac * frac * (3.0f - 2.0f * frac);
                     mPreTurnBearing = RAD2DEG(atan2f(legE, legN)) + frac * turn;
                     mPreTurnActive  = true;
+
+                    // NOTE: rotating the along-track FEED-FORWARD into the
+                    // turn by this same fraction was tried and is badly wrong.
+                    // Near the vertex the rotation approaches the full 144deg,
+                    // so the commanded velocity points down the NEXT leg while
+                    // the vehicle is still flying the current one - it stops
+                    // tracking the leg it is on. The corner geometry has to
+                    // come from the PATH (a real swept/arc corner in the
+                    // planner), not from spinning the follower's feed-forward
+                    // vector underneath an otherwise straight-line leg.
                 }
             }
         }

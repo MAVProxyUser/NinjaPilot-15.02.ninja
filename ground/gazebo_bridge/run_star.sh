@@ -61,3 +61,17 @@ done
 grep -q "wrote .*png" "$LOG" 2>/dev/null || echo "!!! TIMEOUT after ~390s - run did not finish"
 
 sed -n "/=== ${LABEL} ===/,\$p" "$LOG"
+
+# 6. The flash slots have been decoded by now, so delete them. Purging only at
+#    the START of the next run leaves a full set of another flight's slots
+#    sitting on disk in between, which is what makes the flight-number-mod-16
+#    aliasing possible in the first place. Delete them as soon as they have
+#    been read.
+rm -f "$FCWD"/233CDC*.o* 2>/dev/null || true
+
+# 7. The decoded .jsonl is the thing worth keeping, and it is ~2MB a run.
+#    Keep the most recent 12 and drop the rest so this cannot grow without
+#    bound (110MB had accumulated before this existed).
+ls -t "$SCRATCH"/*_flash.jsonl 2>/dev/null | tail -n +13 | xargs rm -f 2>/dev/null || true
+
+echo "  [cleanup] flash slots deleted; keeping the 12 most recent decoded logs"
