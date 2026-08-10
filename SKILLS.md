@@ -91,24 +91,18 @@ cd ~/ninjapilot-build && make -j4 ARM_SDK_PREFIX=arm-none-eabi- simposix
 
 ## Run a SITL test
 
-```bash
-cd "/Users/kfinisterre/Desktop/OP Revo Redux/NinjaPilot-15.02.ninja/ground/gazebo_bridge"
-NINJAPILOT_TEST_MODE=manual_hover NINJAPILOT_VERBOSE=1 \
-  nohup ./run_gazebo_bridge.sh > /tmp/gazebo_run_X.log 2>&1 & disown
-```
-
-- `NINJAPILOT_TEST_MODE`: `manual_hover` (ground-truth raw-throttle
-  10m/20m foundation test) or unset/`scripted` (estimator-based staged
-  test). `NINJAPILOT_VERBOSE=1` for high-rate debug prints.
-- The test auto-runs on UAVTalk connect; watch the log, don't wait blind:
+Use `ground/gazebo_bridge/run_star.sh <label>`. It is the only supported way
+to fly: it waits for the previous processes to actually exit, purges the flash
+slot files, verifies the directory is empty, resets the scene, flies, and runs
+the full three-log analysis - and refuses to run if any of that fails.
 
 ```bash
-timeout 200 bash -c 'until grep -q "sequence done\|CRASH DETECTED\|HARD CEILING" /tmp/gazebo_run_X.log 2>/dev/null; do sleep 3; done'
-grep -n "\[test\]" /tmp/gazebo_run_X.log
+cd ground/gazebo_bridge
+TMPDIR=/tmp ./run_star.sh star42
 ```
 
-(`sleep N` chained with other commands is blocked by the environment;
-use the `timeout N bash -c 'until ...'` polling pattern.)
+Hand-rolling the sequence is how stale slots got merged into an analysis (see
+the purge rule above).
 
 ## Reset instead of relaunch (PREFERRED iteration loop)
 
@@ -209,6 +203,22 @@ for the post-flight pull):
 ```bash
 ./venv/bin/python3 tools/decode_fcwd.py ~/ninjapilot-build/fcwd /tmp/peek.jsonl
 ```
+
+Added 2026-08-09:
+
+- `wp_arrival.py <fclog>` - per-waypoint closest approach, distance at the
+  moment the plan retired it, dwell inside 0.5 m, and overshoot PAST the point
+  along the inbound leg. Cross-track answers "were the legs straight", which is
+  a different question from "did we touch the corners" - a run can score
+  beautiful legs and still cut every waypoint by a metre.
+- `corner_probe.py <fclog>` - commanded velocity swing, `fractional_progress`
+  regression, and command reversals per corner. Answers "is the orbit COMMANDED
+  or FLOWN". Needs VelocityDesired in the log.
+- `star_geom.py` - THE mission geometry. score.py, wp_arrival.py, star_plot.py
+  and analyze_run.sh all import it. It used to be copy-pasted into four places,
+  and changing the mission silently invalidated the copies: the scorers kept
+  measuring the OLD shape and reported 1.76 m of cross-track that was purely a
+  stale planned path. Keep it in step with `build_mission()`.
 
 ## Run the relay Autotune
 
@@ -440,17 +450,34 @@ or WindEffects applies nothing. Links need `<enable_wind>` to be pushed.
 
 ## Star mission: current settled values
 
+Verified over three consecutive clean runs (star114/115/116): cross-track
+0.12-0.15 m mean, closest approach 0.10-0.12 m to every waypoint, overshoot
+0.01-0.04 m, roll RMS ~1.0 deg / pitch ~2.5 deg, 115-123 s.
+
 | knob | value | note |
 |---|---|---|
-| MISSION_SPEED | 1.5 m/s | 3-4 m/s flew but bought wavy legs and tip-overs |
+| MISSION_SPEED | 1.5 m/s | leg cruise, published in ModeParameters[1] |
+| MISSION_WP_RADIUS | 1.0 m | FLY-THROUGH waypoints only |
+| MISSION_WP_RADIUS_PRECISE | 0.15 m | corners, paired with confirm+dwell |
+| MISSION_WP_RADIUS_3D | 0.35 m | vertical legs (1.0 starts the star 1m low) |
+| MISSION_CONFIRM_SPEED | 0.6 m/s | 0.4 rejects the best (first) pass |
+| MISSION_DWELL_S | 0.3 s | each 0.1s costs ~0.8s of mission time |
+| HorizontalVelPID | [5.5, 0.5, 1.4, 15] | **Kd is the fix; Kp 7.0 tumbles** |
+| HorizontalPosP | 0.35 | 0.60 gives 24 command reversals vs 9 |
+| PATH_LEG_ACCEL | 0.8 | along-leg accel |
+| PATH_ARRIVAL_GAIN | 0.85 | linear arrival taper slope |
 | MaxRollPitch | 25 deg | 40 overshot to 61 deg and tipped |
-| MISSION_WP_RADIUS | 0.8 m | must be SMALLER than ARRIVE_DIST |
-| ARRIVE_DIST | 1.2 m | corner hold window; larger than the radius |
-| HorizontalVelPID Kp | 4.0 | 6.5 tumbles it into the ground |
-| CruiseControl | 1.25 / 40 deg | compensates tilt-lift; off = 2.5x worse altitude |
+| yawSlewDps | 35 | airframe ceiling; 60 took yaw RMS 8.4 -> 15.3 deg |
+| CruiseControl | 1.25 / 40 deg | tilt-lift; off = 2.5x worse altitude |
 
-Change ONE variable per run, and repeat a config before believing a 0.05m
+Change ONE variable per run, and repeat a config before believing a 0.05 m
 difference - that is inside the noise.
+
+**Three passes are not margin.** Kp 7.0 passed star109/110/111 (98 s, zero
+overshoot) and then tumbled into the ground at wp3 on star113 - roll p2p
+170 deg, 7.25 m to 0.06 m in two seconds. At 5.5 the same tune is smoother on
+every axis and only slower. If a gain is near a known crash point, get several
+consecutive clean runs before quoting it.
 
 ## Git hygiene for experiments
 
@@ -462,21 +489,34 @@ difference - that is inside the noise.
   file and use `git commit -F <file>`.
 - Nothing is pushed anywhere; local branches only.
 
-## Current fix status (as of 2026-08-09)
+## Current fix status (as of 2026-08-09, end of session)
 
 Committed on branch `claude` (local only), built into ~/ninjapilot-build:
-- Onboard DebugLog enable/pull mechanism (commit 99621b0b4).
-- filteraltitude.c V3: GPS vertical-velocity Kalman update +
-  process-noise raise 1e-2 -> 1.0 (commit 1ab94cd69) - fixed the
-  inert/wrong-sign vertical velocity state AND the covariance collapse
-  that flew missions 12-14 into the ground/away.
-- Mission corner smoothing (bridge): FollowVector + per-corner arrival
-  speeds + 2D/3D acceptance split + flyaway guard; AxisLockKp 2.5->1.0
-  (yaw limit cycle +/-20deg -> +/-0.1deg); craft-width tube trails +
-  auto camera follow. Verified: missions 15 & 16 PASS end-to-end
-  (233s/256s), star hairpin overshoot 0.00m (was 2-4m).
 
-Open: outerloop ~12s AttitudeState startup gap; throttle-cut lag
-mechanism; SIMPOSIX debug print cleanup; corner metric for shallow
-turns over-counts legitimate continuation; task #42 real-UBX path
-(deliberately sidelined - do not start unasked).
+- Onboard DebugLog enable/pull mechanism (99621b0b4).
+- filteraltitude.c V3 (1ab94cd69): GPS vertical-velocity Kalman update +
+  process noise 1e-2 -> 1.0. Fixed the inert/wrong-sign vertical velocity
+  state AND the covariance collapse that flew missions 12-14 into the ground.
+- **Mission-owned corner arrivals** (74a344b16, 218c0cb0b): tight acceptance
+  sphere + confirm-speed/dwell for corners, fly-through rule kept for
+  fly-through waypoints. The never-executed corner controller was removed.
+  Mean closest approach 1.05 m -> 0.11 m.
+- **Leg cruise speed as a mission property** (675b74132) + the
+  ModeParameters slot-0 union trap, guarded on path mode.
+- **The velocity loop had no damping** (14ed55332, d02051cd1):
+  HorizontalVelPID [4.0, 0.5, 0.0, 15] -> [5.5, 0.5, 1.4, 15]. This was the
+  corner "orbit". Cross-track 0.20 -> 0.12 m, overshoot 0.18 -> 0.03 m.
+- Vertical takeoff waypoint; distance-blended corner yaw; farm scenery world
+  (Clearpath cpr_agriculture, ported from Gazebo Classic).
+- Harness: `run_star.sh` (purge + verify + fly + analyse), `corner_probe.py`,
+  `wp_arrival.py`, `star_geom.py`, VelocityDesired logging, uint32
+  timestamp-wrap filtering, and decode warnings no longer swallowed by
+  `tail -1`.
+
+Open / known:
+- MISSION_SPEED 1.5 with Kp 5.5 is only three runs old - good but young.
+- Residual ~0.13 m cross-track is CONTROLLER error; the estimator tracks its
+  own GPS to 0.015 m, so there is no sensing headroom left there.
+- outerloop ~12s AttitudeState startup gap; throttle-cut lag mechanism;
+  SIMPOSIX debug print cleanup.
+- Task #42 real-UBX path - deliberately sidelined, do not start unasked.

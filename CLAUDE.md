@@ -634,37 +634,76 @@ relay state the original never had). Findings:
   bridge landed) - treat the yaw numbers as a lower bound.
 
 
-## Star-mission tuning: what is settled, and the measured ceilings (2026-08-09)
+## Star-mission tuning: what is settled (2026-08-09, end of session)
 
-Best config, verified over four runs (score.py, dense 100ms board log):
-xtrack **mean 0.20-0.26 m, p95 0.52-0.74, max 0.70-1.21**. Run-to-run
-noise is +/-0.03 m on the mean, so DO NOT read a 0.05 m "improvement" as
-real without repeating the run.
+Verified over three consecutive clean runs (star114/115/116), score.py on
+the dense 100ms board log:
 
-Settled values (all re-tested against a clean airframe, i.e. after the
-yaw frame error and the yaw saturation budget were both fixed):
+    cross-track  mean 0.12-0.15 m, p95 0.48-0.58, max 0.65-0.74
+    arrival      closest approach 0.10-0.12 m to EVERY waypoint
+    overshoot    0.01-0.04 m (the vehicle does not pass through the points)
+    attitude     roll RMS 1.0-1.1 deg, pitch RMS 2.5-2.7 deg
+    mission      115-123 s
+
+Run-to-run noise is +/-0.03 m on the mean, so a 0.05 m "improvement" is not
+real until the run is repeated. That rule has caught several false wins.
 
 | knob | value | why not higher/lower |
 |---|---|---|
-| MISSION_SPEED | 1.5 m/s | 3.0-4.0 flew but bought wavy lines and tip-overs |
+| MISSION_SPEED | 1.5 m/s | delivered speed; see the cruise-speed note below |
+| MISSION_WP_RADIUS | 1.0 m | FLY-THROUGH waypoints only |
+| MISSION_WP_RADIUS_PRECISE | 0.15 m | corners; with confirm+dwell |
+| MISSION_WP_RADIUS_3D | 0.35 m | vertical legs; 1.0 started the star 1m low |
+| MISSION_CONFIRM_SPEED | 0.6 m/s | 0.4 rejected the best (first) pass |
+| MISSION_DWELL_S | 0.3 s | every 0.1s costs 0.8s of mission time |
+| HorizontalVelPID | [5.5, 0.5, 1.4, 15] | **Kp 7.0 tumbled it - see below** |
+| HorizontalPosP | 0.35 | 0.60 is worse: 24 command reversals vs 9 |
+| PATH_LEG_ACCEL | 0.8 | 1.2 + fast cruise destabilised the arrival |
+| PATH_ARRIVAL_GAIN | 0.85 | 0.45 crawls the last metre for 9s |
 | MaxRollPitch | 25 deg | at 40 the attitude loop overshot to 61 and tipped |
-| MISSION_WP_RADIUS | 0.8 m | 0.4 scored 0.27 - inside noise, no gain |
-| PATH_LEG_ACCEL | 0.6 | 0.35 (with r0.4) scored 0.30, worse |
-| HorizontalVelPID Kp | 4.0 | **6.5 tumbles it into the ground (roll p2p 192 deg)** |
-| HOLD_GAIN (corner) | 2.5 | the single biggest win: 0.42 -> 0.25 mean |
+| CruiseControl | 1.25 / 40 deg | tilt-lift; off = 2.5x worse altitude |
 
-The corner architecture that works: FollowVector legs + per-corner
-arrival speed + point-turn gate + a FIRM hold at the waypoint during the
-turn. The hold must apply ONLY above ALIGN_STOP - blending it across the
-whole gate band pulls the vehicle backwards on any mid-leg yaw wander
-and makes the legs visibly curved.
+### The two findings that produced almost all of the improvement
 
-Known residual: the vehicle still bulges ~0.5-0.7m past each star point.
-Cause is structural, not a gain: the plan advances at the acceptance
-radius, which is BEFORE the waypoint, so the hold target is still ahead
-of the vehicle and briefly commands it forward. Fixing this properly
-needs lookahead to the next leg (decide the turn before arriving), which
-the fly controller does not currently have.
+**1. The acceptance sphere was a FLY-THROUGH rule.** The plan retired a
+waypoint the instant the vehicle clipped the sphere, so at a corner it turned
+away a full radius short and never visited the point at all. Measured: closest
+approach to all six star points was 0.86-1.15 m with a 1.0 m radius, 0.0 s
+spent inside 0.5 m, and the vehicle never once passed a point. Corners now use
+a tight sphere PLUS the confirm-speed/dwell arrival test in
+`conditionDistanceToTarget` - which was already implemented and simply left
+switched off. Fly-through waypoints keep the old rule; demanding a slow arrival
+on a waypoint whose leg velocity is 1.5 m/s stalls the plan forever.
+
+**2. The velocity loop had no damping.** See the SETTLED section at the top.
+
+### Leg cruise speed is a MISSION property, not an endpoint property
+
+`cruise = max(StartingVelocity, EndingVelocity)` means a leg can never outrun
+its own endpoints. In the star every vertex is a 144 deg hairpin, so both ends
+carried the slow corner speed and every 11.4 m leg crawled at it: a measured
+**0.53 m/s median while MISSION_SPEED said 1.5**. Missions now state a leg
+cruise speed in `ModeParameters[1]`, and corners arrive at a true stop
+(EndingVelocity 0) instead of a nonzero speed that guaranteed overshoot.
+
+### TRAP: ModeParameters is a union, and slot 0 is not free
+
+`PATHDESIRED_MODEPARAMETER_GOTOENDPOINT_NEXTCOMMAND` is index **0**, and
+`FLIGHTMODESETTINGS_RETURNTOBASENEXTCOMMAND_LAND` is **1**. vtolflycontroller
+compared slot 0 against that enum WITHOUT checking the path mode, so a
+FollowVector leg cruise speed of 1.5 m/s cast to `(uint8_t)1` and the vehicle
+flew to its first waypoint and then deliberately landed itself mid-mission.
+Guarded on mode now, and the FollowVector slots are named in plans.h. Slot 0 is
+left permanently unused for FollowVector.
+
+### A leg that starts stopped at its own Start cannot begin
+
+`accel_lim = sqrt(v0^2 + 2*a*d_gone)` is exactly zero when both terms are, so
+the profile commands no speed, the vehicle does not move, and `d_gone` never
+grows. Hidden for as long as every waypoint carried a nonzero arrival velocity;
+it appeared the moment corners became true stops AND a vertical climb waypoint
+sat directly over the pad. It hung for 93 s without leaving the ground. Floored
+at 0.05 m.
 
 ### Measurement discipline (three separate false conclusions came from this)
 
@@ -682,8 +721,8 @@ the fly controller does not currently have.
 
 ## Corner controller, tilt-lift, and the harness bug that faked a control bug (2026-08-09, later)
 
-Best measured star: **0.23m mean / 0.68 p95 / 0.85m max cross-track, altitude
-0.20m peak-to-peak, 108s** (star70). Run-to-run noise is +/-0.03m on the mean.
+(Superseded - see the settled section above. Kept for the harness bug, the
+tilt-lift measurements and the Gazebo GUI trap, which all still hold.)
 
 ### The harness bug FIRST - it invalidates any run it touched
 
@@ -707,29 +746,27 @@ thread feeding sensors to the firmware and flew the vehicle into the ground.
 The trail is cosmetic; it must never compete with flight-critical threads.
 Settled at 10Hz / 0.5m / 50ms marker timeout.
 
-### Corner controller (vtolflycontroller.cpp)
+### The corner controller is GONE - and it never ran
 
-ONE block owns the whole corner - approach, arrival, turn, departure.
-Splitting the job (yaw-gated translation lock in one place, lookahead yaw
-steering in another) is what produced loops and boxy spirals: the two pulled
-against each other. Sequence:
+There was a block in vtolflycontroller.cpp that owned the whole corner
+(APPROACH braking profile, bounded ARRIVE park, TURN, DEPART). It was gated on
+`pathDesired->ModeParameters[3]`, which **nothing in the firmware ever set**,
+so it had never executed once - `paths.c` was flying every corner all along.
+Every conclusion recorded about "tuning the corner controller" was really about
+the trapezoidal profile in paths.c.
 
-  APPROACH  cap along-track speed at sqrt(2*a*(d - ARRIVE_DIST)), keeping
-            the feed-forward pointing ALONG THE LEG so the slide-in stays
-            on the drawn line
-  ARRIVE    park on the waypoint with a BOUNDED command (bounded is what
-            keeps it stable through a dwell; the earlier unbounded 2.5x
-            hold diverged - a leg entered at 11.3m ended 25.6m out)
-  TURN      rotate on the spot
-  DEPART    release to normal leg following
+The first flight in which it did run (once the planner started publishing the
+bearing) stuck at waypoint 1, drifted 4.1 m past the point and swung altitude
+over a 7.6 m range. The reason is structural: `progress` is shared with
+`controlDown`, so rewriting `path_vector[0]/[1]` and `correction_vector[0]/[1]`
+while leaving `[2]` and `fractional_progress` as path_progress computed them
+hands the vertical controller an inconsistent path. It was **removed, not
+disabled** - dead code that looks like the thing doing the work is worse than
+no code.
 
-**Yaw NEVER gates translation.** A quad is omnidirectional; a hover plus a
-rotation cannot move it sideways. If it spirals, translation is being driven
-by the turn - that coupling was the original sin behind every spiral.
-
-ARRIVE_DIST (1.2m) must EXCEED the mission acceptance radius (0.8m), or the
-plan retires the waypoint before the hold can pull the vehicle onto it and
-corners get cut.
+Braking into a corner is owned by the leg speed profile in paths.c; stopping ON
+the point is owned by the mission's confirmed-arrival policy. Those two produced
+0.11 m mean arrival accuracy with that block inert.
 
 ### Tilt costs lift - CruiseControl is the missing term
 
@@ -747,15 +784,51 @@ CruiseControl multiplies thrust by 1/cos(tilt). Bounded at MaxPowerFactor
 that the vehicle is tumbling, not manoeuvring, and boosting thrust into a
 tumble is why it was disabled originally.
 
-### Lookahead: plumbed, deliberately unused
+### Lookahead: now used, for HEADING ONLY
 
-pathplanner publishes the next leg's bearing in PathDesired
-ModeParameters[2]/[3]. iNav (nextTurnAngle) and ArduPilot (next_destination
-splines) both steer with it - but on controllers that own the ENTIRE corner
-(position, velocity and acceleration through it). Bolted onto a follower
-that only owns the current leg, every variant was worse: 0.27-0.51m mean
-versus 0.23m without. Useful foundation if a full S-curve corner controller
-is ever written; not wired in until then.
+pathplanner publishes the next leg's bearing in ModeParameters[2]/[3] (it did
+not before - the code that read it was reading a slot nobody wrote). The
+follower uses it to blend the yaw target as a smooth function of DISTANCE
+REMAINING over the last 4 m, so the nose leads the corner in and is already on
+the new bearing at the point.
+
+Keying it to distance rather than ramping at a fixed rate matters: snapping the
+target and letting the slew limiter grind through it at 35 deg/s produced a
+visibly jagged S into every corner, because yaw rotates the NE->body mapping
+and each rate step kicks translation sideways. Smoothstep makes the rotation
+rate start and end at zero.
+
+Yaw slew is a CEILING set by the airframe, not a preference. Relay autotune
+measured yaw ultimate period at 560 ms against 114 ms for roll - yaw responds
+~5x slower. 60 deg/s (star80) took yaw RMS from 8.4 to 15.3 deg and stretched
+the mission to 169 s. 35 deg/s, with the distance blend doing the shaping.
+
+### Dead ends in corner control - do NOT retry these
+
+All measured, all reverted, all commented in the code:
+
+  lead 1.0 -> 0.25s          overshoot 0.21 -> 0.95 m, 286 s. The lead IS the
+                             braking cue; removing it removes the braking.
+  lead clamped to d/2        same trade, milder: 0.69 m, 198 s.
+  progress ratchet           drove progress regression to exactly 0.000 at
+                             every waypoint and the orbit STAYED. Unclamped it
+                             records the lead point's excursion past the
+                             endpoint and drove the vehicle 14 m the wrong way;
+                             clamped to the leg length it zeroes the along-track
+                             position error and parks the vehicle 2.4 m short,
+                             indefinitely.
+  HorizontalVelPID Ki -> 0   ruled integrator windup out entirely.
+  HorizontalPosP 0.35 -> 0.6 command reversals per corner 9 -> 24. Cross-track
+                             is a perpendicular error so a stiffer line-hold
+                             looks free, but the correction vector rotates as
+                             the vehicle passes a waypoint, and near the point a
+                             high gain on it fights the ARRIVAL, not the line.
+
+The lesson: the command was never the problem, so every fix that reshaped the
+command only changed the shape of the swing. `VelocityDesired` was not being
+logged, which is why this took so long - without the commanded signal you
+cannot tell a path that asks for an orbit from a vehicle that cannot fly a
+clean request.
 
 ### Gazebo GUI
 
