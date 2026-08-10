@@ -623,12 +623,21 @@ static void path_intercept(PathDesiredData *path, float *cur_point, struct path_
     status->path_vector[1] = cmd[1];
     status->path_vector[2] = mode3D ? cmd[2] : 0.0f;
 
-    // No cross-track concept on an intercept - there is no line to hold, only
-    // a target to reach. Correction is zero and the follower's position loop
-    // is left out of it deliberately; the velocity command IS the guidance.
-    status->correction_vector[0] = 0.0f;
-    status->correction_vector[1] = 0.0f;
-    status->correction_vector[2] = 0.0f;
+    // Position error toward the aim point, exactly as path_endpoint does with
+    // its `diff`. This drives the follower's POSITION loop.
+    //
+    // Zeroing this was a real bug and it cost the first intercept a solid
+    // hit. The reasoning was "an intercept has no line to hold, so there is
+    // no cross-track correction" - true for the horizontal LINE sense, but
+    // correction_vector[2] is also the only vertical position feedback the
+    // controller gets. Without it the vertical channel ran on feed-forward
+    // alone and sagged: at closest approach the vehicle was 28cm BELOW the
+    // target and still descending, turning what should have been a centre
+    // hit into a ~25mm graze that the IMU barely registered (icpt03: contact
+    // confirmed by Gazebo at 0.31m, peak 1.40g).
+    status->correction_vector[0] = aim[0];
+    status->correction_vector[1] = aim[1];
+    status->correction_vector[2] = mode3D ? aim[2] : 0.0f;
 
     // Progress reads as closure: 0 at handover range, 1 on contact. Anything
     // watching fractional_progress (PathStatus consumers, the RTB-land check)

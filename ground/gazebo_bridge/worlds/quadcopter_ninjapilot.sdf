@@ -56,6 +56,16 @@
       name="gz::sim::systems::Sensors">
       <render_engine>ogre2</render_engine>
     </plugin>
+
+    <!-- Contact sensing must be a WORLD system, not a model plugin. Declared
+         on the model it loads silently and publishes nothing, which is how
+         the intercept test ended up detecting collisions by sampling the
+         distance between two objects at 20Hz - and aliasing straight over
+         them. Closing at ~2-3 m/s, consecutive samples are 10-15cm apart,
+         so a real strike (IMU peaked at 4.0g) can be recorded as a 0.58m
+         miss. This gives the physics engine's own verdict at full rate. -->
+    <plugin filename="gz-sim-contact-system"
+            name="gz::sim::systems::Contact"/>
     <plugin
       filename="gz-sim-imu-system"
       name="gz::sim::systems::Imu">

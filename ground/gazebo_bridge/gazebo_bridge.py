@@ -103,8 +103,16 @@ TARGET_ALT         = 11.0   # m above the pad - above the 8m mission altitude
 TARGET_START       = (-26.0, -26.0)   # N, E: one corner
 TARGET_END         = (26.0, 26.0)     # N, E: the opposite corner, via overhead
 INTERCEPT_SPEED    = 2.2    # m/s cap handed to the firmware (EndingVelocity)
-INTERCEPT_HIT_DIST = 0.55   # m centre-to-centre = contact (0.25 ball + frame)
-IMU_HIT_G          = 2.5    # g total accel: the IMU-side collision trigger
+# Contact happens at up to ball radius + the frame's half-DIAGONAL, not its
+# half-width: the box is 0.47x0.47, so corner-on contact occurs at
+# 0.25 + (0.47/2)*sqrt(2) = 0.582m centre-to-centre. The original 0.55 was
+# derived from the half-width (0.235) and scored a real collision as a miss -
+# icpt04 bottomed out at 0.577m with a 4.0g impulse and its closing speed
+# collapsing 3.15 -> 0.98 m/s, which is a strike by any reading.
+INTERCEPT_HIT_DIST = 0.60   # m centre-to-centre = contact
+# Hover sits at 1.00g and the 90th percentile through a whole intercept run
+# is 1.06g, so anything above ~1.5 is not flight - measured, not guessed.
+IMU_HIT_G          = 2.0    # g total accel: the IMU-side collision trigger
 
 _target_state = [None]   # (t, (N,E,D)) newest ground-truth target pose
 _last_accel_g = [1.0]    # |specific force| in g, from the vehicle's own IMU
