@@ -114,6 +114,21 @@ INTERCEPT_HIT_DIST = 0.60   # m centre-to-centre = contact
 # is 1.06g, so anything above ~1.5 is not flight - measured, not guessed.
 IMU_HIT_G          = 2.0    # g total accel: the IMU-side collision trigger
 
+# NINJAPILOT_TARGET_MANEUVER=1 makes the target TURN mid-flight instead of
+# flying a rail. This is the honest hard case: every result so far is against
+# a straight-line target whose velocity we estimate by differencing clean
+# positions, which flatters any lead-solution guidance. A turn invalidates
+# the constant-velocity assumption the intercept quadratic is built on.
+# Tunable so the breaking point can be searched for rather than assumed. A
+# turn EARLY in the engagement is easy - path_intercept re-solves the lead
+# quadratic every tick, so the constant-velocity assumption only has to hold
+# over the remaining time-to-go, not the whole run. mvr01 proved that: a 55
+# deg turn at t+5s against contact at t+8.1s was absorbed without trouble.
+# The interesting case is a LATE turn, where there is not enough time-to-go
+# left to re-solve and still close the resulting cross-range error.
+TARGET_TURN_AT     = float(os.environ.get("NINJAPILOT_TURN_AT", "5.0"))
+TARGET_TURN_DEG    = float(os.environ.get("NINJAPILOT_TURN_DEG", "55.0"))
+
 _target_state = [None]   # (t, (N,E,D)) newest ground-truth target pose
 _last_accel_g = [1.0]    # |specific force| in g, from the vehicle's own IMU
 POSE_TOPIC = "/world/%s/pose/info" % GAZEBO_WORLD
@@ -2125,6 +2140,11 @@ def _intercept_run(node, client):
     tvel, _pub, _tw = drive_target(node)
 
     # ---- the intercept run -------------------------------------------------
+    maneuver = os.environ.get("NINJAPILOT_TARGET_MANEUVER") == "1"
+    turned = [False]
+    if maneuver:
+        print(f"[intercept] target will TURN {TARGET_TURN_DEG:.0f} deg at "
+              f"t+{TARGET_TURN_AT:.0f}s")
     hit_gz = hit_imu = None
     min_sep = 1e9
     prev = None
@@ -2132,7 +2152,21 @@ def _intercept_run(node, client):
     t0 = time.time()
     peak_g = 0.0
     while time.time() - t0 < 75.0:
-        _pub.publish(_tw)     # re-assert: a single dropped cmd_vel stalls it
+        # Re-assert every tick: a single dropped cmd_vel stalls the target.
+        # With the maneuver option the commanded velocity also CHANGES here,
+        # which is the point - the guidance must cope with its constant-
+        # velocity assumption being violated mid-engagement.
+        if maneuver and (time.time() - t0) > TARGET_TURN_AT and not turned[0]:
+            turned[0] = True
+            a = math.radians(TARGET_TURN_DEG)
+            vn0, ve0 = tvel[0], tvel[1]
+            nvn = vn0 * math.cos(a) - ve0 * math.sin(a)
+            nve = vn0 * math.sin(a) + ve0 * math.cos(a)
+            _tw.linear.x, _tw.linear.y = nve, nvn
+            tvel = (nvn, nve, 0.0)
+            print(f"[intercept] *** TARGET TURNS {TARGET_TURN_DEG:.0f} deg *** "
+                  f"new velocity N={nvn:+.2f} E={nve:+.2f}")
+        _pub.publish(_tw)
         st = _target_state[0]
         if st is None:
             time.sleep(0.05); continue
