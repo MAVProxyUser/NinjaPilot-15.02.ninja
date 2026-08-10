@@ -98,7 +98,13 @@ GAZEBO_MODEL = "x3"
 # no intercept solution at all (the quadratic in path_intercept goes
 # non-positive and it degenerates to a tail chase).
 TARGET_MODEL       = "target_ball"
-TARGET_SPEED       = 1.2    # m/s along its track
+# DIAGNOSTIC: NINJAPILOT_TARGET_SPEED overrides this. The hypothesis is that
+# first-pass accuracy is limited by CLOSING SPEED (2.2 vs 1.2 m/s nets ~1 m/s
+# and the last stride cannot be won). Slowing the object raises the speed
+# RATIO without touching guidance or the airframe - if hit rate jumps, the
+# ceiling is confirmed as speed and the fix is retuning the velocity loop,
+# not more guidance work.
+TARGET_SPEED       = float(os.environ.get("NINJAPILOT_TARGET_SPEED", "1.2"))
 TARGET_ALT         = 11.0   # m above the pad - above the 8m mission altitude
 TARGET_START       = (-34.0, -34.0)   # N, E: one corner
 TARGET_END         = (34.0, 34.0)     # N, E: the opposite corner, via overhead
@@ -146,6 +152,7 @@ IMU_HIT_G          = 2.0    # g total accel: the IMU-side collision trigger
 # time the object would reach BARN_AT along its own track. Reported as margin,
 # and as how far along the track the hit landed - earliest is best.
 BARN_AT            = (20.0, 20.0)   # N, E: where the object strikes the farm
+TRAILS_ON          = os.environ.get("NINJAPILOT_TRAILS", "1") == "1"
 FLYAWAY_RANGE_M    = 22.0   # m from pad: past this and opening, break off
 ENGAGE_TIMEOUT_S   = 22.0   # s of active pursuit before breaking off
 DETECT_RANGE       = 34.0   # m: range at which the object is "seen" and the
@@ -2165,11 +2172,52 @@ def _intercept_run(node, client):
     # never share a loop with sensor feeding. Created here, in the scope that
     # uses them - they lived in the caller before and _intercept_run died on
     # NameError the moment it reached the run loop.
-    _marker_clear(node)            # drop any trail left by a previous run
-    gui_follow(node)
+    if TRAILS_ON:
+        _marker_clear(node)        # drop any trail left by a previous run
+        gui_follow(node)
     flown = FlownTrail(node)       # cyan  - where the interceptor actually went
     planned = PlannedTrail(node)   # amber - where it PLANNED to intercept
     tgt_trail = TargetTrail(node)  # red   - the target's trajectory
+
+    trail_snapshot = [None]
+    trail_stop = [False]
+
+    def _trail_worker():
+        # Blocking gz calls live here, never in the guidance loop - but a
+        # background thread is NOT enough on its own. Python's GIL means this
+        # thread still stalls the guidance loop while it marshals each call:
+        # measured 5/5 contacts at 0.58-0.60m with trails off, versus
+        # 0.58/1.91/2.19 with them on even off-thread.
+        #
+        # So also cut the LOAD: one marker per cycle round-robin instead of
+        # four, at half the rate - an eighth of the traffic. The trail draws a
+        # little coarser and stays perfectly visible, and guidance keeps its
+        # update rate. Visibility is a requirement; paying for it with hit
+        # rate is not.
+        which = 0
+        while not trail_stop[0]:
+            snap = trail_snapshot[0]
+            if snap is not None and TRAILS_ON:
+                dn_, tn_, vl_ = snap
+                try:
+                    if which == 0:
+                        flown.tick()
+                    elif which == 1:
+                        tgt_trail.tick()
+                    elif which == 2:
+                        planned.tick(lead_solution(dn_, tn_, vl_,
+                                                   INTERCEPT_SPEED))
+                    else:
+                        draw_aim_line(node, dn_,
+                                      lead_solution(dn_, tn_, vl_,
+                                                    INTERCEPT_SPEED))
+                    which = (which + 1) % 4
+                except Exception:
+                    pass
+            time.sleep(0.5)
+
+    if TRAILS_ON:
+        threading.Thread(target=_trail_worker, daemon=True).start()
 
     print("[intercept] waiting for link + config to settle...")
     time.sleep(3.0)
@@ -2333,11 +2381,23 @@ def _intercept_run(node, client):
         hp, dned, _q, _, _, _ = state.snapshot()
         if not hp:
             time.sleep(0.02); continue
-        aim = lead_solution(dned, tned, vel, INTERCEPT_SPEED)
-        flown.tick()
-        tgt_trail.tick()
-        planned.tick(aim)
-        draw_aim_line(node, dned, aim)
+        # TRAILS ARE PUBLISHED OFF-THREAD.
+        #
+        # Every _marker_send is a BLOCKING gz service call. Four of them per
+        # pass (flown, target, planned, aim line) had this loop running at 9Hz
+        # against a 20ms sleep - ~107ms per iteration - so the firmware was
+        # receiving target updates TEN TIMES less often than intended.
+        # CLAUDE.md records this same trap starving the sensor thread twice
+        # before.
+        #
+        # The answer is NOT to drop the trails: plan-vs-flown visibility is a
+        # requirement, and it is how several real bugs in this project were
+        # spotted. Hand the marker work to a background thread and let the
+        # guidance loop run at full rate. The thread just reads the latest
+        # snapshot; if it falls behind it skips, because a trail segment is
+        # cosmetic and a guidance update is not.
+        if TRAILS_ON:
+            trail_snapshot[0] = (list(dned), list(tned), list(vel))
 
         # FLY-AWAY GUARD. Re-attacking an object that is still crossing the
         # defended area is right - hooking back around for another pass is
@@ -2501,6 +2561,7 @@ def _intercept_run(node, client):
     if vision is not None:
         print(f"[vision]   in-frame frames {vis_state['frames']}, "
               f"lock acquisitions {vis_state['handoffs']}")
+    trail_stop[0] = True
     print("[intercept] ---- result ----")
     print(f"[intercept]   barn deadline      : object reaches the barn "
           f"{t_barn:.1f}s into its run")
