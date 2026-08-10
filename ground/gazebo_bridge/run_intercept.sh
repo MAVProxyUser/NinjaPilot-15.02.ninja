@@ -25,7 +25,17 @@ for _ in $(seq 1 20); do pgrep -f fw_simposix >/dev/null || break; sleep 0.5; do
 gz service -s /world/quadcopter/remove --reqtype gz.msgs.Entity \
   --reptype gz.msgs.Boolean --timeout 3000 \
   --req 'name: "target_ball", type: MODEL' >/dev/null 2>&1
-sleep 1
+# VERIFY, do not assume. A crashed run leaves the ball in the world and the
+# next spawn then returns ok=False, wasting a whole cycle - which it did.
+for _ in $(seq 1 10); do
+    gz model --list 2>/dev/null | grep -q target_ball || break
+    gz service -s /world/quadcopter/remove --reqtype gz.msgs.Entity \
+      --reptype gz.msgs.Boolean --timeout 2000 \
+      --req 'name: "target_ball", type: MODEL' >/dev/null 2>&1
+    sleep 1
+done
+gz model --list 2>/dev/null | grep -q target_ball && \
+    echo "!!! stale target could not be removed - spawn will fail"
 "$BR/venv/bin/python3" "$BR/tools/reset_world.py" >/dev/null 2>&1
 sleep 1
 

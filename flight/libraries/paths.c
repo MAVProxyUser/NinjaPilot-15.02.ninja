@@ -490,8 +490,21 @@ static void path_circle(PathDesiredData *path, float *cur_point, struct path_sta
  */
 #define INTERCEPT_MAX_ACCEL      1.2f   // m/s^2 on the commanded speed
 #define INTERCEPT_MAX_TURN_RATE  60.0f  // deg/s on the commanded direction
-#define INTERCEPT_TERMINAL_DIST  1.5f   // m: inside this, aim straight at it
+#define INTERCEPT_ENDGAME_DIST   4.0f   // m: inside this, pure pursuit - the
+                                        // cross-range term is ill-conditioned
+                                        // at short range and thrashes
+#define INTERCEPT_TERMINAL_DIST  3.0f   // m: inside this, aim straight at it
+                                        // 1.5 -> 3.0: braking has to START before
+                                        // the merge, not at it. At 2 m/s closing,
+                                        // 1.5m of runway is 0.75s.
 #define INTERCEPT_LOITER_MARGIN  1.5f   // s of slack required to sit and wait
+#define INTERCEPT_MAX_CLIMB      3.0f   // m/s: the frame's usable climb rate
+#define INTERCEPT_CLIMB_FRAC     0.6f   // of the speed budget, so ~0.8x remains
+                                        // horizontal (sqrt(1-0.36)) and the
+                                        // vehicle closes WHILE it climbs
+#define INTERCEPT_VERT_GAIN      0.7f   // 1/s: vertical speed cap per metre of
+                                        // vertical gap, so the climb ends at
+                                        // the target's level, not past it
 #define INTERCEPT_LOITER_GAIN    0.9f   // 1/s taper settling onto the aim point
 
 // Set by path_intercept_reset(), consumed on the next path_intercept() call.
@@ -523,76 +536,115 @@ static void path_intercept(PathDesiredData *path, float *cur_point, struct path_
         vmax = 0.1f;
     }
 
-    // Aim point: target position advanced by its own velocity over the
-    // predicted time to intercept.
-    float aim[3] = { R[0], R[1], R[2] };
-    if (range > INTERCEPT_TERMINAL_DIST) {
-        float vt2 = Vt[0] * Vt[0] + Vt[1] * Vt[1] + Vt[2] * Vt[2];
-        float a   = vmax * vmax - vt2;
-        float b   = 2.0f * (R[0] * Vt[0] + R[1] * Vt[1] + R[2] * Vt[2]);
-        float c   = range * range;
-        float tgo = 0.0f;
-        if (a > 1e-3f) {
-            float disc = b * b + 4.0f * a * c;
-            if (disc > 0.0f) {
-                tgo = (b + sqrtf(disc)) / (2.0f * a);
-            }
-        }
-        // No solution (target at least as fast as us): pure pursuit.
-        if (tgo > 0.0f && tgo < 60.0f) {
-            aim[0] = R[0] + Vt[0] * tgo;
-            aim[1] = R[1] + Vt[1] * tgo;
-            aim[2] = R[2] + Vt[2] * tgo;
-        }
+    // EARLIEST REACHABLE POINT, steered on a CONSTANT BEARING.
+    //
+    // Two ideas, and both matter:
+    //
+    // 1. AIM AT THE EARLIEST POINT ON THE TRACK WE CAN REACH - not the far
+    //    meeting point. Solving (vmax^2-|Vt|^2)t^2 - 2(R.Vt)t - |R|^2 = 0
+    //    gives the soonest time we can be where the object will be. When our
+    //    speed margin over the object is small that time is long and the
+    //    point sits far downrange; committing to it makes the two look like
+    //    they are racing to a finish line, and every metre of that run is
+    //    wasted the moment the object turns. Recomputing it every tick keeps
+    //    it the EARLIEST point, which walks backwards toward us as we close.
+    //
+    // 2. STEER A CONSTANT BEARING, not a heading to a waypoint. Decompose
+    //    the object's velocity about the line of sight: matching its
+    //    cross-LOS component holds the bearing constant, which is the
+    //    collision condition, and the remaining speed closes the range.
+    //    Constant bearing + decreasing range - what a mariner or a CIWS
+    //    director uses. It needs only what is observable right now; nothing
+    //    about where the object is going, which we could never know.
+    float u[3] = { R[0], R[1], R[2] };
+    if (range > 1e-3f) {
+        u[0] /= range; u[1] /= range; u[2] /= range;
     }
 
-    // ---- BARRAGE, NOT CHASE -------------------------------------------
-    // A gun does not hit a point; it lays a dispersion pattern and the hit
-    // comes from that pattern overlapping the target. The same thinking
-    // applies to a SLOW interceptor, and it changes the tactic completely.
-    //
-    // Our closure is ~2.2 m/s on a target doing ~1.2. A pursuit curve leaves
-    // almost no margin, so the dominant miss is not direction - it is TIMING:
-    // a solution perfect in bearing still misses entirely by arriving two
-    // seconds late, because the along-track error grows with the time error
-    // times the target's speed.
-    //
-    // So when we can reach the predicted crossing point BEFORE the target
-    // does, stop chasing and go sit on it. Arrive early with zero closing
-    // velocity and let the target fly into the contact radius. That converts
-    // "hit a moving point" - dominated by our own attitude lag, which is our
-    // equivalent of barrel whip - into "hold a position", which this airframe
-    // does to 0.04-0.09m against a 0.55m contact window: a 5-10x margin.
-    //
-    // Only when there is no time margin do we revert to maximum-effort
-    // pursuit, which is the best available even though it is marginal.
-    float aimlen = vector_lengthf(aim, 3);
-    float dir[3];
-    if (aimlen > 1e-3f) {
-        dir[0] = aim[0] / aimlen; dir[1] = aim[1] / aimlen; dir[2] = aim[2] / aimlen;
+    // --- (1) earliest reachable point on the track
+    float vt2 = Vt[0] * Vt[0] + Vt[1] * Vt[1] + Vt[2] * Vt[2];
+    float qa = vmax * vmax - vt2;
+    float qb = 2.0f * (R[0] * Vt[0] + R[1] * Vt[1] + R[2] * Vt[2]);
+    float t_int = 0.0f;
+    if (qa > 1e-3f) {
+        float disc = qb * qb + 4.0f * qa * range * range;
+        if (disc > 0.0f) {
+            t_int = (qb + sqrtf(disc)) / (2.0f * qa);
+        }
+    }
+    if (!(t_int > 0.0f) || t_int > 60.0f) {
+        t_int = 0.0f;               // no solution: object is as fast as us
+    }
+    // Position error toward that point - this is what the follower's POSITION
+    // loop needs, and it must be a POSITION, not a velocity.
+    float toP[3] = { R[0] + Vt[0] * t_int,
+                     R[1] + Vt[1] * t_int,
+                     R[2] + Vt[2] * t_int };
+    float distP = vector_lengthf(toP, 3);
+
+    // --- (2) constant-bearing direction
+    float vt_along = Vt[0] * u[0] + Vt[1] * u[1] + Vt[2] * u[2];
+    float vperp[3] = { Vt[0] - vt_along * u[0],
+                       Vt[1] - vt_along * u[1],
+                       Vt[2] - vt_along * u[2] };
+    float vperp_mag = vector_lengthf(vperp, 3);
+    float bear[3];
+    if (range < INTERCEPT_ENDGAME_DIST) {
+        // ENDGAME: pure pursuit, straight at where it IS.
+        //
+        // Constant bearing is the right guidance at range and the wrong one
+        // up close. As range shrinks the line of sight rotates faster and
+        // faster for the same lateral motion, so the cross-range matching
+        // term grows without bound and the command thrashes - measured, the
+        // vehicle reached 1.70m and then flailed alongside the object for
+        // twenty seconds, its position jumping several metres between
+        // samples, never closing the last stride. Handing the endgame to
+        // pure pursuit removes the ill-conditioned term entirely: aim at the
+        // object, close, touch. The lead angle has already done its job by
+        // this point - that is WHY the range is short.
+        bear[0] = u[0] * vmax; bear[1] = u[1] * vmax; bear[2] = u[2] * vmax;
+    } else if (vperp_mag >= vmax) {
+        // Cannot match the cross-range motion: unwinnable geometry, put
+        // everything into cross-range rather than pretending otherwise.
+        bear[0] = vperp[0]; bear[1] = vperp[1]; bear[2] = vperp[2];
     } else {
-        dir[0] = dir[1] = dir[2] = 0.0f;
+        float closing = sqrtf(vmax * vmax - vperp_mag * vperp_mag);
+        bear[0] = vperp[0] + closing * u[0];
+        bear[1] = vperp[1] + closing * u[1];
+        bear[2] = vperp[2] + closing * u[2];
+    }
+    float bl = vector_lengthf(bear, 3);
+    float dir[3];
+    if (bl > 1e-3f) {
+        dir[0] = bear[0] / bl; dir[1] = bear[1] / bl; dir[2] = bear[2] / bl;
+    } else {
+        dir[0] = u[0]; dir[1] = u[1]; dir[2] = u[2];
+    }
+
+    // --- speed: full effort, easing only when there is genuinely time in
+    // hand to sit on the earliest point and let the object come to us, or
+    // when close enough that contact should be an arrival, not a ram.
+    // Is the range opening? Then we have missed and are trailing it, and the
+    // only correct response is maximum effort - re-attack at the earliest
+    // point we can still reach. Measured on the scramble runs: after a miss
+    // the vehicle sat at ~4.6m closing at 0.1 m/s with a 2.2 m/s cap against
+    // a 1.2 m/s object, because the loiter branch believed it had time in
+    // hand. It does not: "wait for it to come to you" is only valid while
+    // the object is still INBOUND.
+    static float lastRange = 0.0f;
+    static bool haveRange = false;
+    bool opening = haveRange && (range > lastRange + 0.02f);
+    lastRange = range;
+    haveRange = true;
+    if (interceptResetPending) {
+        haveRange = false;
     }
 
     float speed = vmax;
-    float t_us  = aimlen / vmax;                 // our time to the aim point
-    float t_tgt = INTERCEPT_LOITER_MARGIN;       // default: assume no margin
-    {
-        // Target's time to that same point, along its own track.
-        float toP[3] = { aim[0] - R[0], aim[1] - R[1], aim[2] - R[2] };
-        float vt = vector_lengthf(Vt, 3);
-        if (vt > 0.05f) {
-            t_tgt = vector_lengthf(toP, 3) / vt;
-        }
-    }
-    if (t_us + INTERCEPT_LOITER_MARGIN < t_tgt) {
-        // We have time in hand: treat the aim point as a POSITION to settle
-        // on, tapering speed with remaining distance so we arrive stopped
-        // instead of sailing through it.
-        speed = boundf(INTERCEPT_LOITER_GAIN * aimlen, 0.0f, vmax);
+    float t_us = distP / vmax;
+    if (!opening && t_int > 0.0f && t_us + INTERCEPT_LOITER_MARGIN < t_int) {
+        speed = boundf(INTERCEPT_LOITER_GAIN * distP, 0.0f, vmax);
     } else if (range < INTERCEPT_TERMINAL_DIST) {
-        // No margin and close: ease in so contact is a controlled arrival
-        // rather than a ram the vertical loop cannot hold.
         speed = vmax * (0.35f + 0.65f * (range / INTERCEPT_TERMINAL_DIST));
     }
 
@@ -630,7 +682,11 @@ static void path_intercept(PathDesiredData *path, float *cur_point, struct path_
                 if (dl > 1e-3f) { dir[0] /= dl; dir[1] /= dl; dir[2] /= dl; }
             }
         }
-        // limit speed change
+        // Symmetric, as originally. Unclamping deceleration was TRIED on the
+        // theory that the merge overshoot was the limiter refusing to brake:
+        // it made the overshoot WORSE (3.38m -> 6.52m above the target), so
+        // the limiter was never what held the climb on. Do not retry without
+        // new evidence.
         float maxDv = INTERCEPT_MAX_ACCEL * dT;
         float dv = speed - lastLen;
         if (dv > maxDv) { speed = lastLen + maxDv; }
@@ -639,6 +695,66 @@ static void path_intercept(PathDesiredData *path, float *cur_point, struct path_
     }
     lastCmd[0] = cmd[0]; lastCmd[1] = cmd[1]; lastCmd[2] = cmd[2];
     haveLast = true;
+
+    // TIME-MATCHED VERTICAL ALLOCATION.
+    //
+    // A constant-bearing direction to a distant, higher target is almost
+    // entirely HORIZONTAL - the altitude gap is a small part of a long
+    // vector. Spending the whole speed budget along it demands a big tilt,
+    // and tilt costs lift by cos(theta), so the vehicle pins itself to the
+    // ground accelerating sideways and never climbs. Measured exactly that:
+    // liftoff reached 0.88m climbing at 1.35 m/s, then the intercept engaged
+    // and it sat at 0.52m for the whole run while the object flew over.
+    // Raising the tilt limit makes this WORSE, not better.
+    //
+    // So the vertical channel gets what it needs FIRST: the rate that closes
+    // the altitude gap over the time we have (t_int), clamped to what the
+    // airframe can climb. Whatever speed is left goes horizontal. That
+    // guarantees arriving at the object's ALTITUDE at the moment we arrive
+    // at its position, instead of arriving level with the ground.
+    if (mode3D) {
+        float vgap = R[2];                       // +ve = target is BELOW us
+        float t_use = (t_int > 0.5f) ? t_int : 0.5f;
+        // Time-matching ALONE dawdles: with a 10m gap and ~26s to intercept it
+        // asks for 0.4 m/s and the vehicle is still low when the object
+        // arrives - measured, the intercept landed 83% along the object's
+        // track. Altitude is not just another axis to schedule, it is the
+        // ENABLER: nothing can be intercepted from the ground, and every
+        // second spent low is a second the horizontal closure cannot be used.
+        // So climb at the gap-proportional rate (fast, early) or the
+        // time-matched rate, whichever is GREATER, and let the clamps below
+        // keep it inside what the frame and the controller can do.
+        float v_time = vgap / t_use;
+        float v_gapr = INTERCEPT_VERT_GAIN * vgap;
+        float v_need = (fabsf(v_gapr) > fabsf(v_time)) ? v_gapr : v_time;
+        // Never demand more climb than the frame can give, and taper near the
+        // gap so the merge is level rather than still climbing.
+        // The climb may never consume the WHOLE speed budget, or the
+        // horizontal term below gets sqrt of a negative and is zeroed - the
+        // vehicle then rises straight up with no closure at all and has to
+        // stern-chase afterwards. That is precisely what happened:
+        // INTERCEPT_MAX_CLIMB 3.0 against a 2.2 m/s budget zeroed horizontal
+        // motion for the entire climb, and the intercepts landed 79-95% along
+        // the object's track, soft, because a stern chase has almost no
+        // closing speed left. Cap the climb at a FRACTION of the budget so
+        // both axes make progress at once.
+        float vcap = INTERCEPT_VERT_GAIN * fabsf(vgap);
+        float budget_cap = INTERCEPT_CLIMB_FRAC * vmax;
+        if (vcap > budget_cap) { vcap = budget_cap; }
+        if (vcap > INTERCEPT_MAX_CLIMB) { vcap = INTERCEPT_MAX_CLIMB; }
+        if (v_need > vcap) { v_need = vcap; }
+        else if (v_need < -vcap) { v_need = -vcap; }
+
+        cmd[2] = v_need;
+        // Horizontal keeps the remainder of the speed budget.
+        float horiz_budget = vmax * vmax - v_need * v_need;
+        horiz_budget = (horiz_budget > 0.0f) ? sqrtf(horiz_budget) : 0.0f;
+        float hmag = sqrtf(cmd[0] * cmd[0] + cmd[1] * cmd[1]);
+        if (hmag > 1e-3f) {
+            cmd[0] = cmd[0] / hmag * horiz_budget;
+            cmd[1] = cmd[1] / hmag * horiz_budget;
+        }
+    }
 
     status->path_vector[0] = cmd[0];
     status->path_vector[1] = cmd[1];
@@ -656,9 +772,9 @@ static void path_intercept(PathDesiredData *path, float *cur_point, struct path_
     // target and still descending, turning what should have been a centre
     // hit into a ~25mm graze that the IMU barely registered (icpt03: contact
     // confirmed by Gazebo at 0.31m, peak 1.40g).
-    status->correction_vector[0] = aim[0];
-    status->correction_vector[1] = aim[1];
-    status->correction_vector[2] = mode3D ? aim[2] : 0.0f;
+    status->correction_vector[0] = toP[0];
+    status->correction_vector[1] = toP[1];
+    status->correction_vector[2] = mode3D ? toP[2] : 0.0f;
 
     // Progress reads as closure: 0 at handover range, 1 on contact. Anything
     // watching fractional_progress (PathStatus consumers, the RTB-land check)

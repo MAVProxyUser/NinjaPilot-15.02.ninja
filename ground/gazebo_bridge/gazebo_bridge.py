@@ -102,6 +102,21 @@ TARGET_SPEED       = 1.2    # m/s along its track
 TARGET_ALT         = 11.0   # m above the pad - above the 8m mission altitude
 TARGET_START       = (-34.0, -34.0)   # N, E: one corner
 TARGET_END         = (34.0, 34.0)     # N, E: the opposite corner, via overhead
+# 2.2 -> 4.5 m/s. The whole failure mode has been "could not get there in
+# time": against a 1.2 m/s object a 2.2 m/s cap gives barely 1 m/s of closure,
+# which is why the intercept point sat far downrange and the two looked like
+# they were racing. Doubling the margin moves the earliest reachable point
+# much closer to where the object is NOW - which is the entire objective.
+# Backed by tilt 25 -> 38 deg (4.6 -> 7.7 m/s^2 of horizontal authority).
+# ONE variable this run: 2.2 -> 3.0. Closing speed is the direct lever on
+# EARLINESS - the earliest reachable point on the object's track moves back
+# toward us as our speed margin over its 1.2 m/s grows. base01 intercepted at
+# 83% along the track; the target is to drive that down. HorizontalVelMax is
+# 3.0, so this sits exactly at the controller's limit and no higher - the
+# freefall bug was a guidance limit ABOVE a controller limit.
+# 3.0 CRASHED (spd01) - the velocity loop is tuned at 1.5 m/s and goes
+# unstable at 3.0. Raw speed is not available without retuning
+# HorizontalVelPID first. Back to 2.2, which flies.
 INTERCEPT_SPEED    = 2.2    # m/s cap handed to the firmware (EndingVelocity)
 # Contact happens at up to ball radius + the frame's half-DIAGONAL, not its
 # half-width: the box is 0.47x0.47, so corner-on contact occurs at
@@ -126,6 +141,11 @@ IMU_HIT_G          = 2.0    # g total accel: the IMU-side collision trigger
 # deg turn at t+5s against contact at t+8.1s was absorbed without trouble.
 # The interesting case is a LATE turn, where there is not enough time-to-go
 # left to re-solve and still close the resulting cross-range error.
+# The object's run ends by hitting the barn. An intercept that happens after
+# that is not an intercept, so the run is scored against a hard deadline: the
+# time the object would reach BARN_AT along its own track. Reported as margin,
+# and as how far along the track the hit landed - earliest is best.
+BARN_AT            = (20.0, 20.0)   # N, E: where the object strikes the farm
 DETECT_RANGE       = 34.0   # m: range at which the object is "seen" and the
                             # vehicle scrambles. Wide enough that a 1.2 m/s
                             # target leaves time to launch and climb 11m.
@@ -134,6 +154,7 @@ TARGET_TURN_DEG    = float(os.environ.get("NINJAPILOT_TURN_DEG", "55.0"))
 
 _target_state = [None]   # (t, (N,E,D)) newest ground-truth target pose
 _last_accel_g = [1.0]    # |specific force| in g, from the vehicle's own IMU
+_contact_hit = [None]    # wall-clock of the PHYSICS ENGINE's own contact report
 POSE_TOPIC = "/world/%s/pose/info" % GAZEBO_WORLD
 IMU_TOPIC = "/X3/imu"
 NAVSAT_TOPIC = "/X3/navsat"
@@ -2044,6 +2065,40 @@ def spawn_target(node):
     return ok
 
 
+def subscribe_contact(node):
+    """The physics engine's own collision verdict.
+
+    Sampling separation at 20Hz aliases: closing at 2-5 m/s, consecutive
+    samples are 10-25cm apart and can step straight over the overlap. That
+    is not hypothetical - scram09 logged a 13.63g IMU strike and still scored
+    "no contact" because no sample landed inside the radius. This reports the
+    contact the solver actually resolved, at physics rate.
+    """
+    from gz.msgs10.contacts_pb2 import Contacts
+
+    def on_contact(msg):
+        # MUST filter by who it hit. The ball also strikes the barn and the
+        # ground, and counting those reported "contact at 34.43m" - a hit
+        # scored while the interceptor was 34m away. Only a collision whose
+        # other party is the vehicle counts.
+        if _contact_hit[0] is not None:
+            return
+        for c in msg.contact:
+            names = (c.collision1.name or "") + " " + (c.collision2.name or "")
+            if GAZEBO_MODEL in names:
+                _contact_hit[0] = time.time()
+                return
+
+    topic = (f"/world/{GAZEBO_WORLD}/model/{TARGET_MODEL}"
+             f"/link/link/sensor/ball_contact/contact")
+    try:
+        node.subscribe(Contacts, topic, on_contact)
+        print(f"[intercept] contact sensor subscribed: {topic}")
+    except Exception as e:
+        print(f"[intercept] contact sensor unavailable ({e}); "
+              f"falling back to sampled separation")
+
+
 def drive_target(node):
     """Command the target's constant velocity along its diagonal track."""
     from gz.msgs10.twist_pb2 import Twist
@@ -2088,12 +2143,6 @@ def intercept_test():
     import gz.transport13 as gztransport
     node = gztransport.Node()
     client = _mission_client[0]   # set by on_connected; not a module global
-    # Scene setup ONCE, before anything time-critical is running. These are
-    # blocking service calls; they must never share a loop with sensor feeding.
-    _marker_clear(node)           # drop any trail left by a previous run
-    gui_follow(node)
-    flown = FlownTrail(node)      # cyan  - where the vehicle actually went
-    tgt_trail = TargetTrail(node)  # red   - where the object came from
 
     try:
         _intercept_run(node, client)
@@ -2110,6 +2159,16 @@ def intercept_test():
 
 
 def _intercept_run(node, client):
+    # Scene setup ONCE, up front: these are BLOCKING gz service calls and must
+    # never share a loop with sensor feeding. Created here, in the scope that
+    # uses them - they lived in the caller before and _intercept_run died on
+    # NameError the moment it reached the run loop.
+    _marker_clear(node)            # drop any trail left by a previous run
+    gui_follow(node)
+    flown = FlownTrail(node)       # cyan  - where the interceptor actually went
+    planned = PlannedTrail(node)   # amber - where it PLANNED to intercept
+    tgt_trail = TargetTrail(node)  # red   - the target's trajectory
+
     print("[intercept] waiting for link + config to settle...")
     time.sleep(3.0)
     if not wait_for_attitude_ok():
@@ -2128,6 +2187,7 @@ def _intercept_run(node, client):
         print("[intercept] FAIL - could not spawn target")
         return
     time.sleep(0.5)
+    subscribe_contact(node)
     tvel, _pub, _tw = drive_target(node)
 
     # "Detection": the object crosses into range. Stands in for whatever
@@ -2166,6 +2226,7 @@ def _intercept_run(node, client):
           f"detection - engaging intercept immediately")
 
     # ---- the intercept run -------------------------------------------------
+    crashed = [False]
     struck = [None]   # wall-clock of the strike, once hit
     knock = [(0.0, 0.0, 0.0)]   # post-impact velocity NED
     maneuver = os.environ.get("NINJAPILOT_TARGET_MANEUVER") == "1"
@@ -2179,7 +2240,10 @@ def _intercept_run(node, client):
     track = []          # (t, drone NED, target NED, aim NED, sep) per tick
     t0 = time.time()
     peak_g = 0.0
-    while time.time() - t0 < 95.0:
+    # 95 -> 55s. The engagement is decided within ~25s of the scramble; the
+    # rest was dead air. Short runs matter more than complete ones when the
+    # loop is "change something, fly it, look".
+    while time.time() - t0 < 55.0:
         # --- KNOCKED DOWN ---------------------------------------------
         # Once struck, the object stops being driven and becomes a falling
         # body. It has to be integrated here rather than handed to DART,
@@ -2219,7 +2283,7 @@ def _intercept_run(node, client):
         _pub.publish(_tw)
         st = _target_state[0]
         if st is None:
-            time.sleep(0.05); continue
+            time.sleep(0.02); continue
         tt, tned = st
         # Estimate the target's velocity from successive fixes - a real tracker
         # would hand us this, and differentiating here keeps the firmware
@@ -2233,10 +2297,12 @@ def _intercept_run(node, client):
 
         hp, dned, _q, _, _, _ = state.snapshot()
         if not hp:
-            time.sleep(0.05); continue
+            time.sleep(0.02); continue
+        aim = lead_solution(dned, tned, vel, INTERCEPT_SPEED)
         flown.tick()
         tgt_trail.tick()
-        draw_aim_line(node, dned, lead_solution(dned, tned, vel, INTERCEPT_SPEED))
+        planned.tick(aim)
+        draw_aim_line(node, dned, aim)
 
         client.send_object("PathDesired", {
             "Start": [dned[0], dned[1], dned[2]],
@@ -2245,12 +2311,21 @@ def _intercept_run(node, client):
             "ModeParameters": [0.0, vel[0], vel[1], vel[2]],
             "UID": 0, "Mode": "Intercept"})
 
+        # CRASH ABORT. A wrecked interceptor tells us nothing more, and every
+        # extra second of a dead run is time not spent on the next one.
+        alt_now = -dned[2]
+        if alt_now < 0.45 and (time.time() - t0) > 6.0:
+            print(f"[intercept] *** INTERCEPTOR DOWN at t+{time.time() - t0:.1f}s "
+                  f"(alt {alt_now:.2f}m) - aborting run ***")
+            crashed[0] = True
+            break
+
         sep = math.dist(dned, tned)
         min_sep = min(min_sep, sep)
         track.append((time.time() - t0, list(dned), list(tned),
                       list(vel), sep, _last_accel_g[0]))
         # (1) Gazebo ground truth
-        if sep < INTERCEPT_HIT_DIST and hit_gz is None:
+        if (_contact_hit[0] is not None or sep < INTERCEPT_HIT_DIST) and hit_gz is None:
             hit_gz = (time.time() - t0, sep)
             # Deflect along the line of impact, scaled by how hard we hit it.
             n = [tned[i] - dned[i] for i in range(3)]
@@ -2271,6 +2346,9 @@ def _intercept_run(node, client):
             print(f"[intercept] *** IMU STRIKE *** t+{hit_imu[0]:.1f}s {g:.2f}g")
         if hit_gz and hit_imu:
             break
+        # Object is down and we hit it - nothing further to learn this run.
+        if struck[0] and (time.time() - struck[0]) > 3.0:
+            break
         time.sleep(0.05)
 
     # Dump the run so it can be plotted. The picture answers questions the
@@ -2286,16 +2364,42 @@ def _intercept_run(node, client):
                     "track": track}, fh)
     print(f"[intercept] track -> {outp}")
 
+    # Deadline: when would the object have reached the barn?
+    n0, e0 = TARGET_START
+    bn, be = BARN_AT
+    t_barn = math.hypot(bn - n0, be - e0) / max(TARGET_SPEED, 1e-3)
+    t_hit = hit_gz[0] if hit_gz else None
+    # Track fraction: 0 = intercepted the instant it entered, 1 = at the barn.
+    frac = None
+    if t_hit is not None and track:
+        # measured from the object's own progress, not assumed timing
+        p0 = track[0][2]
+        ph = min(track, key=lambda r: abs(r[0] - t_hit))[2]
+        travelled = math.hypot(ph[0] - n0, ph[1] - e0)
+        total = math.hypot(bn - n0, be - e0)
+        frac = travelled / total if total > 1e-3 else None
+
     print("[intercept] ---- result ----")
+    print(f"[intercept]   barn deadline      : object reaches the barn "
+          f"{t_barn:.1f}s into its run")
+    if t_hit is not None:
+        print(f"[intercept]   intercept at       : t+{t_hit:.1f}s"
+              + (f", {frac * 100:.0f}% along its track" if frac is not None else "")
+              + (f"  ({'IN TIME' if frac is not None and frac < 1.0 else 'TOO LATE'})"))
     print(f"[intercept]   closest separation : {min_sep:.2f} m")
     print(f"[intercept]   gazebo contact     : "
           f"{'YES t+%.1fs at %.2fm' % hit_gz if hit_gz else 'no'}")
     print(f"[intercept]   IMU strike         : "
           f"{'YES t+%.1fs %.2fg' % hit_imu if hit_imu else 'no'} (peak {peak_g:.2f}g)")
-    verdict = "PASS" if (hit_gz and hit_imu) else (
+    in_time = (frac is not None and frac < 1.0)
+    if crashed[0]:
+        print("[intercept]   NOTE: interceptor crashed - treat this run's "
+              "guidance numbers as unreliable")
+    verdict = "CRASH" if crashed[0] else "PASS" if (hit_gz and hit_imu and in_time) else (
         "PARTIAL" if (hit_gz or hit_imu) else "FAIL")
     print(f"[intercept] intercept_test: {verdict} - intercepted={bool(hit_gz)}, "
-          f"felt={bool(hit_imu)}, min_sep={min_sep:.2f}m")
+          f"felt={bool(hit_imu)}, min_sep={min_sep:.2f}m"
+          + (f", track_frac={frac:.2f}" if frac is not None else ""))
 
 
 
@@ -2711,6 +2815,49 @@ class TargetTrail(object):
 _aim_last = [0.0]
 
 
+class PlannedTrail(object):
+    """Amber trail of the PREDICTED INTERCEPT POINT - the interceptor's plan.
+
+    A mission draws its planned path once, because the route is fixed. An
+    intercept has no fixed route: the aim point is re-solved every tick from
+    where the target now is and where it is going. So the honest equivalent
+    of "planned path" here is the locus of those predictions - it starts out
+    ahead of the target, and converges onto the actual impact point as the
+    solution firms up. Watching it converge (or fail to) says more about the
+    guidance than the flown path does.
+
+    Separate marker id range (5000+) from flown (2000+), aim line (3000) and
+    the target trail (4000+), so nothing overwrites anything else.
+    """
+
+    SEG_MIN_M = 0.4
+
+    def __init__(self, node):
+        self.node = node
+        self.last = 0.0
+        self._seg_id = 5000
+        self._last_pt = None
+
+    def tick(self, aim_ned):
+        now = time.time()
+        if now - self.last < 0.3:
+            return
+        self.last = now
+        pt = (aim_ned[1], aim_ned[0], -aim_ned[2])
+        if self._last_pt is None:
+            self._last_pt = pt
+            return
+        a = self._last_pt
+        if ((pt[0] - a[0]) ** 2 + (pt[1] - a[1]) ** 2
+                + (pt[2] - a[2]) ** 2) < self.SEG_MIN_M ** 2:
+            return
+        _marker_send(self.node, _marker_tube(self._seg_id, a, pt,
+                                             (1.0, 0.75, 0.0, 0.45),
+                                             diameter=0.14))
+        self._seg_id += 1
+        self._last_pt = pt
+
+
 def draw_aim_line(node, drone_ned, aim_ned):
     """Amber line from the vehicle to the point it is currently steering at.
 
@@ -2759,6 +2906,9 @@ def lead_solution(drone_ned, tgt_ned, tgt_vel, vmax):
             tgo = (b + math.sqrt(disc)) / (2.0 * a)
     if not (0.0 < tgo < 60.0):
         return tuple(tgt_ned)
+    # The EARLIEST reachable point on the track, recomputed every tick - it
+    # walks backwards toward us as we close, which is what the amber planned
+    # trail should show. It is not a destination and not a fixed waypoint.
     return tuple(tgt_ned[i] + tgt_vel[i] * tgo for i in range(3))
 
 
@@ -3299,7 +3449,15 @@ def uavtalk_thread():
         # without saturating thrust in the first place.
         vtol_pf = {
             "TreatCustomCraftAs": "VTOL",
-            "HorizontalVelMax": 3.0, "VerticalVelMax": 1.5,
+            # VerticalVelMax 1.5 -> 3.0 to MATCH the guidance's climb limit. These two
+            # numbers must agree: path_intercept was commanding a 3.0 m/s climb
+            # into a controller capped at 1.5, so the vertical PID was handed a
+            # setpoint it could never reach, saturated, and the thrust output
+            # collapsed - measured 0.18g, i.e. near freefall, dropping the
+            # vehicle on the pad while the object flew over. A guidance limit
+            # above a controller limit is not "more performance", it is a
+            # broken loop.
+            "HorizontalVelMax": 3.0, "VerticalVelMax": 3.0,
             # CourseFeedForward 1.0 -> 0.25 s. The follower does not hand
             # path_progress the vehicle's position - it hands it
             # position + velocity*CourseFeedForward, a lead term meant to damp
@@ -3452,6 +3610,19 @@ def uavtalk_thread():
             # commanded limit must stay inside what the attitude loop can
             # actually track during a hard stop, not just what the
             # airframe can theoretically hold.
+            # 25 -> 38 deg. Horizontal accel is g*tan(tilt): 4.6 m/s^2 at 25 deg, 7.7 at
+            # 38 - two thirds more, which is what an early intercept needs.
+            # 38 is chosen, not 45, because CruiseControl can only hold altitude
+            # while it can boost thrust by 1/cos(tilt), and its cap is raised to
+            # 1.35 below = 42.2 deg. Staying inside that ceiling by ~4 deg is the
+            # difference between banking hard and falling out of the sky: the
+            # documented "40 deg overshot to 61 and tipped" was already 3 deg
+            # PAST the old 1.25 cap (36.9 deg), i.e. lift starvation, not the
+            # attitude loop. Envelope is being walked up, not jumped.
+# 32 deg was TRIED and is WORSE: track fraction 0.79 -> 0.95, intercept
+            # t+30.6 -> t+44.3. More tilt authority does not buy an earlier
+            # intercept on this airframe - it costs lift during the climb, and
+            # getting to altitude is the binding constraint. Back to 25.
             "MaxRollPitch": 25.0, "UpdatePeriod": 50, "BrakeRate": 2.5, "BrakeMaxPitch": 30.0,
             "BrakeHorizontalVelPID": [12.0, 0.0, 0.03, 15], "BrakeVelocityFeedforward": 0,
             "LandVerticalVelPID": [0.35, 3.0, 0.05, 0.9],
@@ -3509,6 +3680,15 @@ def uavtalk_thread():
             # improved the PATH but doubled altitude error (0.59 -> 1.53m
             # p2p). CruiseControl multiplies thrust by 1/cos(tilt), which is
             # exactly the missing term.
+            #   1.25 -> 1.35. MaxPowerFactor is the ceiling on CruiseControl's
+            #   1/cos(tilt) thrust boost, so it IS the maximum bank the vehicle
+            #   can hold altitude at: acos(1/1.25) = 36.9 deg, acos(1/1.35) =
+            #   42.2 deg. Raised together with MaxRollPitch 25 -> 38, and
+            #   deliberately kept ~4 deg above it. Raising tilt WITHOUT this
+            #   makes things worse, not better - the vehicle loses lift exactly
+            #   when it banks hardest, which is the most likely reading of the
+            #   old "40 deg overshot to 61 and tipped" result (40 was already
+            #   3 deg past the 1.25 ceiling).
             #   MaxPowerFactor 1.25 covers tilts to ~37 deg, above our 25 deg
             #   MaxRollPitch, so the whole normal envelope is compensated.
             #   MaxAngle 40 is the safety: beyond that the vehicle is not
