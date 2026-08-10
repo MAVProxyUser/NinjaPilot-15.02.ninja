@@ -96,6 +96,8 @@ void VtolFlyController::Activate(void)
         mYawCommandActive = false;
         mPreTurnActive    = false;
         mPreTurnBearing   = 0.0f;
+        // A fresh engagement must not inherit the last one's slew state.
+        path_intercept_reset();
     }
 }
 

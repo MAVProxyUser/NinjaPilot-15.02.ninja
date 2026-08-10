@@ -2010,6 +2010,18 @@ def spawn_target(node):
     req.sdf = sdf
     ok, rep = node.request(f"/world/{GAZEBO_WORLD}/create", req, EntityFactory,
                            Boolean, 3000)
+    if not ok or not rep.data:
+        # Almost always a leftover target from a previous run holding the
+        # name. Remove and retry once rather than failing the whole test.
+        from gz.msgs10.entity_pb2 import Entity
+        ent = Entity()
+        ent.name = TARGET_MODEL
+        ent.type = Entity.MODEL
+        node.request(f"/world/{GAZEBO_WORLD}/remove", ent, Entity, Boolean, 3000)
+        time.sleep(1.0)
+        ok, rep = node.request(f"/world/{GAZEBO_WORLD}/create", req,
+                               EntityFactory, Boolean, 3000)
+        print(f"[intercept] respawn after clearing stale target -> ok={ok}")
     print(f"[intercept] spawn {TARGET_MODEL} at N={n} E={e} alt={TARGET_ALT}m -> ok={ok}")
     return ok
 

@@ -97,6 +97,90 @@ path-ratio metrics are confounded by arrival quality; leg-time windows miss
 corners once waypoints release early. The working metric is vertex-centred
 and time-clustered.
 
+## INTERCEPT flight mode: hitting a moving target (2026-08-10)
+
+A firmware flight mode that flies a lead solution onto a moving object and
+makes contact. First confirmed strike: icpt04, 4.00g on the vehicle's own
+IMU, closing speed collapsing 3.15 -> 0.98 m/s in one 50ms sample.
+
+DIVISION OF LABOUR, deliberately: the bridge supplies ONLY the target's
+position and velocity - what an external tracker or a second GPS would give
+you. Every bit of guidance is in the firmware, because it has to run at the
+follower rate, not at telemetry rate.
+
+  PATHDESIRED_MODE_INTERCEPT -> path_intercept() in paths.c
+  End                = target position NOW
+  ModeParameters[1..3] = target velocity NED (slot 0 left unused - it aliases
+                       GOTOENDPOINT_NEXTCOMMAND and once landed the aircraft)
+  EndingVelocity     = our speed cap
+
+BARRAGE, NOT CHASE. The framing came from Phalanx dispersion: a gun does not
+hit a point, it lays a pattern, and the hit is the overlap of that pattern
+with the target. For a SLOW interceptor the dominant miss is TIMING, not
+bearing - closing at 2.2 m/s on a 1.2 m/s target, a solution perfect in
+direction still misses entirely by arriving two seconds late. So when we can
+reach the crossing point before the target does, path_intercept stops
+chasing and settles onto that point, arriving early with zero closing
+velocity and letting the target fly into the contact radius. That trades
+"hit a moving point" - dominated by our own attitude lag, the equivalent of
+the gun's barrel whip - for "hold a position", which this airframe does to
+0.04-0.09m against a 0.58m contact window.
+
+### The bugs, because every one of them was silent
+
+- **Mode not in pathfollower.cpp's dispatch.** The switch maps PathDesired
+  .Mode to a controller; Intercept was missing, so it fell to default,
+  activeController stayed 0, and the vehicle HOVERED while PathDesired
+  updates arrived and were discarded every tick. No error, no alarm. If a
+  new path mode appears to do nothing, check this switch first.
+- **correction_vector zeroed.** Reasoning "an intercept has no line to hold"
+  is right horizontally and catastrophic vertically: correction_vector[2] is
+  the ONLY vertical position feedback the follower gets. Without it the
+  vertical channel ran on feed-forward alone and sagged 28cm below the
+  target while still descending - a 25mm graze at 1.40g instead of a hit.
+  Restoring it: 1.40g -> 4.00g.
+- **Contact geometry from the wrong dimension.** The frame's box is
+  0.47x0.47, so corner-on contact happens at the half-DIAGONAL: 0.25 (ball)
+  + 0.332 = 0.582m centre-to-centre, not the 0.485 the half-width implies. A
+  real collision scored as a miss.
+- **20Hz collision sampling aliases.** Closing at 2-3 m/s, consecutive
+  samples are 10-15cm apart and step over the minimum. Detect contact with
+  the physics engine, and compute true closest approach in closed form
+  between samples (tools/intercept_summary.py does).
+- **gz-sim Contact must be a WORLD system plugin.** Declared on the model it
+  loads silently and publishes nothing - no topic, no warning.
+- **gz-transport discovery race.** advertise() then publish() 50ms later
+  sends into the void; the VelocityControl plugin has not connected yet and
+  the target just sits there while the log cheerfully reports it underway. A
+  successful publish proves nothing about delivery.
+
+### Airframe protection
+
+The commanded velocity is SLEWED, never stepped: 60 deg/s on direction,
+1.2 m/s^2 on magnitude. A tracker feeding a moving point at 10-20Hz jitters,
+and steering straight off it commands acceleration steps the attitude loop
+cannot follow - star126 is the precedent for what that does. The rate
+limiter's statics persist across calls by design and therefore across
+ENGAGEMENTS; path_intercept_reset() (called from VtolFlyController::Activate)
+clears them so a new engagement does not resume slewing from wherever the
+last one ended.
+
+### Testing
+
+`ground/gazebo_bridge/run_intercept.sh <label>` - the only supported way, for
+the same reason run_star.sh is: it kills and WAITS, removes any leftover
+target, RESETS THE SCENE, purges slots, flies, then plots. Launching by hand
+skipped the reset once and left an armed vehicle chasing a stale PathDesired
+- it drifted 190m and the next three runs started from that state.
+
+tools/intercept_plot.py gives both tracks, altitude, and separation with the
+IMU trace. It exists to separate the two failure modes that score
+identically: a CROSS-TRACK miss (guidance aiming wrong) has a rounded
+separation floor, a TIMING miss (aiming right, arriving late) has a sharp V.
+tools/intercept_summary.py tabulates hit rate across runs and decomposes
+each miss into horizontal and vertical - a scalar "0.31m" hid a 28cm
+vertical error completely.
+
 ## OPEN: unexplained intermittent flyaway at wp3 (2026-08-09)
 
 Twice, on otherwise unremarkable runs, the vehicle departed from waypoint 3

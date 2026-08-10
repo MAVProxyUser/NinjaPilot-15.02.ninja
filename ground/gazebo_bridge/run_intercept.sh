@@ -18,9 +18,14 @@ for _ in $(seq 1 20); do pgrep -f fw_simposix >/dev/null || break; sleep 0.5; do
 
 # Remove any target left over from a previous run, then reset the world so the
 # vehicle starts on the pad rather than wherever it ended up.
+# NOTE THE COMMA. Without it the request silently fails to parse, the stale
+# ball stays in the world, and the NEXT run's spawn returns ok=False - which
+# is how icpt07 died with "could not spawn target" while the log showed a
+# perfectly healthy climb.
 gz service -s /world/quadcopter/remove --reqtype gz.msgs.Entity \
-  --reptype gz.msgs.Boolean --timeout 2000 \
-  --req 'name: "target_ball" type: MODEL' >/dev/null 2>&1
+  --reptype gz.msgs.Boolean --timeout 3000 \
+  --req 'name: "target_ball", type: MODEL' >/dev/null 2>&1
+sleep 1
 "$BR/venv/bin/python3" "$BR/tools/reset_world.py" >/dev/null 2>&1
 sleep 1
 
@@ -29,8 +34,28 @@ rm -f ~/ninjapilot-build/fcwd/233CDC*.o* 2>/dev/null
     ~/ninjapilot-build/build/fw_simposix/fw_simposix.elf > "$SCRATCH/${LABEL}_fw.log" 2>&1 & )
 sleep 6
 
+# Run the bridge in the BACKGROUND and poll the log for the verdict, exactly
+# as run_star.sh does. The bridge does not self-terminate when a test
+# function returns - client.run() keeps pumping packets forever - so waiting
+# on the process in the foreground hangs the whole batch. It did: icpt05
+# finished, its bridge stayed up for 82 minutes, and icpt06/07 never started.
 NINJAPILOT_TEST_MODE=intercept NINJAPILOT_RUN_LABEL="$LABEL" \
-  "$BR/venv/bin/python3" "$BR/gazebo_bridge.py" > "$LOG" 2>&1
+  "$BR/venv/bin/python3" "$BR/gazebo_bridge.py" > "$LOG" 2>&1 &
+BRIDGE_PID=$!
+
+for _ in $(seq 1 90); do
+    grep -q "intercept_test: " "$LOG" 2>/dev/null && break
+    kill -0 "$BRIDGE_PID" 2>/dev/null || break     # died early
+    sleep 3
+done
+grep -q "intercept_test: " "$LOG" 2>/dev/null || echo "!!! TIMEOUT - no verdict after ~270s"
+
+# The verdict is written before the disarm completes; give it a moment, then
+# stop the bridge and the firmware so the next run starts clean.
+sleep 4
+kill "$BRIDGE_PID" 2>/dev/null
+pkill -f fw_simposix 2>/dev/null
+for _ in $(seq 1 20); do pgrep -f fw_simposix >/dev/null || break; sleep 0.5; done
 
 echo "=== $LABEL ==="
 grep -E "^\[intercept\]" "$LOG" | tail -20

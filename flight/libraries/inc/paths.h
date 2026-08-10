@@ -36,4 +36,9 @@ struct path_status {
 
 void path_progress(PathDesiredData *path, float *cur_point, struct path_status *status, bool mode3D);
 
+// Clear PATHDESIRED_MODE_INTERCEPT's command rate-limiter state. Call when
+// the intercept is (re)engaged, so a new engagement does not inherit the
+// previous one's last commanded direction.
+void path_intercept_reset(void);
+
 #endif

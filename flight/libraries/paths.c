@@ -494,6 +494,16 @@ static void path_circle(PathDesiredData *path, float *cur_point, struct path_sta
 #define INTERCEPT_LOITER_MARGIN  1.5f   // s of slack required to sit and wait
 #define INTERCEPT_LOITER_GAIN    0.9f   // 1/s taper settling onto the aim point
 
+// Set by path_intercept_reset(), consumed on the next path_intercept() call.
+// A flag rather than direct clearing because the statics it clears are local
+// to path_intercept.
+static bool interceptResetPending = true;
+
+void path_intercept_reset(void)
+{
+    interceptResetPending = true;
+}
+
 static void path_intercept(PathDesiredData *path, float *cur_point, struct path_status *status, bool mode3D)
 {
     // Relative position: target minus us.
@@ -587,8 +597,19 @@ static void path_intercept(PathDesiredData *path, float *cur_point, struct path_
     }
 
     // ---- rate limiting, so a jittery tracker cannot overload the airframe ----
+    // NOTE these persist across calls BY DESIGN (the rate limiter needs the
+    // previous command) - and therefore also across engagements, which is a
+    // trap. Re-entering intercept after a break would resume slewing from a
+    // command aimed wherever the last engagement ended. path_intercept_reset()
+    // is called from VtolFlyController::Activate() to clear it.
     static float lastCmd[3] = { 0.0f, 0.0f, 0.0f };
     static bool  haveLast   = false;
+
+    if (interceptResetPending) {
+        interceptResetPending = false;
+        haveLast = false;
+        lastCmd[0] = lastCmd[1] = lastCmd[2] = 0.0f;
+    }
     float cmd[3] = { dir[0] * speed, dir[1] * speed, dir[2] * speed };
 
     if (haveLast) {
