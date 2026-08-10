@@ -466,13 +466,29 @@
       <shadows>true</shadows>
     </scene>
 
-    <!-- NO ground visual here, deliberately. A 2km green quad was tried
-         to fill the horizon beyond the farm mesh and REVERTED: the farm's
-         own terrain dips below z=0 in places, so a plane high enough to be
-         seen at the horizon also punched up through the scene's real
-         textured grass. The farm mesh owns everything the eye sees on the
-         ground; anything added here has to sit below its LOWEST point to be
-         safe, which then reads as a cliff at the mesh edge. Left alone. -->
+    <!-- Grass to the horizon, so the farm reads as the centrepiece of a
+         landscape instead of a mesh floating in the void.
+
+         It is a RING, not a plane under the farm: four quads running from
+         the farm's measured XY boundary (X -61.6..58.4, Y -73.7..86.3, from
+         the COLLADA vertices with node transforms and the model pose
+         applied) out to +/-1km. Because it never overlaps the farm mesh it
+         can sit at ground level. The first attempt was a single large plane
+         UNDERNEATH the farm, which punched up through the scene's own
+         textured grass wherever the terrain dips - the farm's Z range is
+         -5.09..13.09, so "just below the field" and "below the whole mesh"
+         are 5m apart and there is no depth that works for both.
+
+         The texture is cropped from the farm's OWN baked atlas and
+         mirror-tiled to be seamless, so the horizon matches the centrepiece.
+         UVs follow world position (repeat every 8m), which also means no
+         seam between the four quads.
+
+         Cost: 4 quads, one 512x512 texture, no collision, no physics, no
+         shadow casting. -->
+    <include>
+      <uri>model://grass_horizon</uri>
+    </include>
 
     <model name="ground_plane">
       <static>true</static>

@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="grass_horizon">
+    <static>true</static>
+    <!-- z=-3.05: just under the farm's LOWEST perimeter terrain (measured
+         min -3.00). The farm is a raised plot whose edges slope down, so
+         there is no height near z=0 that clears them - a ring up there cuts
+         through the slopes and reads as warped terrain. Down here the ring
+         is under the skirt everywhere, and the 6m inward overlap in the
+         mesh means the farm's own geometry covers the junction. -->
+    <pose>0 0 -3.05 0 0 0</pose>
+    <link name="link">
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>model://grass_horizon/meshes/grass_ring.obj</uri></mesh>
+        </geometry>
+        <cast_shadows>false</cast_shadows>
+      </visual>
+    </link>
+  </model>
+</sdf>
