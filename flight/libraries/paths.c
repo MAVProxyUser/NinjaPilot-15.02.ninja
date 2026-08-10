@@ -490,6 +490,16 @@ static void path_circle(PathDesiredData *path, float *cur_point, struct path_sta
  */
 #define INTERCEPT_MAX_ACCEL      1.2f   // m/s^2 on the commanded speed
 #define INTERCEPT_MAX_TURN_RATE  60.0f  // deg/s on the commanded direction
+#define INTERCEPT_ENDGAME_MAX_LEAD_S 2.5f  // s: cap on the endgame lead
+                                           // horizon, so a stalled closure
+                                           // cannot aim absurdly far ahead
+#define INTERCEPT_LEVEL_BAND     1.5f   // m: within this of the target's
+                                        // altitude counts as level - full
+                                        // horizontal pursuit
+#define INTERCEPT_LEVEL_RAMP     5.0f   // m: ramp horizontal back in over
+                                        // this band above LEVEL_BAND
+#define INTERCEPT_LAUNCH_HORIZ   0.15f  // horizontal fraction on the deck
+#define INTERCEPT_FLOOR_M        3.0f   // m: never command descent below this
 #define INTERCEPT_ENDGAME_DIST   4.0f   // m: inside this, pure pursuit - the
                                         // cross-range term is ill-conditioned
                                         // at short range and thrashes
@@ -502,6 +512,15 @@ static void path_circle(PathDesiredData *path, float *cur_point, struct path_sta
 #define INTERCEPT_CLIMB_FRAC     0.6f   // of the speed budget, so ~0.8x remains
                                         // horizontal (sqrt(1-0.36)) and the
                                         // vehicle closes WHILE it climbs
+// AIM-HIGH BIAS AND GAIN 1.1 WERE TRIED AND FAILED. Aiming 0.9m above the
+// object with vertical gain raised 0.7 -> 1.1 made every metric worse:
+// closest approach 0.46-0.62m (thru batch) -> 0.94-3.09m, contacts 1/4 -> 0/4,
+// and one crash. The sag is real and measured, but over-driving the vertical
+// to cancel it destabilises the merge - the vehicle chases altitude instead
+// of closing. Do not retry as a pair; if the sag is attacked again it should
+// be by removing its CAUSE (lift lost to tilt during horizontal closure),
+// not by biasing the aim point on top of an already-marginal loop.
+#define INTERCEPT_AIM_HIGH_M     0.0f   // no aim bias - measured worse
 #define INTERCEPT_VERT_GAIN      0.7f   // 1/s: vertical speed cap per metre of
                                         // vertical gap, so the climb ends at
                                         // the target's level, not past it
@@ -590,19 +609,37 @@ static void path_intercept(PathDesiredData *path, float *cur_point, struct path_
     float vperp_mag = vector_lengthf(vperp, 3);
     float bear[3];
     if (range < INTERCEPT_ENDGAME_DIST) {
-        // ENDGAME: pure pursuit, straight at where it IS.
+        // ENDGAME: SHORT-HORIZON LEAD, not pure pursuit.
         //
-        // Constant bearing is the right guidance at range and the wrong one
-        // up close. As range shrinks the line of sight rotates faster and
-        // faster for the same lateral motion, so the cross-range matching
-        // term grows without bound and the command thrashes - measured, the
-        // vehicle reached 1.70m and then flailed alongside the object for
-        // twenty seconds, its position jumping several metres between
-        // samples, never closing the last stride. Handing the endgame to
-        // pure pursuit removes the ill-conditioned term entirely: aim at the
-        // object, close, touch. The lead angle has already done its job by
-        // this point - that is WHY the range is short.
-        bear[0] = u[0] * vmax; bear[1] = u[1] * vmax; bear[2] = u[2] * vmax;
+        // Pure pursuit was tried here and it is wrong: aiming where the
+        // object IS guarantees trailing it, and every run grazed at
+        // 0.53-0.60m - the outer edge of the contact geometry - instead of
+        // hitting centre. Missing the first pass is expensive: it costs the
+        // whole engagement, because a stern chase afterwards has almost no
+        // closing speed and degenerates into flailing alongside.
+        //
+        // But the full cross-range solution is ill-conditioned at short
+        // range (line-of-sight rate diverges as range -> 0, which is what
+        // made the command thrash). The stable middle is to lead over the
+        // time WE need to cover the remaining range: t = range / vmax. That
+        // horizon shrinks smoothly to zero as we arrive, so it cannot blow
+        // up, and at 4m out with a 1.2 m/s object it is still a 2.2m lead -
+        // the difference between a centre hit and the corner graze.
+        float t_lead = range / vmax;
+        if (t_lead > INTERCEPT_ENDGAME_MAX_LEAD_S) {
+            t_lead = INTERCEPT_ENDGAME_MAX_LEAD_S;
+        }
+        float lead[3] = { R[0] + Vt[0] * t_lead,
+                          R[1] + Vt[1] * t_lead,
+                          R[2] + Vt[2] * t_lead };
+        float ll = vector_lengthf(lead, 3);
+        if (ll > 1e-3f) {
+            bear[0] = lead[0] / ll * vmax;
+            bear[1] = lead[1] / ll * vmax;
+            bear[2] = lead[2] / ll * vmax;
+        } else {
+            bear[0] = u[0] * vmax; bear[1] = u[1] * vmax; bear[2] = u[2] * vmax;
+        }
     } else if (vperp_mag >= vmax) {
         // Cannot match the cross-range motion: unwinnable geometry, put
         // everything into cross-range rather than pretending otherwise.
@@ -642,11 +679,26 @@ static void path_intercept(PathDesiredData *path, float *cur_point, struct path_
 
     float speed = vmax;
     float t_us = distP / vmax;
-    if (!opening && t_int > 0.0f && t_us + INTERCEPT_LOITER_MARGIN < t_int) {
+    if (!opening && range > INTERCEPT_ENDGAME_DIST
+        && t_int > 0.0f && t_us + INTERCEPT_LOITER_MARGIN < t_int) {
+        // Loiter is for holding station on the earliest point while the
+        // object is still FAR. Inside the endgame it would crawl into the
+        // merge, which is the same mistake as the terminal taper.
         speed = boundf(INTERCEPT_LOITER_GAIN * distP, 0.0f, vmax);
-    } else if (range < INTERCEPT_TERMINAL_DIST) {
-        speed = vmax * (0.35f + 0.65f * (range / INTERCEPT_TERMINAL_DIST));
     }
+    // NO TERMINAL DECELERATION - deliberately removed.
+    //
+    // This used to taper to 0.35-1.0x vmax inside 3m, which at the 0.58m
+    // contact distance is UNDER HALF SPEED. The vehicle crawled into the
+    // merge, stopped short of the object, and grazed. That taper came from
+    // waypoint arrival logic, where stopping ON the point is the entire
+    // objective - here it is exactly backwards. An intercept path must be
+    // flown THROUGH the target at full speed.
+    //
+    // It also destroyed the thing that makes a strike register: closing
+    // speed. The runs that produced 63g, 23g and 16g were fast merges; every
+    // 1.3g brush was the vehicle arriving slowly. Slowing down near a moving
+    // object is the one thing guaranteed to turn a hit into a graze.
 
     // ---- rate limiting, so a jittery tracker cannot overload the airframe ----
     // NOTE these persist across calls BY DESIGN (the rate limiter needs the
@@ -713,7 +765,21 @@ static void path_intercept(PathDesiredData *path, float *cur_point, struct path_
     // guarantees arriving at the object's ALTITUDE at the moment we arrive
     // at its position, instead of arriving level with the ground.
     if (mode3D) {
-        float vgap = R[2];                       // +ve = target is BELOW us
+        // AIM BIAS: aim ABOVE the object, because the vehicle chronically
+        // arrives BELOW it.
+        //
+        // Measured across six runs: the vertical error at closest approach
+        // is below the target in five of them, and median altitude through
+        // the engagement is 9.1-10.5m against an object at 11.0m. The cause
+        // is structural, not noise - the vertical command is proportional to
+        // the remaining gap, so the correction shrinks exactly as the gap
+        // does, while tilting for horizontal closure keeps costing lift by
+        // cos(theta). It asymptotes low instead of arriving level.
+        //
+        // This is the gun-laying answer from the Phalanx work: a systematic
+        // miss is not noise to average away, it is a BIAS to correct. Aim
+        // high by the observed sag so the sag lands the strike on centre.
+        float vgap = R[2] - INTERCEPT_AIM_HIGH_M; // +ve = target is BELOW us
         float t_use = (t_int > 0.5f) ? t_int : 0.5f;
         // Time-matching ALONE dawdles: with a 10m gap and ~26s to intercept it
         // asks for 0.4 m/s and the vehicle is still low when the object
@@ -746,13 +812,91 @@ static void path_intercept(PathDesiredData *path, float *cur_point, struct path_
         else if (v_need < -vcap) { v_need = -vcap; }
 
         cmd[2] = v_need;
-        // Horizontal keeps the remainder of the speed budget.
+
+        // CLIMB TO THE TARGET'S ALTITUDE BEFORE PURSUING HORIZONTALLY.
+        //
+        // Gated on the VERTICAL GAP TO THE TARGET, not absolute altitude. The
+        // earlier version throttled horizontal only below a fixed 6m - but
+        // the object is at 11m, so above 6m the vehicle committed horizontally
+        // while still 5m low, arrived at horizontal alignment ~1m under the
+        // target every run, and missed. The object is at a fixed height the
+        // airframe can reach (peak altitude 11.4m measured), and getting to
+        // that level FIRST removes the coupled vertical miss entirely: arrive
+        // already level and let horizontal closure bring them together. The
+        // geometry costs nothing - climbing straight to 11m (~4s) then
+        // pursuing takes the same ~12s as chasing out low, because the object
+        // passes overhead either way. It also stops tilting on the deck: at
+        // launch the gap is ~11m so horizontal is throttled to near zero and
+        // the airframe climbs out clean instead of grinding sideways.
+        float vgap_abs = fabsf(R[2]);
+        float launch_scale = 1.0f;
+        if (vgap_abs > INTERCEPT_LEVEL_BAND) {
+            float over = (vgap_abs - INTERCEPT_LEVEL_BAND) / INTERCEPT_LEVEL_RAMP;
+            if (over > 1.0f) { over = 1.0f; }
+            launch_scale = INTERCEPT_LAUNCH_HORIZ
+                + (1.0f - INTERCEPT_LAUNCH_HORIZ) * (1.0f - over);
+            // Full climb effort while closing the altitude gap.
+            float climb_max = INTERCEPT_MAX_CLIMB;
+            if (climb_max > vmax) { climb_max = vmax; }
+            if (vgap < 0.0f && cmd[2] > -climb_max) {
+                cmd[2] = -climb_max;          // object above: climb hard
+            } else if (vgap > 0.0f && cmd[2] < climb_max) {
+                cmd[2] = climb_max;           // object below: descend to it
+            }
+        }
+
+        // Horizontal keeps the remainder of the speed budget...
         float horiz_budget = vmax * vmax - v_need * v_need;
         horiz_budget = (horiz_budget > 0.0f) ? sqrtf(horiz_budget) : 0.0f;
+
+        // ...but is also PACED BY THE CLIMB. Arriving over the object's
+        // position while still below its altitude is a guaranteed miss, and
+        // it is what was happening: the climb is budget-limited to ~1.3 m/s
+        // so 10m of altitude takes ~7.6s, while horizontal closure gets
+        // there sooner. The vehicle showed up underneath, missed, and every
+        // pass after that was a stern chase with no closing speed left.
+        //
+        // So if the vertical needs longer than the horizontal, slow the
+        // horizontal to match. Better to arrive together than to arrive
+        // early and low. Deliberately NOT applied in the endgame - inside
+        // the merge the lead is doing the work and throttling it there would
+        // just stall the strike.
+        if (range > INTERCEPT_ENDGAME_DIST) {
+            float hdist = sqrtf(R[0] * R[0] + R[1] * R[1]);
+            float vdist = fabsf(R[2]);
+            float vrate = fabsf(v_need);
+            if (vrate > 0.05f && horiz_budget > 0.05f) {
+                float t_vert = vdist / vrate;
+                float t_horiz = hdist / horiz_budget;
+                if (t_vert > t_horiz && t_vert > 0.1f) {
+                    float paced = hdist / t_vert;
+                    if (paced < horiz_budget) {
+                        horiz_budget = paced;
+                    }
+                }
+            }
+        }
+
+        horiz_budget *= launch_scale;
+
         float hmag = sqrtf(cmd[0] * cmd[0] + cmd[1] * cmd[1]);
         if (hmag > 1e-3f) {
             cmd[0] = cmd[0] / hmag * horiz_budget;
             cmd[1] = cmd[1] / hmag * horiz_budget;
+        }
+    }
+
+    // HARD FLOOR. The guidance will chase whatever the tracker reports, and
+    // after a strike the object is a FALLING BODY - so it chases it into the
+    // ground. Two of five runs ended that way, descending steadily from
+    // ~12m to the deck while still dutifully closing on a target that was
+    // itself on its way down. Never accept a descent command below the
+    // floor; if the object goes below it, the object is no longer a threat
+    // and no longer worth following.
+    if (mode3D) {
+        float altitude = -cur_point[2];
+        if (altitude < INTERCEPT_FLOOR_M && cmd[2] > 0.0f) {
+            cmd[2] = 0.0f;                    // +Down = descending
         }
     }
 

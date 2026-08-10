@@ -146,6 +146,7 @@ IMU_HIT_G          = 2.0    # g total accel: the IMU-side collision trigger
 # time the object would reach BARN_AT along its own track. Reported as margin,
 # and as how far along the track the hit landed - earliest is best.
 BARN_AT            = (20.0, 20.0)   # N, E: where the object strikes the farm
+ENGAGE_TIMEOUT_S   = 22.0   # s of active pursuit before breaking off
 DETECT_RANGE       = 34.0   # m: range at which the object is "seen" and the
                             # vehicle scrambles. Wide enough that a 1.2 m/s
                             # target leaves time to launch and climb 11m.
@@ -2227,6 +2228,8 @@ def _intercept_run(node, client):
 
     # ---- the intercept run -------------------------------------------------
     crashed = [False]
+    broke_off = [None]
+    t_engage = [time.time()]
     struck = [None]   # wall-clock of the strike, once hit
     knock = [(0.0, 0.0, 0.0)]   # post-impact velocity NED
     maneuver = os.environ.get("NINJAPILOT_TARGET_MANEUVER") == "1"
@@ -2239,6 +2242,7 @@ def _intercept_run(node, client):
     prev = None
     track = []          # (t, drone NED, target NED, aim NED, sep) per tick
     t0 = time.time()
+    t_engage[0] = t0
     peak_g = 0.0
     # 95 -> 55s. The engagement is decided within ~25s of the scramble; the
     # rest was dead air. Short runs matter more than complete ones when the
@@ -2304,6 +2308,33 @@ def _intercept_run(node, client):
         planned.tick(aim)
         draw_aim_line(node, dned, aim)
 
+        # ENGAGEMENT TIMEOUT. Every crash in the last four batches was a run
+        # where the interceptor never got close enough to break off - min
+        # separations of 1.11, 1.37, 1.51m - and simply chased until it fell
+        # out of the sky. Nothing bounded the engagement. A real interceptor
+        # breaks off and re-forms rather than pursuing to exhaustion, and the
+        # airframe cannot sustain indefinite max-effort manoeuvring. The one
+        # batch with zero crashes (flr) was the one where a close pass always
+        # ended the engagement; this makes that bound unconditional.
+        if (time.time() - t_engage[0]) > ENGAGE_TIMEOUT_S and not broke_off[0]:
+            print(f"[intercept] engagement timeout at "
+                  f"{ENGAGE_TIMEOUT_S:.0f}s - breaking off to stabilise")
+            broke_off[0] = time.time()
+
+        # BREAK OFF once the object is struck or is falling below the
+        # engagement floor. Continuing to feed its position is what flew the
+        # interceptor into the ground twice: after the knock-down the object
+        # is a falling body, and the guidance follows it down faithfully.
+        if struck[0] or broke_off[0] or (-tned[2]) < 4.0:
+            client.send_object("PathDesired", {
+                "Start": [dned[0], dned[1], dned[2]],
+                "End": [dned[0], dned[1], -10.0],
+                "StartingVelocity": 0.0, "EndingVelocity": 0.0,
+                "ModeParameters": [0.0, 0.0, 0.0, 0.0], "UID": 0,
+                "Mode": "GoToEndpoint"})
+            time.sleep(0.05)
+            continue
+
         client.send_object("PathDesired", {
             "Start": [dned[0], dned[1], dned[2]],
             "End": [tned[0], tned[1], tned[2]],
@@ -2325,7 +2356,14 @@ def _intercept_run(node, client):
         track.append((time.time() - t0, list(dned), list(tned),
                       list(vel), sep, _last_accel_g[0]))
         # (1) Gazebo ground truth
-        if (_contact_hit[0] is not None or sep < INTERCEPT_HIT_DIST) and hit_gz is None:
+        # Contact for SCORING may use the distance backstop, but the
+        # knock-down and break-off must require the PHYSICS ENGINE's verdict.
+        # Letting the 0.60m backstop trigger them made the interceptor
+        # declare victory at 60cm, veer away and drop the ball before the
+        # shapes ever touched - four runs in a row scored "contact" with the
+        # IMU flat at 1.32g, because nothing actually hit anything.
+        real_contact = _contact_hit[0] is not None
+        if (real_contact or sep < INTERCEPT_HIT_DIST) and hit_gz is None:
             hit_gz = (time.time() - t0, sep)
             # Deflect along the line of impact, scaled by how hard we hit it.
             n = [tned[i] - dned[i] for i in range(3)]
@@ -2335,8 +2373,21 @@ def _intercept_run(node, client):
             knock[0] = (tvel[0] + n[0] * imp,
                         tvel[1] + n[1] * imp,
                         tvel[2] + n[2] * imp - 1.0)
-            struck[0] = time.time()
-            print("[intercept] *** TARGET KNOCKED DOWN ***")
+            # TWO SEPARATE THINGS, wrongly merged before:
+            #   - KNOCK-DOWN is physical and needs the engine's contact verdict
+            #   - BREAK-OFF is about not killing ourselves, and must happen on
+            #     any close pass whether or not we touched.
+            # Merging them either faked hits (break off at 0.6m before the
+            # shapes touch: 4 runs of "contact" with a flat 1.32g IMU) or
+            # crashed the vehicle (no break-off at all: 3 crashes in 4 runs,
+            # chasing until it fell out of the sky). Neither is acceptable.
+            if real_contact:
+                struck[0] = time.time()
+                print("[intercept] *** TARGET KNOCKED DOWN ***")
+            else:
+                print(f"[intercept] close pass {sep:.2f}m (no physical "
+                      f"contact) - breaking off, engagement over")
+            broke_off[0] = time.time()
             print(f"[intercept] *** GAZEBO CONTACT *** t+{hit_gz[0]:.1f}s sep={sep:.2f}m")
         # (2) the vehicle's own IMU
         g = _last_accel_g[0]
@@ -2348,6 +2399,8 @@ def _intercept_run(node, client):
             break
         # Object is down and we hit it - nothing further to learn this run.
         if struck[0] and (time.time() - struck[0]) > 3.0:
+            break
+        if broke_off[0] and (time.time() - broke_off[0]) > 3.0:
             break
         time.sleep(0.05)
 
@@ -3511,6 +3564,10 @@ def uavtalk_thread():
             # correction vector rotates as the vehicle passes a waypoint, and
             # near the point a high gain on it fights the arrival instead of
             # the line.
+                        # VerticalPosP: 0.50 was tested against a 6-run baseline and was a
+            # NULL result (same cluster, 0 vs 1 contacts) - the vertical miss is
+            # a sequencing problem, not loop weakness, so it is fixed in the
+            # guidance (climb to target level before horizontal pursuit).
             "HorizontalPosP": 0.35, "VerticalPosP": 0.25,
             # VerticalVelPID Kp 0.3->0.6, Ki 0.15->0.45: measured in a real
             # PositionHold sag (truth 2.4m -> ground in ~10s), the vertical
