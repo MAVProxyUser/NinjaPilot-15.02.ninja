@@ -1156,7 +1156,13 @@ MISSION_WP_RADIUS = 1.0
 # point, so it stops the moment the plan is satisfied. star89 confirmed at
 # 0.20-0.26m from every corner and at_retire equalled closest approach at all
 # of them - it was not failing to arrive, it was being told it had arrived.
-MISSION_WP_RADIUS_PRECISE = 0.15  # m, corner acceptance sphere
+# 0.15 -> 0.06. The vehicle retires at whatever distance first satisfies the
+# sphere, so the sphere IS the parking distance: every waypoint in star114-118
+# retired at 0.13-0.15m, i.e. it dwelled ALONGSIDE the point rather than on it.
+# Tightening only became affordable once path_endpoint stopped capping its
+# feed-forward at EndingVelocity=0 (PATH_ARRIVAL_MIN_CAP) - before that the
+# last 0.1m closed at ~0.01 m/s and a tighter sphere would simply have stalled.
+MISSION_WP_RADIUS_PRECISE = 0.06  # m, corner acceptance sphere
 MISSION_WP_RADIUS_3D = 0.35       # m, sphere for legs that move vertically
 # 0.4 -> 0.6 m/s. This gate decides WHICH pass through the waypoint counts as
 # an arrival, and 0.4 was rejecting the best one. The vehicle's first approach
@@ -1540,6 +1546,73 @@ FC_LOG_OBJECTS_MISSION = [
     # the same 100ms as VelocityState so the two can be compared sample for
     # sample.
     ("VelocityDesired", "periodic", 100),
+
+    # --- added after the corner investigation, chosen by insight-per-byte ---
+
+    # THE LEG THE VEHICLE WAS ACTUALLY GIVEN: Start, End, Starting/Ending
+    # velocity, Mode and ModeParameters. On change only - about a dozen
+    # records for a whole mission, ~0.4% of the log - and it is the single
+    # most valuable thing here.
+    #
+    # It makes the analysis SELF-DESCRIBING. Every scorer currently compares
+    # the flown path against a mission shape hard-coded in star_geom.py, and
+    # when the mission changed and that file did not, the scorers kept
+    # measuring the old shape and confidently reported 1.76m of cross-track
+    # that was purely a stale planned path.
+    #
+    # It would also have collapsed the longest investigation of the session
+    # into one glance: the corner controller was gated on ModeParameters[3],
+    # nothing ever set it, and the block had therefore never executed. One
+    # look at a logged PathDesired showing ModeParameters = [0,0,0,0] says
+    # that immediately. The same record shows the slot-0 aliasing bug that
+    # landed the aircraft mid-mission.
+    ("PathDesired", "onchange", 0),
+
+    # What the follower hands the MIXER (roll/pitch/yaw/thrust, normalised).
+    # The saturation budget - "yaw command ~ Kp * MaximumRate.Yaw, keep it
+    # under ~0.5 or yaw STEALS THRUST" - is currently enforced by arithmetic
+    # and verified by crashing. This makes it a measurement. 200ms is ample
+    # for sustained saturation, which is the failure mode that matters (a
+    # corner turn lasts seconds); the autotune profile uses 50ms because it
+    # is detecting a relay square wave, which is a different question.
+    ("ActuatorDesired", "periodic", 200),
+
+    # Is the flight controller itself starving? CPU load, stack remaining,
+    # IRQ stack, event-system errors. We have repeatedly guessed at this
+    # (the outerloop startup gap, the marker-publishing thread starvation)
+    # and never once measured it. 2s costs ~1% of the log.
+    ("SystemStats", "periodic", 2000),
+
+    # NeutralThrustOffset - the hover-thrust baseline the altitude loop
+    # self-tunes. Drift here shows up as altitude error with no obvious
+    # cause in the vertical PIDs.
+    ("VtolSelfTuningStats", "periodic", 2000),
+
+    # The INPUT side, at 1s. Everything else here records what the FC did;
+    # this records what it was TOLD. Three consecutive runs were once lost to
+    # a second UAVTalk client stealing the bridge's packets, and the signature
+    # was invisible in the flight logs precisely because the commanded input
+    # was not among them - it read as a control bug. A gap or a frozen value
+    # here separates "the harness never said it" from "the FC ignored it".
+    ("ManualControlCommand", "periodic", 1000),
+
+    # Mag at 1s. A 90 deg yaw frame error (spawn attitude used as a world
+    # reference) once caused gain-independent lateral spiral divergence, and
+    # yaw rotates the NE->body mapping for every horizontal correction, so
+    # the field the FC believes in is worth recording cheaply.
+    ("MagState", "periodic", 1000),
+]
+
+# Opt-in via NINJAPILOT_DEEP_LOG=1. Closes the control cascade at the rate
+# loop: position -> velocity -> attitude -> RATE -> actuator. Kept OUT of the
+# default profile because the pair costs ~16% of the log bandwidth and only
+# earns it when the question is specifically about the inner loop - yaw
+# hunting, attitude oscillation, tumbles. RateDesired alone is half a
+# picture, so GyroState (the actual rate) comes with it or not at all.
+FC_LOG_OBJECTS_DEEP = [
+    ("RateDesired", "periodic", 200),
+    ("GyroState", "periodic", 200),
+    ("AccelState", "periodic", 200),
 ]
 
 FC_LOG_OBJECTS_AUTOTUNE = [
@@ -3000,7 +3073,10 @@ def uavtalk_thread():
             if TEST_MODE != "pull_logs":
                 setup_fc_logging(client,
                                  FC_LOG_OBJECTS_AUTOTUNE if TEST_MODE == "autotune"
-                                 else (FC_LOG_OBJECTS_MISSION if TEST_MODE == "mission" else ()))
+                                 else (FC_LOG_OBJECTS_MISSION + (
+                                     FC_LOG_OBJECTS_DEEP
+                                     if os.environ.get("NINJAPILOT_DEEP_LOG") == "1" else [])
+                                     if TEST_MODE == "mission" else ()))
                 time.sleep(1.0)  # let metadata writes land before arming
             target()
             if TEST_MODE != "pull_logs":

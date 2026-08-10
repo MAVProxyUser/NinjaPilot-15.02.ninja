@@ -87,14 +87,27 @@
 // the arrival, gentle enough that the velocity loop tracks it without
 // carrying lag through the point.
 //
-// 0.85 -> 1.10. The remaining per-corner cost is the tail of this settle:
-// a first-order approach never quite arrives, and at 0.85 the last metre
-// took ~2.2s of every corner. Raising the slope shortens the tail
-// proportionally. It is bounded by overshoot - the law demands a
-// deceleration of gain^2 * d, which at 1.10 and a 1.2 m/s cruise is about
-// 1.3 m/s^2, still well under the ~4.6 m/s^2 the tilt limit allows, so the
-// binding constraint is loop tracking rather than authority.
+// 1.10 was tried and reverted with the rest of that experiment; 0.85 is the
+// value actually flown in every verified run.
 #define PATH_ARRIVAL_GAIN 0.85f
+
+// Floor on the arrival SPEED CAP (m/s), not on the speed itself.
+//
+// path_endpoint caps its feed-forward at EndingVelocity, and a corner meant to
+// be a full stop has EndingVelocity = 0 - so the cap is zero and the
+// feed-forward is zero for the whole final approach. The last stretch is then
+// closed by the follower's position P term alone: 0.35 * 0.14m = 0.05 m/s
+// commanded. Measured: the vehicle settled 0.14m from the waypoint and closed
+// at ~0.01 m/s over the next four seconds, i.e. it dwelled ALONGSIDE the point
+// rather than on it, and the plan confirmed there because 0.14 was inside the
+// acceptance radius.
+//
+// Capping at max(EndingVelocity, this) restores a real closing command while
+// keeping the taper: speed is still PATH_ARRIVAL_GAIN * distance, so it goes
+// to zero AT the point, but it is no longer clamped to zero on the way in.
+// Fly-through waypoints are unaffected - their EndingVelocity is already well
+// above this.
+#define PATH_ARRIVAL_MIN_CAP 0.30f
 
 #include "uavobjectmanager.h" // <--.
 #include "pathdesired.h" // <-- needed only for correct ENUM macro usage with path modes (PATHDESIRED_MODE_xxx,
@@ -209,6 +222,9 @@ static void path_endpoint(PathDesiredData *path, float *cur_point, struct path_s
     // the fine settling to the follower's position loop, which is what that
     // loop is for. See PATH_ARRIVAL_GAIN for why the slope is linear.
     float speed = path->EndingVelocity;
+    if (speed < PATH_ARRIVAL_MIN_CAP) {
+        speed = PATH_ARRIVAL_MIN_CAP;
+    }
     if (speed > PATH_ARRIVAL_GAIN * dist_diff) {
         speed = PATH_ARRIVAL_GAIN * dist_diff;
     }

@@ -19,6 +19,12 @@ echo "--- board log: decode from the FC's own flash ---"
 # reached the analysis unnoticed.
 "$PY" "$HERE/decode_fcwd.py" "$HOME/ninjapilot-build/fcwd" "$OUT"
 
+# Before trusting ANY score: is the shape we are grading against the shape the
+# vehicle was actually given? PathDesired is logged on change, so this is
+# checkable rather than assumed.
+echo "--- plan: what the follower was actually given ---"
+"$PY" "$HERE/plan_check.py" "$OUT"
+
 echo "--- score (flown vs planned, dense board samples) ---"
 "$PY" "$HERE/score.py" "$LABEL" "$OUT"
 

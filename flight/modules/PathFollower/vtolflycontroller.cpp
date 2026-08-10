@@ -249,7 +249,28 @@ void VtolFlyController::UpdateVelocityDesired()
 
                 // Distance over which the nose swings from this leg's bearing
                 // to the next one's.
-                const float PRETURN_DIST = 4.0f;
+                const float PRETURN_DIST = 7.0f;
+                // ...and the distance at which the turn must be FINISHED. The
+                // blend used to run all the way to the waypoint, so the nose
+                // was still rotating through the final approach - and because
+                // yaw rotates the NE->body mapping, that rotation curls the
+                // ground track. Measured at wp4: the vehicle arced from 0.57m
+                // north of the point out to 0.58m east of it and back before
+                // settling, a visible loop at every corner. Finishing the turn
+                // a metre out leaves the last stretch a straight, purely
+                // translational run-in.
+                //
+                // But the standoff alone made the curl WORSE (2.04x -> 2.50x
+                // path/straight-line over the final 2m), because compressing
+                // the same 144deg into 4m->1m instead of 4m->0m RAISES the
+                // yaw rate during translation. The curl is driven by rate:
+                // the roll/pitch command is computed from the current yaw,
+                // and by the time the vehicle achieves that attitude the yaw
+                // has moved on, so the achieved acceleration is rotated by
+                // roughly (yaw rate x attitude lag). Spreading the turn over
+                // MORE distance is what lowers it - 7m to 1m is 144deg over
+                // 6m (~29 deg/s at cruise) against 4m over 3m (~47 deg/s).
+                const float PRETURN_FINISH = 1.0f;
                 if (distToEnd < PRETURN_DIST) {
                     // Blend the heading as a function of DISTANCE REMAINING,
                     // not at a fixed rate.
@@ -270,7 +291,8 @@ void VtolFlyController::UpdateVelocityDesired()
                     // rate start and finish at zero, so there is no step at
                     // either end - which is the difference between a car
                     // steering into a corner and one that yanks the wheel.
-                    float frac = (PRETURN_DIST - distToEnd) / PRETURN_DIST;
+                    float frac = (PRETURN_DIST - distToEnd)
+                                 / (PRETURN_DIST - PRETURN_FINISH);
                     frac = boundf(frac, 0.0f, 1.0f);
                     frac = frac * frac * (3.0f - 2.0f * frac);
                     mPreTurnBearing = RAD2DEG(atan2f(legE, legN)) + frac * turn;
