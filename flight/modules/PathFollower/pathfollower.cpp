@@ -256,6 +256,15 @@ static void pathFollowerSetActiveController(void)
             case PATHDESIRED_MODE_FOLLOWVECTOR:
             case PATHDESIRED_MODE_CIRCLERIGHT:
             case PATHDESIRED_MODE_CIRCLELEFT:
+            // Intercept is flown by the same controller: it is still "hold a
+            // commanded NE velocity and altitude", the only difference being
+            // that path_intercept() computes that velocity from a lead
+            // solution instead of from a fixed line. Omitting it here is not
+            // a compile error and not a runtime warning - the switch simply
+            // falls to default, activeController stays 0, and the vehicle
+            // hovers while PathDesired updates arrive and are ignored. That
+            // is exactly what it did.
+            case PATHDESIRED_MODE_INTERCEPT:
                 activeController = VtolFlyController::instance();
                 activeController->Activate();
                 break;

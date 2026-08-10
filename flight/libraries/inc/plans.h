@@ -98,6 +98,16 @@ void plan_setup_assistedcontrol(uint8_t timeout_occurred);
 // landing sequence in mid-mission - the vehicle flew to its first waypoint
 // and then descended to the ground under control, which reads as a crash but
 // is the RTB-land path firing on a number that was never a command.
+// Intercept mode: the target's CURRENT velocity in NED. Its position rides in
+// PathDesired.End and is refreshed by whatever is tracking it. Slot 0 is left
+// unused for the same reason as FollowVector - it aliases
+// PATHDESIRED_MODEPARAMETER_GOTOENDPOINT_NEXTCOMMAND, and a non-zero value
+// there once cast to the RTB-LAND enum and landed the aircraft mid-mission.
+#define PATHDESIRED_MODEPARAMETER_INTERCEPT_UNUSED0     0
+#define PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELN  1
+#define PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELE  2
+#define PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELD  3
+
 #define PATHDESIRED_MODEPARAMETER_FOLLOWVECTOR_UNUSED0            0
 // Leg cruise speed (m/s). 0 = no opinion, leg is capped by its endpoint
 // velocities as it always was.

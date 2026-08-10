@@ -462,8 +462,13 @@
     <scene>
       <ambient>0.6 0.6 0.6 1</ambient>
       <background>0.55 0.72 0.92 1</background>
-      <sky></sky>
       <shadows>true</shadows>
+      <!-- NO <sky> HERE, deliberately. gz-sim's procedural sky brings its own
+           sun, and this world already declares a directional light named
+           "sun" - with both present the sky's sun animates and every shadow
+           in the scene sweeps around the property as it moves. The blue
+           <background> gives camera frames a sky-coloured field (the actual
+           complaint that started this) without a second light source. -->
     </scene>
 
     <!-- Grass to the horizon, so the farm reads as the centrepiece of a

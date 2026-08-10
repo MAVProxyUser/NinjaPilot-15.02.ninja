@@ -202,10 +202,29 @@ class ObjectDef(object):
         for f in self.fields:
             v = values.get(f.name, [0] * f.count if f.count > 1 else 0)
             if f.count > 1:
-                flat.extend(v)
+                flat.extend(self._enum_to_int(f, x) for x in v)
             else:
-                flat.append(v)
+                flat.append(self._enum_to_int(f, v))
         return struct.pack(self.struct_format, *flat)
+
+    @staticmethod
+    def _enum_to_int(f, v):
+        """Accept an enum's NAME as well as its index.
+
+        unpack() hands enums back as option strings, so round-tripping a
+        received object straight back through pack() used to fail with a bare
+        "required argument is not an integer" - the enum slot packs as a
+        uint8. Callers also naturally write "Mode": "FollowVector", which is
+        far more readable than the index and does not silently rot when an
+        option is inserted into the middle of the enum.
+        """
+        if f.type == "enum" and isinstance(v, str):
+            try:
+                return f.options.index(v)
+            except ValueError:
+                raise ValueError("%s: %r is not one of %s"
+                                 % (f.name, v, f.options))
+        return v
 
     def unpack(self, data):
         flat = struct.unpack(self.struct_format, data[:self.size])

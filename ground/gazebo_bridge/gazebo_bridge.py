@@ -90,6 +90,24 @@ HOME_ALTITUDE = 30.0
 
 GAZEBO_WORLD = "quadcopter"
 GAZEBO_MODEL = "x3"
+
+# ---------------- INTERCEPT TEST ----------------
+# A slow object crossing the farm diagonally, passing over the vehicle so it
+# transits the upward camera. Speed is deliberately modest: the airframe
+# delivers ~1.5 m/s of usable cruise, and a target much faster than that has
+# no intercept solution at all (the quadratic in path_intercept goes
+# non-positive and it degenerates to a tail chase).
+TARGET_MODEL       = "target_ball"
+TARGET_SPEED       = 1.2    # m/s along its track
+TARGET_ALT         = 11.0   # m above the pad - above the 8m mission altitude
+TARGET_START       = (-26.0, -26.0)   # N, E: one corner
+TARGET_END         = (26.0, 26.0)     # N, E: the opposite corner, via overhead
+INTERCEPT_SPEED    = 2.2    # m/s cap handed to the firmware (EndingVelocity)
+INTERCEPT_HIT_DIST = 0.55   # m centre-to-centre = contact (0.25 ball + frame)
+IMU_HIT_G          = 2.5    # g total accel: the IMU-side collision trigger
+
+_target_state = [None]   # (t, (N,E,D)) newest ground-truth target pose
+_last_accel_g = [1.0]    # |specific force| in g, from the vehicle's own IMU
 POSE_TOPIC = "/world/%s/pose/info" % GAZEBO_WORLD
 IMU_TOPIC = "/X3/imu"
 NAVSAT_TOPIC = "/X3/navsat"
@@ -153,6 +171,11 @@ def gazebo_to_ned_quat(q_gazebo):
 
 def gazebo_pos_to_ned(p):
     """Gazebo ENU (x=E, y=N, z=U) meters -> NED (x=N, y=E, z=D) meters."""
+    return (p[1], p[0], -p[2])
+
+
+def ned_to_gazebo_pos(p):
+    """NED (x=N, y=E, z=D) meters -> Gazebo ENU (x=E, y=N, z=U) meters."""
     return (p[1], p[0], -p[2])
 
 
@@ -285,6 +308,14 @@ sim_start_wall = time.time()
 
 def on_pose(msg):
     for pose in msg.pose:
+        if pose.name == TARGET_MODEL:
+            # The target's ground truth. This stands in for "a completely
+            # separate system that gives us a GPS fix on the object" - the
+            # flight side never sees Gazebo, it only gets the point.
+            t_ = msg.header.stamp.sec + msg.header.stamp.nsec / 1e9
+            _target_state[0] = (t_, gazebo_pos_to_ned(
+                (pose.position.x, pose.position.y, pose.position.z)))
+            continue
         if pose.name != GAZEBO_MODEL:
             continue
         t = msg.header.stamp.sec + msg.header.stamp.nsec / 1e9
@@ -325,6 +356,11 @@ def on_imu(msg):
     gyro_dps = tuple(math.degrees(w) for w in w_frd)
     a_flu = (msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z)
     a_frd = q_rotate(Q_FLU2FRD, a_flu)
+    # Total specific force in g, for the intercept test's IMU-side collision
+    # detector. This is the SAME accel injected into the firmware, so it is
+    # genuinely "what the flight controller felt", not a Gazebo side channel.
+    # Hovering reads ~1g; a strike shows as a short spike above it.
+    _last_accel_g[0] = math.sqrt(sum(x * x for x in a_frd)) / 9.80665
     state.update_from_imu(gyro_dps, a_frd)
 
 
@@ -1920,6 +1956,231 @@ _last_flightstatus = [None]  # latest FlightStatus (mode verification)
 _fms_position_override = [None]  # FlightModePosition override (autotune remaps slot 4)
 
 
+def spawn_target(node):
+    """Put the target object in the world at its start corner.
+
+    A dynamic body with a contact sensor, NOT a static or teleported one: the
+    whole point is that the strike is real physics, so the vehicle's own IMU
+    registers it. Driven by the VelocityControl system plugin, which commands
+    linear velocity every step - that also cancels gravity for free (velocity
+    is set, not accumulated), so no ballistic arc and no drag model needed.
+    """
+    from gz.msgs10.entity_factory_pb2 import EntityFactory
+    from gz.msgs10.boolean_pb2 import Boolean
+    n, e = TARGET_START
+    gx, gy, gz_ = ned_to_gazebo_pos((n, e, -TARGET_ALT))
+    sdf = f"""<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="{TARGET_MODEL}">
+    <pose>{gx} {gy} {gz_} 0 0 0</pose>
+    <link name="link">
+      <gravity>false</gravity>
+      <inertial><mass>0.15</mass>
+        <inertia><ixx>0.00375</ixx><iyy>0.00375</iyy><izz>0.00375</izz>
+                 <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+      </inertial>
+      <collision name="c"><geometry><sphere><radius>0.25</radius></sphere></geometry></collision>
+      <visual name="v">
+        <geometry><sphere><radius>0.25</radius></sphere></geometry>
+        <material>
+          <ambient>1 0.15 0.05 1</ambient><diffuse>1 0.25 0.05 1</diffuse>
+          <emissive>0.5 0.05 0 1</emissive>
+        </material>
+      </visual>
+      <sensor name="ball_contact" type="contact">
+        <always_on>1</always_on><update_rate>200</update_rate>
+        <contact><collision>c</collision></contact>
+      </sensor>
+    </link>
+    <plugin filename="gz-sim-velocity-control-system"
+            name="gz::sim::systems::VelocityControl"/>
+    <plugin filename="gz-sim-contact-system"
+            name="gz::sim::systems::Contact"/>
+  </model>
+</sdf>"""
+    req = EntityFactory()
+    req.sdf = sdf
+    ok, rep = node.request(f"/world/{GAZEBO_WORLD}/create", req, EntityFactory,
+                           Boolean, 3000)
+    print(f"[intercept] spawn {TARGET_MODEL} at N={n} E={e} alt={TARGET_ALT}m -> ok={ok}")
+    return ok
+
+
+def drive_target(node):
+    """Command the target's constant velocity along its diagonal track."""
+    from gz.msgs10.twist_pb2 import Twist
+    n0, e0 = TARGET_START
+    n1, e1 = TARGET_END
+    dn, de = n1 - n0, e1 - e0
+    L = math.hypot(dn, de)
+    vn, ve = TARGET_SPEED * dn / L, TARGET_SPEED * de / L
+    # NED velocity -> Gazebo ENU: x=East, y=North, z=Up
+    tw = Twist()
+    tw.linear.x = ve
+    tw.linear.y = vn
+    tw.linear.z = 0.0
+    pub = node.advertise(f"/model/{TARGET_MODEL}/cmd_vel", Twist)
+    # gz-transport discovery is asynchronous: publishing immediately after
+    # advertise sends into the void, because the VelocityControl plugin has
+    # not yet connected to this publisher. The ball then just sits there -
+    # which is exactly what it did. Wait for discovery, then keep publishing
+    # from the run loop, since one dropped command is a stalled target.
+    time.sleep(1.0)
+    for _ in range(10):
+        pub.publish(tw)
+        time.sleep(0.1)
+    print(f"[intercept] target underway: {TARGET_SPEED:.1f} m/s, "
+          f"velocity N={vn:+.2f} E={ve:+.2f}")
+    return (vn, ve, 0.0), pub, tw
+
+
+def intercept_test():
+    """Fly a firmware-computed intercept on a moving target, to contact.
+
+    The division of labour is deliberate and mirrors how this would work for
+    real: the BRIDGE only supplies the target's position and velocity (as an
+    external tracker or a second GPS would). All of the guidance - lead angle,
+    time-to-go, closing speed, and the airframe rate limits - lives in the
+    firmware's PATHDESIRED_MODE_INTERCEPT (flight/libraries/paths.c).
+
+    Contact is confirmed TWO independent ways, because a single source has
+    been wrong before in this project: Gazebo ground-truth separation, and the
+    vehicle's own IMU seeing the strike.
+    """
+    import gz.transport13 as gztransport
+    node = gztransport.Node()
+    client = _mission_client[0]   # set by on_connected; not a module global
+
+    try:
+        _intercept_run(node, client)
+    finally:
+        # Whatever happened - exception, timeout, success - do not leave the
+        # vehicle armed chasing a stale PathDesired.
+        print("[intercept] disarming")
+        try:
+            control.mode_position = 0
+            time.sleep(1.0)
+            control.armed = False
+        except Exception as e:
+            print(f"[intercept] disarm failed: {e}")
+
+
+def _intercept_run(node, client):
+    print("[intercept] waiting for link + config to settle...")
+    time.sleep(3.0)
+    if not wait_for_attitude_ok():
+        return
+    print("[intercept] arming")
+    control.mode_position = 0
+    time.sleep(0.5)
+    control.armed = True
+    time.sleep(2.0)
+
+    if not vario_climb_and_hold(3.0, 1, "3m staging hold", 5.0):
+        print("[intercept] FAIL - never reached staging altitude")
+        return
+    control.mode_position = 3   # PositionHold: activates PathFollower
+    time.sleep(3.0)
+    print("[intercept] PositionHold engaged; climbing to intercept altitude")
+
+    # Climb toward the target's lane before the target arrives, using the same
+    # PathDesired channel the intercept will use (GoToEndpoint here).
+    t0 = time.time()
+    while time.time() - t0 < 18.0:
+        client.send_object("PathDesired", {
+            "Start": [0.0, 0.0, -8.0], "End": [0.0, 0.0, -8.0],
+            "StartingVelocity": 0.0, "EndingVelocity": 0.0,
+            "ModeParameters": [0.0, 0.0, 0.0, 0.0], "UID": 0, "Mode": "GoToEndpoint"})
+        hp, alt, _ = state.pose_alt_climb()
+        if hp and alt > 7.6:
+            break
+        time.sleep(0.25)
+    _hp, _alt, _ = state.pose_alt_climb()
+    print(f"[intercept] at {_alt:.2f}m, launching target")
+
+    if not spawn_target(node):
+        print("[intercept] FAIL - could not spawn target")
+        return
+    time.sleep(0.5)
+    tvel, _pub, _tw = drive_target(node)
+
+    # ---- the intercept run -------------------------------------------------
+    hit_gz = hit_imu = None
+    min_sep = 1e9
+    prev = None
+    track = []          # (t, drone NED, target NED, aim NED, sep) per tick
+    t0 = time.time()
+    peak_g = 0.0
+    while time.time() - t0 < 75.0:
+        _pub.publish(_tw)     # re-assert: a single dropped cmd_vel stalls it
+        st = _target_state[0]
+        if st is None:
+            time.sleep(0.05); continue
+        tt, tned = st
+        # Estimate the target's velocity from successive fixes - a real tracker
+        # would hand us this, and differentiating here keeps the firmware
+        # honest about only receiving what an external system can supply.
+        if prev and tt > prev[0] + 1e-3:
+            dt = tt - prev[0]
+            vel = tuple((tned[i] - prev[1][i]) / dt for i in range(3))
+        else:
+            vel = tvel
+        prev = (tt, tned)
+
+        hp, dned, _q, _, _, _ = state.snapshot()
+        if not hp:
+            time.sleep(0.05); continue
+        client.send_object("PathDesired", {
+            "Start": [dned[0], dned[1], dned[2]],
+            "End": [tned[0], tned[1], tned[2]],
+            "StartingVelocity": 0.0, "EndingVelocity": INTERCEPT_SPEED,
+            "ModeParameters": [0.0, vel[0], vel[1], vel[2]],
+            "UID": 0, "Mode": "Intercept"})
+
+        sep = math.dist(dned, tned)
+        min_sep = min(min_sep, sep)
+        track.append((time.time() - t0, list(dned), list(tned),
+                      list(vel), sep, _last_accel_g[0]))
+        # (1) Gazebo ground truth
+        if sep < INTERCEPT_HIT_DIST and hit_gz is None:
+            hit_gz = (time.time() - t0, sep)
+            print(f"[intercept] *** GAZEBO CONTACT *** t+{hit_gz[0]:.1f}s sep={sep:.2f}m")
+        # (2) the vehicle's own IMU
+        g = _last_accel_g[0]
+        peak_g = max(peak_g, g)
+        if g > IMU_HIT_G and hit_imu is None and time.time() - t0 > 3.0:
+            hit_imu = (time.time() - t0, g)
+            print(f"[intercept] *** IMU STRIKE *** t+{hit_imu[0]:.1f}s {g:.2f}g")
+        if hit_gz and hit_imu:
+            break
+        time.sleep(0.05)
+
+    # Dump the run so it can be plotted. The picture answers questions the
+    # scalars cannot: did we lead or trail, did we arrive early and wait, and
+    # was the miss cross-track or timing.
+    import json as _json
+    lbl = os.environ.get("NINJAPILOT_RUN_LABEL", "intercept")
+    outp = os.path.join(os.environ.get("TMPDIR", "/tmp"), f"{lbl}_track.json")
+    with open(outp, "w") as fh:
+        _json.dump({"label": lbl, "hit_gz": hit_gz, "hit_imu": hit_imu,
+                    "min_sep": min_sep, "hit_dist": INTERCEPT_HIT_DIST,
+                    "target_speed": TARGET_SPEED, "our_speed": INTERCEPT_SPEED,
+                    "track": track}, fh)
+    print(f"[intercept] track -> {outp}")
+
+    print("[intercept] ---- result ----")
+    print(f"[intercept]   closest separation : {min_sep:.2f} m")
+    print(f"[intercept]   gazebo contact     : "
+          f"{'YES t+%.1fs at %.2fm' % hit_gz if hit_gz else 'no'}")
+    print(f"[intercept]   IMU strike         : "
+          f"{'YES t+%.1fs %.2fg' % hit_imu if hit_imu else 'no'} (peak {peak_g:.2f}g)")
+    verdict = "PASS" if (hit_gz and hit_imu) else (
+        "PARTIAL" if (hit_gz or hit_imu) else "FAIL")
+    print(f"[intercept] intercept_test: {verdict} - intercepted={bool(hit_gz)}, "
+          f"felt={bool(hit_imu)}, min_sep={min_sep:.2f}m")
+
+
+
 def autotune_test():
     """NINJAPILOT_TEST_MODE=autotune: relay-feedback autotune against the
     real Gazebo physics. Protocol (matches flight/modules/Autotune/
@@ -3203,7 +3464,8 @@ def uavtalk_thread():
                   "poshold": poshold_test,
                   "mission": mission_test,
                   "pull_logs": pull_logs_only,
-                  "autotune": autotune_test}.get(TEST_MODE, run_test_sequence)
+                  "autotune": autotune_test,
+                  "intercept": intercept_test}.get(TEST_MODE, run_test_sequence)
 
         def run_with_fc_logging():
             # Runs in its own thread while client.run() keeps pumping packets
@@ -3215,7 +3477,7 @@ def uavtalk_thread():
                                  else (FC_LOG_OBJECTS_MISSION + (
                                      FC_LOG_OBJECTS_DEEP
                                      if os.environ.get("NINJAPILOT_DEEP_LOG") == "1" else [])
-                                     if TEST_MODE == "mission" else ()))
+                                     if TEST_MODE in ("mission", "intercept") else ()))
                 time.sleep(1.0)  # let metadata writes land before arming
             target()
             if TEST_MODE != "pull_logs":

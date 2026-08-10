@@ -124,6 +124,7 @@
 static void path_endpoint(PathDesiredData *path, float *cur_point, struct path_status *status, bool mode);
 static void path_vector(PathDesiredData *path, float *cur_point, struct path_status *status, bool mode);
 static void path_circle(PathDesiredData *path, float *cur_point, struct path_status *status, bool clockwise);
+static void path_intercept(PathDesiredData *path, float *cur_point, struct path_status *status, bool mode3D);
 
 /**
  * @brief Compute progress along path and deviation from it
@@ -149,6 +150,10 @@ void path_progress(PathDesiredData *path, float *cur_point, struct path_status *
         break;
     case PATHDESIRED_MODE_GOTOENDPOINT:
         return path_endpoint(path, cur_point, status, mode3D);
+
+        break;
+    case PATHDESIRED_MODE_INTERCEPT:
+        return path_intercept(path, cur_point, status, mode3D);
 
         break;
     case PATHDESIRED_MODE_LAND:
@@ -449,4 +454,185 @@ static void path_circle(PathDesiredData *path, float *cur_point, struct path_sta
     status->correction_vector[2] = -diff_down;
 
     status->error = fabs(status->error);
+}
+
+
+/**
+ * @brief Fly a lead-pursuit intercept on a MOVING target.
+ * @param[in] path  PathDesired: End = target position NOW, ModeParameters
+ *                  [1..3] = target velocity NED, EndingVelocity = our speed cap
+ * @param[in] cur_point Current location
+ * @param[out] status Structure containing progress along path and deviation
+ *
+ * Chasing where a target IS (plain GoToEndpoint homing on a refreshed point)
+ * is tail-chase: the command always points behind a crossing target and the
+ * miss distance never closes if the target is anywhere near our own speed.
+ * This aims where the target WILL BE.
+ *
+ * Solve for time-to-go from |R + V_t*t| = v_max*t, i.e. the moment our reach
+ * equals the target's range. Expanded that is the quadratic
+ *
+ *     (v_max^2 - |V_t|^2) t^2 - 2(R.V_t) t - |R|^2 = 0
+ *
+ * with R the relative position (target - us). The positive root is the
+ * intercept time; the aim point is R + V_t*t. When the leading coefficient
+ * goes non-positive the target is as fast as we are and no intercept exists -
+ * fall back to pure pursuit, which at least closes if the target ever turns.
+ *
+ * AIRFRAME LIMITS ARE THE POINT. A tracker feeding a moving point at 10-20Hz
+ * will jitter, and steering straight off it commands acceleration steps the
+ * attitude loop cannot follow - the same failure as star126, where rotating
+ * the feed-forward mid-leg put the vehicle on the ground. So the commanded
+ * velocity is SLEWED, not stepped: the direction may change no faster than
+ * INTERCEPT_MAX_TURN_RATE and the magnitude no faster than INTERCEPT_MAX_ACCEL.
+ * Both are well inside what this airframe demonstrated during mission flying
+ * (0.8 m/s^2 leg acceleration, 35 deg/s yaw slew).
+ */
+#define INTERCEPT_MAX_ACCEL      1.2f   // m/s^2 on the commanded speed
+#define INTERCEPT_MAX_TURN_RATE  60.0f  // deg/s on the commanded direction
+#define INTERCEPT_TERMINAL_DIST  1.5f   // m: inside this, aim straight at it
+#define INTERCEPT_LOITER_MARGIN  1.5f   // s of slack required to sit and wait
+#define INTERCEPT_LOITER_GAIN    0.9f   // 1/s taper settling onto the aim point
+
+static void path_intercept(PathDesiredData *path, float *cur_point, struct path_status *status, bool mode3D)
+{
+    // Relative position: target minus us.
+    float R[3] = { path->End.North - cur_point[0],
+                   path->End.East - cur_point[1],
+                   path->End.Down - cur_point[2] };
+    if (!mode3D) {
+        R[2] = 0.0f;
+    }
+    float Vt[3] = { path->ModeParameters[PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELN],
+                    path->ModeParameters[PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELE],
+                    mode3D ? path->ModeParameters[PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELD] : 0.0f };
+
+    float range = vector_lengthf(R, 3);
+    float vmax  = path->EndingVelocity;
+    if (vmax < 0.1f) {
+        vmax = 0.1f;
+    }
+
+    // Aim point: target position advanced by its own velocity over the
+    // predicted time to intercept.
+    float aim[3] = { R[0], R[1], R[2] };
+    if (range > INTERCEPT_TERMINAL_DIST) {
+        float vt2 = Vt[0] * Vt[0] + Vt[1] * Vt[1] + Vt[2] * Vt[2];
+        float a   = vmax * vmax - vt2;
+        float b   = 2.0f * (R[0] * Vt[0] + R[1] * Vt[1] + R[2] * Vt[2]);
+        float c   = range * range;
+        float tgo = 0.0f;
+        if (a > 1e-3f) {
+            float disc = b * b + 4.0f * a * c;
+            if (disc > 0.0f) {
+                tgo = (b + sqrtf(disc)) / (2.0f * a);
+            }
+        }
+        // No solution (target at least as fast as us): pure pursuit.
+        if (tgo > 0.0f && tgo < 60.0f) {
+            aim[0] = R[0] + Vt[0] * tgo;
+            aim[1] = R[1] + Vt[1] * tgo;
+            aim[2] = R[2] + Vt[2] * tgo;
+        }
+    }
+
+    // ---- BARRAGE, NOT CHASE -------------------------------------------
+    // A gun does not hit a point; it lays a dispersion pattern and the hit
+    // comes from that pattern overlapping the target. The same thinking
+    // applies to a SLOW interceptor, and it changes the tactic completely.
+    //
+    // Our closure is ~2.2 m/s on a target doing ~1.2. A pursuit curve leaves
+    // almost no margin, so the dominant miss is not direction - it is TIMING:
+    // a solution perfect in bearing still misses entirely by arriving two
+    // seconds late, because the along-track error grows with the time error
+    // times the target's speed.
+    //
+    // So when we can reach the predicted crossing point BEFORE the target
+    // does, stop chasing and go sit on it. Arrive early with zero closing
+    // velocity and let the target fly into the contact radius. That converts
+    // "hit a moving point" - dominated by our own attitude lag, which is our
+    // equivalent of barrel whip - into "hold a position", which this airframe
+    // does to 0.04-0.09m against a 0.55m contact window: a 5-10x margin.
+    //
+    // Only when there is no time margin do we revert to maximum-effort
+    // pursuit, which is the best available even though it is marginal.
+    float aimlen = vector_lengthf(aim, 3);
+    float dir[3];
+    if (aimlen > 1e-3f) {
+        dir[0] = aim[0] / aimlen; dir[1] = aim[1] / aimlen; dir[2] = aim[2] / aimlen;
+    } else {
+        dir[0] = dir[1] = dir[2] = 0.0f;
+    }
+
+    float speed = vmax;
+    float t_us  = aimlen / vmax;                 // our time to the aim point
+    float t_tgt = INTERCEPT_LOITER_MARGIN;       // default: assume no margin
+    {
+        // Target's time to that same point, along its own track.
+        float toP[3] = { aim[0] - R[0], aim[1] - R[1], aim[2] - R[2] };
+        float vt = vector_lengthf(Vt, 3);
+        if (vt > 0.05f) {
+            t_tgt = vector_lengthf(toP, 3) / vt;
+        }
+    }
+    if (t_us + INTERCEPT_LOITER_MARGIN < t_tgt) {
+        // We have time in hand: treat the aim point as a POSITION to settle
+        // on, tapering speed with remaining distance so we arrive stopped
+        // instead of sailing through it.
+        speed = boundf(INTERCEPT_LOITER_GAIN * aimlen, 0.0f, vmax);
+    } else if (range < INTERCEPT_TERMINAL_DIST) {
+        // No margin and close: ease in so contact is a controlled arrival
+        // rather than a ram the vertical loop cannot hold.
+        speed = vmax * (0.35f + 0.65f * (range / INTERCEPT_TERMINAL_DIST));
+    }
+
+    // ---- rate limiting, so a jittery tracker cannot overload the airframe ----
+    static float lastCmd[3] = { 0.0f, 0.0f, 0.0f };
+    static bool  haveLast   = false;
+    float cmd[3] = { dir[0] * speed, dir[1] * speed, dir[2] * speed };
+
+    if (haveLast) {
+        const float dT = 0.02f; // follower update period; conservative if faster
+        float lastLen = vector_lengthf(lastCmd, 3);
+        if (lastLen > 1e-3f) {
+            // limit direction change
+            float lu[3] = { lastCmd[0] / lastLen, lastCmd[1] / lastLen, lastCmd[2] / lastLen };
+            float dot = boundf(lu[0] * dir[0] + lu[1] * dir[1] + lu[2] * dir[2], -1.0f, 1.0f);
+            float ang = RAD2DEG(acosf(dot));
+            float maxAng = INTERCEPT_MAX_TURN_RATE * dT;
+            if (ang > maxAng && ang > 1e-3f) {
+                float f = maxAng / ang;
+                dir[0] = lu[0] + (dir[0] - lu[0]) * f;
+                dir[1] = lu[1] + (dir[1] - lu[1]) * f;
+                dir[2] = lu[2] + (dir[2] - lu[2]) * f;
+                float dl = vector_lengthf(dir, 3);
+                if (dl > 1e-3f) { dir[0] /= dl; dir[1] /= dl; dir[2] /= dl; }
+            }
+        }
+        // limit speed change
+        float maxDv = INTERCEPT_MAX_ACCEL * dT;
+        float dv = speed - lastLen;
+        if (dv > maxDv) { speed = lastLen + maxDv; }
+        else if (dv < -maxDv) { speed = lastLen - maxDv; }
+        cmd[0] = dir[0] * speed; cmd[1] = dir[1] * speed; cmd[2] = dir[2] * speed;
+    }
+    lastCmd[0] = cmd[0]; lastCmd[1] = cmd[1]; lastCmd[2] = cmd[2];
+    haveLast = true;
+
+    status->path_vector[0] = cmd[0];
+    status->path_vector[1] = cmd[1];
+    status->path_vector[2] = mode3D ? cmd[2] : 0.0f;
+
+    // No cross-track concept on an intercept - there is no line to hold, only
+    // a target to reach. Correction is zero and the follower's position loop
+    // is left out of it deliberately; the velocity command IS the guidance.
+    status->correction_vector[0] = 0.0f;
+    status->correction_vector[1] = 0.0f;
+    status->correction_vector[2] = 0.0f;
+
+    // Progress reads as closure: 0 at handover range, 1 on contact. Anything
+    // watching fractional_progress (PathStatus consumers, the RTB-land check)
+    // sees a sane monotonic number as the range shrinks.
+    status->fractional_progress = 1.0f - boundf(range / 30.0f, 0.0f, 1.0f);
+    status->error = range;
 }
