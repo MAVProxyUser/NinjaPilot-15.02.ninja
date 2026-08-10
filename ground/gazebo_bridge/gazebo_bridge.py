@@ -146,6 +146,7 @@ IMU_HIT_G          = 2.0    # g total accel: the IMU-side collision trigger
 # time the object would reach BARN_AT along its own track. Reported as margin,
 # and as how far along the track the hit landed - earliest is best.
 BARN_AT            = (20.0, 20.0)   # N, E: where the object strikes the farm
+FLYAWAY_RANGE_M    = 22.0   # m from pad: past this and opening, break off
 ENGAGE_TIMEOUT_S   = 22.0   # s of active pursuit before breaking off
 DETECT_RANGE       = 34.0   # m: range at which the object is "seen" and the
                             # vehicle scrambles. Wide enough that a 1.2 m/s
@@ -2189,6 +2190,33 @@ def _intercept_run(node, client):
         return
     time.sleep(0.5)
     subscribe_contact(node)
+    # VISION: up + 45deg cameras only, and only while the ball is in frame.
+    # The instant it leaves frame we fall straight back to the legacy
+    # lead-the-known-location solution. See tools/ball_tracker.py.
+    # OFF BY DEFAULT (NINJAPILOT_VISION=1 to enable).
+    #
+    # The detection scan is cheap - measured 0.7ms/frame, ~4% of a core - but
+    # SUBSCRIBING to two 640x480 RGB topics at 30Hz means gz-transport
+    # delivers ~55 MB/s of frame data into the process that also feeds
+    # sensors to the firmware. Measured effect: closest-approach cluster
+    # 0.41-1.03m (vision off) vs 1.03-2.35m (vision on) over 6 runs each,
+    # with identical firmware. That is inside this rig's run-to-run scatter
+    # so it is not conclusive, but the direction is wrong and the mechanism
+    # is exactly the one CLAUDE.md records flying the vehicle into the ground
+    # (blocking/bulk work on the sensor thread). Flight performance does not
+    # pay for a demo: enable vision explicitly when demonstrating the
+    # in-frame/out-of-frame handoff.
+    vision = None
+    if os.environ.get("NINJAPILOT_VISION") == "1":
+        try:
+            sys.path.insert(0, os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "tools"))
+            from ball_tracker import BallTracker
+            vision = BallTracker(node)
+        except Exception as e:
+            print(f"[vision] disabled ({e})")
+            vision = None
+    vis_state = {"locked": False, "frames": 0, "handoffs": 0}
     tvel, _pub, _tw = drive_target(node)
 
     # "Detection": the object crosses into range. Stands in for whatever
@@ -2243,6 +2271,9 @@ def _intercept_run(node, client):
     track = []          # (t, drone NED, target NED, aim NED, sep) per tick
     t0 = time.time()
     t_engage[0] = t0
+    recede = [0]
+    last_pad_r = [1e9]   # seed HIGH: a 0.0 seed makes the first tick look
+                        # like the object is receding and breaks off instantly
     peak_g = 0.0
     # 95 -> 55s. The engagement is decided within ~25s of the scramble; the
     # rest was dead air. Short runs matter more than complete ones when the
@@ -2307,6 +2338,41 @@ def _intercept_run(node, client):
         tgt_trail.tick()
         planned.tick(aim)
         draw_aim_line(node, dned, aim)
+
+        # FLY-AWAY GUARD. Re-attacking an object that is still crossing the
+        # defended area is right - hooking back around for another pass is
+        # exactly what should happen after a miss. But once the object has
+        # gone by and is RECEDING out of the area there is no second crossing
+        # to set up, and chasing it is a stern chase at 2.2 vs 1.2 m/s: a net
+        # 1 m/s that simply drags the interceptor off the property. That is
+        # the "flies away after the 3rd or 4th miss" behaviour. Guard on the
+        # object's distance from the PAD increasing past a limit, which by
+        # construction can only trigger on the outbound leg.
+        tgt_from_pad = math.hypot(tned[0], tned[1])
+        if tgt_from_pad > FLYAWAY_RANGE_M and tgt_from_pad > last_pad_r[0] + 0.05:
+            recede[0] += 1
+        else:
+            recede[0] = 0
+        if recede[0] > 20:          # ~0.4s of sustained recession, not noise
+            if not broke_off[0]:
+                print(f"[intercept] object departing ({tgt_from_pad:.0f}m from "
+                      f"pad and opening) - breaking off, not chasing it out")
+                broke_off[0] = time.time()
+        last_pad_r[0] = tgt_from_pad
+
+        # VISION LOCK state, logged so the handoff can be seen working.
+        if vision is not None:
+            v = vision.lock()
+            if v is not None:
+                vis_state["frames"] += 1
+                if not vis_state["locked"]:
+                    vis_state["locked"] = True
+                    vis_state["handoffs"] += 1
+                    print(f"[vision] *** LOCK on {v[0]} *** az={math.degrees(v[1]):+.1f} "
+                          f"el={math.degrees(v[2]):+.1f} deg, {v[3]} px")
+            elif vis_state["locked"]:
+                vis_state["locked"] = False
+                print("[vision] lock lost - legacy targeting resumes")
 
         # ENGAGEMENT TIMEOUT. Every crash in the last four batches was a run
         # where the interceptor never got close enough to break off - min
@@ -2432,6 +2498,9 @@ def _intercept_run(node, client):
         total = math.hypot(bn - n0, be - e0)
         frac = travelled / total if total > 1e-3 else None
 
+    if vision is not None:
+        print(f"[vision]   in-frame frames {vis_state['frames']}, "
+              f"lock acquisitions {vis_state['handoffs']}")
     print("[intercept] ---- result ----")
     print(f"[intercept]   barn deadline      : object reaches the barn "
           f"{t_barn:.1f}s into its run")

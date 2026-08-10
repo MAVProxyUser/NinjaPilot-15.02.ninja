@@ -507,6 +507,12 @@ static void path_circle(PathDesiredData *path, float *cur_point, struct path_sta
                                         // 1.5 -> 3.0: braking has to START before
                                         // the merge, not at it. At 2 m/s closing,
                                         // 1.5m of runway is 0.75s.
+// AMBUSH MARGIN TESTED AND NEUTRAL. Aiming 1.6s past the earliest meeting
+// point (arrive first and wait, rather than run a dead heat) gave
+// 0.65-1.87m, mean 1.22 - indistinguishable from 1.20 without it. The
+// along-track lag is real but is NOT fixed by moving the aim point further
+// down the track. Left at 0 rather than carrying an unproven mechanism.
+#define INTERCEPT_AMBUSH_MARGIN_S 0.0f
 #define INTERCEPT_LOITER_MARGIN  1.5f   // s of slack required to sit and wait
 #define INTERCEPT_MAX_CLIMB      3.0f   // m/s: the frame's usable climb rate
 #define INTERCEPT_CLIMB_FRAC     0.6f   // of the speed budget, so ~0.8x remains
@@ -594,11 +600,27 @@ static void path_intercept(PathDesiredData *path, float *cur_point, struct path_
     if (!(t_int > 0.0f) || t_int > 60.0f) {
         t_int = 0.0f;               // no solution: object is as fast as us
     }
-    // Position error toward that point - this is what the follower's POSITION
-    // loop needs, and it must be a POSITION, not a velocity.
-    float toP[3] = { R[0] + Vt[0] * t_int,
-                     R[1] + Vt[1] * t_int,
-                     R[2] + Vt[2] * t_int };
+    // AMBUSH MARGIN: aim at where it will be a little AFTER the earliest
+    // possible meeting, so we arrive with time in hand and it flies into us.
+    //
+    // The earliest reachable point is the mathematically soonest meeting, but
+    // reaching it requires arriving at exactly the right moment - a dead heat
+    // with no margin. At 2.2 m/s against a 1.2 m/s crosser the net closure is
+    // ~1 m/s, and the measured failure is an ALONG-TRACK LAG: the vehicle
+    // matches one axis and trails the other as the object pulls ahead
+    // (cf3: dN 0.28 matched, dE 0.67 trailing at closest approach). A dead
+    // heat that loses by half a metre is still a miss.
+    //
+    // Aiming further down the track converts the problem from "win a race"
+    // to "be there first and wait", which a slower interceptor CAN do because
+    // it cuts the corner while the object flies the hypotenuse. This is the
+    // ambush the operator described - arrive at a point on the trajectory,
+    // let the object come to it - now with explicit margin instead of hoping
+    // the dead heat lands.
+    float t_aim = t_int + INTERCEPT_AMBUSH_MARGIN_S;
+    float toP[3] = { R[0] + Vt[0] * t_aim,
+                     R[1] + Vt[1] * t_aim,
+                     R[2] + Vt[2] * t_aim };
     float distP = vector_lengthf(toP, 3);
 
     // --- (2) constant-bearing direction
