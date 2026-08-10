@@ -100,8 +100,8 @@ GAZEBO_MODEL = "x3"
 TARGET_MODEL       = "target_ball"
 TARGET_SPEED       = 1.2    # m/s along its track
 TARGET_ALT         = 11.0   # m above the pad - above the 8m mission altitude
-TARGET_START       = (-26.0, -26.0)   # N, E: one corner
-TARGET_END         = (26.0, 26.0)     # N, E: the opposite corner, via overhead
+TARGET_START       = (-34.0, -34.0)   # N, E: one corner
+TARGET_END         = (34.0, 34.0)     # N, E: the opposite corner, via overhead
 INTERCEPT_SPEED    = 2.2    # m/s cap handed to the firmware (EndingVelocity)
 # Contact happens at up to ball radius + the frame's half-DIAGONAL, not its
 # half-width: the box is 0.47x0.47, so corner-on contact occurs at
@@ -126,6 +126,9 @@ IMU_HIT_G          = 2.0    # g total accel: the IMU-side collision trigger
 # deg turn at t+5s against contact at t+8.1s was absorbed without trouble.
 # The interesting case is a LATE turn, where there is not enough time-to-go
 # left to re-solve and still close the resulting cross-range error.
+DETECT_RANGE       = 34.0   # m: range at which the object is "seen" and the
+                            # vehicle scrambles. Wide enough that a 1.2 m/s
+                            # target leaves time to launch and climb 11m.
 TARGET_TURN_AT     = float(os.environ.get("NINJAPILOT_TURN_AT", "5.0"))
 TARGET_TURN_DEG    = float(os.environ.get("NINJAPILOT_TURN_DEG", "55.0"))
 
@@ -2085,6 +2088,12 @@ def intercept_test():
     import gz.transport13 as gztransport
     node = gztransport.Node()
     client = _mission_client[0]   # set by on_connected; not a module global
+    # Scene setup ONCE, before anything time-critical is running. These are
+    # blocking service calls; they must never share a loop with sensor feeding.
+    _marker_clear(node)           # drop any trail left by a previous run
+    gui_follow(node)
+    flown = FlownTrail(node)      # cyan  - where the vehicle actually went
+    tgt_trail = TargetTrail(node)  # red   - where the object came from
 
     try:
         _intercept_run(node, client)
@@ -2105,41 +2114,60 @@ def _intercept_run(node, client):
     time.sleep(3.0)
     if not wait_for_attitude_ok():
         return
-    print("[intercept] arming")
-    control.mode_position = 0
-    time.sleep(0.5)
-    control.armed = True
-    time.sleep(2.0)
 
-    if not vario_climb_and_hold(3.0, 1, "3m staging hold", 5.0):
-        print("[intercept] FAIL - never reached staging altitude")
-        return
-    control.mode_position = 3   # PositionHold: activates PathFollower
-    time.sleep(3.0)
-    print("[intercept] PositionHold engaged; climbing to intercept altitude")
-
-    # Climb toward the target's lane before the target arrives, using the same
-    # PathDesired channel the intercept will use (GoToEndpoint here).
-    t0 = time.time()
-    while time.time() - t0 < 18.0:
-        client.send_object("PathDesired", {
-            "Start": [0.0, 0.0, -8.0], "End": [0.0, 0.0, -8.0],
-            "StartingVelocity": 0.0, "EndingVelocity": 0.0,
-            "ModeParameters": [0.0, 0.0, 0.0, 0.0], "UID": 0, "Mode": "GoToEndpoint"})
-        hp, alt, _ = state.pose_alt_climb()
-        if hp and alt > 7.6:
-            break
-        time.sleep(0.25)
-    _hp, _alt, _ = state.pose_alt_climb()
-    print(f"[intercept] at {_alt:.2f}m, launching target")
-
+    # ---- SCRAMBLE, not standing patrol -------------------------------------
+    # The target flies FIRST, with the vehicle cold on the pad. Nothing arms
+    # until the object is detected inbound. That is the realistic sequence
+    # and it is also a much harder problem than the previous one: instead of
+    # loitering at the target's altitude waiting, the vehicle has to get off
+    # the ground, climb ~11m and solve the intercept while the target is
+    # already crossing - and it only has as long as the target takes to
+    # transit to do all of it.
+    print("[intercept] vehicle COLD on the pad; releasing the target")
     if not spawn_target(node):
         print("[intercept] FAIL - could not spawn target")
         return
     time.sleep(0.5)
     tvel, _pub, _tw = drive_target(node)
 
+    # "Detection": the object crosses into range. Stands in for whatever
+    # actually cues the launch - radar, the up-camera, an external tracker.
+    print(f"[intercept] watching for inbound within {DETECT_RANGE:.0f}m...")
+    t_watch = time.time()
+    while time.time() - t_watch < 60.0:
+        _pub.publish(_tw)
+        st = _target_state[0]
+        if st is not None:
+            hp, dned, _q, _, _, _ = state.snapshot()
+            if hp and math.dist(dned, st[1]) < DETECT_RANGE:
+                print(f"[intercept] *** CONTACT DETECTED at "
+                      f"{math.dist(dned, st[1]):.1f}m - SCRAMBLE ***")
+                break
+        time.sleep(0.1)
+    else:
+        print("[intercept] FAIL - target never came within detection range")
+        return
+
+    t_scramble = time.time()
+    control.mode_position = 0
+    time.sleep(0.3)
+    control.armed = True
+    time.sleep(1.2)
+
+    # Shortest liftoff that leaves the controllers healthy. The staging hover
+    # exists because PositionHold engaged from the ground does not settle;
+    # 1.5m is the minimum that reliably works, and it is transited, not held.
+    if not vario_climb_and_hold(1.5, 1, "liftoff", 2.0):
+        print("[intercept] FAIL - never got off the pad")
+        return
+    control.mode_position = 3   # PositionHold: activates PathFollower
+    time.sleep(0.8)
+    print(f"[intercept] airborne {time.time() - t_scramble:.1f}s after "
+          f"detection - engaging intercept immediately")
+
     # ---- the intercept run -------------------------------------------------
+    struck = [None]   # wall-clock of the strike, once hit
+    knock = [(0.0, 0.0, 0.0)]   # post-impact velocity NED
     maneuver = os.environ.get("NINJAPILOT_TARGET_MANEUVER") == "1"
     turned = [False]
     if maneuver:
@@ -2151,7 +2179,29 @@ def _intercept_run(node, client):
     track = []          # (t, drone NED, target NED, aim NED, sep) per tick
     t0 = time.time()
     peak_g = 0.0
-    while time.time() - t0 < 75.0:
+    while time.time() - t0 < 95.0:
+        # --- KNOCKED DOWN ---------------------------------------------
+        # Once struck, the object stops being driven and becomes a falling
+        # body. It has to be integrated here rather than handed to DART,
+        # because VelocityControl SETS the link velocity every physics step -
+        # which is exactly why the ball used to plough straight through the
+        # collision unchanged. Publishing a ballistic velocity each tick is
+        # the same kinematics, just integrated on this side: the impact
+        # deflects it away from the vehicle and gravity does the rest, so it
+        # arcs down and lands instead of continuing on its rail.
+        if struck[0]:
+            dt_k = time.time() - struck[0]
+            kv = knock[0]
+            _tw.linear.x = kv[1]
+            _tw.linear.y = kv[0]
+            _tw.linear.z = kv[2] - 9.81 * dt_k
+            st_k = _target_state[0]
+            if st_k is not None and -st_k[1][2] <= 0.30:
+                _tw.linear.x = _tw.linear.y = _tw.linear.z = 0.0   # grounded
+            _pub.publish(_tw)
+            time.sleep(0.05)
+            continue
+
         # Re-assert every tick: a single dropped cmd_vel stalls the target.
         # With the maneuver option the commanded velocity also CHANGES here,
         # which is the point - the guidance must cope with its constant-
@@ -2184,6 +2234,10 @@ def _intercept_run(node, client):
         hp, dned, _q, _, _, _ = state.snapshot()
         if not hp:
             time.sleep(0.05); continue
+        flown.tick()
+        tgt_trail.tick()
+        draw_aim_line(node, dned, lead_solution(dned, tned, vel, INTERCEPT_SPEED))
+
         client.send_object("PathDesired", {
             "Start": [dned[0], dned[1], dned[2]],
             "End": [tned[0], tned[1], tned[2]],
@@ -2198,6 +2252,16 @@ def _intercept_run(node, client):
         # (1) Gazebo ground truth
         if sep < INTERCEPT_HIT_DIST and hit_gz is None:
             hit_gz = (time.time() - t0, sep)
+            # Deflect along the line of impact, scaled by how hard we hit it.
+            n = [tned[i] - dned[i] for i in range(3)]
+            nl = math.sqrt(sum(x * x for x in n)) or 1.0
+            n = [x / nl for x in n]
+            imp = 2.2
+            knock[0] = (tvel[0] + n[0] * imp,
+                        tvel[1] + n[1] * imp,
+                        tvel[2] + n[2] * imp - 1.0)
+            struck[0] = time.time()
+            print("[intercept] *** TARGET KNOCKED DOWN ***")
             print(f"[intercept] *** GAZEBO CONTACT *** t+{hit_gz[0]:.1f}s sep={sep:.2f}m")
         # (2) the vehicle's own IMU
         g = _last_accel_g[0]
@@ -2603,6 +2667,99 @@ class FlownTrail(object):
                                              (0.1, 0.9, 1.0, 0.33)))
         self._seg_id += 1
         self._last_pt = pt
+
+
+class TargetTrail(object):
+    """Red tube behind the incoming object, same construction as FlownTrail.
+
+    Separate class rather than a parameter on FlownTrail because the source
+    differs: FlownTrail reads the vehicle's own state snapshot, this one
+    reads the target's ground-truth pose feed.
+    """
+
+    SEG_MIN_M = 0.5
+
+    def __init__(self, node):
+        self.node = node
+        self.last = 0.0
+        self._seg_id = 4000
+        self._last_pt = None
+
+    def tick(self):
+        now = time.time()
+        if now - self.last < 0.25:
+            return
+        self.last = now
+        st = _target_state[0]
+        if st is None:
+            return
+        ned = st[1]
+        pt = (ned[1], ned[0], -ned[2])
+        if self._last_pt is None:
+            self._last_pt = pt
+            return
+        a = self._last_pt
+        if ((pt[0] - a[0]) ** 2 + (pt[1] - a[1]) ** 2
+                + (pt[2] - a[2]) ** 2) < self.SEG_MIN_M ** 2:
+            return
+        _marker_send(self.node, _marker_tube(self._seg_id, a, pt,
+                                             (1.0, 0.12, 0.05, 0.40)))
+        self._seg_id += 1
+        self._last_pt = pt
+
+
+_aim_last = [0.0]
+
+
+def draw_aim_line(node, drone_ned, aim_ned):
+    """Amber line from the vehicle to the point it is currently steering at.
+
+    THROTTLED, and that is not cosmetic. Every _marker_send is a BLOCKING gz
+    service request; CLAUDE.md records marker publishing at 20Hz starving the
+    thread that feeds sensors to the firmware and flying the vehicle into the
+    ground. Called unthrottled from the intercept loop it did it again -
+    firmware log showed gyroupdates=0, the bridge never got past startup, and
+    the run timed out with no verdict. 4Hz is plenty for a pointer.
+
+    This is the intercept's equivalent of a mission's planned path: there is
+    no fixed route to draw, because the aim point is re-solved every tick.
+    Re-sent on ONE marker id (ADD_MODIFY replaces in place) so it reads as a
+    live pointer rather than accumulating into a fan of stale lines.
+    """
+    now = time.time()
+    if now - _aim_last[0] < 0.25:
+        return
+    _aim_last[0] = now
+    a = (drone_ned[1], drone_ned[0], -drone_ned[2])
+    b = (aim_ned[1], aim_ned[0], -aim_ned[2])
+    if (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2 < 0.04:
+        return
+    _marker_send(node, _marker_tube(3000, a, b, (1.0, 0.72, 0.0, 0.30),
+                                    diameter=0.10))
+
+
+def lead_solution(drone_ned, tgt_ned, tgt_vel, vmax):
+    """Mirror of path_intercept()'s lead maths, for DISPLAY ONLY.
+
+    Deliberately a copy rather than a shared implementation: the firmware's
+    version is the one that flies, and this must never become something the
+    flight code depends on. If the two disagree visibly on the plot, that is
+    a useful signal in itself.
+    """
+    R = [tgt_ned[i] - drone_ned[i] for i in range(3)]
+    rng = math.sqrt(sum(x * x for x in R))
+    vt2 = sum(v * v for v in tgt_vel)
+    a = vmax * vmax - vt2
+    b = 2.0 * sum(R[i] * tgt_vel[i] for i in range(3))
+    c = rng * rng
+    tgo = 0.0
+    if a > 1e-3:
+        disc = b * b + 4.0 * a * c
+        if disc > 0.0:
+            tgo = (b + math.sqrt(disc)) / (2.0 * a)
+    if not (0.0 < tgo < 60.0):
+        return tuple(tgt_ned)
+    return tuple(tgt_ned[i] + tgt_vel[i] * tgo for i in range(3))
 
 
 def upload_mission(client):

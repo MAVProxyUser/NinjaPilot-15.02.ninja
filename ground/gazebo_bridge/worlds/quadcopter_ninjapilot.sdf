@@ -381,17 +381,21 @@
             each one above follows. Reordering the stack means editing both
             the order AND the anchor targets.
 
-         topic_picker is TRUE deliberately: with it false, gz-gui replaces
-         the picker with a permanent "Subscribed to: <topic>" banner that
-         eats most of a small panel (that string is baked into
-         libImageDisplay.dylib; there is no separate switch for it).
+         These use our own CameraView plugin, not gz-gui's ImageDisplay.
+         ImageDisplay renders a permanent "Subscribed to: <topic>" banner
+         whose string is compiled into libImageDisplay.dylib's QML resource
+         - there is no config key to hide it, and topic_picker only swaps it
+         for a topic combo box, which is just different chrome. On a 300x225
+         panel that banner takes a third of the view, three times over.
+         CameraView draws the image and nothing else. Build it with the
+         wind/GPS panels: gui_plugins/WindControl.
 
          The cameras DO render. An earlier note here claimed they were
          blank on macOS - that was measured with the server running ALONE.
          `gz sim -s` only renders once a GUI client has brought up a
          context; with both up, frames carry real scene content. -->
 
-    <plugin filename="ImageDisplay" name="Down">
+    <plugin filename="CameraView" name="Down">
       <gz-gui>
         <title>Down</title>
         <property type="bool" key="showTitleBar">true</property>
@@ -405,10 +409,9 @@
         </anchors>
       </gz-gui>
       <topic>/X3/cam_down/image</topic>
-      <topic_picker>true</topic_picker>
     </plugin>
 
-    <plugin filename="ImageDisplay" name="FPV 45deg">
+    <plugin filename="CameraView" name="FPV 45deg">
       <gz-gui>
         <title>FPV 45deg</title>
         <property type="bool" key="showTitleBar">true</property>
@@ -422,10 +425,9 @@
         </anchors>
       </gz-gui>
       <topic>/X3/cam_fpv45/image</topic>
-      <topic_picker>true</topic_picker>
     </plugin>
 
-    <plugin filename="ImageDisplay" name="Up">
+    <plugin filename="CameraView" name="Up">
       <gz-gui>
         <title>Up</title>
         <property type="bool" key="showTitleBar">true</property>
@@ -439,7 +441,6 @@
         </anchors>
       </gz-gui>
       <topic>/X3/cam_up/image</topic>
-      <topic_picker>true</topic_picker>
     </plugin>
 
     </gui>

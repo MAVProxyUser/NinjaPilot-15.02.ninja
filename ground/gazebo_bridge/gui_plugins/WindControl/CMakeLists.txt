@@ -16,15 +16,18 @@ find_package(Qt5 REQUIRED COMPONENTS Core Quick QuickControls2)
 
 qt5_wrap_cpp(WIND_MOC WindControl.hh)
 qt5_wrap_cpp(GPS_MOC GpsNoise.hh)
+qt5_wrap_cpp(CAM_MOC CameraView.hh)
 
 # ONE LIBRARY PER PLUGIN. GZ_ADD_PLUGIN emits a per-library registration
 # hook, so two registrations linked into the same library collide with a
 # "duplicate symbol _GzPluginHook" error.
-foreach(plugin WindControl GpsNoise)
+foreach(plugin WindControl GpsNoise CameraView)
   if(plugin STREQUAL "WindControl")
     set(plugin_moc ${WIND_MOC})
-  else()
+  elseif(plugin STREQUAL "GpsNoise")
     set(plugin_moc ${GPS_MOC})
+  else()
+    set(plugin_moc ${CAM_MOC})
   endif()
   add_library(${plugin} SHARED ${plugin}.cc ${plugin_moc} ${plugin}.qrc)
   target_include_directories(${plugin} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

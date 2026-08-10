@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/CameraView">
+    <file>CameraView.qml</file>
+  </qresource>
+</RCC>

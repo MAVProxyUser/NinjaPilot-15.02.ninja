@@ -1,6 +1,13 @@
 <sdf version="1.6">
     <model name="x3">
-        <pose>0 0 0.053302 0 0 0</pose>
+        <!-- 0.0533 -> 0.19: the pad's terrain in the farm mesh is at
+             z=0.123, so the original spawn height (measured for a flat
+             z=0 ground plane) left the airframe's lower half, and its
+             downward camera, inside the ground. 0.19 stands it on the
+             actual surface with the same ~0.067m clearance the original
+             had over a flat floor. Landing detection uses ground truth
+             altitude, which is unaffected. -->
+        <pose>0 0 0.19 0 0 0</pose>
         <link name="X3/base_link">
             <enable_wind>true</enable_wind>
             <pose frame="">0 0 0 0 -0 0</pose>
@@ -104,7 +111,16 @@
                 <always_on>1</always_on>
                 <update_rate>40</update_rate>
                 <topic>X3/cam_down/image</topic>
-                <pose>0 0 -0.03 0 1.5707963 0</pose>
+                <!-- z=+0.02, NOT the -0.03 that looks more like a downward
+                     camera mount. base_link sits at 0.0533 when landed, so
+                     -0.03 put the lens at 0.023m - and the farm's terrain
+                     under the pad is at 0.123m. The camera was BURIED 10cm
+                     inside the ground, looking down through the terrain's
+                     back faces at the empty space below the scene. +0.02
+                     puts it at 0.073m... still under 0.123m, so it also
+                     needs the frame to sit on the terrain rather than at
+                     z=0 - see the model pose below. -->
+                <pose>0 0 0.02 0 1.5707963 0</pose>
                 <camera>
                     <horizontal_fov>1.5707963</horizontal_fov>
                     <image>
