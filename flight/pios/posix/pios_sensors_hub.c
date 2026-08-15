@@ -387,6 +387,71 @@ static bool bmp_read(float *press_pa, float *temp_c)
     return true;
 }
 
+/* ---------------------------------------------------------------- HMC5883L */
+#define HMC_ADDR   0x1E
+#define HMC_CRA    0x00
+#define HMC_CRB    0x01
+#define HMC_MODE   0x02
+#define HMC_DATA   0x03
+#define HMC_IDA    0x0A
+
+/* CRB gain 0x20 = +/-1.3 Ga full scale, 1090 LSB/Gauss */
+#define HMC_LSB_PER_GAUSS 1090.0f
+
+static bool hmc_init(void)
+{
+    uint8_t id[3] = { 0, 0, 0 };
+
+    if (i2c_rd(HMC_ADDR, HMC_IDA, id, 3) < 0) {
+        printf("[hub] HMC5883L: no response at 0x%02X\n", HMC_ADDR);
+        return false;
+    }
+    /* 'H','4','3' - an address ACK alone proves nothing, and a QMC5883L (a
+     * different part with different registers) sits at 0x0D and would not
+     * answer here anyway. Identify positively. */
+    if (id[0] != 'H' || id[1] != '4' || id[2] != '3') {
+        printf("[hub] 0x%02X answered but ID=%c%c%c, not an HMC5883L\n",
+               HMC_ADDR, id[0], id[1], id[2]);
+        return false;
+    }
+
+    i2c_wr8(HMC_ADDR, HMC_CRA, 0x78);   /* 8-sample average, 75 Hz, normal   */
+    i2c_wr8(HMC_ADDR, HMC_CRB, 0x20);   /* +/-1.3 Ga                         */
+    i2c_wr8(HMC_ADDR, HMC_MODE, 0x00);  /* continuous measurement            */
+    msleep(10);
+
+    printf("[hub] HMC5883L ok (75 Hz, +/-1.3 Ga) - SECONDARY mag\n");
+    return true;
+}
+
+static bool hmc_read(float ga[3])
+{
+    uint8_t b[6];
+
+    if (i2c_rd(HMC_ADDR, HMC_DATA, b, sizeof(b)) < 0) {
+        return false;
+    }
+    /*
+     * REGISTER ORDER IS X, Z, Y - not X, Y, Z. This is the classic HMC5883L
+     * trap: read it in the obvious order and you get a magnetometer whose Y
+     * and Z are swapped, which does not look like a bug, it looks like a
+     * mounting-orientation problem, and it will be "corrected" with a rotation
+     * that can never be right.
+     */
+    int16_t x = (int16_t)((b[0] << 8) | b[1]);
+    int16_t z = (int16_t)((b[2] << 8) | b[3]);
+    int16_t y = (int16_t)((b[4] << 8) | b[5]);
+
+    /* -4096 is the saturation/overflow flag, not a reading */
+    if (x == -4096 || y == -4096 || z == -4096) {
+        return false;
+    }
+    ga[0] = x / HMC_LSB_PER_GAUSS;
+    ga[1] = y / HMC_LSB_PER_GAUSS;
+    ga[2] = z / HMC_LSB_PER_GAUSS;
+    return true;
+}
+
 /* -------------------------------------------------------- DroneCAN over CAN */
 #define DC_MSG_MAGNETIC_FIELD 1001   /* determined on the wire, see below */
 #define DC_MSG_FIX2           1060
@@ -508,13 +573,15 @@ static void can_poll(void)
 /* ------------------------------------------------------------ reader thread */
 static pthread_t hub_thread;
 static volatile bool hub_run;
-static bool have_mpu, have_bmp, have_can;
+static bool have_mpu, have_bmp, have_can, have_hmc;
 
 static void *hub_main(void *arg)
 {
     (void)arg;
     double next_imu = now_s();
     double next_baro = now_s();
+    double next_hmc = now_s();
+    const double hmc_dt = 1.0 / 50.0;
     const double imu_dt = 1.0 / 500.0;   /* matches PIOS_SENSOR_RATE */
     const double baro_dt = 1.0 / 50.0;
 
@@ -558,6 +625,23 @@ static void *hub_main(void *arg)
             }
         }
 
+        if (have_hmc && t >= next_hmc) {
+            float m[3];
+            if (hmc_read(m)) {
+                hub_publish_begin();
+                memcpy(hub.mag2_ga, m, sizeof(m));
+                hub.mag2_time = t;
+                hub.mag2_count++;
+                hub_publish_end();
+            } else {
+                hub.mag2_errors++;
+            }
+            next_hmc += hmc_dt;
+            if (next_hmc < t) {
+                next_hmc = t + hmc_dt;
+            }
+        }
+
         if (have_can) {
             can_poll();
         }
@@ -588,14 +672,16 @@ int32_t PIOS_SENSORS_HUB_Init(const char *i2c_dev, const char *can_if)
     } else {
         have_mpu = mpu_init();
         have_bmp = bmp_init();
+        have_hmc = hmc_init();
     }
     have_can = can_init(can_if);
 
     hub.have_imu = have_mpu;
     hub.have_baro = have_bmp;
     hub.have_mag = have_can;
+    hub.have_mag2 = have_hmc;
 
-    if (!have_mpu && !have_bmp && !have_can) {
+    if (!have_mpu && !have_bmp && !have_can && !have_hmc) {
         printf("[hub] NO sensors initialised - refusing to start the thread\n");
         return -1;
     }
@@ -681,8 +767,8 @@ int32_t PIOS_SENSORS_HUB_Init(const char *i2c_dev, const char *can_if)
         hub_run = false;
         return -1;
     }
-    printf("[hub] reader thread up: imu=%d baro=%d can=%d\n",
-           have_mpu, have_bmp, have_can);
+    printf("[hub] reader thread up: imu=%d baro=%d can=%d hmc=%d\n",
+           have_mpu, have_bmp, have_can, have_hmc);
     return 0;
 }
 

@@ -30,14 +30,20 @@ struct pios_sensors_hub_data {
     uint32_t baro_count;
     uint32_t baro_errors;
 
-    float    mag_ga[3];       /* Gauss, as DroneCAN sends it  */
+    float    mag_ga[3];       /* Gauss, RM3100 via DroneCAN   */
     uint8_t  mag_node;
     double   mag_time;
     uint32_t mag_count;
 
+    float    mag2_ga[3];      /* Gauss, HMC5883L on local I2C */
+    double   mag2_time;
+    uint32_t mag2_count;
+    uint32_t mag2_errors;
+
     bool     have_imu;
     bool     have_baro;
-    bool     have_mag;
+    bool     have_mag;        /* RM3100 over CAN   */
+    bool     have_mag2;       /* HMC5883L on I2C   */
 };
 
 /**
