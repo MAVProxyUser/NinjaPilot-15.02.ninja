@@ -1,0 +1,26 @@
+[Unit]
+Description=NinjaPilot fw_simposix (real sensors via UAVTalk/UDP:9000)
+After=network.target
+
+[Service]
+WorkingDirectory=/usr/local/ninja/fcwd
+Environment="NINJAPILOT_EXTERNAL_PHYSICS=1"
+ExecStart=/usr/local/ninja/src/build/fw_simposix/fw_simposix.elf
+
+# Measured: at SCHED_OTHER the 500 Hz loop is up to 18 ms late (9 periods,
+# 0.31 % past the firmware own critical threshold even when idle, 5.4 % under
+# load). At SCHED_FIFO 50 the worst case is 0.23 ms and NOTHING breaches.
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=50
+
+# Deliberately NO CPUAffinity. The FreeRTOS Posix port IDLE task busy-spins,
+# so this process wants ~105 % of one core. RT bandwidth is aggregated across
+# both runqueues (~190 %), which is why it does not throttle. Pinning it to a
+# single CPU would cap it at that runqueue 95 % budget and cause exactly the
+# throttling this setting is meant to avoid.
+
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
