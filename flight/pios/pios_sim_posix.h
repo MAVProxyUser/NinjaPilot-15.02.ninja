@@ -101,5 +101,15 @@ extern void PIOS_LED_Init(void);
 #if defined(PIOS_INCLUDE_BL_HELPER)
 #include <pios_bl_helper.h>
 #endif
+/*
+ * Only the realposix target turns this on. SimPosix has no bus to talk to, so
+ * it never needed these; realposix reads real parts off /dev/i2c-N through the
+ * same PIOS_I2C_Transfer() API the STM32 targets use, which is what lets the
+ * common sensor drivers run unmodified on Linux.
+ */
+#if defined(PIOS_INCLUDE_I2C)
+#include <pios_i2c.h>
+#include <pios_i2c_posix.h>
+#endif
 
 #endif /* PIOS_POSIX_H */
