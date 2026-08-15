@@ -182,6 +182,78 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
     while (1) {
         PIOS_WDG_UpdateFlag(PIOS_WDG_SENSORS);
 
+#ifdef PIOS_REALPOSIX
+        /*
+         * REALPOSIX: publish the REAL sensors the hub thread is reading.
+         *
+         * The hub owns a plain pthread (see pios_sensors_hub.c) precisely so
+         * this task never performs a syscall - a blocking ioctl here would
+         * freeze every FreeRTOS task for the duration of the read. All this
+         * does is copy a seqlock-protected snapshot and hand it to the
+         * UAVObjects, which is cheap and cannot block.
+         *
+         * Each object is published ONLY when its counter has moved. The hub
+         * samples at different rates (imu 500 Hz, baro 50, mag 25), and
+         * re-publishing an unchanged value would fake sensor updates - which
+         * matters because stabilizationInnerloopTask is triggered BY
+         * GyroSensor updates, and the estimator gates on MagSensor arriving.
+         */
+        {
+            static uint32_t last_imu, last_baro, last_mag;
+            struct pios_sensors_hub_data h;
+
+            if (PIOS_SENSORS_HUB_Get(&h)) {
+                if (h.have_imu && h.imu_count != last_imu) {
+                    last_imu = h.imu_count;
+
+                    AccelSensorData a;
+                    a.x = h.accel_mss[0];
+                    a.y = h.accel_mss[1];
+                    a.z = h.accel_mss[2];
+                    a.temperature = h.imu_temp_c;
+                    AccelSensorSet(&a);
+
+                    /* Published LAST of the pair on purpose: GyroSensor is
+                     * what dispatches the inner loop, so the accel it will
+                     * read is already in place when it runs. */
+                    GyroSensorData g;
+                    g.x = h.gyro_dps[0];
+                    g.y = h.gyro_dps[1];
+                    g.z = h.gyro_dps[2];
+                    g.temperature = h.imu_temp_c;
+                    GyroSensorSet(&g);
+                }
+
+                if (h.have_baro && h.baro_count != last_baro) {
+                    last_baro = h.baro_count;
+
+                    BaroSensorData b;
+                    b.Temperature = h.baro_temp_c;
+                    b.Pressure    = h.press_pa / 1000.0f;   /* Pa -> kPa */
+                    /* International Standard Atmosphere, the same relation
+                     * pios_ms5611.c uses. 101.325 kPa / 288.15 K sea level. */
+                    b.Altitude    = 44330.0f *
+                                    (1.0f - powf(b.Pressure / 101.325f,
+                                                 (1.0f / 5.255f)));
+                    BaroSensorSet(&b);
+                }
+
+                if (h.have_mag && h.mag_count != last_mag) {
+                    last_mag = h.mag_count;
+
+                    MagSensorData m;
+                    m.x = h.mag_ga[0] * 1000.0f;            /* Ga -> mGa */
+                    m.y = h.mag_ga[1] * 1000.0f;
+                    m.z = h.mag_ga[2] * 1000.0f;
+                    m.temperature = h.baro_temp_c;
+                    MagSensorSet(&m);
+                }
+            }
+            vTaskDelay(2 / portTICK_RATE_MS);
+            continue;
+        }
+#endif /* PIOS_REALPOSIX */
+
         if (externalPhysics) {
             vTaskDelay(2 / portTICK_RATE_MS);
             continue;
