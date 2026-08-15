@@ -499,9 +499,22 @@ invisible**, exactly like the IST8310, and for the same reason: no code to
 talk to it. Rebuilding AP_Periph with IMU support would still be the wrong
 transport - measured on this bus, RawIMU at 500 Hz costs 74 %.
 
-An **SPL06** barometer at 0x76 would work there - but note the driver list is
-exact: SPL06, not MS5611, BMP280 or anything else. That matters, because the
-baro actually in hand is a **GY-63 = MS5611**, which the node cannot drive.
+**CORRECTED 2026-08-15 against the shipped build's own `features.txt`** (from
+https://firmware.ardupilot.org/AP_Periph/latest/MatekL431-Periph/, commit
+a824813): the earlier claim here that "the driver list is exact: SPL06, not
+MS5611, BMP280 or anything else" was WRONG. It was inferred from the hwdef's
+`BARO SPL06 I2C:0:0x76` line, which declares the ONBOARD baro - not the set of
+drivers compiled in. The real list is broad:
+
+    AP_BARO_BMP280_ENABLED   AP_BARO_BMP388_ENABLED   AP_BARO_BMP581_ENABLED
+    AP_BARO_MS5611_ENABLED   AP_BARO_MS5607_ENABLED   AP_BARO_MS5637_ENABLED
+    AP_BARO_SPL06_ENABLED    AP_BARO_DPS280_ENABLED   AP_BARO_FBM320_ENABLED
+    AP_BARO_BMP085_ENABLED   AP_BARO_LPS2XH_ENABLED
+    AP_BARO_PROBE_EXTERNAL_I2C_BUSES   <- probes external buses too
+
+So the L431 CAN drive an MS5611, a BMP280 or a BMP388 on its I2C port. The
+GY-63 would have worked there. Read `features.txt` from the firmware server
+before claiming what a build supports - the hwdef alone does not say.
 
 **SUPERSEDED - put the baro on the board's own I2C instead.** There is no such
 thing as a standalone DroneCAN barometer to buy (baro is always bundled into a
@@ -816,3 +829,35 @@ produced the bug (the others: "guidance variance" that was a 9 Hz sampling
 loop, and CAN "50 Hz / 295 % jitter" that was frames counted as transfers).
 The pattern is always the same - a derived metric was trusted over the raw
 evidence. Read the log. Then measure.
+
+
+## CONFIRMED from the shipped build: what MatekL431-Periph can and cannot do
+
+Source of truth is the build's own `features.txt`, not the hwdef and not
+inference - fetched from
+https://firmware.ardupilot.org/AP_Periph/latest/MatekL431-Periph/
+(commit a824813, 2026-08-14). A leading `!` means DISABLED.
+
+**Compass - two backends, and only two:**
+
+    AP_COMPASS_RM3100_ENABLED       <- what node 125 actually uses
+    AP_COMPASS_QMC5883L_ENABLED
+    !AP_COMPASS_IST8310_ENABLED     <- confirms the IST8310 can NEVER appear
+    !AP_COMPASS_HMC5843_ENABLED     <- so an HMC5883L needs a REBUILD
+    !AP_COMPASS_DRONECAN_ENABLED
+
+This settles two long-running questions with the vendor's own artifact rather
+than with reasoning: the IST8310 is genuinely absent from the build, and
+putting an HMC5883L on the L431's I2C port requires recompiling AP_Periph
+(HMC5843 is the driver that covers the HMC5883L).
+
+**IMU - none, as suspected:**
+
+    !AP_PERIPH_IMU_ENABLED
+
+No inertial sensor support of any kind, which is why an MPU9150 on that port
+is invisible. Independently, the bus economics forbid it anyway: RawIMU at
+500 Hz measures 73.9 % of a 1 Mbit bus.
+
+**Baro - broad, see the correction above.** This is where the earlier
+inference was wrong.
