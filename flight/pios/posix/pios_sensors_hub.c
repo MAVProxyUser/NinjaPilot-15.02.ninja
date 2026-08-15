@@ -456,7 +456,7 @@ static bool hmc_read(float ga[3])
 #define DC_MSG_MAGNETIC_FIELD 1001   /* determined on the wire, see below */
 #define DC_MSG_FIX2           1060
 #define DC_MSG_NODE_STATUS     341
-#define DC_MSG_VENDOR_20003  20003
+#define DC_MSG_GNSS_STATUS   20003  /* ardupilot.gnss.Status */
 
 static int can_fd = -1;
 
@@ -601,24 +601,43 @@ static void can_poll(void)
             continue;
         }
 
-        if (mt == DC_MSG_VENDOR_20003) {
+        if (mt == DC_MSG_GNSS_STATUS && f.can_dlc >= 8) {
             /*
-             * Seen at 5 Hz from the GPS node, single frame. In ArduPilot's
-             * vendor ID range, but the DSDL is NOT established here - so the
-             * raw payload is captured and nothing is claimed about its
-             * meaning. Guessing a layout is how the magnetometer ended up
-             * being reported as 17120 Gauss.
+             * ardupilot.gnss.Status, confirmed against the DSDL at
+             * dronecan/DSDL ardupilot/gnss/20003.Status.uavcan:
+             *
+             *     uint32 error_codes      bits  0-31
+             *     bool   healthy          bit   32
+             *     uint23 status           bits 33-55       = 56 bits = 7 bytes
+             *
+             * DroneCAN packs LSB-first, so `healthy` is bit 0 of byte 4 and
+             * `status` is the remaining 7 bits of byte 4 plus bytes 5-6.
+             *
+             * STATUS_ARMABLE is the one that matters for flight safety: the
+             * GPS node's own judgement that the system is in a fit state to
+             * arm. Observed indoors with no fix: error_codes=0, healthy=1,
+             * ARMABLE=0 - i.e. healthy hardware correctly refusing to bless
+             * an arm. Do NOT treat healthy alone as permission to fly.
+             *
+             * The DSDL itself says the remaining status bits are the
+             * application's to interpret, and bit 6 is set here with no
+             * documented meaning - so the full field is kept raw alongside
+             * the two named flags rather than discarded.
              */
-            uint8_t n = f.can_dlc - 1;          /* strip the tail byte */
-            if (n > sizeof(hub.v20003)) {
-                n = sizeof(hub.v20003);
-            }
+            uint32_t ec = (uint32_t)f.data[0] | ((uint32_t)f.data[1] << 8)
+                        | ((uint32_t)f.data[2] << 16) | ((uint32_t)f.data[3] << 24);
+            uint32_t st = ((uint32_t)f.data[4] >> 1)
+                        | ((uint32_t)f.data[5] << 7) | ((uint32_t)f.data[6] << 15);
+
             hub_publish_begin();
-            memcpy(hub.v20003, f.data, n);
-            hub.v20003_len   = n;
-            hub.v20003_node  = node;
-            hub.v20003_time  = now_s();
-            hub.v20003_count++;
+            hub.gnss_error_codes = ec;
+            hub.gnss_healthy     = (f.data[4] & 0x01) != 0;
+            hub.gnss_status_raw  = st & 0x7FFFFF;
+            hub.gnss_logging     = (st & 1u) != 0;   /* STATUS_LOGGING = 1 */
+            hub.gnss_armable     = (st & 2u) != 0;   /* STATUS_ARMABLE = 2 */
+            hub.gnss_node        = node;
+            hub.gnss_time        = now_s();
+            hub.gnss_count++;
             hub_publish_end();
             continue;
         }

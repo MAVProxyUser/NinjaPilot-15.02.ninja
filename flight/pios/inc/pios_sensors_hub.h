@@ -57,14 +57,15 @@ struct pios_sensors_hub_data {
     struct pios_hub_node nodes[PIOS_HUB_MAX_NODES];
     uint8_t  node_count;
 
-    /* ardupilot vendor message 20003 from the GPS node - NOT decoded, the
-     * DSDL for it is not established here. Raw bytes kept so it can be
-     * identified from real data rather than guessed at. */
-    uint8_t  v20003[8];
-    uint8_t  v20003_len;
-    uint8_t  v20003_node;
-    double   v20003_time;
-    uint32_t v20003_count;
+    /* ardupilot.gnss.Status (msg 20003) - confirmed against the DSDL */
+    uint32_t gnss_error_codes;
+    bool     gnss_healthy;
+    bool     gnss_armable;      /* STATUS_ARMABLE - "safe to arm"      */
+    bool     gnss_logging;      /* STATUS_LOGGING                      */
+    uint32_t gnss_status_raw;   /* full 23-bit field, undocumented bits */
+    uint8_t  gnss_node;
+    double   gnss_time;
+    uint32_t gnss_count;
 
     bool     adxl_present;  /* KUSBA enumerated; see note in the .c       */
 

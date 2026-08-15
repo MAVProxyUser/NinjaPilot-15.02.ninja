@@ -861,3 +861,41 @@ is invisible. Independently, the bus economics forbid it anyway: RawIMU at
 
 **Baro - broad, see the correction above.** This is where the earlier
 inference was wrong.
+
+## SOLVED: vendor 20003 is `ardupilot.gnss.Status` — and ARMABLE is a real gate
+
+Identified by looking it up, not by shape-matching. ArduPilot's vendor DSDL
+lives in the dronecan/DSDL repo under `ardupilot/`, and the filenames carry
+the IDs:
+
+    ardupilot/gnss/20002.Heading   20003.Status   20005.MovingBaselineData
+                   20006.RelPosHeading
+    ardupilot/indication/20000.SafetyState  20001.Button  20007.NotifyState
+
+`20003.Status.uavcan`:
+
+    uint32 error_codes      bits  0-31
+    bool   healthy          bit   32
+    uint23 status           bits 33-55        = 56 bits = 7 bytes
+
+Seven bytes is exactly the payload length observed, which is the first check
+that the identification is right. DroneCAN packs LSB-first, so `healthy` is
+bit 0 of byte 4 and `status` is the top 7 bits of byte 4 plus bytes 5-6.
+
+Decoded live from node 124, indoors with no fix:
+
+    err=0x00000000  healthy=1  ARMABLE=0  LOGGING=0  raw=0x000040
+
+**`STATUS_ARMABLE` is the flight-safety bit**: the GPS node's own judgement
+that the system is fit to arm. Here it reads healthy hardware CORRECTLY
+refusing to bless an arm, because there is no fix. **Do not treat `healthy`
+alone as permission to fly** - healthy describes the receiver, ARMABLE
+describes the solution.
+
+Bit 6 of `status` is set with no documented meaning; the DSDL explicitly
+leaves the remaining bits to the application, so the full 23-bit field is kept
+raw alongside the two named flags rather than discarded.
+
+The earlier decision to store this message's bytes RAW rather than guess a
+layout is what made the identification cheap and safe - the guessed version
+would have been wrong, exactly as it was for the magnetometer.
