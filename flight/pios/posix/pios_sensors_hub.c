@@ -66,6 +66,8 @@
 #include <errno.h>
 #include <time.h>
 #include <pthread.h>
+#include <signal.h>
+#include <sched.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <linux/can.h>
@@ -599,8 +601,83 @@ int32_t PIOS_SENSORS_HUB_Init(const char *i2c_dev, const char *can_if)
     }
 
     hub_run = true;
-    if (pthread_create(&hub_thread, NULL, hub_main, NULL) != 0) {
-        printf("[hub] pthread_create failed: %s\n", strerror(errno));
+
+    /*
+     * Block signals in the reader thread. The FreeRTOS Posix port is
+     * signal-driven (its scheduler parks in sigtimedwait), and a
+     * process-directed signal goes to ANY thread not blocking it, so a
+     * non-FreeRTOS thread should never be eligible. This is hygiene rather
+     * than a fix for a specific observed bug - the hang that motivated it
+     * turned out to be the SCHED_FIFO inheritance handled below.
+     *
+     * The FreeRTOS Posix port is SIGNAL-DRIVEN: its scheduler thread parks in
+     * sigtimedwait() and is woken by the tick signal. A process-directed
+     * signal is delivered to ANY thread that does not block it, so a pthread
+     * created here - before vTaskStartScheduler(), with an empty mask -
+     * happily eats the scheduler's tick.
+     *
+     * Mask BEFORE pthread_create so the child inherits it, then restore.
+     */
+    sigset_t all_sigs, old_sigs;
+    sigfillset(&all_sigs);
+    pthread_sigmask(SIG_SETMASK, &all_sigs, &old_sigs);
+
+    /*
+     * SET THE SCHEDULING POLICY EXPLICITLY - inheriting it is what broke this.
+     *
+     * pthread_create inherits the CREATOR's policy by default. Launch the
+     * firmware under `chrt -f 50` (which is exactly what makes the flight loop
+     * meet its deadlines) and this reader thread silently comes up at
+     * SCHED_FIFO 50 too - equal priority to every FreeRTOS thread. FIFO is
+     * run-to-completion, so a thread polling I2C at 500 Hz then starves them.
+     *
+     * The failure does NOT look like a crash: the process stays up, this
+     * thread keeps reading sensors, the socket threads and telemetry keep
+     * moving, but every FreeRTOS TASK stops - IDLE included - and the
+     * scheduler parks at 0 % CPU. Measured, 5 s samples:
+     *
+     *     simposix, FIFO 50            IDLE 385 ticks, Sensors 18, Ca 32, wd 2/s
+     *     realposix, FIFO 50 inherited IDLE   0,       Sensors  0, Ca  0, wd SILENT
+     *     realposix, SCHED_OTHER       IDLE   -        Sensors  2, Ca  5, wd 1.3/s
+     *
+     * So: PTHREAD_EXPLICIT_SCHED, and one band BELOW the flight code. The
+     * reader is I/O bound and blocks on ioctl anyway, so it gets all the CPU
+     * it needs whenever the flight loop is not running - and can never
+     * preempt it. This is the same trap already recorded in
+     * osd32mp1/CLAUDE.md for fork() and SCHED_FIFO.
+     */
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+
+    int pol = sched_getscheduler(0);
+    if (pol == SCHED_FIFO || pol == SCHED_RR) {
+        struct sched_param pp;
+        sched_getparam(0, &pp);
+        int prio = pp.sched_priority - 10;
+        int lo = sched_get_priority_min(pol);
+        if (prio < lo) {
+            prio = lo;
+        }
+        struct sched_param cp = { .sched_priority = prio };
+        pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+        pthread_attr_setschedpolicy(&attr, pol);
+        pthread_attr_setschedparam(&attr, &cp);
+        printf("[hub] reader at RT priority %d (flight code is at %d)\n",
+               prio, pp.sched_priority);
+    } else {
+        struct sched_param cp = { .sched_priority = 0 };
+        pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+        pthread_attr_setschedpolicy(&attr, SCHED_OTHER);
+        pthread_attr_setschedparam(&attr, &cp);
+    }
+
+    int rc = pthread_create(&hub_thread, &attr, hub_main, NULL);
+
+    pthread_attr_destroy(&attr);
+    pthread_sigmask(SIG_SETMASK, &old_sigs, NULL);
+
+    if (rc != 0) {
+        printf("[hub] pthread_create failed: %s\n", strerror(rc));
         hub_run = false;
         return -1;
     }
