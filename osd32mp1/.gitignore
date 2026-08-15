@@ -1,0 +1,30 @@
+# Vendor images and flashables: gigabytes of binary, freely re-downloadable
+# from Octavo/ST. Never let these into git history - a 5 GB sparse .raw does
+# not compress and cannot be removed once committed.
+*.raw
+*.img
+*.ext4
+*.stm32
+*.zip
+*.tar.xz
+*.dtb
+deploy/
+venv/
+
+# build artifacts
+__pycache__/
+*.pyc
+*.o
+rt_jitter
+i2c_rate
+
+# CREDENTIALS - this repo has a public GitHub remote. The private key that
+# reaches the board must never be committed; regenerate it rather than share it.
+ssh/
+*.pem
+*_key
+*_rsa
+
+# scratch logs and dumps
+*.log
+phase.bin

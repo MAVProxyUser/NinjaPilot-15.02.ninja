@@ -1,0 +1,363 @@
+# OSD32MP1-RED — recipes
+
+Commands that work, with the reasoning kept short. The *why* lives in
+`CLAUDE.md`; this file is for getting things done.
+
+All host commands run from `osd32mp1/`. The venv (`./venv/bin/python`) has
+`pyusb` for the libusb fallback path.
+
+---
+
+## Reach the board
+
+Three independent channels. If one is broken, the others still work — that is
+the whole point of the image edits.
+
+```bash
+ssh osd32mp1
+```
+
+Ethernet, key auth, fastest. `~/.ssh/config` supplies the mandatory
+`+ssh-rsa` options and points at the mDNS name (the DHCP lease moves; the name
+does not). Password fallback is `ninjapilot`.
+
+```bash
+./venv/bin/python board_cmd.py "uname -a" "ip -brief addr"
+```
+
+USB serial console. Needs **no network at all** — use this when Ethernet, DHCP
+or sshd are the thing you broke. macOS binds it natively as
+`/dev/cu.usbmodem*`; the getty runs `--autologin root`, so there is no login
+prompt to script around.
+
+```bash
+screen /dev/cu.usbmodem* 115200        # interactive equivalent (ctrl-a k to quit)
+```
+
+`usb_console.py` is the libusb fallback for an image whose ACM advertises
+protocol `0xff` (the stock build), where macOS binds nothing. **You do not
+need it with the edited image.**
+
+### When nothing responds
+
+```bash
+./detect.sh
+```
+
+Distinguishes ROM-DFU / serial / USB-network / Ethernet and says what to do.
+Confirm identity positively rather than by elimination — a "new host" on the
+LAN can easily be a printer:
+
+```bash
+dscacheutil -q host -a name osd32mp1-red-v12.local
+```
+
+## Run a command on the board over the console
+
+```bash
+./venv/bin/python board_cmd.py "systemctl is-active dropbear.socket"
+./venv/bin/python board_cmd.py "cmd one" "cmd two"      # several in one session
+```
+
+Note the board's non-interactive ssh PATH omits `/usr/sbin` and `/sbin`, so
+`ip`, `ifconfig` and `reboot` appear "not found" over ssh but work on the
+console. Export it when scripting over ssh:
+
+```bash
+ssh osd32mp1 'export PATH=/usr/sbin:/sbin:$PATH; ip -brief addr'
+```
+
+## Edit an SD image offline, on macOS, without sudo
+
+The reason this works: `/dev/disk*` needs root, but a raw `.img` is a file you
+own. Never hardcode offsets — read them from the GPT.
+
+```bash
+python3 gpt.py ~/Downloads/osd32mp1-red-v1_2-trusted-openstlinux-sdcard-v3_0_1.img
+```
+
+```bash
+python3 part.py out image.img rootfs.ext4 88622080 782237696
+```
+
+Then edit with `debugfs`, always by `cd`-ing into the target directory and
+writing directly (a `write` + `ln` + `rm` sequence corrupts the image):
+
+```bash
+debugfs -w -f edits.cmds rootfs.ext4
+```
+
+A command file looks like this — `sif` sets mode/uid/gid because `write` does
+not preserve them:
+
+```
+cd /sbin
+rm stm32_usbotg_eth_config.sh
+write /host/path/stm32_usbotg_eth_config.sh stm32_usbotg_eth_config.sh
+sif stm32_usbotg_eth_config.sh mode 0100755
+sif stm32_usbotg_eth_config.sh uid 0
+sif stm32_usbotg_eth_config.sh gid 0
+quit
+```
+
+Verify, inject, verify again. **Both fsck runs must report zero repairs:**
+
+```bash
+e2fsck -fy rootfs.ext4 && python3 part.py in image.img rootfs.ext4 88622080 782237696
+```
+
+Partition offsets for this image (from `gpt.py`, for reference):
+
+| part | name | offset | size |
+|---|---|---|---|
+| 4 | boot | 4736000 | 67108864 |
+| 6 | rootfs | 88622080 | 782237696 |
+
+`e2fsprogs` is Homebrew's, not on the default PATH:
+
+```bash
+export PATH="/opt/homebrew/opt/e2fsprogs/sbin:$PATH"
+```
+
+## Flash the card
+
+```bash
+diskutil unmountDisk /dev/disk10 && sudo dd if=~/Downloads/osd32mp1-red-v1_2-NINJAPILOT.img of=/dev/rdisk10 bs=4m status=progress
+```
+
+Use `/dev/rdisk` (raw) not `/dev/disk` — an order of magnitude faster. Confirm
+the disk number with `diskutil list` first; the built-in reader is usually
+`disk10` and reports as *internal*, which is normal.
+
+## Generate a password hash
+
+macOS has neither `crypt(3)` `$6$` support nor `openssl passwd -6`:
+
+```bash
+python3 sha512crypt.py <password> <salt>
+```
+
+It self-tests against the specification's official vector and **refuses to
+emit a hash if that fails**. Do not remove that check — the first
+implementation was wrong and the vector is what caught it.
+
+## Switch the USB gadget between console and network
+
+macOS gives you one or the other, never both (see `CLAUDE.md`). Default is the
+console. To get USB networking instead, on the board:
+
+```bash
+sed -i 's/^func_acm=.*/func_acm=/' /sbin/stm32_usbotg_eth_config.sh
+```
+
+...and remove the two `acm.0` lines, or for a quick non-persistent test:
+
+```bash
+ssh osd32mp1 'G=/sys/kernel/config/usb_gadget/g1; echo "" > $G/UDC; rm -f $G/configs/c.1/acm.0; rmdir $G/functions/acm.0; ls /sys/class/udc | head -1 > $G/UDC'
+```
+
+The host then gets a `192.168.7.x` address from the board's own DHCP server
+and the board answers on **192.168.7.1**. Detach the command with `nohup ... &`
+if running it over ssh — rebinding the UDC drops the session mid-command.
+
+**This kills the console until reboot** (`BindsTo=dev-ttyGS0.device`, see
+`CLAUDE.md`). Reboot rather than fighting it:
+
+```bash
+ssh osd32mp1 'nohup sh -c "sleep 1; /sbin/reboot" >/dev/null 2>&1 &'
+```
+
+## Inspect gadget state
+
+Board side:
+
+```bash
+ssh osd32mp1 'ls /sys/kernel/config/usb_gadget/g1/configs/c.1/; networkctl status usb0'
+```
+
+Host side — what macOS actually bound, which is the question that matters:
+
+```bash
+ioreg -w0 -l | grep -o '"AppleUSB\(ECM\|ACM\|NCM\)[A-Za-z]*"=[0-9]*' | sort -u
+```
+
+`AppleUSBECMControl=1` with `AppleUSBECMData=0` is the signature of the
+ECM-blocked-by-ACM case. Full descriptor dump:
+
+```bash
+./venv/bin/python usb_descriptors.py
+```
+
+## Disk space — build in /usr/local, not /
+
+The rootfs is a **644 MB partition that ships ~93% full**, and installing
+`dronecan` + `python3-sqlite3` took it to 97%. It is not a place to build.
+
+Two reclaims, in order of safety:
+
+```bash
+ssh osd32mp1 'apt-get clean && rm -f /var/cache/apt/archives/*.deb'
+```
+
+```bash
+ssh osd32mp1 'resize2fs /dev/mmcblk1p7'
+```
+
+The second is free space that was already yours: **p7 is a 705 MB partition
+that only contained a 120 MB filesystem** — the image never grew it. Online
+resize, no partition-table change, took `/usr/local` to **679 MB with 609 MB
+free**. Do this before the SimPosix build and put the tree in `/usr/local`.
+
+If even that runs out, the card has **~30 GB unallocated** past p7 (ends at
+sector 3145694 of 61952000), so a new partition is available — but that *does*
+mean editing the GPT on the boot medium, so it is a deliberate step, not a
+casual one.
+
+## Read the KUSBA accelerometer (Klipper protocol)
+
+No Klipper install needed. Both run **on the board**:
+
+```bash
+ssh osd32mp1 'python3 /home/root/klipper_probe.py'
+```
+
+Fetches the firmware's data dictionary and reports which sensor commands the
+build has. Use `--dump-json` for the full dictionary.
+
+```bash
+ssh osd32mp1 'cd /home/root && python3 klipper_accel.py --seconds 5 --rate 800'
+```
+
+Configures SPI, verifies `DEVID = 0xE5`, puts the ADXL345 in FIFO stream mode
+and decodes samples to m/s^2. `--rate` accepts 25..3200 Hz.
+
+If it reports no response at any sequence, the MCU is wedged mid-config —
+unplug/replug the KUSBA. Sequence state persists across connections, which is
+why the tools sweep for it rather than assuming 0 (see `CLAUDE.md`).
+
+## Feed real sensors into fw_simposix
+
+```bash
+ssh osd32mp1 'cd /usr/local/ninja && python3 sensor_bridge.py --dry-run --seconds 12'
+```
+
+Prints the UAVObject values it would send, so the conversions can be checked
+against real hardware without the firmware built. Drop `--dry-run` to actually
+feed `127.0.0.1:9000`. Measured 190 Hz against a 200 Hz target on this board.
+
+**One-time setup** — OpenSTLinux ships a SPLIT python3, and `multiprocessing`
+shared memory needs `mmap`, which is not installed by default (same trap as
+`sqlite3`; `import` fails with `No module named 'mmap'`):
+
+```bash
+ssh osd32mp1 'apt-get install -y --no-install-recommends python3-mmap python3-multiprocessing python3-ctypes'
+```
+
+Deployed layout is `/usr/local/ninja/{sensor_bridge.py,pyuavtalk/,shared/uavobjectdefinition/}`.
+Pass `--xml-dir` if you move it — `default_xml_dir()` resolves a repo-relative
+path that does not hold once deployed.
+
+## Get source onto the board
+
+`git` and `rsync` are **absent**, so tar over ssh:
+
+```bash
+tar czf - -C ../NinjaPilot-15.02.ninja . | ssh osd32mp1 'mkdir -p /home/root/ninjapilot && tar xzf - -C /home/root/ninjapilot'
+```
+
+Include `.git` if the build needs it — `version-info.py` reads the worktree and
+produces `0xNone commit_hash_prefix` without it. Space is not a concern
+mid-development.
+
+## Build SimPosix on the board
+
+```bash
+ssh osd32mp1 'cd /home/root/ninjapilot && make -j2 simposix'
+```
+
+Two cores and ~426 MB RAM, so `-j2`. Expect the same workarounds the Debian
+build needed: pre-generated UAVObjects, a stub generator, and `QMAKE=true` when
+`qmake` is missing.
+
+## Probe sensors (runs on the board)
+
+> **`probe_sensors.py` IS NOT WRITTEN YET.** It is the next tool to build, and
+> is specified here so the spec does not drift. Until it exists, use
+> `i2cdetect -y <bus>` and `i2cget` directly on the board.
+
+Intended interface:
+
+```bash
+./probe_sensors.py --i2c      # bus scan + WHO_AM_I identity checks
+./probe_sensors.py --can      # SocketCAN presence, bitrate, live frame count
+```
+
+A bus scan only proves *something* acked an address; the identity register is
+the real test:
+
+| part | register | expected |
+|---|---|---|
+| MPU9150 | `0x75` WHO_AM_I | `0x68` |
+| AK8975 (inside MPU9150) | `0x00` WIA | `0x48` |
+| HMC5883L | `0x0A,0x0B,0x0C` | `0x48,0x34,0x33` = `"H43"` |
+
+Bring `can0` up before probing CAN:
+
+```bash
+ssh osd32mp1 'ip link set can0 up type can bitrate 1000000; ip -details link show can0'
+```
+
+## DroneCAN: see who is on the bus
+
+```bash
+./can_poll.py
+```
+
+Host-side. Brings `can0` up, dumps, decodes the 29-bit IDs into source node +
+message type. `--seconds`, `--bitrate`, `--raw`. Handles the anonymous-frame ID
+layout correctly (see `CLAUDE.md` — the normal layout gives garbage there).
+
+Healthy output is `ERROR-ACTIVE` with `berr-counter tx 0 rx 0`. If you get zero
+frames with the counter pinned at **127 at every bitrate**, that is
+termination, not bitrate.
+
+Prove the controller independently of the wiring:
+
+```bash
+ssh osd32mp1 'ip link set can0 down; ip link set can0 up type can bitrate 1000000 loopback on; (candump -T 2000 can0 &); cansend can0 123#DEADBEEF; sleep 2'
+```
+
+## Measure CAN bus load and timing
+
+```bash
+ssh osd32mp1 'cd /usr/local/ninja && python3 can_bandwidth.py --seconds 300'
+```
+
+Reports bus utilisation (nominal and worst-case bit stuffing) and, per message
+type, the **transfer** rate/jitter/max-gap plus frames-per-message. Uses kernel
+`SO_TIMESTAMP`, and counts a transfer only on the tail byte's start-of-transfer
+bit - timing raw frames reports ~300 % jitter that is entirely artifact.
+
+## DroneCAN: grant node IDs and watch live sensor data
+
+Nodes stay silent until something allocates them an ID:
+
+```bash
+ssh osd32mp1 'python3 /home/root/dronecan_allocator.py --seconds 60'
+```
+
+Runs the allocation server (node 127) plus a monitor, and prints each node's
+name, message mix and any GNSS fix. Grants persist in
+`/home/root/dronecan_alloc.db`, so IDs are stable across reboots.
+
+**One-time setup on the board:**
+
+```bash
+ssh osd32mp1 'python3 -m pip install --no-cache-dir dronecan && apt-get update && apt-get install -y --no-install-recommends python3-sqlite3'
+```
+
+`python3-sqlite3` is genuinely required and genuinely missing from the stock
+image — `dronecan.app.dynamic_node_id` imports `sqlite3` at module scope, so
+**`import dronecan` itself fails** without it, not just the allocator. The
+library `libsqlite3.so.0` is already present; only Python's `_sqlite3`
+extension is absent, and ST's OpenSTLinux apt feed has it.
