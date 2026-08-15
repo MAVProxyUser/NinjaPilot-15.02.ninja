@@ -30,12 +30,28 @@
 
 #ifndef __cplusplus
 typedef enum { FALSE = 0, TRUE = !FALSE } bool;
-#endif
 
+/* MUST stay inside the !__cplusplus guard, together with the enum that
+ * actually declares FALSE/TRUE.
+ *
+ * It used to sit outside. In C++ `false` is a KEYWORD, not a macro, so
+ * `#ifndef false` is true there - the block fired and defined `false` to
+ * FALSE, an identifier the enum above had just been guarded OUT of existing.
+ * Every C++ translation unit then failed the moment it wrote `false`
+ * (fixedwingflycontroller.cpp:592 among many), and the damage spread into
+ * libstdc++ headers because the macro rewrites `false` everywhere.
+ *
+ * macOS never showed this: its system headers define TRUE/FALSE, so the
+ * dangling reference happened to resolve. glibc does not, so the bug only
+ * appears when building for Linux - which is exactly the port to the
+ * OSD32MP1's Debian armv7l. Nothing arch-specific about it; it is purely
+ * about which libc supplies TRUE/FALSE.
+ */
 #ifndef false
         #define false FALSE
         #define true  TRUE
 #endif
+#endif /* !__cplusplus */
 
 // #define FILEINFO FILE*
 
