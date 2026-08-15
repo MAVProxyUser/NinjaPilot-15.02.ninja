@@ -16,6 +16,20 @@
  * gets a wholly consistent set or retries - never a torn mix of two updates.
  * Units are the ones the flight code wants, converted at the source.
  */
+#define PIOS_HUB_MAX_NODES 8
+
+/** uavcan.protocol.NodeStatus - per-node health, the bus's own liveness signal */
+struct pios_hub_node {
+    uint8_t  node_id;
+    uint8_t  health;        /* 0 OK, 1 WARNING, 2 ERROR, 3 CRITICAL   */
+    uint8_t  mode;          /* 0 OPERATIONAL, 1 INIT, 2 MAINT, 7 OFFLINE */
+    uint8_t  sub_mode;
+    uint32_t uptime_sec;
+    uint16_t vendor_code;
+    double   last_seen;     /* CLOCK_MONOTONIC; stale => node gone      */
+    uint32_t count;
+};
+
 struct pios_sensors_hub_data {
     float    gyro_dps[3];     /* deg/s, sensor frame          */
     float    accel_mss[3];    /* m/s^2, sensor frame          */
@@ -39,6 +53,20 @@ struct pios_sensors_hub_data {
     double   mag2_time;
     uint32_t mag2_count;
     uint32_t mag2_errors;
+
+    struct pios_hub_node nodes[PIOS_HUB_MAX_NODES];
+    uint8_t  node_count;
+
+    /* ardupilot vendor message 20003 from the GPS node - NOT decoded, the
+     * DSDL for it is not established here. Raw bytes kept so it can be
+     * identified from real data rather than guessed at. */
+    uint8_t  v20003[8];
+    uint8_t  v20003_len;
+    uint8_t  v20003_node;
+    double   v20003_time;
+    uint32_t v20003_count;
+
+    bool     adxl_present;  /* KUSBA enumerated; see note in the .c       */
 
     bool     have_imu;
     bool     have_baro;

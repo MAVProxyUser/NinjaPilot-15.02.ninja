@@ -455,6 +455,8 @@ static bool hmc_read(float ga[3])
 /* -------------------------------------------------------- DroneCAN over CAN */
 #define DC_MSG_MAGNETIC_FIELD 1001   /* determined on the wire, see below */
 #define DC_MSG_FIX2           1060
+#define DC_MSG_NODE_STATUS     341
+#define DC_MSG_VENDOR_20003  20003
 
 static int can_fd = -1;
 
@@ -553,6 +555,73 @@ static void can_poll(void)
             continue;         /* not the start of a transfer */
         }
         uint16_t mt = (id >> 8) & 0xFFFF;
+
+        if (mt == DC_MSG_NODE_STATUS && f.can_dlc >= 7) {
+            /*
+             * uavcan.protocol.NodeStatus, 7 bytes:
+             *   uint32 uptime_sec           bytes 0-3, little endian
+             *   uint2  health               byte 4, bits 0-1
+             *   uint3  mode                 byte 4, bits 2-4
+             *   uint3  sub_mode             byte 4, bits 5-7
+             *   uint16 vendor_status_code   bytes 5-6, little endian
+             *
+             * This is the bus's own liveness signal and the cheapest real
+             * health check available: a node that stops sending it is gone,
+             * and one reporting health != OK is telling you so before its
+             * data goes wrong. last_seen is what makes "gone" detectable -
+             * a silent node publishes nothing at all, including nothing bad.
+             */
+            uint32_t up = (uint32_t)f.data[0] | ((uint32_t)f.data[1] << 8)
+                        | ((uint32_t)f.data[2] << 16) | ((uint32_t)f.data[3] << 24);
+            uint8_t hm = f.data[4];
+            uint16_t vc = (uint16_t)(f.data[5] | (f.data[6] << 8));
+
+            hub_publish_begin();
+            struct pios_hub_node *n = NULL;
+            for (uint8_t i = 0; i < hub.node_count; i++) {
+                if (hub.nodes[i].node_id == node) {
+                    n = &hub.nodes[i];
+                    break;
+                }
+            }
+            if (!n && hub.node_count < PIOS_HUB_MAX_NODES) {
+                n = &hub.nodes[hub.node_count++];
+                n->node_id = node;
+            }
+            if (n) {
+                n->uptime_sec  = up;
+                n->health      = hm & 0x03;
+                n->mode        = (hm >> 2) & 0x07;
+                n->sub_mode    = (hm >> 5) & 0x07;
+                n->vendor_code = vc;
+                n->last_seen   = now_s();
+                n->count++;
+            }
+            hub_publish_end();
+            continue;
+        }
+
+        if (mt == DC_MSG_VENDOR_20003) {
+            /*
+             * Seen at 5 Hz from the GPS node, single frame. In ArduPilot's
+             * vendor ID range, but the DSDL is NOT established here - so the
+             * raw payload is captured and nothing is claimed about its
+             * meaning. Guessing a layout is how the magnetometer ended up
+             * being reported as 17120 Gauss.
+             */
+            uint8_t n = f.can_dlc - 1;          /* strip the tail byte */
+            if (n > sizeof(hub.v20003)) {
+                n = sizeof(hub.v20003);
+            }
+            hub_publish_begin();
+            memcpy(hub.v20003, f.data, n);
+            hub.v20003_len   = n;
+            hub.v20003_node  = node;
+            hub.v20003_time  = now_s();
+            hub.v20003_count++;
+            hub_publish_end();
+            continue;
+        }
 
         if (mt == DC_MSG_MAGNETIC_FIELD && f.can_dlc >= 7) {
             float x = f16_to_f32((uint16_t)(f.data[0] | (f.data[1] << 8)));
@@ -662,6 +731,37 @@ static void *hub_main(void *arg)
     return NULL;
 }
 
+/**
+ * @brief Note whether the KUSBA accelerometer is plugged in.
+ *
+ * PRESENCE ONLY, deliberately. The KUSBA runs stock Klipper firmware, whose
+ * protocol needs a sync-framed CRC16 transport, a sequence number discovered
+ * by sweeping 0..15 (it PERSISTS across host connections), and a
+ * zlib-compressed JSON data dictionary fetched before any command can be
+ * issued - because command IDs are assigned per firmware build. That is a
+ * real protocol implementation and it does not belong in flight firmware for
+ * something whose documented role is an independent VIBRATION REFERENCE, not
+ * a flight sensor. It also reads 0.912 g at rest (~9 % low, uncalibrated), so
+ * it could not be trusted as one anyway.
+ *
+ * osd32mp1/klipper_accel.py does the full job on the host. This just records
+ * "it is plugged in", so a sanity check can say so rather than guess.
+ */
+static bool adxl_probe(void)
+{
+    /* The KUSBA is 1d50:614e (Anchor / Rampon) -> a CDC ACM node. */
+    for (int i = 0; i < 4; i++) {
+        char path[32];
+        snprintf(path, sizeof path, "/dev/ttyACM%d", i);
+        if (access(path, F_OK) == 0) {
+            printf("[hub] ADXL345/KUSBA present at %s (vibration reference; "
+                   "read it with klipper_accel.py, not from here)\n", path);
+            return true;
+        }
+    }
+    return false;
+}
+
 int32_t PIOS_SENSORS_HUB_Init(const char *i2c_dev, const char *can_if)
 {
     memset(&hub, 0, sizeof(hub));
@@ -675,6 +775,7 @@ int32_t PIOS_SENSORS_HUB_Init(const char *i2c_dev, const char *can_if)
         have_hmc = hmc_init();
     }
     have_can = can_init(can_if);
+    hub.adxl_present = adxl_probe();
 
     hub.have_imu = have_mpu;
     hub.have_baro = have_bmp;
