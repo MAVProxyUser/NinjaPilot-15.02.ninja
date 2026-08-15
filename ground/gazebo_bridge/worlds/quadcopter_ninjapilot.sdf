@@ -111,7 +111,15 @@
   <scene>scene</scene>
   <ambient_light>0.4 0.4 0.4</ambient_light>
   <background_color>0.8 0.8 0.8</background_color>
-  <camera_pose>-6 0 6 0 0.5 0</camera_pose>
+  <!-- WHOLE-FARM OVERVIEW, barn toward the top of the screen.
+       ENU: x=East, y=North, z=Up. The action spans roughly N/E -34 (target
+       spawn) to +20 (the barn), so the camera sits ~75m SOUTH and 60m up,
+       yawed +90deg to look NORTH - which puts the barn at the top of the
+       frame and the target's inbound run coming toward the viewer. Pitch
+       0.60 rad is atan(55/80), i.e. aimed at the middle of that span.
+       The previous -6 0 6 was a close-in pad view: fine for takeoff, useless
+       for watching a 50m engagement. -->
+  <camera_pose>-5 -75 60 0 0.60 1.5708</camera_pose>
 </plugin>
 
 <!-- Plugins that add functionality to the scene -->

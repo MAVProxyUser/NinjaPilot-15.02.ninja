@@ -8,6 +8,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="$HERE/../venv/bin/python3"
 LABEL="$1"; BRIDGE="$2"
 OUT="${TMPDIR:-/tmp}/${LABEL}_flash.jsonl"
+# star | intercept. score.py, wp_arrival.py, corner_probe.py and star_plot.py
+# all grade against the star geometry in star_geom.py; pointing them at an
+# intercept yields confident nonsense (see the stale-planned-path trap in
+# CLAUDE.md). An intercept's "plan" is an aim point that moves every tick, so
+# it gets its own comparison instead.
+KIND="${NINJAPILOT_RUN_KIND:-star}"
 
 echo "=== $LABEL ==="
 echo "--- bridge log: outcome + harness ---"
@@ -25,6 +31,16 @@ echo "--- board log: decode from the FC's own flash ---"
 echo "--- plan: what the follower was actually given ---"
 "$PY" "$HERE/plan_check.py" "$OUT"
 
+if [ "$KIND" = "intercept" ]; then
+  echo "--- intercept: three-log comparison ---"
+  TRACK="${TMPDIR:-/tmp}/${LABEL}_track.json"
+  if [ -f "$TRACK" ]; then
+    "$PY" "$HERE/intercept_three_log.py" "$OUT" "$TRACK"
+  else
+    echo "  (no track at $TRACK)"
+  fi
+else
+
 echo "--- score (flown vs planned, dense board samples) ---"
 "$PY" "$HERE/score.py" "$LABEL" "$OUT"
 
@@ -38,6 +54,7 @@ echo "--- waypoint arrival (did it actually get ON the point, and stop there) --
 # to fly a clean command. Needs VelocityDesired in the log.
 echo "--- corner: is the orbit commanded, or flown? ---"
 "$PY" "$HERE/corner_probe.py" "$OUT" 2>/dev/null
+fi
 
 echo "--- oscillation (is it porpoising/hunting, and at what frequency) ---"
 "$PY" "$HERE/porpoise.py" "$OUT" 2>/dev/null | sed -n '1,7p'
@@ -130,7 +147,12 @@ fi
 # sag all score similarly but look nothing alike.
 echo "--- planned vs flown + altitude profile ---"
 PNG="${PNG_OUT:-${TMPDIR:-/tmp}/${LABEL}.png}"
-if "$PY" "$HERE/star_plot.py" "$OUT" "$PNG" 2>/dev/null; then
+if [ "$KIND" = "intercept" ]; then
+  # run_intercept.sh already renders the intercept plot (both tracks,
+  # altitude, separation + IMU). Name it here so the path is printed by the
+  # same analysis that prints everything else.
+  echo "  ${TMPDIR:-/tmp}/${LABEL}.png (intercept plot)"
+elif "$PY" "$HERE/star_plot.py" "$OUT" "$PNG" 2>/dev/null; then
   echo "  $PNG"
 else
   echo "  (plot failed - is this a star mission?)"

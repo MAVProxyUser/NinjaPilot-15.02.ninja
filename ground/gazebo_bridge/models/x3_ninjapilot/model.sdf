@@ -186,6 +186,61 @@
                     </clip>
                 </camera>
             </sensor>
+
+            <!-- TRACKER CAMERAS: same poses and FOVs as cam_up / cam_fpv45,
+                 but 160x120 at 20Hz instead of 640x480 at 30Hz.
+
+                 These exist because the first vision attempt LOST to no
+                 vision at all, and the reason was bandwidth, not algorithm.
+                 Subscribing the bridge to the two 640x480 RGB topics pushes
+                 ~55 MB/s into the same process that feeds sensors to the
+                 firmware - the exact failure class CLAUDE.md records twice
+                 (blocking/bulk work on the sensor thread flying the vehicle
+                 into the ground). Measured: closest approach 0.41-1.03m with
+                 vision off versus 1.03-2.35m with it on, identical firmware.
+
+                 160x120 at 20Hz is 2.3 MB/s - a 24x cut - and costs the
+                 tracker nothing: the ball subtends 700-1000 px at 640x480,
+                 so it is still a 44-63 px blob here, vastly more than the
+                 3-pixel detection floor. The pretty 640x480 feeds stay
+                 exactly as they are for the FPV widgets, which are rendered
+                 by the Gazebo GUI process and never touch the bridge. -->
+            <sensor name="cam_track_up" type="camera">
+                <always_on>1</always_on>
+                <update_rate>20</update_rate>
+                <topic>X3/cam_track_up/image</topic>
+                <pose>0 0 0.03 0 -1.5707963 0</pose>
+                <camera>
+                    <horizontal_fov>1.9198622</horizontal_fov>
+                    <image>
+                        <width>160</width>
+                        <height>120</height>
+                        <format>R8G8B8</format>
+                    </image>
+                    <clip>
+                        <near>0.01</near>
+                        <far>300</far>
+                    </clip>
+                </camera>
+            </sensor>
+            <sensor name="cam_track_45" type="camera">
+                <always_on>1</always_on>
+                <update_rate>20</update_rate>
+                <topic>X3/cam_track_45/image</topic>
+                <pose>0.08 0 0.01 0 -0.7853982 0</pose>
+                <camera>
+                    <horizontal_fov>1.7453293</horizontal_fov>
+                    <image>
+                        <width>160</width>
+                        <height>120</height>
+                        <format>R8G8B8</format>
+                    </image>
+                    <clip>
+                        <near>0.01</near>
+                        <far>300</far>
+                    </clip>
+                </camera>
+            </sensor>
         </link>
         <link name="X3/rotor_0">
             <pose frame="">0.13 -0.22 0.023 0 -0 0</pose>

@@ -17,6 +17,17 @@ MISSION="${2:-star}"
 SCRATCH="${TMPDIR:-/tmp}"
 FCWD="$HOME/ninjapilot-build/fcwd"
 ELF="$HOME/ninjapilot-build/build/fw_simposix/fw_simposix.elf"
+
+# TRAILS in their own process (tools/trail_daemon.py) when the in-process
+# mission trail is switched off. Blocking /marker calls have no business on
+# the thread feeding the firmware; a separate process removes the load
+# instead of rationing it. NINJAPILOT_TRAILS=0 disables drawing entirely.
+pkill -f trail_daemon.py >/dev/null 2>&1 || true
+if [ "${NINJAPILOT_TRAILS:-1}" != "0" ] && \
+   [ "${NINJAPILOT_MISSION_TRAIL_INPROC:-1}" = "0" ]; then
+    ( "$HERE/venv/bin/python3" "$HERE/tools/trail_daemon.py" \
+        > "${TMPDIR:-/tmp}/${LABEL}_trails.log" 2>&1 & )
+fi
 LOG="$SCRATCH/${LABEL}.log"
 
 # 1. Stop anything still running, and WAIT for it to actually die. A firmware

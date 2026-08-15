@@ -181,6 +181,298 @@ tools/intercept_summary.py tabulates hit rate across runs and decomposes
 each miss into horizontal and vertical - a scalar "0.31m" hid a 28cm
 vertical error completely.
 
+### The endgame miss is LAG, and the fix belongs in the estimator (2026-08-10)
+
+On the clean (loop-unblocked) baseline the miss stopped being random and
+became a signature: **0.57-0.59m directly BEHIND the ball, along its own
+velocity vector, with ~0.15m cross-track**, repeatable to ~2cm. That is not
+an aiming error. 0.58m / 1.2 m/s = **0.48s of pure time lag** through the
+bridge loop, UAVTalk transport, and the ~130ms attitude response relay
+autotune measured.
+
+**Adding the lag as a CONSTANT to the firmware's endgame lead FAILED and must
+not be retried.** `INTERCEPT_LAG_COMP_S 0.45f` gave first-pass misses of
+1.25m, 1.30m and 1.32m against the 0.57-0.59m it was meant to close - more
+than twice as bad. The mechanism: the endgame lead is already range-dependent
+(`range/vmax`), so a constant on top of it over-leads hardest exactly when
+range is collapsing and a moving aim point is least affordable. This is the
+same lesson as the earlier `x1.35` lead experiment (0.87m vs 0.59m) - the
+endgame lead is right, and stacking more lead onto it is not the fix.
+
+Compensation now lives in `tools/target_ekf.py`, which propagates the target
+STATE forward by the lag through the dynamics it already estimates, so the
+correction is automatically right at every range instead of at one.
+
+### Tracking: an EKF fusing position fixes with camera bearings
+
+`tools/target_ekf.py` - 6-state constant-velocity EKF on the target in NED,
+replacing the raw finite-difference velocity that used to be handed to the
+firmware. **The firmware interface is unchanged** (still just target position
++ velocity, still all the guidance in flight code); only the quality of what
+it receives changed.
+
+**Why the FIRST vision attempt lost to no vision at all**, and what is
+different now - this matters because the measured numbers looked damning:
+closest approach 0.41-1.03m with vision off versus 1.03-2.35m with it on,
+identical firmware. Two independent causes, both fixed:
+
+- **It SUBSTITUTED instead of fusing.** While the ball was in frame it
+  rotated the target direction onto the measured bearing and kept the
+  last-known range - discarding what the position channel knew, and creating
+  a step change at every dropout. The filter fuses instead: the bearing
+  update's Jacobian `(I - u u^T)/|R|` is a rank-2 projector whose null space
+  is the sightline itself, so vision sharpens DIRECTION and is
+  *structurally* incapable of corrupting RANGE. No gate, no heuristic - it
+  falls out of the geometry. Verified offline: seeded with 5m of pure range
+  error and fed bearings only, the error stays along the sightline (1.08m
+  along, 0.08m cross).
+- **It cost loop rate.** Subscribing to two 640x480 30Hz RGB topics pushes
+  ~55 MB/s into the process that feeds sensors to the firmware - the exact
+  failure class recorded twice already in this file. The model now carries
+  dedicated `cam_track_up` / `cam_track_45` at **160x120 @ 20Hz (2.3 MB/s, a
+  24x cut)**; the 640x480 feeds are untouched and still serve the GUI's FPV
+  widgets, which render in the Gazebo GUI process and never touch the bridge.
+
+Also fixed in `ball_tracker.py`: bearings are now a full **body-frame ray**
+(pixel -> camera ray -> mount rotation -> FLU->FRD), not an angle pair with
+the mount tilt folded in as a scalar added to elevation. That shortcut is
+only correct on the optical axis, and cam_up - pitched 90 deg - spends an
+entire engagement off it.
+
+`sigma_a` (process noise, the one real knob) is **0.5 m/s^2**, picked from a
+sweep rather than taste: turn-tracking error bottoms out on a 0.5-0.8
+plateau while straight-line prediction keeps degrading above 0.5. Table in
+the source.
+
+### The miss is now ENTIRELY VERTICAL, and the budget is why (2026-08-10)
+
+With lag compensation in the estimator, the horizontal solution is
+essentially exact and the whole miss moved to one axis:
+
+    ekfA1   horiz 0.10m   vert -1.16m   (along-track -0.095, cross 0.034)
+    ekfA2   horiz 0.08m   vert -1.28m
+
+The FC's OWN log settles what kind of vertical failure it is: through the
+merge the vehicle tracked its commanded climb to within **0.10 m/s**, while
+that command decayed to **0.41-0.45 m/s with 1.16-1.28m still to close**.
+The airframe was never the limit - **guidance under-asks**.
+
+**Asking harder out of the same budget is NOT the fix, and is measured
+worse.** Raising the vertical cap to the time-matched rate `|vgap|/t_go`:
+
+    before  horiz 0.10 / 0.08   vert -1.16 / -1.28   sep 1.16 / 1.29
+    after   horiz 0.23 / 0.30   vert -1.41 / -1.51   sep 1.43 / 1.54
+
+Worse on BOTH axes, which is the tell. `vmax` is a **shared budget** - the
+horizontal term is `sqrt(vmax^2 - v_climb^2)` - so buying climb spends
+closure: 1.32 m/s of climb instead of 0.98 drops horizontal from 1.97 to
+1.76 m/s, the merge happens ~0.6s sooner, and the vehicle is therefore lower
+when it gets there. Reverted, documented in paths.c.
+
+**RESOLVED by the climb-first gate, not by the vertical law.**
+`INTERCEPT_LEVEL_BAND` 1.5 -> 0.10 keeps horizontal throttled until the
+vehicle is nearly level with the target, so the endgame never has to buy
+altitude out of the closure budget at all:
+
+    band 1.5   horiz 0.10 / 0.08   vert -1.16 / -1.28   sep 1.16 / 1.29
+    band 0.35  horiz 0.09-0.14     vert -0.69..-0.78    sep 0.70-0.79
+    band 0.10  horiz 0.35-0.43     vert -0.31..-0.41    sep 0.46-0.54
+
+With `INTERCEPT_SPEED` 2.2 -> 2.6 (stable; only 3.0 was ever unstable), TEN
+consecutive runs made contact on the FIRST pass - zero aborts, zero stern
+chases, 0.45-0.58m against the 0.582m contact geometry.
+
+### The error budget is CONSERVED - this is the ceiling, and the reason
+
+Three separate attempts to improve on that all failed the same way:
+
+    vertical cap = time-matched rate   worse on BOTH axes
+    INTERCEPT_AIM_HIGH_M 0.35          vert -0.31 -> -0.10, horiz 0.40 -> 0.48
+    INTERCEPT_CLIMB_FRAC 0.6 -> 0.9    worse and noisier (0.45-0.63)
+
+Horizontal and vertical error trade **roughly 1:1**, and their sum sits near
+0.5m regardless of how the split is chosen, because `vmax` is a SHARED
+BUDGET - the horizontal term is `sqrt(vmax^2 - v_climb^2)`. Re-dividing that
+budget cannot get below the floor; only more capability or more time can.
+That makes the flight-envelope work (tilt/rate/speed maxima) the next real
+lever, not further guidance tuning. Do not spend more runs re-splitting.
+
+Note `INTERCEPT_AIM_HIGH_M` has now been tested TWICE: once in the 9Hz era
+coupled with a gain change (invalid), and once cleanly here. The clean test
+says it works exactly as intended on the vertical axis and buys nothing
+overall, for the budget reason above.
+
+### CORRECTION to "TEN consecutive first-pass" - it does NOT reproduce at 3.0 (2026-08-10, late)
+
+The "ten consecutive first-pass contacts" above were at INTERCEPT_SPEED 2.6
+and DO hold there (7-8/8 across several batches). A later push to raise speed
+tried to carry that to 3.0 and it FELL APART - not into a clean failure, into
+VARIANCE. At an identical, verified config on a freshly restarted server,
+consecutive 3.0 runs went: strike (-0.02) / strike / MISS (+0.66) / MISS
+(+0.73) / MISS high (+0.82) / strike / no-fly. Roughly 40-50% strike.
+
+Two wrong conclusions were reached and then corrected on the way, both worth
+recording so they are not re-reached:
+  - "3.0 strikes repeatably" - FALSE. It was built on the first two runs
+    (r30a/r30b), which were the lucky tail of a high-variance distribution.
+  - "the envelope changes regressed the vertical" - ALSO FALSE. fr2 struck at
+    -0.02 on the exact config that fr1 missed at +0.82, so it is variance, not
+    a regression. A fresh-vs-aged-server confound was hypothesised and
+    DISPROVEN the same way (fresh server produced both a strike and a miss).
+
+THE MECHANISM (this is the durable finding). The miss is a stochastic
+vertical LEVEL-OFF OVERSHOOT: the vehicle climbs to the target's altitude and
+sometimes coasts +0.7m past it before settling, landing the merge at the
+overshoot peak. The reason a climb-rate cap in paths.c cannot stop it:
+pidcontroldown.cpp assembles the commanded down-velocity as
+
+    velDown = progress->path_vector[2]        // guidance feed-forward (capped)
+              + pid_apply(PIDpos, correction_vector[2], dt)   // position term
+
+The position term is a P-loop on the FULL vertical gap and is added
+DOWNSTREAM of guidance, so neither `cmd[2]` (capped 1.55 in path_intercept)
+nor VtolPathFollowerSettings.VerticalVelMax bounds the flown climb - measured
+3.5 m/s entry against a 2.0 setpoint cap. Whatever cures the 3.0 overshoot has
+to live in the vertical PID (pidcontroldown), or in decelerating the climb
+before level-off, NOT in the guidance feed-forward. This is the same
+"downstream code owns the value" trap as the actuator slew limiter and the
+corner controller.
+
+MEASURED-AND-REVERTED at 3.0, do not retry blind:
+  climb-entry cap 1.55 in paths.c   fixed +0.66 -> +0.02 ONCE (r30a), did not
+                                    reproduce; reverted with the envelope push
+  INTERCEPT_LEVEL_RAMP 5.0 -> 2.5   neutral (+0.78 -> +0.80)
+  VerticalVelMax 3.0 -> 2.0         no effect (climb bypasses it, see above)
+  envelope bundle (speed 3.0, MaxRollPitch 35, CruiseControlMaxPowerFactor
+  1.45, HorizontalVelMax 4.5)       REVERTED to committed baseline; the
+                                    airframe flew 4.0 m/s stably (no tumble,
+                                    so the airframe is NOT the speed limit -
+                                    the vertical overshoot is), but strike rate
+                                    did not survive the variance. Never
+                                    committed.
+
+The settled, committed-good intercept config is the 2.6 baseline
+(CruiseControlMaxPowerFactor 1.25, MaxRollPitch 25, HorizontalVelMax 3.0, no
+climb cap). Raising the speed is a REAL open task (task #63) but it is gated
+on fixing the vertical overshoot FIRST, in the vertical PID.
+
+### SOLVED: the 3.0 m/s overshoot is VerticalPosP - but only against a SLOW target (2026-08-10, night)
+
+The stochastic +0.7m level-off overshoot that made 3.0 m/s a coin-flip is
+fixed by lowering `VerticalPosP` **0.25 -> 0.10** (bridge config, now
+env-overridable via NINJAPILOT_VPOSP so the star keeps its committed tune).
+
+    3.0 m/s, balloon 1.2, vP 0.25   +0.66 / +0.73 / +0.82   coin-flip, ~40-50%
+    3.0 m/s, balloon 1.2, vP 0.10   -0.06 / +0.01           2/2 STOPPED (felt)
+    3.0 m/s, balloon 1.2, vP 0.15   -0.10                   stopped
+    2.6 m/s, balloon 1.2, vP 0.25   -0.09 / -0.18           2/2 (baseline)
+
+WHY: velDown = guidance feed-forward + `VerticalPosP * vertical_gap`
+(pidcontroldown.cpp). At an 8m gap, 0.25 alone commands 2.0 m/s ON TOP of
+the feed-forward - that is the 3.5 m/s climb entry the taper then cannot
+arrest. 0.10 bleeds the climb off EARLY instead of fighting it at the top.
+Extra vertical-velocity D (0.08 -> 0.25) also works but arrives LOW
+(-0.29/-0.35) - it damps the climb rather than shortening it. Do not stack
+both; they are two different low-biases.
+
+### THE REAL SPEED LIMIT IS THE TARGET'S SPEED, and VerticalPosP does NOT fix it
+
+Balloon speed maps monotonically onto vertical error, and this reproduces:
+
+    balloon 1.2   vert -0.06 / +0.01     STOPPED
+    balloon 1.6   vert +0.33             barn hit
+    balloon 2.0   vert +0.75 / +0.77     barn hit (vP 0.10)
+    balloon 2.0   vert +0.65 / +0.83     barn hit (vP 0.05 - NO BETTER)
+
+`VerticalPosP` 0.05 vs 0.10 at balloon 2.0 is statistically identical, so the
+fast-target failure is NOT the position gain. THE MECHANISM IS UPSTREAM, in
+path_intercept's own climb demand:
+
+    float v_time = vgap / t_use;      // t_use SHRINKS as the balloon speeds up
+    float v_need = (|v_gapr| > |v_time|) ? v_gapr : v_time;   // takes the GREATER
+
+A faster target shortens time-to-intercept, so `v_time` grows, so guidance
+DEMANDS a faster climb - and a faster climb overshoots more. The merge then
+lands in the tail of the climb transient instead of after it settles. This
+is why an absolute climb-entry cap (tried earlier and judged "did not
+reproduce") looked useless: it was tested at balloon 1.2, where the
+time-matched term never binds. **Re-test the climb cap against balloon
+1.6-2.0, where the mechanism predicts it should matter.** That is the next
+experiment, not more VerticalPosP.
+
+### CONTACT IS NOT SPHERICAL - vertical tolerance is HALF the horizontal
+
+The frame is a flat box: it spans +/-0.235 horizontally (+/-0.332 corner-on)
+but only ~0.05 vertically. With the ball's 0.25 radius, contact needs
+|vert| <~ 0.30, against ~0.58 horizontally. Measured: a run with sampled
+separation **0.40m** - well inside the 0.485 "guaranteed contact" figure -
+scored felt=False because vert was +0.33; it passed straight over the ball.
+
+Consequences, both load-bearing:
+  - a scalar separation CANNOT score an intercept. Only the physics contact
+    sensor / IMU (felt=True) can.
+  - vertical accuracy matters roughly twice as much as horizontal, which is
+    why every failure mode in this whole investigation has been vertical.
+
+### RULE: restart the gz server between comparison BATCHES, and never trust one run
+
+A server left running for hours of spawn/remove/reset cycles eventually
+produces a no-fly (the attitude estimator never initialises - "waiting for
+attitude estimator... Critical" forever, vehicle sits on the pad). It was
+seen twice this session (s35b, lock3, an fr3). run_intercept.sh now aborts
+such a run in ~60s instead of 270s and names the cause. But the deeper
+lesson: a marginal result spread across a long-lived server is not
+trustworthy - the +0.02/+0.82 split that looked like a server-age effect was
+actually pure run-to-run variance, and it took a fresh-server A/B to tell
+them apart. For any close call, restart the server and repeat before
+believing it.
+
+### The stale target costs whole runs - re-check AFTER the reset
+
+A knocked-down ball survived both the `/world/quadcopter/remove` service AND
+the world reset. `run_intercept.sh` removed it only BEFORE the reset, so the
+next two runs died on "could not spawn target" - the exact icpt07 failure
+that script exists to prevent, recurring because the check was on the wrong
+side of the reset. It now re-checks afterwards and aborts loudly with the
+remedy (restart the Gazebo server) rather than flying a doomed run.
+
+### RULE: the three-log rule was NOT being enforced on intercept runs
+
+`run_intercept.sh` never set `NINJAPILOT_BRIDGE_LOG`, so `analyze_run.sh`
+printed "running board-log analysis only" on every single intercept - the
+flight controller's own account of itself, uncorroborated by ground truth.
+`run_gazebo_bridge.sh` also never redirected the Gazebo server's output, so
+the third log defaulted to a stale empty `/tmp/gzserver.log` for **star runs
+too**. Both fixed.
+
+`analyze_run.sh` now takes `NINJAPILOT_RUN_KIND`: score.py, wp_arrival.py,
+corner_probe.py and star_plot.py all grade against `star_geom.py` and would
+report confident nonsense on an intercept. `tools/intercept_three_log.py` is
+the intercept equivalent - and its first output was the vertical diagnosis
+above, which no amount of staring at bridge separation numbers had produced.
+
+Two traps found while building it, both the classic ones: the bridge track
+did not record the COMMANDED AIM POINT at all (so "planned vs flown" was
+undrawable for an intercept - the target's track is where the ball went, not
+what we asked for), and the first version of the vertical check scored
+post-break-off samples, where a commanded descent made a run that tracked
+perfectly report "did NOT track". Window on the engagement, always.
+
+### RULE: validate filter changes OFFLINE first
+
+`tools/test_target_ekf.py` runs the filter against a synthetic truth track in
+**0.2s** and checks the three claims that matter: convergence, that bearings
+cannot corrupt range, and that `predict_ahead(tau)` actually lands on the
+truth tau seconds later. Measured there: at the real 0.48s lag it predicts to
+**0.199m**, against the 0.58m of raw lag it replaces - inside the 0.582m
+contact geometry.
+
+This is the single biggest time saver available on this problem. Every
+guidance constant tried by flying it cost a 60-90s run plus scene reset, and
+several of those experiments (the x1.35 lead, the constant lag comp, the
+aim-high bias) could have been rejected or predicted at a desk. Fly to
+confirm, not to explore.
+
 ## OPEN: unexplained intermittent flyaway at wp3 (2026-08-09)
 
 Twice, on otherwise unremarkable runs, the vehicle departed from waypoint 3
@@ -914,6 +1206,33 @@ the mission supervision loop at 20Hz with 0.35m trail segments starved the
 thread feeding sensors to the firmware and flew the vehicle into the ground.
 The trail is cosmetic; it must never compete with flight-critical threads.
 Settled at 10Hz / 0.5m / 50ms marker timeout.
+
+**SUPERSEDED by tools/trail_daemon.py (2026-08-10): draw trails from a
+separate PROCESS.** Rationing the trail (10Hz/0.5m) was a compromise, not a
+fix - even off the guidance loop, a background THREAD still stalls it through
+the GIL while marshalling each blocking /marker call (measured: intercept
+closest approach 0.58 vs 1.91/2.19m with in-process trails on). A separate
+process has its own GIL and its own core, so trails draw at full rate and the
+flight loop never sees them. Measured over 3 star runs each: in-process
+trails gave 0.04/0.05/0.08m mean cross-track with a 0.41m worst excursion
+(intermittent starvation), the daemon gave a dead-flat 0.04 / 0.09m worst -
+so the load WAS costing star consistency, not just intercept hit rate. The
+daemon subscribes straight to Gazebo's pose stream and needs nothing from the
+bridge. NINJAPILOT_MISSION_TRAIL_INPROC=0 hands the star's trail to it;
+run_intercept.sh uses it unconditionally.
+
+Two SILENT bugs that made the daemon look broken (both invisible from
+outside, which is why it now prints a heartbeat with per-trail segment
+counts):
+  - Gazebo publishes the model as "x3" lowercase; matching "X3" drew nothing
+    at all while the process looked perfectly healthy.
+  - _marker_base stamps every marker "ninjapilot_trail", the exact namespace
+    the bridge DELETE_ALLs at mission start - so the bridge wiped everything
+    the daemon drew. Daemon markers now use "ninjapilot_daemon".
+  - Also: _marker_tube expects GAZEBO ENU (the bridge's TargetTrail converts
+    NED first: pt=(ned[1],ned[0],-ned[2])). The daemon handed it NED, drawing
+    every segment mirrored and UNDERGROUND - invisible in flight, briefly
+    clipping the surface as the ball fell. Fixed in Trail.tick.
 
 ### The corner controller is GONE - and it never ran
 

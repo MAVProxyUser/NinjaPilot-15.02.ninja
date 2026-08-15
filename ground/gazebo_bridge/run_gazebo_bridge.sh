@@ -68,7 +68,11 @@ echo "Starting Gazebo server with $WORLD ..."
 # --headless-rendering: camera sensors make the server open a visible
 # "OgreWindow (0)_0" render window on macOS. This keeps the context
 # offscreen - verified the cameras still publish real frames with it.
-gz sim -s -r --headless-rendering "$WORLD" &
+# Redirect the server's output to a KNOWN path. It was previously left on the
+# terminal, so analyze_run.sh's third log defaulted to a stale empty
+# /tmp/gzserver.log and the "physics/plugin complaints" leg of the three-log
+# rule was silently absent from every run.
+gz sim -s -r --headless-rendering "$WORLD" > "${TMPDIR:-/tmp}/gzserver.log" 2>&1 &
 GZ_SERVER_PID=$!
 sleep 6
 

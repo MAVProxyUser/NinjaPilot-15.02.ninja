@@ -311,6 +311,21 @@ print(n.request('/gui/follow', s, StringMsg, Boolean, 1000))"
   CYLINDER markers (TRAIL_DIAMETER 0.22, alpha ~0.3) - gz renders
   LINE_STRIP at 1px which is invisible at scene distance. Flown tube
   extends one segment per ~1m of travel.
+- **Trails now draw from a SEPARATE PROCESS (tools/trail_daemon.py)** so the
+  blocking /marker calls cost the flight loop nothing - launched by
+  run_intercept.sh and (with NINJAPILOT_MISSION_TRAIL_INPROC=0) run_star.sh.
+  It subscribes to the pose stream directly. If trails do not appear:
+    - check its heartbeat log ($LABEL_trails.log): "flown=N target=N
+      planned=N" with N climbing means it IS drawing; "drone=NO" means it is
+      not seeing the model (it matches "x3" lowercase - Gazebo's name).
+    - daemon markers use ns="ninjapilot_daemon" so the bridge's DELETE_ALL on
+      "ninjapilot_trail" does not wipe them.
+    - it feeds _marker_tube GAZEBO ENU (converts NED first); handing it NED
+      draws everything underground.
+  Manual: `./venv/bin/python3 tools/trail_daemon.py [world]`.
+- **Whole-farm GUI view**: the world's <camera_pose> is set for an overview
+  with the barn at the top; run_intercept.sh points the camera there via
+  /gui/move_to/pose. NINJAPILOT_FOLLOW=1 restores vehicle-chase instead.
 - /marker quirks (cost a lot of debugging): ack type is gz.msgs.Empty;
   the request often returns ok=False even though the marker REGISTERED
   - verify with `/marker/list` (Marker_V), never trust the ok flag.
@@ -447,6 +462,162 @@ and that stops being true - which is the point of the slider.
 To publish wind without the GUI (speed v m/s FROM bearing B):
 `linear_velocity.x = -v*sin(B)`, `.y = -v*cos(B)`, and `enable_wind: true`
 or WindEffects applies nothing. Links need `<enable_wind>` to be pushed.
+
+## Intercept: run it, score it, tune it (2026-08-10)
+
+`run_intercept.sh` is the ONLY supported way, same reason as run_star.sh. It
+kills and waits, removes any stale target BOTH before and after the world
+reset, purges slots, flies, analyses all three logs, and plots.
+
+```bash
+cd ground/gazebo_bridge
+./run_intercept.sh icpt01
+```
+
+If it aborts with `target_ball STILL present after reset`, restart the
+Gazebo server - a knocked-down ball occasionally survives both the remove
+service and the reset, and every run after it fails to spawn.
+
+Batch several runs, reporting the miss decomposed (which is the only useful
+form - a scalar separation hides whether the error is horizontal or vertical):
+
+```bash
+for r in a1 a2 a3; do NINJAPILOT_VISION=0 ./run_intercept.sh $r; done
+```
+
+Env knobs, no rebuild needed:
+
+| var | default | what it does |
+|---|---|---|
+| `NINJAPILOT_VISION` | 1 | 0 disables the camera bearing channel (EKF then runs on position only) |
+| `NINJAPILOT_LAG_S` | 0.20 | seconds the EKF predicts ahead; 0 = no lag compensation. NOTE it is engagement-specific: 0.48 was right at DETECT_RANGE 34, 0.20 at 46 - re-measure if the geometry changes |
+| `NINJAPILOT_ISPEED` | 2.6 | interceptor speed override, no rebuild |
+| `NINJAPILOT_TRAILS` | 1 | 0 drops the trails (drawn by tools/trail_daemon.py) |
+| `NINJAPILOT_FOLLOW` | 0 | 1 makes the GUI chase the vehicle; default is the whole-farm overview |
+| `TARGET_SPEED` | 1.2 | target m/s |
+
+### Settled intercept values (the COMMITTED baseline)
+
+At 2.6 m/s this strikes 7-8 of 8 first-pass, 0.45-0.58m against 0.582m
+geometry. `felt=True` (physics contact) is the criterion; a sampled 0.58m IS
+the corner-on contact distance, so it cannot go lower once the ball deflects.
+
+| knob | value | note |
+|---|---|---|
+| `INTERCEPT_LEVEL_BAND` | 0.10 m | **the load-bearing one.** Climb to level BEFORE committing horizontally. 1.5 -> 0.10 took the miss 1.2m -> 0.5m |
+| `INTERCEPT_SPEED` | 2.6 m/s | see the speed warning below |
+| `DETECT_RANGE` | 46 m | earlier detection = more time; the only lever the shared budget allows |
+| `INTERCEPT_HIT_DIST` | 0.485 m | score ONLY guaranteed contact (face-on); real contact comes from the ball's sensor |
+| `TRACK_LAG_S` | 0.20 s | EKF forward prediction; replaced a firmware constant that made things WORSE |
+| `INTERCEPT_AIM_HIGH_M` | 0.0 | tested twice, buys nothing - shared-budget |
+| `INTERCEPT_CLIMB_FRAC` | 0.6 | 0.9 is worse and noisier |
+
+**SPEED IS CAPPED AT 2.6 UNTIL THE VERTICAL PID IS FIXED - do not just raise
+INTERCEPT_SPEED.** 3.0 was pushed and proved a STOCHASTIC knife-edge
+(~40-50% strike): the vehicle sometimes overshoots the target's altitude by
++0.7m at level-off. The overshoot is a position-P term in pidcontroldown.cpp
+added DOWNSTREAM of guidance, so no guidance-side cap (cmd[2], VerticalVelMax)
+bounds it. The airframe itself flies 4.0 m/s stably - it is NOT the limit.
+Full analysis and the list of measured-and-reverted attempts is in CLAUDE.md
+("CORRECTION to TEN consecutive first-pass"). Fix the vertical PID first.
+
+**Do not spend runs re-splitting the error budget.** Horizontal and vertical
+trade ~1:1 and their sum is conserved near 0.5m because `vmax` is shared
+(`horizontal = sqrt(vmax^2 - v_climb^2)`). More capability or more time is
+the only way below that floor.
+
+**Restart the gz server between comparison batches.** A long-lived server
+eventually no-flies (estimator never inits), and marginal results spread
+across spawn/reset cycles are not comparable - a fresh-server A/B is what
+distinguished real variance from an apparent server-age effect this session.
+
+## Barn trial: does the balloon get stopped, or reach the barn?
+
+`tools/barn_trial.py` runs a scripted matrix of one-shot engagements and
+tallies STOPPED vs BARN HIT. Success requires **felt=True** (the vehicle's
+own IMU), never a separation number - see the contact-geometry note below
+for why separation alone scores false positives.
+
+```bash
+cd ground/gazebo_bridge
+cat > /tmp/plan.json <<'EOF'
+{"minutes": 40, "runs": [
+  {"label":"a1","ispeed":3.0,"tspeed":1.2,"vposp":0.10,"vveld":0.08}
+]}
+EOF
+cp /tmp/plan.json "$TMPDIR/barn_trial_plan.json"
+./venv/bin/python3 tools/barn_trial.py          # writes barn_trial_results.json
+./venv/bin/python3 tools/barn_tally.py          # tally, invalid runs excluded
+```
+
+It restarts the gz server every 6 runs and after any timeout/no-fly, hard-
+kills a run's whole process group at 300s, and reaps stragglers between runs
+- all three were needed; this rig has produced three distinct hangs.
+
+`barn_tally.py` separates INVALID runs (no-fly, spawn failure, timeout) from
+real barn hits. A run where the ball never spawned is a harness fault, not a
+guidance outcome; scoring it as a miss understates the guidance and hides
+harness bugs. Headline rate is over valid engagements only, with the invalid
+count printed alongside.
+
+### Measured envelope (2026-08-10, 18 valid engagements, tools/barn_trial_2026-08-10.json)
+
+| interceptor | balloon | stopped | vert at merge |
+|---|---|---|---|
+| 2.6 | 1.2 | 2/2 | -0.09 / -0.18 |
+| 3.0 (vP 0.10) | 1.2 | **2/2** | -0.06 / +0.01 |
+| 3.0 (vP 0.05) | 1.2 | **2/2** | +0.03 / +0.03 |
+| 3.0 | 1.6 | 1/2 | +0.31 / +0.46 |
+| 3.0 | 2.0 | 0/4 | +0.65 .. +0.83 |
+| 3.5 | 1.6 | 0/2 | +0.56 / +0.61 |
+
+**Recommended intercept config: INTERCEPT_SPEED 3.0 with
+NINJAPILOT_VPOSP=0.10.** 4/4 stopped with vertical inside +/-0.06, versus a
+~40-50% coin-flip at the stock 0.25. NOT made the default: `VerticalPosP` is
+shared with the star, and 0.10 has not been flown on a mission. Set it
+per-batch until someone runs the star at 0.10.
+
+**Balloon >= 1.6 m/s is where it breaks**, and NOT because of VerticalPosP -
+0.05 vs 0.10 at balloon 2.0 is statistically identical. Both speeds shorten
+time-to-intercept, which grows path_intercept's own `v_time = vgap/t_use`
+climb demand, which overshoots. Next lever is the climb cap in paths.c,
+re-tested against balloon 1.6-2.0 (it was previously tested at 1.2, where
+that term never binds). Full mechanism in CLAUDE.md.
+
+**CONTACT IS NOT SPHERICAL.** The frame is a flat box: ~+/-0.32m vertical
+tolerance vs ~+/-0.58 horizontal. A run at sampled separation **0.40m**
+scored felt=False because vert was +0.33 - it flew over the ball. Never
+score an intercept on separation.
+
+## Validate estimator/filter changes OFFLINE before flying them
+
+```bash
+./venv/bin/python3 tools/test_target_ekf.py
+```
+
+0.2s instead of a 90s flight. Checks convergence, that bearing updates
+cannot corrupt range (the rank-2 Jacobian property), and that
+`predict_ahead(tau)` lands on truth tau seconds later. Several guidance
+constants that cost multiple flights each could have been rejected here.
+
+## Three-log analysis for an intercept run
+
+`analyze_run.sh` branches on `NINJAPILOT_RUN_KIND` because score.py /
+wp_arrival.py / star_plot.py all grade against the star geometry and report
+confident nonsense on an intercept. `run_intercept.sh` sets it. Manually:
+
+```bash
+NINJAPILOT_RUN_KIND=intercept tools/analyze_run.sh icpt01 "$TMPDIR/icpt01.log"
+# or just the intercept-specific comparison:
+./venv/bin/python3 tools/intercept_three_log.py \
+    "$TMPDIR/icpt01_flash.jsonl" "$TMPDIR/icpt01_track.json"
+```
+
+The one output that matters most: **"vehicle TRACKED the vertical command"
+vs "did NOT track"**. Those are opposite fixes - the first is a guidance
+bug, the second is thrust/tilt starvation - and no separation number
+distinguishes them. It is what identified the vertical miss as guidance
+under-asking rather than an airframe limit.
 
 ## Star mission: current settled values (2026-08-09, corner saga closed)
 

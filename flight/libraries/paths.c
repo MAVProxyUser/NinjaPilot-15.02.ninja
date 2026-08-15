@@ -490,14 +490,51 @@ static void path_circle(PathDesiredData *path, float *cur_point, struct path_sta
  */
 #define INTERCEPT_MAX_ACCEL      1.2f   // m/s^2 on the commanded speed
 #define INTERCEPT_MAX_TURN_RATE  60.0f  // deg/s on the commanded direction
+// LEAD x1.35 TESTED AND WORSE, on the clean (loop-unblocked) baseline where
+// the measurement is trustworthy: mean 0.87m and 1/5 contacts, versus 0.59m
+// and 5/5 at x1.0. The endgame lead is already right; do not add more.
+#define INTERCEPT_ENDGAME_LEAD_K  1.0f  // multiply the endgame lead horizon.
+                                         // Contacts sit at 0.58-0.60m, the
+                                         // outer edge of the 0.582m contact
+                                         // geometry - grazes, not centre
+                                         // hits. Leading slightly longer aims
+                                         // into the centre. Measurable now
+                                         // that runs repeat to ~2cm.
+// LAG COMPENSATION MOVED TO THE ESTIMATOR - do not re-add it here.
+//
+// The measured miss on the clean baseline was a repeatable 0.57-0.59m
+// directly BEHIND the target with near-zero cross-track: a pure ~0.48s time
+// lag, not an aiming error. Adding that 0.48s as a CONSTANT to the endgame
+// lead was tried and was measurably worse - 1.25m, 1.30m, 1.32m first-pass
+// misses over three runs, versus 0.57-0.59m without it.
+//
+// The reason it backfired: the endgame lead is already range-dependent
+// (range/vmax), so a constant on top of it over-leads hardest exactly when
+// range is collapsing and the vehicle can least afford a moving aim point.
+//
+// The compensation now lives where the information is - the bridge's
+// TargetEKF propagates the target state forward by the lag through the same
+// dynamics it already estimates, and hands the firmware a position that is
+// honest about when it will be acted on. That is automatically correct at
+// every range. Offline against a synthetic track it predicts 0.48s ahead to
+// 0.199m, versus the 0.58m of pure lag it replaces
+// (tools/test_target_ekf.py).
+#define INTERCEPT_LAG_COMP_S      0.0f   // estimator owns this; see above
 #define INTERCEPT_ENDGAME_MAX_LEAD_S 2.5f  // s: cap on the endgame lead
                                            // horizon, so a stalled closure
                                            // cannot aim absurdly far ahead
-#define INTERCEPT_LEVEL_BAND     1.5f   // m: within this of the target's
+#define INTERCEPT_LEVEL_BAND     0.10f   // m: within this of the target's
                                         // altitude counts as level - full
                                         // horizontal pursuit
 #define INTERCEPT_LEVEL_RAMP     5.0f   // m: ramp horizontal back in over
-                                        // this band above LEVEL_BAND
+                                        // this band above LEVEL_BAND.
+                                        // 2.5 TRIED AND NEUTRAL (+0.78 ->
+                                        // +0.80 at 3.5): the gate releases on
+                                        // POSITION gap, so the full sprint
+                                        // always starts while still carrying
+                                        // ~2 m/s of climb - ramp width never
+                                        // touches that. The real entry-rate
+                                        // cap is VerticalVelMax (bridge).
 #define INTERCEPT_LAUNCH_HORIZ   0.15f  // horizontal fraction on the deck
 #define INTERCEPT_FLOOR_M        3.0f   // m: never command descent below this
 #define INTERCEPT_ENDGAME_DIST   4.0f   // m: inside this, pure pursuit - the
@@ -647,7 +684,22 @@ static void path_intercept(PathDesiredData *path, float *cur_point, struct path_
         // horizon shrinks smoothly to zero as we arrive, so it cannot blow
         // up, and at 4m out with a 1.2 m/s object it is still a 2.2m lead -
         // the difference between a centre hit and the corner graze.
-        float t_lead = range / vmax;
+        // ADD the measured loop lag, do not scale by it.
+        //
+        // On the clean baseline the miss is astonishingly repeatable: the
+        // vehicle sits 0.57-0.59m BEHIND the ball along its own direction of
+        // travel, with cross-track essentially zero (-0.18..0.00m). That is
+        // not an aiming error, it is LATENCY - 0.58m at 1.2 m/s is 0.48s of
+        // lag through bridge sampling, transport, and the ~130ms attitude
+        // response. It is a constant offset in TIME, so it needs a constant
+        // correction in time.
+        //
+        // Scaling the geometric lead was tried (x1.35) and was worse - mean
+        // 0.87m, 1/5 contacts vs 0.59m, 5/5 - because the geometric term
+        // grows with range: it overshoots badly at 4m while barely moving the
+        // aim at 0.6m, which is where the miss actually is.
+        float t_lead = (range / vmax) * INTERCEPT_ENDGAME_LEAD_K
+                       + INTERCEPT_LAG_COMP_S;
         if (t_lead > INTERCEPT_ENDGAME_MAX_LEAD_S) {
             t_lead = INTERCEPT_ENDGAME_MAX_LEAD_S;
         }
@@ -827,6 +879,44 @@ static void path_intercept(PathDesiredData *path, float *cur_point, struct path_
         // closing speed left. Cap the climb at a FRACTION of the budget so
         // both axes make progress at once.
         float vcap = INTERCEPT_VERT_GAIN * fabsf(vgap);
+        // THE CAP MUST NOT DEFEAT THE TIME MATCH. This was the whole vertical
+        // miss (2026-08-10). v_need above already takes the GREATER of the
+        // gap-proportional and time-matched rates - and then this cap, being
+        // itself INTERCEPT_VERT_GAIN * vgap, clamped it straight back down to
+        // the gap-proportional value. The time-matched term could never
+        // survive, so the vertical channel was a pure proportional approach
+        // with a 1/0.7 = 1.43s time constant while the endgame lasts ~0.7s:
+        // structurally incapable of arriving level.
+        //
+        // Measured signature, two runs, confirmed by the FC's OWN log: the
+        // vehicle tracked its vertical command to within 0.10 m/s all the way
+        // through the merge, while that command decayed to 0.41-0.45 m/s with
+        // 1.16-1.28m still to close. Guidance under-asked; the airframe was
+        // never the limit. Horizontal at the same moment was 0.08-0.10m.
+        //
+        // RAISING THE CAP TO THE TIME-MATCHED RATE WAS TRIED AND IS WORSE.
+        // Setting vcap = max(gap-proportional, |vgap|/t_go) with t_go the
+        // sooner of t_int and range/vmax:
+        //
+        //   before (ekfA1/A2)  horiz 0.10 / 0.08   vert -1.16 / -1.28
+        //   after  (vt2/vt3)   horiz 0.23 / 0.30   vert -1.41 / -1.51
+        //
+        // Worse on BOTH axes, which is the tell. vmax is a SHARED BUDGET -
+        // the horizontal term is sqrt(vmax^2 - v_climb^2) - so buying climb
+        // spends closure. At 2.2 m/s, demanding 1.32 m/s of climb instead of
+        // 0.98 drops horizontal from 1.97 to 1.76 m/s, the merge happens
+        // sooner (t+5.6-5.7s vs t+6.2s) and the vehicle is therefore LOWER
+        // when it gets there. Under-asking was never the real constraint.
+        //
+        // The diagnosis that produced this attempt still stands and is worth
+        // keeping: the FC's own log shows the vehicle tracking its vertical
+        // command to 0.10 m/s while that command decayed to 0.41 m/s with
+        // 1.16m to close. Guidance does under-ask. But the fix is not to ask
+        // harder out of the same budget - it is to remove the competition,
+        // either by reaching the target's altitude before committing
+        // horizontally (the INTERCEPT_LEVEL_BAND gate, which currently
+        // releases at 1.5m) or by giving the vertical channel authority that
+        // does not come out of vmax at all.
         float budget_cap = INTERCEPT_CLIMB_FRAC * vmax;
         if (vcap > budget_cap) { vcap = budget_cap; }
         if (vcap > INTERCEPT_MAX_CLIMB) { vcap = INTERCEPT_MAX_CLIMB; }

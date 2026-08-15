@@ -123,14 +123,52 @@ TARGET_END         = (34.0, 34.0)     # N, E: the opposite corner, via overhead
 # 3.0 CRASHED (spd01) - the velocity loop is tuned at 1.5 m/s and goes
 # unstable at 3.0. Raw speed is not available without retuning
 # HorizontalVelPID first. Back to 2.2, which flies.
-INTERCEPT_SPEED    = 2.2    # m/s cap handed to the firmware (EndingVelocity)
+INTERCEPT_SPEED    = float(os.environ.get("NINJAPILOT_ISPEED", "2.6"))    # m/s cap handed to the firmware (EndingVelocity)
+# LAG COMPENSATION, owned by the estimator rather than by the guidance law.
+#
+# The clean-baseline miss was a repeatable 0.57-0.59m directly BEHIND the
+# target with near-zero cross-track - the signature of a pure time lag
+# (0.58m / 1.2 m/s = 0.48s) through this loop, UAVTalk transport, and the
+# ~130ms attitude response measured by relay autotune. Adding 0.45s as a
+# constant to the firmware's endgame lead was tried and was WORSE (1.25,
+# 1.30, 1.32m first-pass misses vs 0.57-0.59m), because that lead is already
+# range-dependent and a constant over-leads worst at short range.
+#
+# Propagating the FILTER state forward by the lag instead is correct at every
+# range: the firmware is handed where the target will be when the command
+# actually bites. Offline this predicts to 0.199m against 0.58m of raw lag
+# (tools/test_target_ekf.py check 3).
+# 0.48 -> 0.20. The 0.48s was measured with detection at 34m, where the
+# engagement was short and the vehicle still settling at the merge. With
+# DETECT_RANGE 46 the run is longer and better settled, the real loop lag is
+# smaller, and 0.48 OVER-leads: the miss flipped sign to +0.38m AHEAD of the
+# ball (0.32s of over-lead at 1.2 m/s). 0.20 cancels it - 4/4 confirmed
+# strikes. Lag compensation is not a constant of the vehicle; it is a
+# property of the vehicle AND the engagement, so re-measure it whenever the
+# geometry changes. NINJAPILOT_LAG_S overrides without a rebuild.
+TRACK_LAG_S        = float(os.environ.get("NINJAPILOT_LAG_S", "0.20"))
+TRACK_VISION       = os.environ.get("NINJAPILOT_VISION", "1") == "1"
 # Contact happens at up to ball radius + the frame's half-DIAGONAL, not its
 # half-width: the box is 0.47x0.47, so corner-on contact occurs at
 # 0.25 + (0.47/2)*sqrt(2) = 0.582m centre-to-centre. The original 0.55 was
 # derived from the half-width (0.235) and scored a real collision as a miss -
 # icpt04 bottomed out at 0.577m with a 4.0g impulse and its closing speed
 # collapsing 3.15 -> 0.98 m/s, which is a strike by any reading.
-INTERCEPT_HIT_DIST = 0.60   # m centre-to-centre = contact
+#
+# 0.60 -> 0.485: SCORE ONLY WHAT IS GEOMETRICALLY GUARANTEED.
+#
+# 0.582 is the corner-on MAXIMUM; face-on contact needs 0.25 + 0.235 = 0.485.
+# Between those two the outcome depends entirely on relative orientation at
+# the merge, so a distance backstop set at 0.60 counted the whole ambiguous
+# band - and worse, counted 0.02m of clearance past even the corner-on case -
+# as a hit. That is exactly what the run record showed: ten first-pass
+# "intercepts" at 0.45-0.58m, of which the physics engine registered ONE.
+#
+# The backstop now sits at the distance where contact cannot NOT happen. A
+# real collision at 0.50-0.58m still scores, because `real_contact` from the
+# ball's own contact sensor is checked first and is the actual ground truth;
+# the backstop exists only to catch a strike the 20Hz sampler stepped over.
+INTERCEPT_HIT_DIST = 0.485  # m centre-to-centre: guaranteed-contact distance
 # Hover sits at 1.00g and the 90th percentile through a whole intercept run
 # is 1.06g, so anything above ~1.5 is not flight - measured, not guessed.
 IMU_HIT_G          = 2.0    # g total accel: the IMU-side collision trigger
@@ -152,17 +190,43 @@ IMU_HIT_G          = 2.0    # g total accel: the IMU-side collision trigger
 # time the object would reach BARN_AT along its own track. Reported as margin,
 # and as how far along the track the hit landed - earliest is best.
 BARN_AT            = (20.0, 20.0)   # N, E: where the object strikes the farm
-TRAILS_ON          = os.environ.get("NINJAPILOT_TRAILS", "1") == "1"
+# SUPERSEDED BY tools/trail_daemon.py - default OFF.
+#
+# The in-process trail worker is kept for reference but no longer used: even
+# off-thread it stalls guidance through the GIL while marshalling each
+# blocking /marker call (0.58/1.91/2.19m closest approach with it on, versus
+# 0.58-0.60 with it off). Drawing now happens in a SEPARATE PROCESS with its
+# own GIL and its own core, subscribed straight to Gazebo's pose stream, so
+# it costs the guidance loop literally nothing and can run at full rate.
+# NINJAPILOT_TRAILS controls the daemon (see run_intercept.sh); set
+# NINJAPILOT_TRAILS_INPROC=1 only to reproduce the old behaviour.
+TRAILS_ON          = os.environ.get("NINJAPILOT_TRAILS_INPROC", "0") == "1"
 FLYAWAY_RANGE_M    = 22.0   # m from pad: past this and opening, break off
-ENGAGE_TIMEOUT_S   = 22.0   # s of active pursuit before breaking off
-DETECT_RANGE       = 34.0   # m: range at which the object is "seen" and the
-                            # vehicle scrambles. Wide enough that a 1.2 m/s
-                            # target leaves time to launch and climb 11m.
+ENGAGE_TIMEOUT_S   = 14.0   # s of active pursuit before breaking off
+# 34 -> 46: BUY TIME, because time is the only thing that helps.
+#
+# Horizontal and vertical error trade ~1:1 and their sum is conserved near
+# 0.5m, because vmax is a shared budget (horizontal = sqrt(vmax^2-v_climb^2)).
+# Three attempts to re-split it - a time-matched vertical cap, an aim-high
+# bias, a bigger climb fraction - all failed for that one reason. The budget
+# is spent climbing 10.2m AND closing ~25m inside ~6s; the only escapes are
+# more speed (2.6 flies, 3.0 is unstable without retuning HorizontalVelPID)
+# or more time. Detecting earlier is the honest version of more time: a real
+# cueing sensor has range, and the target spawns ~48m out, so 46m cues almost
+# at spawn and hands the whole extra span to the climb.
+DETECT_RANGE       = 46.0   # m: range at which the object is "seen" and the
+                            # vehicle scrambles.
 TARGET_TURN_AT     = float(os.environ.get("NINJAPILOT_TURN_AT", "5.0"))
 TARGET_TURN_DEG    = float(os.environ.get("NINJAPILOT_TURN_DEG", "55.0"))
 
 _target_state = [None]   # (t, (N,E,D)) newest ground-truth target pose
 _last_accel_g = [1.0]    # |specific force| in g, from the vehicle's own IMU
+# PEAK-HOLD companion. The IMU callback runs at 250Hz; the intercept loop
+# reads at ~19Hz, so a collision impulse a few samples wide fell BETWEEN
+# reads - a watched, physics-confirmed slam (ta1) scored felt=False. The
+# callback keeps the running maximum; the loop reads AND RESETS it, so no
+# impulse can alias away regardless of loop rate.
+_peak_accel_g = [1.0]
 _contact_hit = [None]    # wall-clock of the PHYSICS ENGINE's own contact report
 POSE_TOPIC = "/world/%s/pose/info" % GAZEBO_WORLD
 IMU_TOPIC = "/X3/imu"
@@ -417,6 +481,8 @@ def on_imu(msg):
     # genuinely "what the flight controller felt", not a Gazebo side channel.
     # Hovering reads ~1g; a strike shows as a short spike above it.
     _last_accel_g[0] = math.sqrt(sum(x * x for x in a_frd)) / 9.80665
+    if _last_accel_g[0] > _peak_accel_g[0]:
+        _peak_accel_g[0] = _last_accel_g[0]
     state.update_from_imu(gyro_dps, a_frd)
 
 
@@ -2065,11 +2131,22 @@ def spawn_target(node):
         ent = Entity()
         ent.name = TARGET_MODEL
         ent.type = Entity.MODEL
-        node.request(f"/world/{GAZEBO_WORLD}/remove", ent, Entity, Boolean, 3000)
-        time.sleep(1.0)
-        ok, rep = node.request(f"/world/{GAZEBO_WORLD}/create", req,
-                               EntityFactory, Boolean, 3000)
-        print(f"[intercept] respawn after clearing stale target -> ok={ok}")
+        # BOUNDED RETRY, not a single attempt. One remove + 1.0s was not
+        # enough: Gazebo does not free the model NAME synchronously, so a
+        # fast respawn still collides with the corpse of the last run's
+        # ball. Measured 2 lost runs in 10 during a timed trial - each one
+        # costs a full ~90s cycle AND (under strict scoring) looks like a
+        # guidance failure, which is worse than the lost time. Three tries
+        # with a growing wait clears it.
+        for attempt in range(3):
+            node.request(f"/world/{GAZEBO_WORLD}/remove", ent, Entity,
+                         Boolean, 3000)
+            time.sleep(1.0 + attempt)
+            ok, rep = node.request(f"/world/{GAZEBO_WORLD}/create", req,
+                                   EntityFactory, Boolean, 3000)
+            print(f"[intercept] respawn attempt {attempt + 1} -> ok={ok}")
+            if ok and rep.data:
+                break
     print(f"[intercept] spawn {TARGET_MODEL} at N={n} E={e} alt={TARGET_ALT}m -> ok={ok}")
     return ok
 
@@ -2238,33 +2315,41 @@ def _intercept_run(node, client):
         return
     time.sleep(0.5)
     subscribe_contact(node)
-    # VISION: up + 45deg cameras only, and only while the ball is in frame.
-    # The instant it leaves frame we fall straight back to the legacy
-    # lead-the-known-location solution. See tools/ball_tracker.py.
-    # OFF BY DEFAULT (NINJAPILOT_VISION=1 to enable).
+    # TRACKING: an EKF over the target, fed by position fixes and - while the
+    # ball is in frame - camera bearings. See tools/target_ekf.py for the
+    # full argument; the short version is that the first vision attempt
+    # SUBSTITUTED vision for the position feed and lost to no vision at all
+    # (0.41-1.03m closest approach off, 1.03-2.35m on), for two reasons that
+    # are both fixed here:
     #
-    # The detection scan is cheap - measured 0.7ms/frame, ~4% of a core - but
-    # SUBSCRIBING to two 640x480 RGB topics at 30Hz means gz-transport
-    # delivers ~55 MB/s of frame data into the process that also feeds
-    # sensors to the firmware. Measured effect: closest-approach cluster
-    # 0.41-1.03m (vision off) vs 1.03-2.35m (vision on) over 6 runs each,
-    # with identical firmware. That is inside this rig's run-to-run scatter
-    # so it is not conclusive, but the direction is wrong and the mechanism
-    # is exactly the one CLAUDE.md records flying the vehicle into the ground
-    # (blocking/bulk work on the sensor thread). Flight performance does not
-    # pay for a demo: enable vision explicitly when demonstrating the
-    # in-frame/out-of-frame handoff.
+    #   - it discarded range, which is the one thing a camera cannot measure.
+    #     The filter's bearing update has a rank-2 Jacobian orthogonal to the
+    #     sightline, so vision now sharpens direction and is structurally
+    #     incapable of corrupting range.
+    #   - it subscribed to two 640x480 30Hz RGB topics (~55 MB/s) inside the
+    #     process that feeds sensors to the firmware - the exact failure
+    #     class CLAUDE.md records twice. The tracker now uses dedicated
+    #     160x120 20Hz cameras, 2.3 MB/s, a 24x cut, while the 640x480 feeds
+    #     stay untouched for the GUI's FPV widgets.
+    #
+    # The filter also replaces the raw finite-difference velocity estimate
+    # that used to be handed to the firmware, and owns lag compensation.
+    sys.path.insert(0, os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "tools"))
+    from target_ekf import TargetEKF
+    ekf = TargetEKF()
     vision = None
-    if os.environ.get("NINJAPILOT_VISION") == "1":
+    if TRACK_VISION:
         try:
-            sys.path.insert(0, os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "tools"))
             from ball_tracker import BallTracker
             vision = BallTracker(node)
         except Exception as e:
             print(f"[vision] disabled ({e})")
             vision = None
-    vis_state = {"locked": False, "frames": 0, "handoffs": 0}
+    else:
+        print("[vision] disabled (NINJAPILOT_VISION=0) - EKF on position only")
+    vis_state = {"locked": False, "n_bearing": 0, "n_pos": 0,
+                 "locked_s": 0.0, "innov": [], "last": None}
     tvel, _pub, _tw = drive_target(node)
 
     # "Detection": the object crosses into range. Stands in for whatever
@@ -2304,6 +2389,10 @@ def _intercept_run(node, client):
 
     # ---- the intercept run -------------------------------------------------
     crashed = [False]
+    first_pass_done = [False]
+    fp_min = [1e9]
+    fp_open = [0]
+    fp_hit = [False]
     broke_off = [None]
     t_engage = [time.time()]
     struck = [None]   # wall-clock of the strike, once hit
@@ -2316,7 +2405,8 @@ def _intercept_run(node, client):
     hit_gz = hit_imu = None
     min_sep = 1e9
     prev = None
-    track = []          # (t, drone NED, target NED, aim NED, sep) per tick
+    # (t, drone NED, target NED, target vel, sep, IMU g, commanded aim NED)
+    track = []
     t0 = time.time()
     t_engage[0] = t0
     recede = [0]
@@ -2326,7 +2416,7 @@ def _intercept_run(node, client):
     # 95 -> 55s. The engagement is decided within ~25s of the scramble; the
     # rest was dead air. Short runs matter more than complete ones when the
     # loop is "change something, fly it, look".
-    while time.time() - t0 < 55.0:
+    while time.time() - t0 < 32.0:
         # --- KNOCKED DOWN ---------------------------------------------
         # Once struck, the object stops being driven and becomes a falling
         # body. It has to be integrated here rather than handed to DART,
@@ -2368,19 +2458,52 @@ def _intercept_run(node, client):
         if st is None:
             time.sleep(0.02); continue
         tt, tned = st
-        # Estimate the target's velocity from successive fixes - a real tracker
-        # would hand us this, and differentiating here keeps the firmware
-        # honest about only receiving what an external system can supply.
-        if prev and tt > prev[0] + 1e-3:
-            dt = tt - prev[0]
-            vel = tuple((tned[i] - prev[1][i]) / dt for i in range(3))
-        else:
-            vel = tvel
-        prev = (tt, tned)
-
-        hp, dned, _q, _, _, _ = state.snapshot()
+        hp, dned, q_ned, _, _, _ = state.snapshot()
         if not hp:
             time.sleep(0.02); continue
+
+        # TRACKING. The division of labour is unchanged - the firmware still
+        # receives only a target position and velocity, which is all an
+        # external tracker could supply - but those now come from an EKF
+        # instead of from differencing consecutive fixes. Finite differencing
+        # at this loop's jitter turns centimetres of position noise into
+        # tenths of a m/s of velocity noise, and that velocity feeds the
+        # firmware's lead computation directly.
+        if not ekf.initialised():
+            ekf.init(tt, tned, tvel)
+        else:
+            ekf.predict(tt)
+        ekf.update_position(tned)
+        vis_state["n_pos"] += 1
+
+        # VISION, IN-FRAME ONLY, exactly as specified: while the ball is in
+        # frame the camera contributes a bearing; the moment it is not, the
+        # filter simply stops receiving them and coasts on the position
+        # channel. There is no handoff and no step change - which is the
+        # whole reason for fusing rather than switching.
+        if vision is not None:
+            lk = vision.lock()
+            if lk is not None:
+                cam, ray_frd, npix, _age = lk
+                # ray is body FRD; quat_ned is FRD-body -> NED-world.
+                los_ned = q_rotate(q_ned, ray_frd)
+                innov = ekf.update_bearing(dned, los_ned)
+                if innov is not None:
+                    vis_state["n_bearing"] += 1
+                    vis_state["innov"].append(innov)
+                if not vis_state["locked"]:
+                    vis_state["locked"] = True
+                    print(f"[vision] LOCK ({cam}, {npix}px)")
+            elif vis_state["locked"]:
+                vis_state["locked"] = False
+                print("[vision] lost - position channel only")
+
+        # LAG-COMPENSATED COMMAND. The firmware is handed where the target
+        # will be when the command actually bites, not where it is now. See
+        # TRACK_LAG_S. Scoring below deliberately keeps using the TRUE
+        # position - the compensation must never flatter the measurement.
+        tgt_p, vel = ekf.predict_ahead(TRACK_LAG_S)
+        prev = (tt, tned)
         # TRAILS ARE PUBLISHED OFF-THREAD.
         #
         # Every _marker_send is a BLOCKING gz service call. Four of them per
@@ -2463,7 +2586,7 @@ def _intercept_run(node, client):
 
         client.send_object("PathDesired", {
             "Start": [dned[0], dned[1], dned[2]],
-            "End": [tned[0], tned[1], tned[2]],
+            "End": [tgt_p[0], tgt_p[1], tgt_p[2]],
             "StartingVelocity": 0.0, "EndingVelocity": INTERCEPT_SPEED,
             "ModeParameters": [0.0, vel[0], vel[1], vel[2]],
             "UID": 0, "Mode": "Intercept"})
@@ -2479,8 +2602,38 @@ def _intercept_run(node, client):
 
         sep = math.dist(dned, tned)
         min_sep = min(min_sep, sep)
+
+        # FIRST PASS IS THE ONLY PASS THAT COUNTS.
+        #
+        # Missing the merge, wallowing, then catching the object from behind
+        # is not an interception. It also quietly inflated every number
+        # reported here: the sub-metre results were mostly LATE passes at
+        # t+15..t+22, not first passes. Score the first merge and stop - PASS
+        # if it touched, FAIL if it did not - which also cuts run time hard,
+        # because everything after the first pass was wasted wall clock.
+        if not first_pass_done[0]:
+            if sep < fp_min[0]:
+                fp_min[0] = sep
+                fp_open[0] = 0
+            elif sep > fp_min[0] + 0.05:
+                fp_open[0] += 1
+                if fp_open[0] > 15 and fp_min[0] < 900:
+                    first_pass_done[0] = True
+                    fp_hit[0] = bool(real_contact) or fp_min[0] < INTERCEPT_HIT_DIST
+                    print("[intercept] FIRST PASS %s at %.2fm (t+%.1fs)%s"
+                          % ("HIT" if fp_hit[0] else "MISS", fp_min[0],
+                             time.time() - t0,
+                             "" if fp_hit[0] else " - aborting, no stern chase"))
+                    if not fp_hit[0]:
+                        break
+        # Slot 6 is the COMMANDED AIM POINT - the lag-compensated PathDesired
+        # .End actually sent to the firmware. Without it "planned vs flown"
+        # cannot be drawn for an intercept at all: the target's track is
+        # where the ball went, not where we asked the vehicle to go, and the
+        # difference between those two IS the guidance. Appended rather than
+        # inserted so intercept_plot.py / intercept_summary.py keep working.
         track.append((time.time() - t0, list(dned), list(tned),
-                      list(vel), sep, _last_accel_g[0]))
+                      list(vel), sep, _last_accel_g[0], list(tgt_p)))
         # (1) Gazebo ground truth
         # Contact for SCORING may use the distance backstop, but the
         # knock-down and break-off must require the PHYSICS ENGINE's verdict.
@@ -2516,7 +2669,11 @@ def _intercept_run(node, client):
             broke_off[0] = time.time()
             print(f"[intercept] *** GAZEBO CONTACT *** t+{hit_gz[0]:.1f}s sep={sep:.2f}m")
         # (2) the vehicle's own IMU
-        g = _last_accel_g[0]
+        # Read-and-reset the 250Hz peak, not the instantaneous sample -
+        # see _peak_accel_g. The track keeps recording the instantaneous
+        # value; only the DETECTOR uses the peak.
+        g = _peak_accel_g[0]
+        _peak_accel_g[0] = _last_accel_g[0]
         peak_g = max(peak_g, g)
         if g > IMU_HIT_G and hit_imu is None and time.time() - t0 > 3.0:
             hit_imu = (time.time() - t0, g)
@@ -2911,6 +3068,15 @@ def gui_follow(node, model=GAZEBO_MODEL, offset=(-14.0, -14.0, 9.0)):
     from gz.msgs10.boolean_pb2 import Boolean
     from gz.msgs10.vector3d_pb2 import Vector3d
     try:
+        # FOLLOW IS OPT-IN. Chasing the vehicle zooms the view onto it, which
+        # makes a 50m engagement impossible to watch - you see the quad and
+        # nothing it is chasing. Default off; the world's camera_pose gives a
+        # whole-farm overview with the barn at the top of the frame instead.
+        # NINJAPILOT_FOLLOW=1 restores the chase view.
+        if os.environ.get("NINJAPILOT_FOLLOW", "0") != "1":
+            print("[gui] camera follow OFF (whole-farm overview); "
+                  "NINJAPILOT_FOLLOW=1 to chase the vehicle")
+            return
         s = StringMsg()
         s.data = model
         node.request("/gui/follow", s, StringMsg, Boolean, 1000)
@@ -3241,9 +3407,19 @@ def mission_test():
     last_seen_idx = None
     landed_grace = None
     leg_entry_dist = None
+    # MISSION TRAIL, in-process. Every flown.tick() that actually emits a
+    # segment is a BLOCKING gz service call on the mission supervision thread
+    # - the same thread that feeds sensors to the firmware. That combination
+    # once flew the vehicle into the ground, and the standing mitigation has
+    # been to RATION it (10Hz / 0.5m) rather than remove it.
+    # NINJAPILOT_MISSION_TRAIL_INPROC=0 hands the job to tools/trail_daemon.py
+    # instead, which draws from its own process and its own GIL and therefore
+    # costs this loop nothing.
+    trail_inproc = os.environ.get("NINJAPILOT_MISSION_TRAIL_INPROC", "1") == "1"
     while True:
         now = time.time()
-        flown.tick()
+        if trail_inproc:
+            flown.tick()
         have_pose, alt, _climb = state.pose_alt_climb()
         have_pose2, pos_ned, _, _, _, _ = state.snapshot()
         n, e = (pos_ned[0], pos_ned[1]) if have_pose2 else (0.0, 0.0)
@@ -3698,7 +3874,16 @@ def uavtalk_thread():
             # NULL result (same cluster, 0 vs 1 contacts) - the vertical miss is
             # a sequencing problem, not loop weakness, so it is fixed in the
             # guidance (climb to target level before horizontal pursuit).
-            "HorizontalPosP": 0.35, "VerticalPosP": 0.25,
+            "HorizontalPosP": 0.35,
+            # VerticalPosP env-overridable for the level-off overshoot work.
+            # velDown = guidance feed-forward + VerticalPosP * vertical_gap
+            # (pidcontroldown.cpp ControlPositionWithPath), so at an 8m gap
+            # 0.25 alone asks for 2.0 m/s on top of the feed-forward - which
+            # is where the 3.5 m/s climb entry (and the +0.7m overshoot at
+            # level-off) comes from. Lowering it decelerates the climb EARLIER
+            # rather than trying to arrest it at the top. Default unchanged so
+            # the star keeps its committed tune; intercept batches override.
+            "VerticalPosP": float(os.environ.get("NINJAPILOT_VPOSP", "0.25")),
             # VerticalVelPID Kp 0.3->0.6, Ki 0.15->0.45: measured in a real
             # PositionHold sag (truth 2.4m -> ground in ~10s), the vertical
             # velocity PID's output hovered at ~0.69 against a true hover
@@ -3762,7 +3947,11 @@ def uavtalk_thread():
             # its own stability margin - pitch RMS 2.4 -> 6.0 deg, peak-to-peak
             # 41 deg, and overshoot 0.00 -> 0.13m. More gain just oscillates.
             # The settling problem is not solvable by pushing this loop.
-            "HorizontalVelPID": [5.5, 0.5, 1.4, 15], "VerticalVelPID": [0.6, 0.45, 0.08, 1.0],
+            "HorizontalVelPID": [5.5, 0.5, 1.4, 15],
+            # Vertical velocity loop; D is env-overridable (damping on the
+            # level-off arrest).
+            "VerticalVelPID": [0.6, 0.45,
+                               float(os.environ.get("NINJAPILOT_VVELD", "0.08")), 1.0],
             # ThrustLimits.Neutral is the altitude-hold PID's hover-point
             # baseline (vtolflycontroller.cpp: controlDown.UpdateNeutralThrust
             # uses it directly) - the XML's 0.5 default assumes a much
