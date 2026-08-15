@@ -53,6 +53,39 @@ remembered IP** — the DHCP lease moves.
 Base: `osd32mp1-red-v1_2-trusted-openstlinux-sdcard-v3_0_1.zip` (the **V1.2**
 image — the V1.1 one cannot do Ethernet on this board).
 
+### Provenance — identify by hash, not by filename
+
+- product page: https://octavosystems.com/octavo_products/osd32mp1-red/
+- getting started: https://octavosystems.com/app_notes/osd32mp1-red-getting-started/
+- Yocto BSP layer: https://github.com/octavosystems/meta-octavo-osd32mp1
+  (for **building** images — not a flashable artifact, and not needed to get running)
+
+| | sha256 | size |
+|---|---|---|
+| **works** `osd32mp1-red-v1_2-trusted-openstlinux-sdcard-v3_0_1.zip` | `4d9546342acf4f5da612a758dc75189d1a64c9e972a42b0b28e46d634f8289c2` | 244,369,137 |
+| **wrong for V1.2** `osd32mp1-red-debian-sdcard-v3.0.zip` | `0fc13f0885695766546379c4a4494a36855626460ac37ede603ddb36d05cb404` | 1,127,143,235 |
+
+The second one is listed so it can be told apart, not used: it ships only the
+V1.1 device tree, which on this board gives `no phy at addr -1` and no Ethernet
+**while the link LEDs keep blinking** — they are driven by the PHY's own link
+detection, which works whether or not the SoC can reach it over MDIO. See the
+board-revision rule at the top of `CLAUDE.md`; check the silkscreen revision
+against the DTB filename before debugging Ethernet at all.
+
+What actually runs, once flashed:
+
+    ST OpenSTLinux - Weston (Yocto/dunfell) 3.1-snapshot-20230124
+    kernel 5.10.10   (SMP PREEMPT — note: NOT PREEMPT_RT)
+    /boot/stm32mp157c-osd32mp1-red-v1_2.dtb
+
+The version strings do not match the zip's name: Octavo's "v3.0.1" packaging
+contains an ST 3.1-snapshot distro. That is expected, not a mixed-up download.
+
+Two further changes are made **after** flashing and are not part of the image —
+SCHED_FIFO for the firmware, and I²C at 400 kHz. Both are in `board-config/`
+with the measurements that justify them; the I²C one is the single
+highest-impact change on the board.
+
 | # | stock behaviour | edit |
 |---|---|---|
 | 1 | gadget is `rndis.0`; macOS has no RNDIS driver at all | → `ecm.0` |
