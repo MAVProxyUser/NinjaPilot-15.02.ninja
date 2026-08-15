@@ -784,3 +784,35 @@ anything about a sensor.
 discriminator, not a 16-bit type), so decoding `(cid >> 8) & 0xFFFF` on a
 node-0 frame yields garbage - the "12537" seen during this debugging session
 was exactly that. Skip `node == 0` frames when counting message types.
+
+## THE INSTRUMENTATION LIED AGAIN — read the RAW log before diagnosing
+
+A "fw_realposix hangs after ~2 seconds" diagnosis was chased through three
+wrong hypotheses (signal stealing, SCHED_FIFO inheritance, stack overflow)
+before the raw log showed the firmware had been running correctly the entire
+time. Both artifacts are generic and will recur:
+
+1. **The firmware's stdout is BLOCK-buffered into a pipe.** Not a TTY, so libc
+   uses 4 KB full buffering instead of line buffering. Output arrives in
+   bursts with clustered timestamps, so `journalctl --since "-30s"` returns
+   NOTHING while the process is perfectly healthy. Use `stdbuf -oL`, or judge
+   by content rather than by time window.
+2. **USER_HZ tick deltas round small loads to zero.** `/proc/PID/task/*/stat`
+   counts in 10 ms units. A task at 0.3 % CPU uses ~1.5 ticks per 5 s, which
+   reads as "0 ticks = stopped". It is below the resolution, not stopped.
+
+What the raw log actually said, and what should have been checked first:
+
+    innerloop.c watchdog: gyroupdates=1 rateupdates=-1   <- outer loop RUNNING
+    innerloop.c PERIODIC: gateOpen=1
+    [althold] posDown=-0.0344 velDown=-0.1146 dT=0.00252 <- 2.5 ms, live
+    UAVObj event stats: eventCallbackErrors=0 eventQueueErrors=0
+
+`rateupdates` at **-1** instead of the **-64** floor is the single most useful
+health signal here: -64 means the outer loop never ran at all.
+
+This is the THIRD time in this project a measurement rather than the system
+produced the bug (the others: "guidance variance" that was a 9 Hz sampling
+loop, and CAN "50 Hz / 295 % jitter" that was frames counted as transfers).
+The pattern is always the same - a derived metric was trusted over the raw
+evidence. Read the log. Then measure.
