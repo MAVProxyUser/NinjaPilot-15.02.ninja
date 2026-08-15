@@ -171,6 +171,25 @@ void PIOS_Board_Init(void)
     /* Initialize the alarms library */
     AlarmsInitialize();
 
+#ifdef PIOS_INCLUDE_SENSORS_HUB
+    /*
+     * REALPOSIX: real sensors, read on a DEDICATED pthread rather than from a
+     * FreeRTOS task. The Posix port runs one task at a time and a blocking
+     * ioctl is not a FreeRTOS blocking point, so reading I2C from a task would
+     * freeze the WHOLE firmware for ~506 us per sample - 25 % of a 500 Hz
+     * period, scaling linearly with sensor count. Off the scheduler it is
+     * free: measured, a 500 Hz RT loop sees 0.200 -> 0.270 ms worst-case
+     * latency with the bus hammered continuously.
+     *
+     * Init failures are NOT fatal. A missing baro or a down CAN bus should
+     * still leave a debuggable firmware, and the hub reports which sensors
+     * came up. It only fails hard when NOTHING initialised.
+     */
+    if (PIOS_SENSORS_HUB_Init(PIOS_REALPOSIX_I2C_DEV, PIOS_REALPOSIX_CAN_IF) != 0) {
+        PIOS_DEBUG_Assert(0);
+    }
+#endif
+
     /* Configure IO ports */
 
     /* Configure Telemetry port */

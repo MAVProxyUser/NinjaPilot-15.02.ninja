@@ -111,5 +111,8 @@ extern void PIOS_LED_Init(void);
 #include <pios_i2c.h>
 #include <pios_i2c_posix.h>
 #endif
+#if defined(PIOS_INCLUDE_SENSORS_HUB)
+#include <pios_sensors_hub.h>
+#endif
 
 #endif /* PIOS_POSIX_H */

@@ -53,6 +53,16 @@
  */
 #define PIOS_REALPOSIX
 
+/*
+ * Which devices the sensor hub opens. Named here rather than buried in the
+ * driver so a rewired bench is a one-line change.
+ *   /dev/i2c-3 = I2C5 on the RPi header (JP20): MPU-9150 0x68, BMP388 0x77
+ *   can0       = DroneCAN: RM3100 mag node 125 @ 25 Hz, GPS node 124 @ 5 Hz
+ */
+#define PIOS_INCLUDE_SENSORS_HUB
+#define PIOS_REALPOSIX_I2C_DEV "/dev/i2c-3"
+#define PIOS_REALPOSIX_CAN_IF  "can0"
+
 #define PIOS_INCLUDE_DELAY
 #define PIOS_INCLUDE_I2C
 #define PIOS_INCLUDE_IRQ
