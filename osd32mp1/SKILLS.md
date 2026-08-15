@@ -361,3 +361,51 @@ image — `dronecan.app.dynamic_node_id` imports `sqlite3` at module scope, so
 **`import dronecan` itself fails** without it, not just the allocator. The
 library `libsqlite3.so.0` is already present; only Python's `_sqlite3`
 extension is absent, and ST's OpenSTLinux apt feed has it.
+
+
+## Bring up CAN after a reboot (do this BEFORE believing any sensor is missing)
+
+`can0` comes up DOWN, and `ip` is not on root's default PATH — so the obvious
+command fails with a bare `sh: ip: not found`.
+
+```bash
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ip link set can0 up type can bitrate 1000000
+ip -br link show can0
+```
+
+Then start the dynamic node-ID allocator. Until it runs, **every node sits
+broadcasting anonymous allocation requests and publishes no sensor data**, so
+the bus looks dead and a bridge run reports `mag: 0` and `gps: 0`:
+
+```bash
+setsid nohup python3 /home/root/dronecan_allocator.py > /tmp/alloc.log 2>&1 &
+```
+
+`setsid` matters: a plain `&` job is killed by SIGHUP when the ssh session ends.
+
+Healthy bus, ~15 s after the allocator starts:
+
+    msg 1001  25.1 Hz  node 125   magnetometer
+    msg 1061   5.0 Hz  node 124   gnss.Auxiliary
+    msg 1063   5.0 Hz  node 124   gnss.Heading
+    msg  341   3.0 Hz  nodes 124/125/127  NodeStatus
+
+## Read the magnetometer off CAN
+
+Payload is three `float16` Gauss values at **offset 0** — there is no
+`sensor_id` byte. Count transfers, not frames: only frames whose tail byte has
+bit 0x80 set start a transfer. Skip `node == 0`, whose ID layout differs.
+
+```python
+cid, dlc = struct.unpack("<IB", frame[:5]); cid &= 0x1FFFFFFF
+node = cid & 0x7F
+if node and (cid >> 8) & 0xFFFF == 1001:
+    b = frame[8:8+dlc]
+    if b[dlc-1] & 0x80:                        # start of transfer
+        x, y, z = struct.unpack("<eee", b[:6]) # Gauss
+```
+
+Sanity check the magnitude before trusting any of it: Earth's field is
+0.25-0.65 Ga (25-65 uT). A reading of thousands of Gauss means the offset is
+wrong, not that the sensor is broken.

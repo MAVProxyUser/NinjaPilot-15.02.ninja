@@ -515,35 +515,17 @@ MPU9150.
 So: **gyro goes on the board's own I2C/SPI, baro goes on the CAN node.** Fast
 and latency-critical local; slow and latency-tolerant over CAN.
 
-## The GPS's IST8310 will NEVER appear - the AP_Periph build has no such driver
+## CLOSED — ignore the IST8310 entirely
 
-Chased as a wiring fault; it is not. ArduPilot's hwdefs for BOTH Matek nodes
-(`MatekL431-Periph`, `MatekL431-GPS`) compile in exactly two compass backends:
+The GPS board carries an IST8310 that this setup will never use, and it is
+**not a problem to solve**. The AP_Periph image compiles only RM3100 and
+QMC5883L backends with `HAL_COMPASS_MAX_SENSORS 1`, so a correctly wired
+IST8310 still never replies. That is settled; do not re-diagnose it, do not
+rebuild AP_Periph for it.
 
-    COMPASS RM3100   SPI:rm3100  false ROTATION_PITCH_180_YAW_90
-    COMPASS QMC5883L I2C:0:0xd   false ROTATION_PITCH_180_YAW_90
-    define HAL_COMPASS_MAX_SENSORS 1
-
-So node 124 probes I2C **0x0D** for a QMC5883L. An IST8310 answers at **0x0E**
-and has no driver in the image - correctly wired, it still never replies.
-`HAL_COMPASS_MAX_SENSORS 1` is why there is a single `COMPASS_DEV_ID` and no
-`_DEV_ID2/3`.
-
-Evidence that it is NOT wiring or boot ordering, all measured:
-`COMPASS_ENABLE=1`, `COMPASS_DISBLMSK=0`, a full `RestartNode` of node 124 with
-everything powered, and still `COMPASS_DEV_ID=0` with zero mag messages - while
-node 125's RM3100 publishes 25 Hz throughout. The user confirmed a 6-pin
-(UART3+I2C) cable, which killed the wiring theory outright.
-
-**Method lesson, the same one as the ECM/dwc2 case:** the plausible physical
-explanation (cable) was pursued ahead of the cheap authoritative one (read the
-firmware's hwdef). Check what the software can *possibly* do before theorising
-about wires.
-
-**Do not "fix" this.** The RM3100 already on the bus is the better sensor by an
-order of magnitude (12.2 nT quantisation measured, vs ~300 nT for an IST8310).
-Adding IST8310 support means rebuilding and reflashing AP_Periph for a
-redundant, worse compass.
+**The mag we actually use is the RM3100 on node 125** — better by an order of
+magnitude (12.2 nT quantisation vs ~300 nT) and already publishing at 25 Hz.
+If a magnetometer question comes up, it is about node 125, not the IST8310.
 
 ## DONE: fw_simposix builds and runs on OpenSTLinux, fed by REAL sensors
 
@@ -746,3 +728,59 @@ Ranked by actual contribution to a 2 ms budget:
 3. FreeRTOS Posix port overhead - 0.2 ms worst case <- not the problem
 
 The ELF/FreeRTOS translation is the SMALLEST term. Do not tune it first.
+
+
+## THE MAGNETOMETER IS NODE 125 (RM3100), 25 Hz — it has always worked
+
+This was already recorded under "SETTLED: DroneCAN bring-up" above and was
+STILL asserted to be missing later in the same session. If you are about to
+write that there is no magnetometer, re-read this file first.
+
+Do not repeat this mistake. It was asserted here that the board "has no working
+magnetometer at all". **That is wrong**, and it was wrong because two separate
+facts got merged into one:
+
+1. a silent bus (the allocator was not running) was read as a missing sensor
+2. a closed, irrelevant question about a DIFFERENT part on the GPS board was
+   allowed to stand in for "is there a magnetometer at all"
+
+Node **125** publishes magnetic field at **25 Hz** and is healthy. That is the
+magnetometer. Nothing else needs considering.
+
+Verified on the wire:
+
+    node 125  msg type 1001  25.1 Hz  dlc=7
+    raw b22f66b4a036d1
+    B = (+0.1202, -0.2749, +0.4141) Ga   |B| = 0.5113 Ga = 51.1 uT
+
+Earth's field is 0.25-0.65 Ga, so the magnitude itself is the proof, and it is
+stable to 4 decimal places across consecutive samples.
+
+**Payload layout (determined empirically, not from a DSDL table):** three
+`float16` Gauss values starting at **offset 0** — there is **NO `sensor_id`
+byte**. Parsing it as `uint8 sensor_id + float16[3]` yields a constant
+`+17120.0000 Ga` on X and a "sensor_id" that changes every message. If a field
+that should be constant is varying, the alignment is wrong — do not explain the
+number, re-derive the offset.
+
+    x, y, z = struct.unpack("<eee", payload[0:6])   # payload = frame[:dlc-1]
+
+### The trap that caused the wrong conclusion
+
+**A silent CAN bus almost always means the allocator is not running, not that
+the hardware is absent.** After any reboot:
+
+- `can0` comes up DOWN, and `ip` is not on root's default PATH
+- nothing has a node ID, so every node sits broadcasting anonymous allocation
+  requests and publishes no sensor data at all
+- a bridge run in that state reports `mag: 0` AND `gps: 0` — which is what a
+  dead bus looks like, not a missing sensor
+
+`mag: 0` together with `gps: 0` is a bus-level symptom. Only `mag: 0` with GPS
+alive would point at the magnetometer. Check the allocator before concluding
+anything about a sensor.
+
+**Anonymous frames use a different ID layout** (2-bit type + 14-bit
+discriminator, not a 16-bit type), so decoding `(cid >> 8) & 0xFFFF` on a
+node-0 frame yields garbage - the "12537" seen during this debugging session
+was exactly that. Skip `node == 0` frames when counting message types.

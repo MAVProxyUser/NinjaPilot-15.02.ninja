@@ -109,6 +109,27 @@ diskutil unmountDisk /dev/disk10 && sudo dd if=~/Downloads/osd32mp1-red-v1_2-NIN
 The edits are reproducible offline on macOS without sudo — `gpt.py` + `part.py`
 + `debugfs`, recipe in `SKILLS.md`.
 
+## Sensor inventory — what is actually connected and live
+
+| sensor | where | address / node | rate | state |
+|---|---|---|---|---|
+| MPU-9150 gyro+accel | I2C `/dev/i2c-3` | 0x68 | 200 Hz cfg | live |
+| BMP388 barometer | I2C `/dev/i2c-3` | 0x77 (CHIP_ID 0x50) | up to 200 Hz | present, driver TODO |
+| **RM3100 magnetometer** | **DroneCAN `can0`** | **node 125, msg 1001** | **25 Hz** | **live, 51.1 uT** |
+| GPS | DroneCAN `can0` | node 124 | 5 Hz | live |
+| KUSBA ADXL345 | USB (Klipper protocol) | - | - | live |
+
+The magnetometer **works** — `|B| = 0.5113 Ga = 51.1 uT` against an Earth field
+of 0.25-0.65 Ga. An earlier note in this repo claimed there was no working
+magnetometer; that was wrong — the bus was silent because the DroneCAN
+allocator was not running. `CLAUDE.md` records the trap.
+
+The IST8310 on the GPS board is a **closed, irrelevant** question: it has no
+driver in the AP_Periph image and is not the mag we use. Ignore it.
+
+**Nothing on CAN publishes until the DroneCAN allocator has handed out node
+IDs**, and `can0` comes up DOWN after every reboot. See `SKILLS.md`.
+
 ## Hardware reference
 
 ### Power
