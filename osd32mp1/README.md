@@ -20,7 +20,7 @@ integration base** with real sensors replacing the simulator.
 | SSH | **working** — key auth, dropbear |
 | Toolchain | gcc/g++ 9.3.0, make 4.3, python3 3.8.2 (**no git, no rsync**) |
 | SocketCAN | **DroneCAN bus working** — 2 Matek nodes allocated and publishing; allocator is a systemd service |
-| Live sensors | MPU-9150 @ 500 Hz, HMC5883L @ 50 Hz (MP1 I2C); BMP388 @ 50 Hz, 2nd MPU-9150 raw proxy up to ~430 Hz, RM3100 @ 25 Hz, IST8310 @ 25 Hz, GNSS @ 5 Hz (CAN) |
+| Live sensors | MPU-9150 @ 500 Hz (1440 free-run max), HMC5883L @ 69 Hz max, BMP280 @ 22 Hz (MP1 I2C); MPU-9150 raw proxy ~400 Hz, BMP388 @ 50 Hz, RM3100 @ 25 Hz, IST8310 @ 97 Hz max, GNSS @ 10 Hz (20 max) (CAN) |
 | **realposix** | **`fw_realposix.elf` reads every sensor natively** (PIOS I2C driver + CAN hub, no Python in the loop) and publishes the full UAVObject set; 360 s soak graded **GO** |
 | Node 124 firmware | **custom AP_Periph** (`ap-periph-ninja-debug.patch`, gcc 10.2.1) — adds the declared BMP388 probe + an I2C debug scanner; flashed over CAN |
 | SimPosix | still builds and runs (`fwsimposix.service`, bridge-fed) — kept as the sim-parity target; never run both at once (same ports) |
@@ -115,13 +115,13 @@ The edits are reproducible offline on macOS without sudo — `gpt.py` + `part.py
 | sensor | where | address / node | rate | state |
 |---|---|---|---|---|
 | MPU-9150 #1 gyro+accel | MP1 I2C `/dev/i2c-3` | 0x68 | **500 Hz** | live — the PRIMARY IMU |
-| MPU-9150 #2 gyro+accel | DroneCAN, L431 I2C | node 124, msg 20500/20501 | **up to ~430 Hz** | live — RAW-count proxy stream (no cal/filter on the node), realposix failover IMU |
+| MPU-9150 #2 gyro+accel | DroneCAN, L431 I2C | node 124, msg 20500/20501 | **~400 Hz** | live — RAW-count proxy (no cal/filter on the node); IMU-priority guardrail: NEVER throttled, aux streams degrade instead; realposix failover IMU |
 | BMP388 barometer | DroneCAN, L431 I2C | node 124, msg 1028/1029 | **50 Hz** | live, 98.1 kPa |
 | BMP280 barometer | MP1 I2C `/dev/i2c-3` | 0x76 (CHIP_ID 0x58) | ~23 Hz unique | live, bench-read (no hub driver yet) — the CAN baro's I2C twin |
 | HMC5883L mag | MP1 I2C `/dev/i2c-3` | 0x1E (ID 'H43') | **50 Hz** | live → AuxMagSensor |
 | RM3100 mag | DroneCAN | node 125, msg 1001 | **25 Hz** | live, 51 uT — the FLIGHT mag (hub keys 1001 to node 125) |
-| IST8310 mag | DroneCAN, L431 I2C | node 124, msg 1001 | **25 Hz** | live, 46.9 uT — on the Holybro Micro M9N; hub ingests as qmc_* (aux) |
-| GPS (Holybro Micro M9N) | DroneCAN, L431 UART | node 124, msg 1063/1061/20003 | **5 Hz** | decoded — Fix2 + Auxiliary + Status; indoors no-fix (two receivers showed 0 sats at this bench — window test decides) |
+| IST8310 mag | DroneCAN, L431 I2C | node 124, msg 1001 | **25 Hz (97 max)** | live, 46.9 uT — Holybro Micro M9N; `MAG_MAX_RATE=100` unlocks ~97 Hz; hub ingests as qmc_* (aux) |
+| GPS (Holybro Micro M9N) | DroneCAN, L431 UART | node 124, msg 1063/1061/20003 | **10 Hz (20 max)** | decoded — Fix2 + Auxiliary + Status; `GPS1_RATE_MS` 100→10 Hz, 50→true 20 Hz; indoors no-fix (two receivers showed 0 sats at this bench — window test decides) |
 
 **GPS module history**: Holybro M8N → Matek M9N-5883 (its "QMC5883L" is
 really a **QMC5883P at 0x2C** — scan before trusting a 5883 label; the module
