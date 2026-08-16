@@ -67,6 +67,22 @@ struct pios_sensors_hub_data {
     double   gnss_time;
     uint32_t gnss_count;
 
+    /* uavcan.equipment.gnss.Fix2 (msg 1063) - decoded per the DSDL.
+     * lat/lon VALIDATED only for the no-fix case until flown outdoors:
+     * indoors, zero reads identically whether the bit offsets are right or
+     * wrong, so the structural fields (status/sats/time standard) carry the
+     * validation burden. See the decode comment in the .c. */
+    int32_t  gps_lat_1e7;      /* degrees x 1e7, OpenPilot convention */
+    int32_t  gps_lon_1e7;
+    float    gps_alt_msl_m;
+    float    gps_ned_vel[3];   /* m/s */
+    float    gps_pdop;
+    uint8_t  gps_sats;
+    uint8_t  gps_fix;          /* 0 NO_FIX, 1 TIME_ONLY, 2 2D, 3 3D */
+    double   gps_time;
+    uint32_t gps_count;
+    uint32_t gps_bad;          /* reassembly/decode rejects */
+
     bool     have_imu;
     bool     have_baro;
     bool     have_mag;        /* RM3100 over CAN   */

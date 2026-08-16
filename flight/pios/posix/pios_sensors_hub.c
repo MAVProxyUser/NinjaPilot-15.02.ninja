@@ -456,6 +456,8 @@ static bool hmc_read(float ga[3])
 #define DC_MSG_MAGNETIC_FIELD 1001   /* determined on the wire, see below */
 #define DC_MSG_FIX2           1060
 #define DC_MSG_NODE_STATUS     341
+#define DC_MSG_FIX2_REAL      1063  /* the DEPRECATED Fix is 1060; an earlier
+                                       bus table here had the two swapped */
 #define DC_MSG_GNSS_STATUS   20003  /* ardupilot.gnss.Status */
 
 static int can_fd = -1;
@@ -492,6 +494,179 @@ static bool can_init(const char *ifname)
     fcntl(can_fd, F_SETFL, O_NONBLOCK);
     printf("[hub] CAN %s ok\n", ifname);
     return true;
+}
+
+static float f16_to_f32(uint16_t h);   /* defined below */
+
+/* ------------------------- DroneCAN v0 bit-level decode (per libcanard) --
+ * The wire packs each field's bits MSB-first per byte into the stream; a
+ * partial tail byte is right-aligned; assembled bytes are LITTLE-endian.
+ * Ported from canardDecodeScalar/copyBitArray semantics (libcanard, MIT) -
+ * NOT derived from reasoning, which is how the mag briefly read 17120 Ga. */
+static uint64_t dc_bits(const uint8_t *buf, uint32_t bit_ofs, uint8_t nbits)
+{
+    uint8_t bytes[8] = { 0 };
+    uint8_t nbytes = (uint8_t)((nbits + 7u) / 8u);
+
+    for (uint8_t i = 0; i < nbytes; i++) {
+        uint8_t want = (uint8_t)((nbits - i * 8u) >= 8u ? 8u : (nbits - i * 8u));
+        uint8_t v = 0;
+        for (uint8_t b = 0; b < want; b++) {
+            uint32_t sbit = bit_ofs + i * 8u + b;
+            uint8_t bit = (uint8_t)((buf[sbit / 8u] >> (7u - (sbit % 8u))) & 1u);
+            v = (uint8_t)((v << 1) | bit);
+        }
+        bytes[i] = v;              /* tail partial byte lands right-aligned */
+    }
+    uint64_t out = 0;
+    for (uint8_t i = 0; i < nbytes; i++) {
+        out |= (uint64_t)bytes[i] << (8u * i);      /* little-endian */
+    }
+    return out;
+}
+
+static int64_t dc_sbits(const uint8_t *buf, uint32_t bit_ofs, uint8_t nbits)
+{
+    uint64_t u = dc_bits(buf, bit_ofs, nbits);
+
+    if (u & (1ull << (nbits - 1u))) {
+        u |= ~((1ull << nbits) - 1ull);             /* sign-extend */
+    }
+    return (int64_t)u;
+}
+
+static float dc_f32(const uint8_t *buf, uint32_t bit_ofs)
+{
+    uint32_t u = (uint32_t)dc_bits(buf, bit_ofs, 32);
+    float f;
+
+    memcpy(&f, &u, 4);
+    return f;
+}
+
+/* ---- Fix2 multi-frame reassembly (node 124). Tail byte: bit7 start,
+ * bit6 end, bit5 toggle, bits 0-4 transfer id. Multi-frame payloads carry a
+ * 2-byte transfer CRC first; validating it needs the DSDL 64-bit signature,
+ * so acceptance here rests on the structural field checks below instead. */
+static struct {
+    uint8_t buf[128];
+    uint8_t len;
+    uint8_t tid;
+    uint8_t toggle;
+    bool    active;
+} fix2_rx;
+
+static void fix2_decode(const uint8_t *p, uint8_t n);
+
+static void fix2_feed(const uint8_t *data, uint8_t dlc)
+{
+    uint8_t tail = data[dlc - 1];
+    uint8_t sot = (uint8_t)(tail >> 7) & 1u, eot = (uint8_t)(tail >> 6) & 1u;
+    uint8_t tog = (uint8_t)(tail >> 5) & 1u, tid = tail & 0x1Fu;
+    uint8_t nb = (uint8_t)(dlc - 1);
+
+    if (sot && eot) {                              /* single-frame: no CRC */
+        fix2_decode(data, nb);
+        return;
+    }
+    if (sot) {
+        fix2_rx.active = true;
+        fix2_rx.len    = 0;
+        fix2_rx.tid    = tid;
+        fix2_rx.toggle = 0;
+        if (tog != 0) {
+            fix2_rx.active = false;
+            hub.gps_bad++;
+            return;
+        }
+    } else if (!fix2_rx.active || tid != fix2_rx.tid || tog != (fix2_rx.toggle ^ 1u)) {
+        fix2_rx.active = false;                    /* lost/foreign frame */
+        hub.gps_bad++;
+        return;
+    }
+    if (!sot) {
+        fix2_rx.toggle = tog;
+    }
+    if (fix2_rx.len + nb > sizeof(fix2_rx.buf)) {
+        fix2_rx.active = false;
+        hub.gps_bad++;
+        return;
+    }
+    memcpy(&fix2_rx.buf[fix2_rx.len], data, nb);
+    fix2_rx.len += nb;
+    if (eot) {
+        fix2_rx.active = false;
+        if (fix2_rx.len > 2) {
+            fix2_decode(&fix2_rx.buf[2], (uint8_t)(fix2_rx.len - 2));
+        }
+    }
+}
+
+/* uavcan.equipment.gnss.Fix2, field-for-field from 1063.Fix2.uavcan */
+static void fix2_decode(const uint8_t *p, uint8_t n)
+{
+    if (n < 48) {                                  /* fixed part = 378 bits */
+        hub.gps_bad++;
+        return;
+    }
+    uint32_t o = 0;
+    o += 56;                                       /* timestamp.usec        */
+    o += 56;                                       /* gnss_timestamp.usec   */
+    uint8_t tstd = (uint8_t)dc_bits(p, o, 3); o += 3;
+    o += 13;                                       /* void13                */
+    uint8_t leap = (uint8_t)dc_bits(p, o, 8); o += 8;
+    int64_t lon8 = dc_sbits(p, o, 37); o += 37;
+    int64_t lat8 = dc_sbits(p, o, 37); o += 37;
+    o += 27;                                       /* height_ellipsoid_mm   */
+    int64_t hmsl = dc_sbits(p, o, 27); o += 27;
+    float vn = dc_f32(p, o); o += 32;
+    float ve = dc_f32(p, o); o += 32;
+    float vd = dc_f32(p, o); o += 32;
+    uint8_t sats = (uint8_t)dc_bits(p, o, 6); o += 6;
+    uint8_t fix  = (uint8_t)dc_bits(p, o, 2); o += 2;
+    o += 4 + 6;                                    /* mode, sub_mode        */
+    uint8_t covn = (uint8_t)dc_bits(p, o, 6); o += 6;
+    float pdop = 0.0f;
+    if ((o + covn * 16u + 16u) <= (uint32_t)n * 8u) {
+        o += covn * 16u;
+        pdop = f16_to_f32((uint16_t)dc_bits(p, o, 16));
+    }
+
+    /* Structural sanity carries the validation burden indoors (lat/lon of
+     * zero cannot distinguish right offsets from wrong ones): the enums must
+     * be legal, sats must be physical, leap seconds 0 or ~18. Reject rather
+     * than publish plausible garbage. */
+    if (tstd > 3 || sats > 40 || (leap != 0 && (leap < 10 || leap > 30))) {
+        hub.gps_bad++;
+        if (hub.gps_bad <= 3) {
+            PIOS_SHMLOG_Printf("[hub-gps] REJECT #%lu tstd=%u sats=%u leap=%u "
+                               "len=%u - bit offsets suspect",
+                               (unsigned long)hub.gps_bad, tstd, sats, leap, n);
+        }
+        return;
+    }
+
+    hub_publish_begin();
+    hub.gps_lat_1e7   = (int32_t)(lat8 / 10);
+    hub.gps_lon_1e7   = (int32_t)(lon8 / 10);
+    hub.gps_alt_msl_m = (float)hmsl / 1000.0f;
+    hub.gps_ned_vel[0] = vn;
+    hub.gps_ned_vel[1] = ve;
+    hub.gps_ned_vel[2] = vd;
+    hub.gps_pdop = pdop;
+    hub.gps_sats = sats;
+    hub.gps_fix  = fix;
+    hub.gps_time = now_s();
+    hub.gps_count++;
+    hub_publish_end();
+
+    if ((hub.gps_count % 25u) == 1u) {             /* one line every ~5 s */
+        PIOS_SHMLOG_Printf("[hub-gps] fix=%u sats=%u lat=%ld lon=%ld alt=%.1f "
+                           "pdop=%.1f tstd=%u leap=%u bad=%lu",
+                           fix, sats, (long)hub.gps_lat_1e7, (long)hub.gps_lon_1e7,
+                           (double)hub.gps_alt_msl_m, (double)pdop, tstd, leap,
+                           (unsigned long)hub.gps_bad);
+    }
 }
 
 /* half-precision -> float, for DroneCAN's float16 fields */
@@ -550,11 +725,21 @@ static void can_poll(void)
         if (node == 0) {
             continue;         /* anonymous frames use a DIFFERENT id layout */
         }
+        uint16_t mt = (id >> 8) & 0xFFFF;
+
+        /* Fix2 is a 10-frame transfer: the reassembler needs EVERY frame,
+         * so dispatch it BEFORE the start-of-transfer filter below. Feeding
+         * it only start frames (the first version of this code) means
+         * reassembly silently never completes. */
+        if (mt == DC_MSG_FIX2_REAL) {
+            fix2_feed(f.data, f.can_dlc);
+            continue;
+        }
+
         uint8_t tail = f.data[f.can_dlc - 1];
         if (!(tail & 0x80)) {
             continue;         /* not the start of a transfer */
         }
-        uint16_t mt = (id >> 8) & 0xFFFF;
 
         if (mt == DC_MSG_NODE_STATUS && f.can_dlc >= 7) {
             /*

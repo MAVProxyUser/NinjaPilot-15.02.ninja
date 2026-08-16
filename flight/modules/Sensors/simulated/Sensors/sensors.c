@@ -58,6 +58,8 @@
 #include "barosensor.h"
 #include "magsensor.h"
 #include "auxmagsensor.h"
+#include "gpspositionsensor.h"
+#include "gpsvelocitysensor.h"
 #include "gyrosensor.h"
 #include "flightstatus.h"
 #include "gpspositionsensor.h"
@@ -217,7 +219,7 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
          * GyroSensor updates, and the estimator gates on MagSensor arriving.
          */
         {
-            static uint32_t last_imu, last_baro, last_mag, last_mag2;
+            static uint32_t last_imu, last_baro, last_mag, last_mag2, last_gps;
             static bool telemetry_throttled = false;
 
             /*
@@ -314,6 +316,49 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                     am.z = h.mag2_ga[2] * 1000.0f;
                     am.Status = AUXMAGSENSOR_STATUS_OK;
                     AuxMagSensorSet(&am);
+                }
+
+                if (h.gps_count != last_gps) {
+                    last_gps = h.gps_count;
+
+                    /* Truthful no-fix publishing: Status carries the fix
+                     * state, so filterlla's gates ignore the zeros rather
+                     * than fusing them. Fix2 carries only PDOP; HDOP/VDOP
+                     * are set to it rather than invented. */
+                    GPSPositionSensorData gp;
+                    GPSPositionSensorGet(&gp);
+                    gp.Latitude   = h.gps_lat_1e7;
+                    gp.Longitude  = h.gps_lon_1e7;
+                    gp.Altitude   = h.gps_alt_msl_m;
+                    gp.Satellites = (int8_t)h.gps_sats;
+                    gp.PDOP       = h.gps_pdop;
+                    gp.HDOP       = h.gps_pdop;
+                    gp.VDOP       = h.gps_pdop;
+                    gp.SensorType = GPSPOSITIONSENSOR_SENSORTYPE_UNKNOWN;
+                    gp.Status     = (h.gps_fix == 3) ? GPSPOSITIONSENSOR_STATUS_FIX3D :
+                                    (h.gps_fix == 2) ? GPSPOSITIONSENSOR_STATUS_FIX2D :
+                                    GPSPOSITIONSENSOR_STATUS_NOFIX;
+                    if (h.gps_fix >= 2) {
+                        gp.Groundspeed = sqrtf(h.gps_ned_vel[0] * h.gps_ned_vel[0]
+                                               + h.gps_ned_vel[1] * h.gps_ned_vel[1]);
+                        gp.Heading = atan2f(h.gps_ned_vel[1], h.gps_ned_vel[0])
+                                     * 57.29578f;
+                        if (gp.Heading < 0.0f) {
+                            gp.Heading += 360.0f;
+                        }
+                    } else {
+                        gp.Groundspeed = 0.0f;
+                        gp.Heading     = 0.0f;
+                    }
+                    GPSPositionSensorSet(&gp);
+
+                    if (h.gps_fix == 3) {
+                        GPSVelocitySensorData gv;
+                        gv.North = h.gps_ned_vel[0];
+                        gv.East  = h.gps_ned_vel[1];
+                        gv.Down  = h.gps_ned_vel[2];
+                        GPSVelocitySensorSet(&gv);
+                    }
                 }
 
                 if (h.have_mag && h.mag_count != last_mag) {

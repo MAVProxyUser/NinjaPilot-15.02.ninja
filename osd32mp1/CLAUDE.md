@@ -989,3 +989,48 @@ Config identical to ten consecutive 2-20 s deaths.
 
 **RULE going forward: no stdio in any FreeRTOS task or driver loop on the
 Posix port. Diagnostics go through PIOS_SHMLOG_Printf. stdout is for init.**
+
+## GPS Fix2 DECODED (2026-08-16) - and two corrections that made it possible
+
+**CORRECTION: Fix2 is message 1063, not 1060.** The earlier bandwidth table
+labeled the 10-frame 5 Hz transfer "1060/Fix2"; the DSDL and a fresh wire
+census agree it is 1063 (1060 is the DEPRECATED Fix, not on this bus at all).
+Census: 1063 = 300 frames / 30 xfers / 6 s = 10 frames per transfer, 5 Hz.
+
+The decoder (pios_sensors_hub.c) implements DroneCAN v0 bit packing ported
+from libcanard's canardDecodeScalar semantics, NOT derived from reasoning:
+stream bits MSB-first per byte, partial tail byte right-aligned, assembled
+bytes little-endian, sign-extend at field width. Cross-checked against the
+already-working byte-aligned mag decode.
+
+**TRAP that cost one full test cycle: the reassembler needs EVERY frame, but
+can_poll filtered on the start-of-transfer bit BEFORE dispatch** - so Fix2
+only ever received first frames and silently never completed. Multi-frame
+message dispatch must sit ABOVE that filter. Silent rejection hid it; the
+reject path now logs the first three failures with field values.
+
+Validation, per the indoors protocol (lat/lon of zero cannot distinguish
+right offsets from wrong ones, so structure carries the burden): fix=NO_FIX
+matching gnss.Status ARMABLE=0, sats=0, bad=0 across every transfer, 5 Hz
+cadence, flight loops healthy alongside. **lat/lon remain UNVALIDATED until
+the first outdoor fix** - the decode gate rejects illegal enum/sat/leap
+values rather than publish plausible garbage. Published as
+GPSPositionSensor/GPSVelocitySensor with Status=NoFix, so filterlla's gates
+ignore the zeros rather than fusing them.
+
+Open diagnostics item: a SHMLOG line printing two %.1f doubles then %u shows
+garbage in the %u on armv7 (tstd=1616 from a 3-bit field that PASSED a >3
+gate - the decode is right, the print is wrong). Integer-only lines are
+clean. Suspect varargs handling after doubles; verify before trusting mixed
+float/int shmlog lines.
+
+Also: **shmlogd --dump CONSUMES the ring** (it is the consumer, not a
+viewer). Dump ONCE to a file and grep the file - a second dump reads empty.
+
+**GPS init answer:** the M8N needs nothing from us - AP_Periph runs ublox
+autoconfig itself, and the node publishing Fix2 at 5 Hz with healthy=1 proves
+the receiver is alive and talking. sats_used=0 on a desk is plausible for a
+bare M8N: no assistance data, cold almanac, indoor attenuation - a phone
+cheats with A-GPS. If it still shows 0 sats NEAR A WINDOW after ~15 min,
+suspect the antenna; decode gnss.Auxiliary (1061, 3 frames) for sats_visible
+to separate "sees nothing" from "uses nothing".
