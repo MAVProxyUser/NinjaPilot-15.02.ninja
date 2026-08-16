@@ -20,7 +20,7 @@ integration base** with real sensors replacing the simulator.
 | SSH | **working** — key auth, dropbear |
 | Toolchain | gcc/g++ 9.3.0, make 4.3, python3 3.8.2 (**no git, no rsync**) |
 | SocketCAN | **DroneCAN bus working** — 2 Matek nodes allocated and publishing; allocator is a systemd service |
-| Live sensors | MPU-9150 @ 500 Hz, HMC5883L @ 50 Hz (MP1 I2C); BMP388 @ 50 Hz, 2nd MPU-9150 compact stream up to ~305 Hz, RM3100 @ 25 Hz, IST8310 @ 25 Hz, GNSS @ 5 Hz (CAN) |
+| Live sensors | MPU-9150 @ 500 Hz, HMC5883L @ 50 Hz (MP1 I2C); BMP388 @ 50 Hz, 2nd MPU-9150 raw proxy up to ~430 Hz, RM3100 @ 25 Hz, IST8310 @ 25 Hz, GNSS @ 5 Hz (CAN) |
 | **realposix** | **`fw_realposix.elf` reads every sensor natively** (PIOS I2C driver + CAN hub, no Python in the loop) and publishes the full UAVObject set; 360 s soak graded **GO** |
 | Node 124 firmware | **custom AP_Periph** (`ap-periph-ninja-debug.patch`, gcc 10.2.1) — adds the declared BMP388 probe + an I2C debug scanner; flashed over CAN |
 | SimPosix | still builds and runs (`fwsimposix.service`, bridge-fed) — kept as the sim-parity target; never run both at once (same ports) |
