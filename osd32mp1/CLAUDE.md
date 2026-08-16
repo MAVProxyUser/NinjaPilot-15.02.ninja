@@ -1555,3 +1555,19 @@ Conclusions, each verified by the pair of runs:
   not transport: PIOS filters to taste now.
 - Accel scale errors are stable die properties (#1 -1.5%, #2 +4.3%, both
   repeated across runs to 0.001 g) - a one-time PIOS cal will hold.
+
+## BMP280 on the MP1 bus: the baro twin is live (2026-08-16)
+
+Wired per the SPI-names-on-I2C decode (SCK=SCL, SDI=SDA, SDO->GND = 0x76,
+CSB high = I2C mode): found at 0x76, CHIP_ID 0x58, factory calibration read
+and Bosch compensation applied. Simultaneous twin reading:
+
+    BMP280 (MP1 I2C):  98.268 kPa  26.4 C   noise sd 1.5 Pa (~12 cm alt)
+    BMP388 (CAN):      98.137 kPa            same 4 s window
+    delta:             +131 Pa ~ 10.9 m alt-equivalent
+
+The 131 Pa is ABSOLUTE offset (BMP280 spec +/-100 Pa, BMP388 +/-50, plus
+bench height difference) - both track changes together; the arm-time ground
+zero removes it. NOT yet a flight sensor: the hub has no BMP280 driver (its
+local-baro path was written for the BMP388's registers, now on CAN). Wiring
+one in gives BaroSensor a local source + failover like the IMU pair.
