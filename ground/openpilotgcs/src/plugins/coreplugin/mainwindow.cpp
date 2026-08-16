@@ -133,7 +133,7 @@ MainWindow::MainWindow() :
 #endif
     m_toggleFullScreenAction(0)
 {
-    setWindowTitle(tr("NinjaPilot GCS"));
+    setWindowTitle(tr("NinjaPilotGCS"));
 #ifndef Q_WS_MAC
     qApp->setWindowIcon(QIcon(":/core/images/openpilot_logo_128.png"));
 #endif

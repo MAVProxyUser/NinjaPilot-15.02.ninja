@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleGetInfoString</key>
-	<string>NinjaPilot GCS; Copyright Sasquatch Labs</string>
+	<string>NinjaPilotGCS; Copyright Sasquatch Labs</string>
 	<key>CFBundleIconFile</key>
 	<string>@ICON@</string>
 	<key>CFBundlePackageType</key>

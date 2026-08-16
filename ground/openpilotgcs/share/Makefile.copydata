@@ -526,49 +526,49 @@ distclean: clean
 ####### Sub-libraries
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Resources/cloudconfig: /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/cloudconfig
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/cloudconfig" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources" 
-	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/cloudconfig" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/cloudconfig"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/cloudconfig" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources" 
+	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/cloudconfig" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/cloudconfig"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Resources/default_configurations: /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/default_configurations
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/default_configurations" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources" 
-	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/default_configurations" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/default_configurations"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/default_configurations" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources" 
+	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/default_configurations" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/default_configurations"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Resources/dials: /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/dials
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/dials" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources" 
-	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/dials" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/dials"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/dials" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources" 
+	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/dials" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/dials"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Resources/models: /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/models
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/models" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources" 
-	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/models" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/models"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/models" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources" 
+	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/models" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/models"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Resources/pfd: /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/pfd
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/pfd" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources" 
-	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/pfd" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/pfd"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/pfd" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources" 
+	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/pfd" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/pfd"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Resources/sounds: /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/sounds
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/sounds" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources" 
-	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/sounds" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/sounds"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/sounds" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources" 
+	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/sounds" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/sounds"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Resources/diagrams: /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/diagrams
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/diagrams" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources" 
-	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/diagrams" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/diagrams"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/diagrams" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources" 
+	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/diagrams" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/diagrams"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Resources/mapicons: /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/mapicons
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/mapicons" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources" 
-	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/mapicons" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/mapicons"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/mapicons" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources" 
+	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/mapicons" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/mapicons"
 
 /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot\ GCS.app/Contents/Resources/stylesheets: /Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/stylesheets
-	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/stylesheets" 
-	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources" 
-	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/stylesheets" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilot GCS.app/Contents/Resources/stylesheets"
+	@rm -rf "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/stylesheets" 
+	 -@$(MKDIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources" 
+	 $(COPY_DIR) "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/share/openpilotgcs/stylesheets" "/Users/kfinisterre/NinjaPilot-15.02.ninja/ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/Resources/stylesheets"
 
 xcodeproj:
 	@$(QMAKE) -spec macx-xcode "$(EXPORT__PRO_FILE_)" -spec /opt/homebrew/Cellar/qt@5/5.15.16_2/mkspecs/macx-clang CONFIG+=release
