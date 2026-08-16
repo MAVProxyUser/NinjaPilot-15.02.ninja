@@ -542,3 +542,17 @@ git fetch git@github.com:MAVProxyUser/OpenPilotAI.git Octavo:refs/remotes/opai/O
 NEW=$(git commit-tree 'HEAD^{tree}' -p refs/remotes/opai/Octavo -m "snapshot: <summary>")
 git push git@github.com:MAVProxyUser/OpenPilotAI.git $NEW:refs/heads/Octavo
 ```
+
+
+## Compare the two MPU-9150s across buses (bench recipe)
+
+Stop the firmware (`pkill -x Scheduler` - it owns /dev/i2c-3), then one
+python on the board with two threads: (1) direct I2C burst reads of MPU#1
+at 500 Hz after writing the hub's own config (0x6B=01 wake, 0x19=01,
+0x1A=03 DLPF44, 0x1B=0x18, 0x1C=0x00), (2) raw socket parsing 20500/20501
+pairs (RAW counts: dps = raw/16.4, m/s2 = raw*9.80665/16384). Compare
+orientation-INVARIANT quantities so mounting differences drop out: |a|
+magnitude, |gyro-mean| bias, per-axis noise sd in each unit's own frame,
+and empirical quantization step (min nonzero delta). Windows 30/90/120 s;
+on a stationary bench they should agree to ~3 decimals or the capture is
+suspect. Restore/verify the node's saved rates afterwards.

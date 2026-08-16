@@ -142,7 +142,11 @@ IST8310 probes, and `I2C_SCAN=1` identifies anything new in one sweep.
 Every sensor on either bus lands in the same hub snapshot with one
 timestamp domain, so CAN-vs-I2C comparisons run **simultaneously under
 identical motion** — the two IMU streams are the same sensor model on the
-two transports, recorded side by side.
+two transports, recorded side by side. Measured head-to-head (120 s,
+stationary): 493 Hz local vs 399 Hz paired over CAN, **identical 0.0610
+dps quantization on both** (the raw-count contract makes the wire
+bit-faithful), true uncalibrated biases on both, noise differing only by
+DLPF bandwidth choice. Full table in `CLAUDE.md`.
 
 The BMP388 **moved** from the board's own I2C bus to the L431 CAN node
 (2026-08-16). That took a custom AP_Periph build — the stock hwdef marks the

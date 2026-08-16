@@ -1532,3 +1532,26 @@ Comparison context (pre-proxy, AP-groomed stream): CAN gyro bias 0.005 dps
 came from AP's BOOT CALIBRATION, not the silicon - the raw proxy now ships
 true uncalibrated counts (bias ~1-2 dps, scale error visible in |a|),
 exactly what PIOS-side calibration expects to receive.
+
+## MEASURED: raw-proxy rerun of the dual-MPU comparison (2026-08-16, final)
+
+Same rig as the first comparison (local MPU#1 direct on MP1 I2C at 500 Hz,
+DLPF 44; MPU#2 over CAN), 30/90/120 s windows all agreeing to 3 decimals:
+
+    metric          I2C #1 (DLPF44)   CAN #2 raw (DLPF off)   CAN before (AP-groomed)
+    paired rate     493 Hz            399 Hz (430 on wire)    220 Hz
+    gyro bias       1.184 dps         0.640 dps (TRUE)        0.005 (AP boot cal)
+    gyro noise sd   0.041-0.047       0.085-0.094             0.01-0.17 filtered
+    accel |a|       0.9846 g          1.0430 g                1.0438 g
+    accel noise     0.014-0.022       0.030-0.046 m/s2        0.009-0.013 filtered
+    gyro qstep      0.0610 dps        0.0610 dps IDENTICAL    0.0573 (re-scaled)
+
+Conclusions, each verified by the pair of runs:
+- The transport is now TRANSPARENT: identical native quantization both
+  sides - the raw contract removed the wire's re-scaling artifact.
+- The old 0.005 dps bias was AP's boot cal, proven by its disappearance:
+  the raw stream ships the true 0.64 dps offset for PIOS to calibrate.
+- The 2x noise ratio is bandwidth physics (256 Hz vs 42 Hz BW ~ sqrt ratio),
+  not transport: PIOS filters to taste now.
+- Accel scale errors are stable die properties (#1 -1.5%, #2 +4.3%, both
+  repeated across runs to 0.001 g) - a one-time PIOS cal will hold.
