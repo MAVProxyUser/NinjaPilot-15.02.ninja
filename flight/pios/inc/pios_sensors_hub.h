@@ -67,8 +67,6 @@ struct pios_sensors_hub_data {
     double   gnss_time;
     uint32_t gnss_count;
 
-    bool     adxl_present;  /* KUSBA enumerated; see note in the .c       */
-
     bool     have_imu;
     bool     have_baro;
     bool     have_mag;        /* RM3100 over CAN   */

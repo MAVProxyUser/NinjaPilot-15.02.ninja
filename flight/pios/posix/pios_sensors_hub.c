@@ -750,37 +750,6 @@ static void *hub_main(void *arg)
     return NULL;
 }
 
-/**
- * @brief Note whether the KUSBA accelerometer is plugged in.
- *
- * PRESENCE ONLY, deliberately. The KUSBA runs stock Klipper firmware, whose
- * protocol needs a sync-framed CRC16 transport, a sequence number discovered
- * by sweeping 0..15 (it PERSISTS across host connections), and a
- * zlib-compressed JSON data dictionary fetched before any command can be
- * issued - because command IDs are assigned per firmware build. That is a
- * real protocol implementation and it does not belong in flight firmware for
- * something whose documented role is an independent VIBRATION REFERENCE, not
- * a flight sensor. It also reads 0.912 g at rest (~9 % low, uncalibrated), so
- * it could not be trusted as one anyway.
- *
- * osd32mp1/klipper_accel.py does the full job on the host. This just records
- * "it is plugged in", so a sanity check can say so rather than guess.
- */
-static bool adxl_probe(void)
-{
-    /* The KUSBA is 1d50:614e (Anchor / Rampon) -> a CDC ACM node. */
-    for (int i = 0; i < 4; i++) {
-        char path[32];
-        snprintf(path, sizeof path, "/dev/ttyACM%d", i);
-        if (access(path, F_OK) == 0) {
-            printf("[hub] ADXL345/KUSBA present at %s (vibration reference; "
-                   "read it with klipper_accel.py, not from here)\n", path);
-            return true;
-        }
-    }
-    return false;
-}
-
 int32_t PIOS_SENSORS_HUB_Init(const char *i2c_dev, const char *can_if)
 {
     memset(&hub, 0, sizeof(hub));
@@ -794,7 +763,6 @@ int32_t PIOS_SENSORS_HUB_Init(const char *i2c_dev, const char *can_if)
         have_hmc = hmc_init();
     }
     have_can = can_init(can_if);
-    hub.adxl_present = adxl_probe();
 
     hub.have_imu = have_mpu;
     hub.have_baro = have_bmp;

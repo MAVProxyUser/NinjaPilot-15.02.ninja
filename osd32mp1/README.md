@@ -20,7 +20,7 @@ integration base** with real sensors replacing the simulator.
 | SSH | **working** — key auth, dropbear |
 | Toolchain | gcc/g++ 9.3.0, make 4.3, python3 3.8.2 (**no git, no rsync**) |
 | SocketCAN | **DroneCAN bus working** — 2 Matek nodes allocated and publishing |
-| Live sensors | mag @ 25 Hz (RM3100, 46-48 µT), GNSS Fix2 @ 5 Hz (no fix indoors), ADXL345 @ 800 Hz |
+| Live sensors | MPU-9150 @ 500 Hz, BMP388 @ 50 Hz, HMC5883L @ 50 Hz (I2C); RM3100 @ 25 Hz, GNSS @ 5 Hz (CAN) |
 | Sensor bridge | **working** — real sensors converted to UAVObjects at 190 Hz (`sensor_bridge.py --dry-run`) |
 | SimPosix | **built + running on OpenSTLinux** under `fwsimposix.service`, fed by real sensors |
 
@@ -113,11 +113,19 @@ The edits are reproducible offline on macOS without sudo — `gpt.py` + `part.py
 
 | sensor | where | address / node | rate | state |
 |---|---|---|---|---|
-| MPU-9150 gyro+accel | I2C `/dev/i2c-3` | 0x68 | 200 Hz cfg | live |
-| BMP388 barometer | I2C `/dev/i2c-3` | 0x77 (CHIP_ID 0x50) | up to 200 Hz | present, driver TODO |
+| MPU-9150 gyro+accel | I2C `/dev/i2c-3` | 0x68 | **500 Hz** | live, 1.011 g, 0 err |
+| BMP388 barometer | I2C `/dev/i2c-3` | 0x77 (CHIP_ID 0x50) | **50 Hz** | live, 98 680 Pa ±2 Pa, 0 err |
+| HMC5883L mag (secondary) | I2C `/dev/i2c-3` | 0x1E (ID 'H43') | **50 Hz** | live, 42.8 uT, 0 err |
 | **RM3100 magnetometer** | **DroneCAN `can0`** | **node 125, msg 1001** | **25 Hz** | **live, 51.1 uT** |
-| GPS | DroneCAN `can0` | node 124 | 5 Hz | live |
-| KUSBA ADXL345 | USB (Klipper protocol) | - | - | live |
+| GPS | DroneCAN `can0` | node 124 | 5 Hz | on the wire, not decoded |
+
+The KUSBA/ADXL345 was **removed from the bench permanently** (2026-08-15). It
+was only ever a vibration reference - it read 0.912 g at rest, ~9 % low and
+uncalibrated - and reading it needed the whole Klipper protocol (CRC16 framing,
+a sequence number that persists across host connections, and a
+zlib-compressed per-build JSON command dictionary). `klipper_probe.py` and
+`klipper_accel.py` are kept because the protocol work is reusable, but nothing
+in the flight path depends on it.
 
 The magnetometer **works** — `|B| = 0.5113 Ga = 51.1 uT` against an Earth field
 of 0.25-0.65 Ga. An earlier note in this repo claimed there was no working
