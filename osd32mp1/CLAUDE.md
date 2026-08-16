@@ -1099,3 +1099,30 @@ belongs to overwrite rings and reads ZERO here (found live: head=12191,
 tail=0, dropped=8095, dump empty). And a post-mortem dump holds only the
 FIRST ring-full (~2 min at current rates): for long captures run shmlogd
 CONCURRENTLY into a file. Both now encoded in shmlogd itself.
+
+## BMP388-on-L431: software exonerated, wiring/hwdef under suspicion (2026-08-16)
+
+The baro was moved to the L431 Periph's I2C port and does NOT appear on CAN.
+The software gates are now FULLY open, so stop re-checking them:
+- `BARO_PROBE_EXT` was 0 (the predicted gate), set to 1024, PROVEN to persist
+  across reboot, then set to 16383 - every probe bit, all eleven compiled
+  baro drivers - saved ok, node restarted twice, publishes its GPS suite fine.
+- Still zero StaticPressure/StaticTemperature (1028/1029) on the wire.
+
+Remaining suspects, in order: (1) wrong JST (the 6-pin is UART3+I2C combined,
+the CAN daisy ports probe nothing), (2) SDA/SCL mapping - Adafruit silk says
+SDI/SCK which ARE SDA/SCL in I2C mode, (3) the hwdef may mark the L431's only
+I2C bus INTERNAL, in which case BARO_PROBE_EXT skips it regardless of mask -
+a gate no parameter opens. The deterministic fix for (3) is a one-line custom
+hwdef build: `BARO BMP388 I2C:0:0x77` declared, not probed.
+Re-prove the sensor itself on the MP1 bus (probe_sensors.py) before deeper
+theories - it worked there an hour before the move.
+
+## FIXED PERMANENTLY: the "allocator keeps dying" mystery
+
+`dronecan_allocator.py` never died - it is a SESSION TOOL that exits after
+printing its report. Every mysterious allocator death was it completing
+normally, and every silent bus after a node reboot was this. Replaced by
+`allocatord.py` + `dronecan-allocator.service` (systemd, Restart=always,
+enabled, brings can0 up itself). Nodes now get IDs within seconds of any
+power-up, unattended. The session tool remains useful for its REPORT.

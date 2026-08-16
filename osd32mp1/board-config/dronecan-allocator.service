@@ -1,0 +1,12 @@
+[Unit]
+Description=DroneCAN dynamic node-ID allocator (nodes publish NOTHING without it)
+After=network.target
+
+[Service]
+ExecStartPre=-/sbin/ip link set can0 up type can bitrate 1000000
+ExecStart=/usr/bin/python3 /home/root/allocatord.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
