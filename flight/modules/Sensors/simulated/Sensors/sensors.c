@@ -76,7 +76,24 @@
 #include "CoordinateConversions.h"
 
 // Private constants
+#ifdef PIOS_REALPOSIX
+/*
+ * 1540 bytes was sized for a task that did nothing but vTaskDelay under
+ * external physics. The realposix branch adds a ~96-byte sensor snapshot,
+ * four UAVObject structs and a powf() frame, and then calls UAVObjSet four
+ * times - which takes mutexes and dispatches events, none of it free. Posix
+ * stack frames are also far larger than the ARM ones this number was chosen
+ * against.
+ *
+ * The overflow does NOT crash. It quietly corrupts whatever follows the
+ * stack, and the firmware runs for ~15-20 s before every FreeRTOS task stops
+ * - IDLE included - with the scheduler parked at 0 % CPU. That signature
+ * looked like a scheduling bug for several iterations and is not one.
+ */
+#define STACK_SIZE_BYTES 8192
+#else
 #define STACK_SIZE_BYTES 1540
+#endif
 #define TASK_PRIORITY    (tskIDLE_PRIORITY + 3)
 #define SENSOR_PERIOD    2
 
@@ -200,7 +217,8 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
          */
         {
             static uint32_t last_imu, last_baro, last_mag;
-            struct pios_sensors_hub_data h;
+            /* static, not automatic: ~96 bytes, and only this task reads it */
+            static struct pios_sensors_hub_data h;
 
             if (PIOS_SENSORS_HUB_Get(&h)) {
                 if (h.have_imu && h.imu_count != last_imu) {
