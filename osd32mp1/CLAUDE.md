@@ -412,8 +412,23 @@ Measured **147.9 bits/frame** worst case = **148 us at 1 Mbit**, and Fix2 is
 |---|---|
 | 100 Hz | 14.8 % |
 | 200 Hz | 29.6 % |
-| 500 Hz | **73.9 %** - no headroom left |
+| 500 Hz | **73.9 %** - FITS, but see below |
 | 1000 Hz | **147.9 %** - exceeds the bus |
+
+**CORRECTION (user called it): "no headroom left" overstated the capacity
+argument.** 73.9 % + today's 1.2 % fits on the wire. The real arguments
+against gyro-over-CAN are latency and budget, not capacity:
+- a 10-frame transfer is **1.48 ms of serialization** - the sample cannot be
+  consumed until its last frame lands, so the gyro-triggered inner loop eats
+  ~75 % of its 2 ms period as pure transport delay, before queueing. At 74 %
+  utilisation, queueing multiplies waits ~4x on top.
+- the plan puts MOTOR COMMANDS on this same bus. ESC/actuator streams at
+  200-400 Hz cost 6-12 %+; the gyro stream would spend the margin the
+  control OUTPUT path needs - and the output path cannot tolerate jitter.
+- two IMUs at 500 Hz (MPU-9150 + ICM-20602) genuinely do not fit: 148 %.
+A REDUNDANT gyro stream at 100-250 Hz over CAN (15-37 %) is perfectly
+reasonable; the PRIMARY 500 Hz gyro belongs on SPI/local for latency, not
+for bandwidth.
 
 This confirms the earlier back-of-envelope estimate (~1.35 ms/sample) with real
 numbers, and settles it: `PIOS_SENSOR_RATE` is 500 Hz, so a DroneCAN gyro would
