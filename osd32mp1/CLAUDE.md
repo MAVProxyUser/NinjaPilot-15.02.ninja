@@ -1375,3 +1375,32 @@ the throttle binds only to the param value active at trip time. The
 NodeStatus bit-15 flag still latches until reboot as the telltale. Verified
 live: post-"degradation" re-requests of 200 and 100 Hz delivered 188.8 and
 99.8 Hz immediately. Restored + saved operating point: 200/25, baro native.
+
+## M9N-5883 GPS swap + the 317 Hz gyro ceiling (2026-08-16, late night)
+
+**M9N GNSS: seen immediately, zero config.** The Matek M9N-5883 replaced the
+M8N on the L431's UART; AP_Periph auto-bauded and the full suite continued
+at exactly 5 Hz (Fix2/Aux/Status, healthy=1). Indoors still ARMABLE=0 with
+sats_visible=0 and the hdop/vdop=100.0 sentinel - NOTE: two different
+receivers with two different antennas now show zero VISIBLE sats at this
+bench, which shifts suspicion from "broken antenna" to "RF-dead bench
+location". The window test decides.
+
+**Its QMC5883L compass is NOT on the bus.** MAG was re-enabled in the
+firmware (the earlier mag-disable removed; stock QMC declared probe at
+0x0D; +4.4 KB, fits with 10 KB spare) - and COMPASS_DEV_ID still reads 0
+after a fresh boot-time probe, while the BMP388 (0x77) and MPU-9150 (0x68)
+on the SAME bus answer normally. The bus is proven; the part is absent:
+the M9N's DA/CL strand is not landing on the L431's SCL/SDA net. Check the
+6P cable pin mapping (Matek-to-Matek is not proof of 1:1 signal order)
+before any software theory.
+
+**Publish-loop push: 317 Hz delivered max, bus still bored.** Sleeping only
+the remainder of the period (wait_for_sample already blocks ~2.5 ms at the
+400 Hz init base) raised the ceiling 271.8 -> 317.0 Hz (cmd 390), wire at
+733 fr/s, ZERO overruns, mag canary flat. The residual gap to 400 is
+per-iteration work causing sample skips. KNOWN REGRESSION from this change:
+mid-range command tracking is gone - commands 200-375 all deliver ~265-270
+(sleep and sample-wait no longer stack). Fix queued: divider pacing -
+publish every Nth sample of the 400 Hz base for exact 400/N rates.
+Operating point saved at cmd 200 = ~263 delivered.

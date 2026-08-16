@@ -220,7 +220,7 @@ index ec0e76a..0813508 100644
          uint32_t len = uavcan_protocol_NodeStatus_encode(&node_status, buffer, !canfdout());
  
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
-index 1ab2a2e..196ffda 100644
+index 1ab2a2e..b9bb92b 100644
 --- a/Tools/AP_Periph/imu.cpp
 +++ b/Tools/AP_Periph/imu.cpp
 @@ -3,6 +3,11 @@
@@ -235,7 +235,7 @@ index 1ab2a2e..196ffda 100644
  extern const AP_HAL::HAL &hal;
  
  /*
-@@ -10,16 +15,31 @@ extern const AP_HAL::HAL &hal;
+@@ -10,15 +15,39 @@ extern const AP_HAL::HAL &hal;
   */
  void AP_Periph_FW::can_imu_update(void)
  {
@@ -270,12 +270,20 @@ index 1ab2a2e..196ffda 100644
 +        uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 400);
 +        if (imu_hz_degraded && g.imu_sample_rate.get() == tripped_rate) {
 +            rate = MIN(rate, (uint16_t)50);
++        }
++        /*
++         * wait_for_sample() inside imu.update() already blocks until the
++         * next 400 Hz sample (~2.5 ms), so sleep only the REMAINDER of the
++         * requested period. Sleeping the full period stacked the two waits
++         * and capped delivery at ~270 Hz no matter what was asked.
++         */
++        const uint32_t period_us = 1000000UL / rate;
++        if (period_us > 2500) {
++            hal.scheduler->delay_microseconds(period_us - 2500);
          }
-+        hal.scheduler->delay_microseconds(1000000UL / rate);
  
          imu.update();
- 
-@@ -27,6 +47,55 @@ void AP_Periph_FW::can_imu_update(void)
+@@ -27,6 +56,55 @@ void AP_Periph_FW::can_imu_update(void)
              continue;
          }
  
@@ -331,7 +339,7 @@ index 1ab2a2e..196ffda 100644
          uavcan_equipment_ahrs_RawIMU pkt {};
  
          Vector3f tmp;
-@@ -40,16 +109,14 @@ void AP_Periph_FW::can_imu_update(void)
+@@ -40,16 +118,14 @@ void AP_Periph_FW::can_imu_update(void)
          pkt.rate_gyro_integral[1] = tmp.y;
          pkt.rate_gyro_integral[2] = tmp.z;
  
@@ -356,7 +364,7 @@ index 1ab2a2e..196ffda 100644
          uint16_t total_size = uavcan_equipment_ahrs_RawIMU_encode(&pkt, buffer, !canfdout());
          canard_broadcast(UAVCAN_EQUIPMENT_AHRS_RAWIMU_SIGNATURE,
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
-index 067210f..8721fd9 100644
+index 067210f..dda096c 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 +++ b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 @@ -45,9 +45,16 @@ define AP_PERIPH_BARO_ENABLED 1
@@ -386,7 +394,7 @@ index 067210f..8721fd9 100644
  
  define HAL_USE_ADC TRUE
  define STM32_ADC_USE_ADC1 TRUE
-@@ -85,3 +92,21 @@ define AP_SERIALLED_ENABLED 1
+@@ -85,3 +92,20 @@ define AP_SERIALLED_ENABLED 1
  
  define HAL_SERIAL_ESC_COMM_ENABLED 1
  USE_BOOTLOADER_FROM_BOARD MatekL431
@@ -396,9 +404,8 @@ index 067210f..8721fd9 100644
 +define AP_PERIPH_IMU_ENABLED 1
 +IMU Invensense I2C:0:0x68 ROTATION_NONE
 +
-+# node 124 carries no magnetometer (the RM3100 is node 125) - free the flash
-+undef AP_PERIPH_MAG_ENABLED
-+define AP_PERIPH_MAG_ENABLED 0
++# MAG re-enabled 2026-08-16: the M9N-5883 GPS brings a QMC5883L onto this
++# node's I2C bus (0x0D - no conflict with MPU 0x68 / BMP388 0x77)
 +
 +# baro: compile only the part actually fitted
 +define AP_BARO_BACKEND_DEFAULT_ENABLED 0
