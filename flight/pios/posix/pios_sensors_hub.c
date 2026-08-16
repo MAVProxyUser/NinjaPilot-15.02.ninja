@@ -464,6 +464,8 @@ static bool hmc_read(float ga[3])
 #define DC_MSG_MAGNETIC_FIELD 1001   /* determined on the wire, see below */
 #define DC_MSG_FIX2           1060
 #define DC_MSG_NODE_STATUS     341
+#define DC_MSG_STATIC_PRESS   1028  /* float32 Pa + float16 variance      */
+#define DC_MSG_STATIC_TEMP    1029  /* float16 KELVIN + float16 variance  */
 #define DC_MSG_FIX2_REAL      1063  /* the DEPRECATED Fix is 1060; an earlier
                                        bus table here had the two swapped */
 #define DC_MSG_GNSS_STATUS   20003  /* ardupilot.gnss.Status */
@@ -794,6 +796,36 @@ static void can_poll(void)
         uint8_t tail = f.data[f.can_dlc - 1];
         if (!(tail & 0x80)) {
             continue;         /* not the start of a transfer */
+        }
+
+        if (mt == DC_MSG_STATIC_PRESS && f.can_dlc >= 5) {
+            /* BMP388 now lives on the L431 (custom hwdef, declared probe);
+             * byte-aligned float32 pascals, single frame. Reuses the same
+             * hub fields the local-I2C baro used, so sensors.c publishes
+             * BaroSensor with no changes. */
+            float pa;
+            memcpy(&pa, &f.data[0], 4);
+            if (pa > 30000.0f && pa < 120000.0f) {      /* 3-12 km sanity */
+                hub_publish_begin();
+                hub.press_pa = pa;
+                hub.baro_time = now_s();
+                hub.baro_count++;
+                hub.have_baro = true;
+                hub_publish_end();
+            } else {
+                hub.baro_errors++;
+            }
+            continue;
+        }
+
+        if (mt == DC_MSG_STATIC_TEMP && f.can_dlc >= 3) {
+            float k = f16_to_f32((uint16_t)(f.data[0] | (f.data[1] << 8)));
+            if (k > 200.0f && k < 350.0f) {
+                hub_publish_begin();
+                hub.baro_temp_c = k - 273.15f;
+                hub_publish_end();
+            }
+            continue;
         }
 
         if (mt == DC_MSG_NODE_STATUS && f.can_dlc >= 7) {

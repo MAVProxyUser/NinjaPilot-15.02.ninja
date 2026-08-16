@@ -1195,3 +1195,38 @@ before ANY other theory.
 Recovery machinery held throughout: the bootloader stayed reachable and
 reflashable over CAN through every failed attempt - the floor never dropped
 below "waiting bootloader".
+
+## RESOLVED: gcc 13.3 was the boot-killer; the custom hwdef WORKS (2026-08-16)
+
+Suspect (2) from the saga above was the answer. The IDENTICAL source built
+with **gcc 10.2.1** (arm-gnu 10-2020-q4-major, AP's blessed toolchain,
+installed at `~/gcc-arm-none-eabi-10-2020-q4-major/bin` on the Mac — prepend
+to PATH before `./waf configure`) flashed over CAN and booted first try:
+mode 3 (SW_UPDATE) -> 1 (INITIALIZATION) -> 0 (OPERATIONAL). Power-cycle
+(suspect 1) had already been ruled out; alignment (suspect 3) never needed
+testing. **Rule: build AP_Periph for the L431 ONLY with gcc 10.2.1.** A
+gcc 13.3 image holds the node in the bootloader indefinitely — recoverable,
+but a guaranteed dead flash.
+
+With the custom hwdef running, the HAL_I2C_INTERNAL_MASK root cause is
+CONFIRMED by outcome — the declared `BARO BMP388 I2C:0:0x77` probe found the
+sensor immediately:
+
+    node 124  msg 1028  StaticPressure     50.05 Hz   98573.6 Pa = 98.57 kPa
+    node 124  msg 1029  StaticTemperature  50.00 Hz
+    (full GPS suite intact: Fix2/Aux/20003 at 5 Hz; node 125 mag 25 Hz)
+
+98.57 kPa agrees with what the SAME BMP388 read on the MP1's own I2C bus
+before the move (98.6-98.7) — sensor, wiring, and firmware all vindicated at
+once. The I2CDBG scanner in the patch stays correctly SILENT because the baro
+is healthy; it only sweeps when `!baro.healthy()`. Known-good binary saved as
+`osd32mp1/fw/AP_Periph-ninja-gcc10.bin` (195,244 bytes; patch:
+`osd32mp1/ap-periph-ninja-debug.patch`).
+
+**The hub consumes it**: pios_sensors_hub.c decodes 1028 (float32 Pa,
+single frame, sanity 30-120 kPa) and 1029 (float16 Kelvin) into the same
+snapshot fields the local-I2C BMP388 used, so sensors.c publishes BaroSensor
+unchanged. Verified live: hub-health `baro=500`/10 s = 50 Hz from CAN, zero
+errors, can_pm 23 (2.3 % bus with baro added), flight loops healthy
+(rateupdates -2). The baro's migration MP1-I2C -> L431-CAN is COMPLETE and
+freed ~25 % of the MP1 I2C bus budget (was 30.5 % busy with three devices).
