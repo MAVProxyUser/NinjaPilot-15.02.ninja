@@ -524,8 +524,9 @@ All set over DroneCAN param GetSet on node 124, effective immediately:
 |---|---|---|
 | `INS_SAMPLE_RATE` | 1-1000 | raw proxy pair rate; delivered tracks command up to the ~430 Hz I2C ceiling |
 | `IMU_RAW_RATE` | (inert) | RawIMU stream REMOVED in the raw-proxy firmware - compact only; the 7-frame storm hazard is gone by construction |
-| `BARO_MAX_RATE` | 0-100 | 0 = native 50 Hz, else cap |
-| `GPS1_RATE_MS` | 100-200 | 100 = 10 Hz on the M9N |
+| `BARO_MAX_RATE` | 0-100 | 0 = native 50 Hz, else cap; forced to 5 Hz while DEGRADEDHZ aux-throttle is active |
+| `MAG_MAX_RATE` | 0-100 | 0 = default 25 Hz; the IST8310 delivers ~97 Hz at 100 |
+| `GPS1_RATE_MS` | 50-200 | 100 = 10 Hz; 50 = TRUE 20 Hz on the M9N (allow ~30 s for the u-blox reconfigure to settle) |
 
 DEGRADEDHZ (NodeStatus vendor bit 15) latches if TX fails sustained; the
 throttle releases the moment a NEW rate is requested - only the flag stays

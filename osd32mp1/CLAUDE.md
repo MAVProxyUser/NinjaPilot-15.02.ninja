@@ -1597,3 +1597,38 @@ happened" is exactly how it presents.
 Headlines: the MP1's local bus tops at 1440 Hz reads (Python! - C will be
 higher), the M9N delivers 10 Hz GNSS sustained, and six minutes of both
 buses at max produced zero overruns anywhere.
+
+## DEGRADEDHZ v2: IMU-priority - and the solo benchmarks that found two hidden maxima (2026-08-16)
+
+**Policy inverted per user directive: the IMU stream is NEVER throttled.**
+On sustained TX failure the AUX streams (baro, mag) cap at 5 Hz instead;
+they self-restore 10 s after TX goes healthy. The bit-15 flag still latches
+until reboot as the telltale. The 47-Hz-IMU incident can never recur - the
+one stream the inner loop lives on now has absolute priority.
+
+New knob: `MAG_MAX_RATE` (0 = built-in 25, else cap, up to 100) - the stock
+limit was COMPILE-TIME (`AP_PERIPH_MAG_MAX_RATE 25U`), now runtime.
+
+**Solo benchmarks** (each CAN sensor with the others floored, 30 s each,
+zero overruns, flag never tripped):
+
+    IMU compact solo     396.9 Hz   (same as loaded - the L431 I2C/loop is
+                                     the ceiling, NOT bus competition)
+    BMP388 solo          50.07 Hz   (driver-paced native max)
+    IST8310 solo         97.2 Hz    (!! 4x the old cap - the driver samples
+                                     ~100 Hz internally; MAG_MAX_RATE=100
+                                     exposes it)
+    M9N GNSS solo        20.0 Hz    (!! GPS1_RATE_MS=50 accepted; first 30 s
+                                     showed 10.3 mid-reconfigure, sustained
+                                     20.00 after - u-blox rate change takes
+                                     time to settle. M9N true max = 20 Hz)
+    RM3100 (node 125)    25.0 Hz    (stock firmware, unreachable knob)
+
+**Firmware quirk found**: INS_SAMPLE_RATE below ~15 delivers ~55 Hz, not
+the asked rate - `delay_microseconds` wraps at 65,536 us on this platform
+(999,400 % 65,536 = 16.3 ms + 2.3 ms read = 54 Hz, matches exactly). The
+IMU stream's practical floor is therefore ~55 Hz; harmless for flight
+(nobody wants a 1 Hz gyro), chunked-ms delay is the fix if ever needed.
+
+Operating point saved: IMU 1000 (=397), baro native 50, mag default 25,
+GPS 10 Hz. Verified on the wire post-restore.
