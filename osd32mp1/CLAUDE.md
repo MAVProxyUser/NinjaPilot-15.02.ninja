@@ -1157,3 +1157,41 @@ Baro postscript: even on 1.9 with all probe bits, still no StaticPressure -
 two firmware versions, four reboots, every driver probing. The BMP388's
 connection to the L431 (or the hwdef marking its I2C bus internal) is the
 remaining suspect set; software above the hwdef is exhausted.
+
+## THE BARO ROOT CAUSE, and the custom-AP_Periph saga (2026-08-16)
+
+**ROOT CAUSE FOUND in the hwdef parent include** (MatekL431/hwdef.inc):
+
+    define HAL_I2C_INTERNAL_MASK 1
+
+The L431's ONLY I2C bus is declared INTERNAL, and BARO_PROBE_EXT probes
+external buses exclusively - so no parameter can ever reach that bus. All 14
+probe bits across two firmware versions were structurally inert. The fix is
+a DECLARED probe in a custom hwdef: `BARO BMP388 I2C:0:0x77` (patch:
+osd32mp1/ap-periph-ninja-debug.patch, which also adds the bench I2C scanner
+with SDA/SCL swap detection over debug.LogMessage, and trims airspeed+battery
+- net 17 KB freed, 27.8 KB flash headroom).
+
+**Build environment facts:** ArduPilot will not build under a path with
+SPACES ("/OP Revo Redux/" broke ChibiOS scripts -> moved to ~/ardupilot);
+hwdef changes need `waf configure` RERUN or you get a byte-identical binary
+and a 2-second "success"; empy's import name is `em`; shallow clones build
+with vcs_commit=0.
+
+**Custom image did NOT boot; stock re-flash also now holds in bootloader.**
+Identity trap that cost an hour: anything answering GetNodeInfo with
+`sw 2.0 vcs=00000000 mode=MAINTENANCE vendor=0xd` is the BOOTLOADER (BLs are
+built without git info; the app reports available_memory as vendor code -
+13 bytes free is impossible for a running app). The app descriptor in our
+bin is VALID (magic at 0x1d0, CRCs populated, size exact), so rejection is
+not structural. Suspects, in order: (1) a bootloader boot-failure hold flag
+that a POWER CYCLE clears - untested at session end; (2) gcc 13.3 - AP's
+blessed toolchain is gcc 10.2.1, and a miscompiled app that faults before
+feeding the watchdog would hold the BL exactly like this; (3) our bin is not
+8-byte aligned (193372 % 8 = 4) on a dual-word-programming L4 - stock is
+aligned. Next session: power-cycle first, then rebuild with gcc 10.2.1
+before ANY other theory.
+
+Recovery machinery held throughout: the bootloader stayed reachable and
+reflashable over CAN through every failed attempt - the floor never dropped
+below "waiting bootloader".

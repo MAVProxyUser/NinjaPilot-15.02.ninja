@@ -1,0 +1,124 @@
+diff --git a/Tools/AP_Periph/AP_Periph.cpp b/Tools/AP_Periph/AP_Periph.cpp
+index 04cc75e..5d26e2f 100644
+--- a/Tools/AP_Periph/AP_Periph.cpp
++++ b/Tools/AP_Periph/AP_Periph.cpp
+@@ -426,6 +426,88 @@ void AP_Periph_FW::update()
+ 
+     static uint32_t last_led_ms;
+     uint32_t now = AP_HAL::millis();
++
++#if AP_PERIPH_BARO_ENABLED && defined(HAL_PERIPH_NINJA_I2C_DEBUG)
++    /*
++     * NinjaPilot bench debug. While no baro is healthy: sweep the I2C bus,
++     * report every ACK with its common ID registers over debug.LogMessage
++     * (readable in any DroneCAN tool). If the sweep is EMPTY, bit-bang the
++     * same probe with SCL/SDA SWAPPED (PB13<->PB14) to catch crossed wiring,
++     * then hand the pins back to the peripheral. Runs at most 8 times per
++     * boot, 15 s apart, and each sweep stalls the loop briefly - this is a
++     * bring-up diagnostic, not flight code.
++     */
++    {
++        static uint32_t last_scan_ms;
++        static uint8_t scan_count;
++        if (!baro.healthy() && scan_count < 8 && now - last_scan_ms > 15000) {
++            last_scan_ms = now;
++            scan_count++;
++            uint8_t found = 0;
++            for (uint8_t a = 8; a < 0x78; a++) {
++                auto dev = hal.i2c_mgr->get_device(0, a);
++                if (!dev) {
++                    continue;
++                }
++                WITH_SEMAPHORE(dev->get_semaphore());
++                dev->set_retries(1);
++                uint8_t b = 0;
++                if (dev->transfer(nullptr, 0, &b, 1)) {
++                    uint8_t id00 = 0xEE, idD0 = 0xEE, id75 = 0xEE;
++                    dev->read_registers(0x00, &id00, 1);
++                    dev->read_registers(0xD0, &idD0, 1);
++                    dev->read_registers(0x75, &id75, 1);
++                    can_printf("I2CDBG ACK 0x%02x id[00]=%02x id[D0]=%02x id[75]=%02x",
++                               a, id00, idD0, id75);
++                    found++;
++                }
++            }
++            if (found == 0) {
++                can_printf("I2CDBG bus EMPTY (scan %u) - trying SWAPPED SDA/SCL", scan_count);
++                /* bit-bang with roles swapped: PB14 clocks, PB13 is data */
++                const ioline_t SCLp = PAL_LINE(GPIOB, 14U);   /* normally SDA */
++                const ioline_t SDAp = PAL_LINE(GPIOB, 13U);   /* normally SCL */
++                palSetLineMode(SCLp, PAL_MODE_OUTPUT_OPENDRAIN);
++                palSetLineMode(SDAp, PAL_MODE_OUTPUT_OPENDRAIN);
++                palSetLine(SCLp); palSetLine(SDAp);
++                hal.scheduler->delay_microseconds(50);
++                uint8_t swapped_hits = 0;
++                for (uint8_t a = 8; a < 0x78 && swapped_hits < 4; a++) {
++                    /* START */
++                    palClearLine(SDAp); hal.scheduler->delay_microseconds(5);
++                    palClearLine(SCLp); hal.scheduler->delay_microseconds(5);
++                    uint8_t byte = (uint8_t)(a << 1);   /* write address */
++                    for (int i = 7; i >= 0; i--) {
++                        if (byte & (1 << i)) { palSetLine(SDAp); } else { palClearLine(SDAp); }
++                        hal.scheduler->delay_microseconds(3);
++                        palSetLine(SCLp); hal.scheduler->delay_microseconds(5);
++                        palClearLine(SCLp); hal.scheduler->delay_microseconds(2);
++                    }
++                    palSetLine(SDAp);                    /* release for ACK */
++                    hal.scheduler->delay_microseconds(3);
++                    palSetLine(SCLp); hal.scheduler->delay_microseconds(5);
++                    bool ack = (palReadLine(SDAp) == PAL_LOW);
++                    palClearLine(SCLp); hal.scheduler->delay_microseconds(3);
++                    /* STOP */
++                    palClearLine(SDAp); hal.scheduler->delay_microseconds(3);
++                    palSetLine(SCLp);  hal.scheduler->delay_microseconds(3);
++                    palSetLine(SDAp);  hal.scheduler->delay_microseconds(5);
++                    if (ack) {
++                        can_printf("I2CDBG SWAPPED ACK at 0x%02x - SDA/SCL WIRES CROSSED", a);
++                        swapped_hits++;
++                    }
++                }
++                if (swapped_hits == 0) {
++                    can_printf("I2CDBG swapped scan also empty - check power/pullups/cable");
++                }
++                /* hand the pins back to I2C2 (AF4 open-drain) */
++                palSetLineMode(SDAp, PAL_MODE_ALTERNATE(4) | PAL_STM32_OTYPE_OPENDRAIN);
++                palSetLineMode(SCLp, PAL_MODE_ALTERNATE(4) | PAL_STM32_OTYPE_OPENDRAIN);
++            }
++        }
++    }
++#endif /* NINJA_I2C_DEBUG */
++
+     if (now - last_led_ms > 1000) {
+         last_led_ms = now;
+ #ifdef HAL_GPIO_PIN_LED
+diff --git a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
+index 067210f..ec58a74 100644
+--- a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
++++ b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
+@@ -45,9 +45,16 @@ define AP_PERIPH_BARO_ENABLED 1
+ define HAL_BARO_ALLOW_INIT_NO_BARO
+ 
+ BARO SPL06 I2C:0:0x76
++# NinjaPilot: BMP388 on the I2C JST, DECLARED because this bus is marked
++# INTERNAL (HAL_I2C_INTERNAL_MASK 1 in the parent .inc) and BARO_PROBE_EXT
++# only probes external buses - no parameter can reach this bus. Proven the
++# hard way: 14 probe bits, two firmware versions, zero probes.
++BARO BMP388 I2C:0:0x77
++BARO BMP388 I2C:0:0x76
++define HAL_PERIPH_NINJA_I2C_DEBUG 1
+ 
+ # ------------------ I2C airspeed -------------------------
+-define AP_PERIPH_AIRSPEED_ENABLED 1
++define AP_PERIPH_AIRSPEED_ENABLED 0
+ 
+ # MS4525 sensor by default
+ define HAL_AIRSPEED_TYPE_DEFAULT 1
+@@ -59,7 +66,7 @@ define HAL_MSP_ENABLED 1
+ define AP_PERIPH_MSP_PORT_DEFAULT 1
+ 
+ # ------------------ BATTERY Monitor -----------------------
+-define AP_PERIPH_BATTERY_ENABLED 1
++define AP_PERIPH_BATTERY_ENABLED 0
+ 
+ define HAL_USE_ADC TRUE
+ define STM32_ADC_USE_ADC1 TRUE
