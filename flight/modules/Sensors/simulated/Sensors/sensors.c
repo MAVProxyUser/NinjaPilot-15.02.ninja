@@ -218,6 +218,41 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
          */
         {
             static uint32_t last_imu, last_baro, last_mag, last_mag2;
+            static bool telemetry_throttled = false;
+
+            /*
+             * Throttle sensor-object TELEMETRY before the first publish.
+             *
+             * Locally Set() objects fire telemetry events; UAVTalk-received
+             * ones do not (loop prevention). Under Gazebo the sensor objects
+             * arrive via UAVTalk, so telemetry stays idle - which is why this
+             * never appeared in a year of SITL. Publishing locally at 500 Hz
+             * floods TelTx with ~1100 events/s; TelTx and the UDP tasks all
+             * run at tskIDLE_PRIORITY+7, and once that band never goes
+             * collectively idle, EVERY task at +6 and below starves - the
+             * Sensors task, the estimator callbacks, IDLE included. Measured
+             * on the OSD32MP1: firmware ran 2-20 s then all low-band tasks
+             * froze (voluntary ctxt switches stopped dead) while the +7 band
+             * cycled normally at 456-1000 wakes/s.
+             *
+             * Raw 500 Hz sensor streams do not belong on telemetry anyway;
+             * a GCS wanting them can change the metadata explicitly.
+             */
+            if (!telemetry_throttled) {
+                telemetry_throttled = true;
+                UAVObjMetadata md;
+                UAVObjHandle objs[] = {
+                    GyroSensorHandle(), AccelSensorHandle(),
+                    BaroSensorHandle(), MagSensorHandle(),
+                    AuxMagSensorHandle()
+                };
+                for (unsigned i = 0; i < sizeof(objs) / sizeof(objs[0]); i++) {
+                    UAVObjGetMetadata(objs[i], &md);
+                    UAVObjSetTelemetryUpdateMode(&md, UPDATEMODE_PERIODIC);
+                    md.telemetryUpdatePeriod = 1000;   /* 1 Hz is plenty */
+                    UAVObjSetMetadata(objs[i], &md);
+                }
+            }
             /* static, not automatic: ~96 bytes, and only this task reads it */
             static struct pios_sensors_hub_data h;
 

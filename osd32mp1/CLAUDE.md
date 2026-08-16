@@ -899,3 +899,55 @@ raw alongside the two named flags rather than discarded.
 The earlier decision to store this message's bytes RAW rather than guess a
 layout is what made the identification cheap and safe - the guessed version
 would have been wrong, exactly as it was for the magnetometer.
+
+## OPEN BUG, rigorously bounded: realposix low-priority task starvation (2026-08-16)
+
+**fw_realposix: every FreeRTOS task at priority <= +6 permanently stops 2-20 s
+after start.** The +7 band (TelTx, UDP_Rx x2) and all raw pthreads keep
+running normally, so it looks like selective task death, never a crash.
+Reproduces 100 %: SCHED_OTHER and FIFO, pinned and unpinned, single clean
+instance. fw_simposix idle does not stall; bridge-fed simposix (142 Hz,
+inbound over UAVTalk) never showed it in 30 s windows.
+
+**Proven with gdb + /proc, not inferred:**
+- frozen tasks sit in `event_wait` beneath `vPortYield` beneath
+  `xQueueSemaphoreTake(xTicksToWait=10)` - 10 ms timeouts parked for minutes
+- their voluntary ctxt-switch counters freeze DEAD (Sensors: 449 total, then
+  +0 over any window) while TelTx does ~456/s and UDP_Rx ~1000/s
+- SigBlk map is the port's normal signature (exactly one unmasked thread)
+- `uxSchedulerSuspended = 0`
+
+**NINE hypotheses tested and disproven** (each by experiment, in order):
+journald pipe blocking; stdout buffering as the stall; hub stealing signals
+(masked - no change); SCHED_FIFO inheritance (fixed, real bug, not this);
+Sensors stack overflow (8 KB - no change); multi-instance contamination
+(REAL, fixed, still dies clean); SMP switch window (pinned to 1 CPU - still
+dies); tick-signal nesting in the event handshake (all three wait_for_event.c
+entry points now signal-masked - still dies); telemetry event flood from
+local 500 Hz Set() (metadata throttled to 1 Hz periodic - still dies).
+
+**TWO measurement artifacts that produced false conclusions, do not repeat:**
+- `gdb -batch` PAUSES the inferior: two `p xTickCount` reads with a sleep
+  between them read IDENTICAL values on a healthy system. The "tick died"
+  conclusion was this artifact.
+- journalctl accumulates across systemd-run reuses of one unit name - use a
+  FRESH unit name per test run, judge only by the t= wall-clock stamps inside
+  the log lines.
+
+**The environment traps that cost half the session (all fixed):**
+- the port renames the main thread comm to `Scheduler`, so
+  `pkill/pgrep -x fw_realposix.elf` match NOTHING - instances leak and fight
+  over UDP 9000 and I2C. Use `pgrep -x Scheduler`.
+- `fwsimposix.service` was enabled and auto-restarted; it is now DISABLED.
+  Never run both targets simultaneously - same ports.
+- `udp dev 0 - socket opened - result -1` in the log means the telemetry bind
+  FAILED (another instance holds it). It was in the log the whole time.
+
+**The next probe is a two-arm bisect, not a tenth guess:**
+1. realposix with the sensors.c publish branch disabled (hub reads, nothing
+   Set()s locally). Survives -> local Set() path is the trigger; dies -> the
+   hub/target delta is.
+2. simposix + sensor_bridge pushed to 500 Hz (not 142). Dies -> load-generic
+   port bug, nothing to do with realposix; survives -> realposix-specific.
+Also verify the metadata throttle actually took (read the metadata back) -
+test 9's negative is only valid if it did.
