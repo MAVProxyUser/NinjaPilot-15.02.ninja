@@ -114,25 +114,43 @@ index 04cc75e..d6e20c8 100644
          last_led_ms = now;
  #ifdef HAL_GPIO_PIN_LED
 diff --git a/Tools/AP_Periph/AP_Periph.h b/Tools/AP_Periph/AP_Periph.h
-index 0ab36ee..2538eb1 100644
+index 0ab36ee..f3ebba8 100644
 --- a/Tools/AP_Periph/AP_Periph.h
 +++ b/Tools/AP_Periph/AP_Periph.h
-@@ -494,6 +494,10 @@ public:
+@@ -494,6 +494,14 @@ public:
      uint32_t last_relposheading_ms;
  #if AP_PERIPH_BARO_ENABLED
      uint32_t last_baro_update_ms;
 +    uint32_t last_baro_send_ms;
-+    // set once when the IMU stream detects CAN TX failures and self-throttles;
-+    // sticky until reboot, surfaced in NodeStatus vendor code as DEGRADEDHZ
-+    bool imu_hz_degraded;
++    // DEGRADEDHZ policy (user-specified): the IMU stream is NEVER throttled -
++    // it always gets its requested rate. On sustained TX failure the AUX
++    // streams (baro, mag) drop to 5 Hz instead, restoring 10 s after TX
++    // health returns. The flag latches until reboot as the telltale.
++    bool imu_hz_degraded;        // latched telltale (NodeStatus bit 15)
++    bool imu_aux_throttle;       // live: aux streams capped at 5 Hz
++    uint32_t imu_last_txfail_ms;
  #endif
  #if AP_PERIPH_AIRSPEED_ENABLED
      uint32_t last_airspeed_update_ms;
 diff --git a/Tools/AP_Periph/Parameters.cpp b/Tools/AP_Periph/Parameters.cpp
-index c36ab3e..25309da 100644
+index c36ab3e..14fa3a5 100644
 --- a/Tools/AP_Periph/Parameters.cpp
 +++ b/Tools/AP_Periph/Parameters.cpp
-@@ -281,6 +281,20 @@ const AP_Param::Info AP_Periph_FW::var_info[] = {
+@@ -267,6 +267,13 @@ const AP_Param::Info AP_Periph_FW::var_info[] = {
+     // @Group: COMPASS_
+     // @Path: ../libraries/AP_Compass/AP_Compass.cpp
+     GOBJECT(compass,         "COMPASS_",     Compass),
++
++    // @Param: MAG_MAX_RATE
++    // @DisplayName: Mag publish rate limit
++    // @Description: Maximum MagneticFieldStrength publish rate in Hz. 0 = built-in default (25).
++    // @Range: 0 100
++    // @User: Standard
++    GSCALAR(mag_max_rate, "MAG_MAX_RATE", 0),
+ #endif
+ 
+ #if AP_PERIPH_BARO_ENABLED
+@@ -281,6 +288,20 @@ const AP_Param::Info AP_Periph_FW::var_info[] = {
      // @Values: 0:Disabled, 1:Enabled
      // @User: Standard
      GSCALAR(baro_enable, "BARO_ENABLE", AP_PERIPH_BARO_ENABLE_DEFAULT),
@@ -153,7 +171,7 @@ index c36ab3e..25309da 100644
  #endif
  
  #if AP_PERIPH_HAVE_LED_WITHOUT_NOTIFY
-@@ -724,6 +738,13 @@ const AP_Param::Info AP_Periph_FW::var_info[] = {
+@@ -724,6 +745,13 @@ const AP_Param::Info AP_Periph_FW::var_info[] = {
      // @User: Standard
      GSCALAR(imu_sample_rate, "INS_SAMPLE_RATE", 0),
  
@@ -168,29 +186,33 @@ index c36ab3e..25309da 100644
      // @Path: ../libraries/AP_InertialSensor/AP_InertialSensor.cpp
      GOBJECT(imu, "INS", AP_InertialSensor),
 diff --git a/Tools/AP_Periph/Parameters.h b/Tools/AP_Periph/Parameters.h
-index 16604f3..bc2d731 100644
+index 16604f3..4cc83f6 100644
 --- a/Tools/AP_Periph/Parameters.h
 +++ b/Tools/AP_Periph/Parameters.h
-@@ -106,6 +106,9 @@ public:
+@@ -106,6 +106,10 @@ public:
          k_param_servo_command_timeout_ms,
          k_param_servo_telem_msg_rate,
          k_param_battery_bms,
 +        k_param_baro_max_rate,
 +        k_param_imu_raw_rate,
 +        k_param_debug_scan,
++        k_param_mag_max_rate,
      };
  
      AP_Int16 format_version;
-@@ -128,6 +131,8 @@ public:
+@@ -128,6 +132,11 @@ public:
  #endif
  #if AP_PERIPH_BARO_ENABLED
      AP_Int8 baro_enable;
 +    AP_Int16 baro_max_rate;
 +    AP_Int8 debug_scan;
++#endif
++#if AP_PERIPH_MAG_ENABLED
++    AP_Int16 mag_max_rate;
  #endif
  #if !defined(HAL_NO_FLASH_SUPPORT) && !defined(HAL_NO_ROMFS_SUPPORT)
      AP_Int8 flash_bootloader;
-@@ -222,6 +227,7 @@ public:
+@@ -222,6 +231,7 @@ public:
  
  #if AP_PERIPH_IMU_ENABLED
      AP_Int16 imu_sample_rate;
@@ -199,20 +221,27 @@ index 16604f3..bc2d731 100644
  
  #if HAL_PERIPH_CAN_MIRROR
 diff --git a/Tools/AP_Periph/baro.cpp b/Tools/AP_Periph/baro.cpp
-index a4f089d..a6c2c0c 100644
+index a4f089d..704f866 100644
 --- a/Tools/AP_Periph/baro.cpp
 +++ b/Tools/AP_Periph/baro.cpp
-@@ -26,6 +26,14 @@ void AP_Periph_FW::can_baro_update(void)
+@@ -26,6 +26,21 @@ void AP_Periph_FW::can_baro_update(void)
          // don't send any data
          return;
      }
-+    if (g.baro_max_rate > 0) {
-+        // rate-limit knob for bus experiments; 0 = native driver rate
-+        const uint32_t now_ms = AP_HAL::millis();
-+        if (now_ms - last_baro_send_ms < 1000U / (uint32_t)constrain_int16(g.baro_max_rate.get(), 1, 100)) {
-+            return;
++    {
++        // rate-limit knob (0 = native driver rate), overridden down to 5 Hz
++        // while the DEGRADEDHZ aux throttle is active - the IMU has priority
++        uint16_t cap = (g.baro_max_rate > 0) ? (uint16_t)constrain_int16(g.baro_max_rate.get(), 1, 100) : 0;
++        if (imu_aux_throttle) {
++            cap = (cap > 0) ? MIN(cap, (uint16_t)5) : (uint16_t)5;
 +        }
-+        last_baro_send_ms = now_ms;
++        if (cap > 0) {
++            const uint32_t now_ms = AP_HAL::millis();
++            if (now_ms - last_baro_send_ms < 1000U / cap) {
++                return;
++            }
++            last_baro_send_ms = now_ms;
++        }
 +    }
      const float press = baro.get_pressure();
      const float temp = baro.get_temperature();
@@ -235,11 +264,41 @@ index ec0e76a..0813508 100644
  
          uint32_t len = uavcan_protocol_NodeStatus_encode(&node_status, buffer, !canfdout());
  
+diff --git a/Tools/AP_Periph/compass.cpp b/Tools/AP_Periph/compass.cpp
+index ad455b0..934c23a 100644
+--- a/Tools/AP_Periph/compass.cpp
++++ b/Tools/AP_Periph/compass.cpp
+@@ -31,13 +31,19 @@ void AP_Periph_FW::can_mag_update(void)
+         return;
+     }
+ 
+-#if AP_PERIPH_MAG_MAX_RATE > 0
+-    // don't flood the bus with very high rate magnetometers
+-    const uint32_t now_ms = AP_HAL::millis();
+-    if (now_ms - last_mag_update_ms < (1000U / AP_PERIPH_MAG_MAX_RATE)) {
+-        return;
++    {
++        // runtime MAG_MAX_RATE knob (0 = built-in default), overridden down
++        // to 5 Hz while the DEGRADEDHZ aux throttle is active
++        uint16_t cap = (g.mag_max_rate > 0) ? (uint16_t)constrain_int16(g.mag_max_rate.get(), 1, 100)
++                                            : (uint16_t)AP_PERIPH_MAG_MAX_RATE;
++        if (imu_aux_throttle) {
++            cap = MIN(cap, (uint16_t)5);
++        }
++        const uint32_t now_ms = AP_HAL::millis();
++        if (cap > 0 && now_ms - last_mag_update_ms < (1000U / cap)) {
++            return;
++        }
+     }
+-#endif
+ 
+     compass.read();
+ 
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
-index 1ab2a2e..2728868 100644
+index 1ab2a2e..66dc78e 100644
 --- a/Tools/AP_Periph/imu.cpp
 +++ b/Tools/AP_Periph/imu.cpp
-@@ -2,61 +2,98 @@
+@@ -2,61 +2,103 @@
  
  #if AP_PERIPH_IMU_ENABLED
  #include <dronecan_msgs.h>
@@ -295,16 +354,14 @@ index 1ab2a2e..2728868 100644
 +    can_printf("IMU proxy: MPU-9150 raw handoff up");
  
 -        imu.update();
-+    static int16_t tripped_rate = -1;
 +    uint16_t tx_fail_run = 0;
-+
-+    while (true) {
-+        uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 1000);
-+        if (imu_hz_degraded && g.imu_sample_rate.get() == tripped_rate) {
-+            rate = MIN(rate, (uint16_t)50);
-+        }
  
 -        if (!imu.healthy()) {
++    while (true) {
++        // The IMU is the inner loop's heartbeat: it ALWAYS gets the
++        // requested rate. Degradation throttles the aux streams instead.
++        const uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 1000);
++
 +        uint8_t d[14];
 +        bool ok;
 +        {
@@ -360,18 +417,25 @@ index 1ab2a2e..2728868 100644
 +        tx_fail |= !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_ACCEL,
 +                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
 +
-+        // DEGRADEDHZ guardrail: throttle to defaults on sustained TX failure,
-+        // latch the NodeStatus flag, release when a NEW rate is requested.
-+        if (AP_HAL::millis() < 15000) {
++        // DEGRADEDHZ guardrail, IMU-priority policy: sustained TX failure
++        // latches the flag and caps the AUX streams (baro/mag) at 5 Hz; the
++        // IMU stream is untouched. Aux restores 10 s after TX goes healthy.
++        const uint32_t now_ms = AP_HAL::millis();
++        if (now_ms < 15000) {
 +            tx_fail_run = 0;    // boot grace: anonymous-phase sends fail
 +        } else if (tx_fail) {
-+            if (++tx_fail_run >= 50 && !imu_hz_degraded) {
-+                imu_hz_degraded = true;
-+                tripped_rate = g.imu_sample_rate.get();
-+                can_printf("DEGRADEDHZ: CAN TX failing, IMU throttled (new rate requests honored)");
++            imu_last_txfail_ms = now_ms;
++            if (++tx_fail_run >= 50 && !imu_aux_throttle) {
++                imu_hz_degraded = true;    // latched telltale
++                imu_aux_throttle = true;
++                can_printf("DEGRADEDHZ: CAN TX failing - aux capped 5 Hz, IMU kept at full rate");
 +            }
 +        } else if (tx_fail_run > 0) {
 +            tx_fail_run--;
++        }
++        if (imu_aux_throttle && now_ms - imu_last_txfail_ms > 10000) {
++            imu_aux_throttle = false;
++            can_printf("DEGRADEDHZ: TX healthy 10 s - aux streams restored");
 +        }
 +
 +        // the burst read above costs ~550 us; sleep only the remainder
