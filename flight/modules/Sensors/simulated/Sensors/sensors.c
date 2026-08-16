@@ -77,6 +77,9 @@
 #endif
 
 #include "CoordinateConversions.h"
+#ifdef PIOS_REALPOSIX
+#include <pios_shmlog.h>
+#endif
 
 // Private constants
 #ifdef PIOS_REALPOSIX
@@ -219,7 +222,7 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
          * GyroSensor updates, and the estimator gates on MagSensor arriving.
          */
         {
-            static uint32_t last_imu, last_baro, last_mag, last_mag2, last_gps;
+            static uint32_t last_imu, last_baro, last_mag, last_mag2, last_gps, last_imu2;
             static bool telemetry_throttled = false;
 
             /*
@@ -278,6 +281,46 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                     g.z = h.gyro_dps[2];
                     g.temperature = h.imu_temp_c;
                     GyroSensorSet(&g);
+                }
+
+                /*
+                 * IMU failover: the second MPU-9150 rides the CAN bus via
+                 * the L431's compact stream. It is NOT fused with the local
+                 * sensor - same part, no shared clock - it takes over
+                 * publishing only when the local I2C stream has been silent
+                 * for 200 ms (100 lost samples at 500 Hz), and stands down
+                 * the moment the local sensor speaks again. The inner loop
+                 * then keeps closing at the CAN rate instead of dying with
+                 * the I2C bus. Timestamps are both hub CLOCK_MONOTONIC, so
+                 * the comparison needs no clock read here.
+                 */
+                if (h.have_imu2 && h.imu2_count != last_imu2) {
+                    last_imu2 = h.imu2_count;
+                    static bool failed_over = false;
+                    bool local_dead = !h.have_imu
+                                      || (h.imu2_time - h.imu_time) > 0.2;
+                    if (local_dead) {
+                        if (!failed_over) {
+                            failed_over = true;
+                            PIOS_SHMLOG_Printf("[sensors] LOCAL IMU SILENT - failing over to CAN IMU stream");
+                        }
+                        AccelSensorData a2;
+                        a2.x = h.imu2_accel_mss[0];
+                        a2.y = h.imu2_accel_mss[1];
+                        a2.z = h.imu2_accel_mss[2];
+                        a2.temperature = h.imu_temp_c;
+                        AccelSensorSet(&a2);
+
+                        GyroSensorData g2;
+                        g2.x = h.imu2_gyro_dps[0];
+                        g2.y = h.imu2_gyro_dps[1];
+                        g2.z = h.imu2_gyro_dps[2];
+                        g2.temperature = h.imu_temp_c;
+                        GyroSensorSet(&g2);
+                    } else if (failed_over) {
+                        failed_over = false;
+                        PIOS_SHMLOG_Printf("[sensors] local IMU back - CAN IMU stands down");
+                    }
                 }
 
                 if (h.have_baro && h.baro_count != last_baro) {

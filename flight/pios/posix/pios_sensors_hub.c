@@ -466,6 +466,8 @@ static bool hmc_read(float ga[3])
 #define DC_MSG_NODE_STATUS     341
 #define DC_MSG_STATIC_PRESS   1028  /* float32 Pa + float16 variance      */
 #define DC_MSG_STATIC_TEMP    1029  /* float16 KELVIN + float16 variance  */
+#define DC_MSG_NINJA_GYRO    20500  /* int16[3] LE, rad/s * 1000, 1 frame */
+#define DC_MSG_NINJA_ACCEL   20501  /* int16[3] LE, m/s^2 * 500,  1 frame */
 #define DC_MSG_FIX2_REAL      1063  /* the DEPRECATED Fix is 1060; an earlier
                                        bus table here had the two swapped */
 #define DC_MSG_GNSS_STATUS   20003  /* ardupilot.gnss.Status */
@@ -798,6 +800,35 @@ static void can_poll(void)
             continue;         /* not the start of a transfer */
         }
 
+        if (mt == DC_MSG_NINJA_GYRO && f.can_dlc >= 7) {
+            /* Compact IMU stream from the L431's second MPU-9150. Single
+             * frame by design, so there is no reassembly to fail. The node
+             * sends gyro then accel back to back; the ACCEL message is the
+             * pair's completion marker and owns the counter. */
+            int16_t r[3];
+            memcpy(r, f.data, 6);
+            hub_publish_begin();
+            hub.imu2_gyro_dps[0] = (float)r[0] * 0.057295779513f; /* mrad/s -> deg/s */
+            hub.imu2_gyro_dps[1] = (float)r[1] * 0.057295779513f;
+            hub.imu2_gyro_dps[2] = (float)r[2] * 0.057295779513f;
+            hub_publish_end();
+            continue;
+        }
+
+        if (mt == DC_MSG_NINJA_ACCEL && f.can_dlc >= 7) {
+            int16_t r[3];
+            memcpy(r, f.data, 6);
+            hub_publish_begin();
+            hub.imu2_accel_mss[0] = (float)r[0] * 0.002f;
+            hub.imu2_accel_mss[1] = (float)r[1] * 0.002f;
+            hub.imu2_accel_mss[2] = (float)r[2] * 0.002f;
+            hub.imu2_time  = now_s();
+            hub.imu2_count++;
+            hub.have_imu2  = true;
+            hub_publish_end();
+            continue;
+        }
+
         if (mt == DC_MSG_STATIC_PRESS && f.can_dlc >= 5) {
             /* BMP388 now lives on the L431 (custom hwdef, declared probe);
              * byte-aligned float32 pascals, single frame. Reuses the same
@@ -1019,10 +1050,11 @@ static void *hub_main(void *arg)
              * actual frame sizes - not datasheet arithmetic. Integer-only:
              * the %u-after-doubles varargs artifact is still open.
              */
-            PIOS_SHMLOG_Printf("[hub-health] imu=%lu baro=%lu hmc=%lu mag=%lu "
+            PIOS_SHMLOG_Printf("[hub-health] imu=%lu imu2=%lu baro=%lu hmc=%lu mag=%lu "
                                "fix2=%lu aux=%lu ierr=%lu berr=%lu gbad=%lu "
                                "i2c_pm=%lu can_pm=%lu",
                                (unsigned long)(hub.imu_count - prev.imu_count),
+                               (unsigned long)(hub.imu2_count - prev.imu2_count),
                                (unsigned long)(hub.baro_count - prev.baro_count),
                                (unsigned long)(hub.mag2_count - prev.mag2_count),
                                (unsigned long)(hub.mag_count - prev.mag_count),

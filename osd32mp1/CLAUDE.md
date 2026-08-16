@@ -1324,3 +1324,25 @@ either reset-looped silently or held in the bootloader; the identical source
 built clean booted first try. The ambush flasher recovers either way (it
 caught a reset-looping node in 2.9 s with no power cycle - the BL window
 recurs every watchdog reset).
+
+## realposix consumes the CAN IMU: hub decode + failover (2026-08-16, night)
+
+The hub decodes the compact stream (20500 gyro / 20501 accel, int16 LE at
+/1000 rad/s and /500 m/s^2) into `imu2_*` snapshot fields. The ACCEL message
+owns the counter - the node sends gyro-then-accel back to back, so accel
+arrival marks a complete pair and sensors.c publishes on it. Verified live:
+`[hub-health] ... imu2=1862/10s` = 186 Hz through the hub with every other
+sensor untouched (local imu 496 Hz, baro 50, mag 25, GPS 5, zero errors),
+outer loop recovered post-calibration (rateupdates -2).
+
+**Failover, not fusion**: the CAN IMU publishes GyroSensor/AccelSensor ONLY
+while the local I2C stream has been silent >200 ms (timestamps are both hub
+CLOCK_MONOTONIC, compared snapshot-internally - no clock read in the task),
+and stands down the moment the local sensor returns. Entry/exit are one-shot
+shmlog lines ("LOCAL IMU SILENT..." / "...stands down"). With both alive the
+CAN stream idles in standby - measured: failover lines 0 across the soak.
+The inner loop keeps closing at ~186 Hz on CAN if the local bus dies.
+
+Live pull-the-plug test still pending: unplug the LOCAL MPU-9150 (MP1
+`/dev/i2c-3`, addr 0x68) while fw_realposix runs and watch the failover
+line appear with gyroupdates staying alive.

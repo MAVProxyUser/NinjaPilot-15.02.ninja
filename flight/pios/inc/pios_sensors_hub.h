@@ -38,6 +38,13 @@ struct pios_sensors_hub_data {
     uint32_t imu_count;
     uint32_t imu_errors;
 
+    /* Second IMU: the MPU-9150 on the L431 CAN node, via the compact
+     * single-frame stream (msgs 20500/20501). Failover source only. */
+    float    imu2_gyro_dps[3];
+    float    imu2_accel_mss[3];
+    double   imu2_time;
+    uint32_t imu2_count;
+
     float    press_pa;        /* Pascals                      */
     float    baro_temp_c;
     double   baro_time;
@@ -91,6 +98,7 @@ struct pios_sensors_hub_data {
     uint32_t gps_aux_count;
 
     bool     have_imu;
+    bool     have_imu2;
     bool     have_baro;
     bool     have_mag;        /* RM3100 over CAN   */
     bool     have_mag2;       /* HMC5883L on I2C   */
