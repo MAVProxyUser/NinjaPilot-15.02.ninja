@@ -500,3 +500,45 @@ Once parked, run `flash124b.py` (a fresh Begin re-attaches cleanly even if
 the ambush server died mid-feed). Judge success ONLY by mode==0 AND the
 sensor suite publishing — `mode = (b[4]>>3)&7`, and health `(b[4]>>6)` is
 NOT mode.
+
+
+## Identify anything on the L431's I2C bus (one command, no rebuild)
+
+The custom AP_Periph carries a param-triggered scanner: set `I2C_SCAN=1`
+over DroneCAN and the node sweeps its bus, reports every ACK with common ID
+registers over `debug.LogMessage` (msg 16383), then bit-bangs the same probe
+with SDA/SCL swapped to catch crossed pairs. Self-clears; reboot the node
+afterwards (the pin-stealing leaves a cosmetic IERR chatter until restart).
+
+Known IDs seen on this bench: `0x68 id[75]=68` MPU-9150, `0x77 id[00]=50`
+BMP388, `0x2C id[00]=80` QMC5883P, `0x0E id[00]=10` IST8310.
+
+This settled two "missing compass" mysteries in ninety seconds each. Scan
+and read IDs before trusting any module's part label or pin silk.
+
+## Tune the CAN sensor stream live (no reflash)
+
+All set over DroneCAN param GetSet on node 124, effective immediately:
+
+| param | range | what |
+|---|---|---|
+| `INS_SAMPLE_RATE` | 1-400 | compact gyro/accel pair rate; delivered = ~316/N (divider of the real 316 Hz loop base; max ~305-317) |
+| `IMU_RAW_RATE` | 0-200 | standard RawIMU; **0 disables** (halves the bus); >=100 storms the wire - deliberately allowed to exercise DEGRADEDHZ |
+| `BARO_MAX_RATE` | 0-100 | 0 = native 50 Hz, else cap |
+| `GPS1_RATE_MS` | 100-200 | 100 = 10 Hz on the M9N |
+
+DEGRADEDHZ (NodeStatus vendor bit 15) latches if TX fails sustained; the
+throttle releases the moment a NEW rate is requested - only the flag stays
+until reboot.
+
+## Push to BOTH remotes
+
+Day-to-day history goes to origin; OpenPilotAI gets tree snapshots (its
+Octavo branch has no shared ancestry - never push the full history there):
+
+```bash
+git push git@github.com:MAVProxyUser/NinjaPilot-15.02.ninja.git claude:claude
+git fetch git@github.com:MAVProxyUser/OpenPilotAI.git Octavo:refs/remotes/opai/Octavo
+NEW=$(git commit-tree 'HEAD^{tree}' -p refs/remotes/opai/Octavo -m "snapshot: <summary>")
+git push git@github.com:MAVProxyUser/OpenPilotAI.git $NEW:refs/heads/Octavo
+```

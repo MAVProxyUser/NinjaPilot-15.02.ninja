@@ -1487,3 +1487,16 @@ LogMessages after a param-triggered sweep - the bit-bang stealing the I2C
 pins mid-driver leaves an internal-error latch that chatters until reboot.
 Cosmetic, clears on restart; scan, then reboot the node before trusting
 error counters.
+
+
+## M9N-5883 second connector: parallel pass-through (photo-confirmed)
+
+The Matek M9N-5883 carries TWO JST-GH-6P connectors, one per edge, absent
+from its written specs but visible in the product photo: left silk reads
+5V/RX/TX/CL/DA/G top-down, right reads G/DA/CL/TX/RX/5V - the same six
+nets with the connector rotated 180 deg. Either connector is the uplink;
+the spare daisy-chains I2C peripherals downstream (they land on the L431's
+I2C2, where I2C_SCAN sees them). Never attach a second HOST - TX/RX are
+duplicated. And because the two sides are mirror-ordered, check hand-made
+cables against the silk per side. Lesson generalized: the page-text fetch
+missed what the product PHOTO showed plainly - check images, not just specs.

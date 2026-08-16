@@ -20,7 +20,7 @@ integration base** with real sensors replacing the simulator.
 | SSH | **working** — key auth, dropbear |
 | Toolchain | gcc/g++ 9.3.0, make 4.3, python3 3.8.2 (**no git, no rsync**) |
 | SocketCAN | **DroneCAN bus working** — 2 Matek nodes allocated and publishing; allocator is a systemd service |
-| Live sensors | MPU-9150 @ 500 Hz, HMC5883L @ 50 Hz (I2C); **BMP388 @ 50 Hz**, RM3100 @ 25 Hz, GNSS @ 5 Hz (CAN) |
+| Live sensors | MPU-9150 @ 500 Hz, HMC5883L @ 50 Hz (MP1 I2C); BMP388 @ 50 Hz, 2nd MPU-9150 compact stream up to ~305 Hz, RM3100 @ 25 Hz, IST8310 @ 25 Hz, GNSS @ 5 Hz (CAN) |
 | **realposix** | **`fw_realposix.elf` reads every sensor natively** (PIOS I2C driver + CAN hub, no Python in the loop) and publishes the full UAVObject set; 360 s soak graded **GO** |
 | Node 124 firmware | **custom AP_Periph** (`ap-periph-ninja-debug.patch`, gcc 10.2.1) — adds the declared BMP388 probe + an I2C debug scanner; flashed over CAN |
 | SimPosix | still builds and runs (`fwsimposix.service`, bridge-fed) — kept as the sim-parity target; never run both at once (same ports) |
@@ -114,11 +114,35 @@ The edits are reproducible offline on macOS without sudo — `gpt.py` + `part.py
 
 | sensor | where | address / node | rate | state |
 |---|---|---|---|---|
-| MPU-9150 gyro+accel | I2C `/dev/i2c-3` | 0x68 | **500 Hz** | live, 1.011 g, 0 err |
-| **BMP388 barometer** | **DroneCAN `can0`** | **node 124, msg 1028/1029** | **50 Hz** | **live, 98.57 kPa — on the L431's I2C, via the custom AP_Periph** |
-| HMC5883L mag (secondary) | I2C `/dev/i2c-3` | 0x1E (ID 'H43') | **50 Hz** | live, 42.8 uT, 0 err |
-| **RM3100 magnetometer** | **DroneCAN `can0`** | **node 125, msg 1001** | **25 Hz** | **live, 51.1 uT** |
-| GPS (M8N) | DroneCAN `can0` | node 124, msg 1063/1061/20003 | 5 Hz | **decoded** — Fix2 + Auxiliary + gnss.Status; indoors no-fix, `sats_visible=0` (antenna question open, needs the window test) |
+| MPU-9150 #1 gyro+accel | MP1 I2C `/dev/i2c-3` | 0x68 | **500 Hz** | live — the PRIMARY IMU |
+| MPU-9150 #2 gyro+accel | DroneCAN, L431 I2C | node 124, msg 20500/20501 | **up to ~305 Hz** | live — compact single-frame stream, realposix failover IMU |
+| BMP388 barometer | DroneCAN, L431 I2C | node 124, msg 1028/1029 | **50 Hz** | live, 98.6 kPa |
+| HMC5883L mag | MP1 I2C `/dev/i2c-3` | 0x1E (ID 'H43') | **50 Hz** | live → AuxMagSensor |
+| RM3100 mag | DroneCAN | node 125, msg 1001 | **25 Hz** | live, 51 uT — the FLIGHT mag (hub keys 1001 to node 125) |
+| IST8310 mag | DroneCAN, L431 I2C | node 124, msg 1001 | **25 Hz** | live, 46.9 uT — on the Holybro Micro M9N; hub ingests as qmc_* (aux) |
+| GPS (Holybro Micro M9N) | DroneCAN, L431 UART | node 124, msg 1063/1061/20003 | **5 Hz** | decoded — Fix2 + Auxiliary + Status; indoors no-fix (two receivers showed 0 sats at this bench — window test decides) |
+
+**GPS module history**: Holybro M8N → Matek M9N-5883 (its "QMC5883L" is
+really a **QMC5883P at 0x2C** — scan before trusting a 5883 label; the module
+has TWO mirrored JST-GH-6P connectors wired in parallel for pass-through) →
+Holybro Micro M9N (IST8310 at 0x0E). Whichever module is plugged in, its
+compass is found at boot: the custom firmware declares both QMC5883P and
+IST8310 probes, and `I2C_SCAN=1` identifies anything new in one sweep.
+
+**Which bus feeds which UAVObject (realposix source map):**
+
+| UAVObject | source | fallback |
+|---|---|---|
+| GyroSensor / AccelSensor | MPU-9150 #1 (MP1 I2C, 500 Hz) | MPU-9150 #2 over CAN if local silent >200 ms |
+| BaroSensor | BMP388 over CAN | — |
+| MagSensor | RM3100 over CAN | — |
+| AuxMagSensor | HMC5883L (MP1 I2C) | — |
+| GPSPosition/VelocitySensor | M9N over CAN | — |
+
+Every sensor on either bus lands in the same hub snapshot with one
+timestamp domain, so CAN-vs-I2C comparisons run **simultaneously under
+identical motion** — the two IMU streams are the same sensor model on the
+two transports, recorded side by side.
 
 The BMP388 **moved** from the board's own I2C bus to the L431 CAN node
 (2026-08-16). That took a custom AP_Periph build — the stock hwdef marks the
