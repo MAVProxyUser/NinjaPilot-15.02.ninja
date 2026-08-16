@@ -57,6 +57,7 @@
 #include "airspeedsensor.h"
 #include "barosensor.h"
 #include "magsensor.h"
+#include "auxmagsensor.h"
 #include "gyrosensor.h"
 #include "flightstatus.h"
 #include "gpspositionsensor.h"
@@ -216,7 +217,7 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
          * GyroSensor updates, and the estimator gates on MagSensor arriving.
          */
         {
-            static uint32_t last_imu, last_baro, last_mag;
+            static uint32_t last_imu, last_baro, last_mag, last_mag2;
             /* static, not automatic: ~96 bytes, and only this task reads it */
             static struct pios_sensors_hub_data h;
 
@@ -254,6 +255,30 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                                     (1.0f - powf(b.Pressure / 101.325f,
                                                  (1.0f / 5.255f)));
                     BaroSensorSet(&b);
+                }
+
+                if (h.have_mag2 && h.mag2_count != last_mag2) {
+                    last_mag2 = h.mag2_count;
+
+                    /*
+                     * The HMC5883L goes to AuxMagSensor, not MagSensor: this
+                     * tree already has auxmagsupport.c to fuse a second
+                     * magnetometer, and MagSensor belongs to the RM3100 -
+                     * which is the better part by ~25x on quantisation
+                     * (12.2 nT vs ~300 nT) and is the one the estimator
+                     * should trust. Two sensors writing one object would
+                     * just be the last writer winning.
+                     *
+                     * Status is GOOD unconditionally because the driver
+                     * already rejects the -4096 saturation flag at the
+                     * source - a reading that reaches here is real.
+                     */
+                    AuxMagSensorData am;
+                    am.x = h.mag2_ga[0] * 1000.0f;          /* Ga -> mGa */
+                    am.y = h.mag2_ga[1] * 1000.0f;
+                    am.z = h.mag2_ga[2] * 1000.0f;
+                    am.Status = AUXMAGSENSOR_STATUS_OK;
+                    AuxMagSensorSet(&am);
                 }
 
                 if (h.have_mag && h.mag_count != last_mag) {
