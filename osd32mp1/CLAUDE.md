@@ -1126,3 +1126,34 @@ normally, and every silent bus after a node reboot was this. Replaced by
 `allocatord.py` + `dronecan-allocator.service` (systemd, Restart=always,
 enabled, brings can0 up itself). Nodes now get IDs within seconds of any
 power-up, unattended. The session tool remains useful for its REPORT.
+
+## PROVEN: L431 firmware flashes over CAN, and recovery from a failed flash is REAL (2026-08-16)
+
+Full over-CAN update of node 124, stock MatekL431-Periph image, 212,568 bytes
+served by our own dronecan FileServer in ~124 s (~1.7 KB/s):
+
+    BEFORE  sw 1.7  vcs=9c6f307f
+    AFTER   sw 1.9  vcs=e0652af4   (exactly the upstream commit downloaded)
+
+**The recovery guarantee was tested LIVE, by accident:** our file server
+crashed mid-handshake on the first attempt, after the node had already
+committed to updating. The bootloader sat on the bus in mode 3 (SW_UPDATE)
+waiting to be fed - node fully recoverable - and a re-attached server plus a
+fresh BeginFirmwareUpdate completed the flash. The bootloader region is never
+written by a CAN update, so the worst case is a waiting bootloader, not a
+brick. SWD pads remain the absolute fallback.
+
+Parameters SURVIVE the app update (BARO_PROBE_EXT read back 16383 on 1.9).
+
+**Three dronecan-python traps, each cost one attempt** (`can_flash.py` embeds
+all three fixes):
+1. `node.spin()` RAISES TransferError on wire noise - an unhandled one kills
+   your file server mid-flash. Wrap every spin.
+2. Request callbacks receive **None on timeout** - guard before appending.
+3. Run the flasher as a fixed node id (126 here) that collides with nothing:
+   127 is the resident allocator.
+
+Baro postscript: even on 1.9 with all probe bits, still no StaticPressure -
+two firmware versions, four reboots, every driver probing. The BMP388's
+connection to the L431 (or the hwdef marking its I2C bus internal) is the
+remaining suspect set; software above the hwdef is exhausted.
