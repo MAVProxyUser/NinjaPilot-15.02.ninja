@@ -1,5 +1,5 @@
 diff --git a/Tools/AP_Periph/AP_Periph.cpp b/Tools/AP_Periph/AP_Periph.cpp
-index 04cc75e..54f9df6 100644
+index 04cc75e..1aa48bf 100644
 --- a/Tools/AP_Periph/AP_Periph.cpp
 +++ b/Tools/AP_Periph/AP_Periph.cpp
 @@ -177,9 +177,12 @@ void AP_Periph_FW::init()
@@ -8,9 +8,9 @@ index 04cc75e..54f9df6 100644
      if (g.imu_sample_rate) {
 -        imu.init(g.imu_sample_rate);
 +        // NinjaPilot: wait_for_sample() paces the publish loop at the INIT
-+        // rate, so init at the knob ceiling. 500 was tried and starves the
-+        // watchdog on this 80 MHz part (silent reset loop); 200 holds.
-+        imu.init(200);
++        // rate, so init at the knob ceiling. 500 starves the watchdog on
++        // this 80 MHz part (silent reset loop); 400 is the sweep ceiling.
++        imu.init(400);
          if (imu.get_accel_count() > 0 || imu.get_gyro_count() > 0) {
 -            hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_Periph_FW::can_imu_update, void), "IMU_UPDATE", 16384, AP_HAL::Scheduler::PRIORITY_CAN, 0);
 +            hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_Periph_FW::can_imu_update, void), "IMU_UPDATE", 4096, AP_HAL::Scheduler::PRIORITY_CAN, 0);
@@ -220,7 +220,7 @@ index ec0e76a..0813508 100644
          uint32_t len = uavcan_protocol_NodeStatus_encode(&node_status, buffer, !canfdout());
  
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
-index 1ab2a2e..55d8f0d 100644
+index 1ab2a2e..196ffda 100644
 --- a/Tools/AP_Periph/imu.cpp
 +++ b/Tools/AP_Periph/imu.cpp
 @@ -3,6 +3,11 @@
@@ -235,7 +235,7 @@ index 1ab2a2e..55d8f0d 100644
  extern const AP_HAL::HAL &hal;
  
  /*
-@@ -10,16 +15,22 @@ extern const AP_HAL::HAL &hal;
+@@ -10,16 +15,31 @@ extern const AP_HAL::HAL &hal;
   */
  void AP_Periph_FW::can_imu_update(void)
  {
@@ -258,15 +258,24 @@ index 1ab2a2e..55d8f0d 100644
 -        if (delay_ms == 0) {
 -            // sleep for a bit to avoid flooding the CPU
 -            hal.scheduler->delay_microseconds(100);
-+        uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 200);
-+        if (imu_hz_degraded) {
-+            rate = MIN(rate, (uint16_t)50);   // stuck at defaults until reboot
++        /*
++         * Degradation policy (user-specified): tripping throttles the
++         * streams to defaults and latches the DEGRADEDHZ flag, but a NEW
++         * rate request made after the trip is honored - the throttle binds
++         * only to the value that was active when the trip happened. The
++         * NodeStatus flag stays latched until reboot as the telltale.
++         */
++        static int16_t tripped_rate = -1;
++        static int16_t tripped_raw  = -1;
++        uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 400);
++        if (imu_hz_degraded && g.imu_sample_rate.get() == tripped_rate) {
++            rate = MIN(rate, (uint16_t)50);
          }
 +        hal.scheduler->delay_microseconds(1000000UL / rate);
  
          imu.update();
  
-@@ -27,6 +38,53 @@ void AP_Periph_FW::can_imu_update(void)
+@@ -27,6 +47,55 @@ void AP_Periph_FW::can_imu_update(void)
              continue;
          }
  
@@ -297,7 +306,9 @@ index 1ab2a2e..55d8f0d 100644
 +        } else if (tx_fail) {
 +            if (++tx_fail_run >= 50 && !imu_hz_degraded) {
 +                imu_hz_degraded = true;
-+                can_printf("DEGRADEDHZ: CAN TX failing, IMU throttled to 50 Hz until reboot");
++                tripped_rate = g.imu_sample_rate.get();
++                tripped_raw  = g.imu_raw_rate.get();
++                can_printf("DEGRADEDHZ: CAN TX failing, IMU throttled to defaults (new rate requests still honored)");
 +            }
 +        } else if (tx_fail_run > 0) {
 +            tx_fail_run--;
@@ -305,7 +316,7 @@ index 1ab2a2e..55d8f0d 100644
 +        (void)0;
 +
 +        int16_t raw_rate = constrain_int16(g.imu_raw_rate.get(), 0, 200);
-+        if (imu_hz_degraded) {
++        if (imu_hz_degraded && g.imu_raw_rate.get() == tripped_raw) {
 +            raw_rate = MIN(raw_rate, (int16_t)25);
 +        }
 +        if (raw_rate == 0) {
@@ -320,7 +331,7 @@ index 1ab2a2e..55d8f0d 100644
          uavcan_equipment_ahrs_RawIMU pkt {};
  
          Vector3f tmp;
-@@ -40,16 +98,14 @@ void AP_Periph_FW::can_imu_update(void)
+@@ -40,16 +109,14 @@ void AP_Periph_FW::can_imu_update(void)
          pkt.rate_gyro_integral[1] = tmp.y;
          pkt.rate_gyro_integral[2] = tmp.z;
  

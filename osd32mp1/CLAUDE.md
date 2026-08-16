@@ -1346,3 +1346,32 @@ The inner loop keeps closing at ~186 Hz on CAN if the local bus dies.
 Live pull-the-plug test still pending: unplug the LOCAL MPU-9150 (MP1
 `/dev/i2c-3`, addr 0x68) while fw_realposix runs and watch the failover
 line appear with gyroupdates staying alive.
+
+## MEASURED: the compact gyro stream CANNOT flood the bus - the node tops out first (2026-08-16)
+
+The rate walk the DEGRADEDHZ work was built for, run for real: bus silenced
+to the MPU streams (IMU_RAW_RATE=0, BARO_MAX_RATE=1; GPS's 70 fr/s cannot
+be muted without a rebuild), INS_SAMPLE_RATE walked 200 -> 400 in 5 Hz
+steps, three tripwires per step (delivered rate regression, node-125 mag
+canary, MP1 kernel overrun counter).
+
+**Result: NO FLOOD, anywhere.** Zero overruns across the whole walk, mag
+pinned at 25.0-25.5 Hz, wire peaking at 644 fr/s (~8 % of 1 Mbit). The
+delivered rate climbs sublinearly and saturates at **271.8 Hz** (asymptote
+~270, flat from commanded ~340 up). The ceiling is the L431's publish-loop
+CPU budget, not CAN: per-iteration overhead grows from ~330 us at 200 Hz
+toward ~1.2 ms at the top. Flooding the wire with single-frame pairs would
+take ~3,700 Hz - 13x beyond what the node can produce. The only proven
+wire-killer remains multi-frame RawIMU at >=100 Hz (error storm, see the
+ramp-test section).
+
+Practical envelope by stream, both measured:
+    compact pairs:  any rate you can ask for is bus-safe; 270 Hz delivered max
+    RawIMU:         50 Hz safe, >=100 Hz storms the wire
+
+**Degradation policy updated to spec:** a DEGRADEDHZ trip throttles the
+streams to defaults, but a NEW rate request made after the trip is honored -
+the throttle binds only to the param value active at trip time. The
+NodeStatus bit-15 flag still latches until reboot as the telltale. Verified
+live: post-"degradation" re-requests of 200 and 100 Hz delivered 188.8 and
+99.8 Hz immediately. Restored + saved operating point: 200/25, baro native.
