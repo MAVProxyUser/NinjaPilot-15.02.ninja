@@ -424,3 +424,53 @@ The ring survives firmware death, so `--dump` after a wedge shows the final
 seconds. Build if missing: `cc -O2 -o /usr/bin/shmlogd osd32mp1/shmlogd.c`.
 Only one firmware instance can run: the flock pidfile at
 `/var/run/ninjapilot-fw.pid` names the pid of whoever holds it.
+
+## Build the custom AP_Periph for the L431 (gcc 10.2.1 ONLY)
+
+The patch (`ap-periph-ninja-debug.patch`) adds the declared BMP388 probe that
+the stock hwdef structurally cannot do (`HAL_I2C_INTERNAL_MASK 1` hides the
+bus from every `BARO_PROBE_EXT` bit), plus a bench I2C scanner with SDA/SCL
+swap detection reported over `debug.LogMessage`.
+
+```bash
+# toolchain: gcc 13.3 produces images that HOLD THE NODE IN ITS BOOTLOADER.
+# 10.2.1 (arm-gnu 10-2020-q4-major) is ArduPilot's blessed compiler and works.
+export PATH=~/gcc-arm-none-eabi-10-2020-q4-major/bin:$PATH
+
+# the tree must live at a path with NO SPACES (ChibiOS scripts break)
+cd ~/ardupilot
+git apply "<repo>/osd32mp1/ap-periph-ninja-debug.patch"
+
+./waf configure --board MatekL431-Periph   # RERUN after ANY hwdef edit -
+./waf AP_Periph                            # else you get a byte-identical
+                                           # binary and a 2-second "success"
+```
+
+Output: `build/MatekL431-Periph/bin/AP_Periph.bin`. The exact flashed binary
+is committed as `fw/AP_Periph-ninja-gcc10.bin` (md5-verify against it after a
+rebuild if you expect no change). Parameters survive app updates.
+
+## Flash an L431 node over CAN, and recover a failed flash
+
+```bash
+scp fw/AP_Periph-ninja-gcc10.bin root@<board>:/home/root/fw/AP_Periph.bin
+ssh root@<board> 'python3 can_flash.py'    # flashes node 124, ~2 min at 1.7 KB/s
+```
+
+`can_flash.py` sends `BeginFirmwareUpdate` and serves the file itself. It
+embeds the three dronecan-python traps: every `node.spin()` wrapped (raises
+`TransferError` on wire noise), request callbacks guarded against None (the
+timeout value), flasher node id 126 (127 is the resident allocator).
+
+**Judging the result — the bootloader identity trap:** anything answering
+GetNodeInfo with `sw 2.0 vcs=00000000 mode=MAINTENANCE vendor≈13` is the
+BOOTLOADER, not an app. A flash is done ONLY when mode reads OPERATIONAL (0)
+and the sensor suite publishes. The healthy boot trace is mode 3 → 1 → 0.
+
+**Recovery floor (tested live):** a failed or interrupted flash leaves the
+node's bootloader waiting on the bus in mode 3 — reachable and reflashable
+forever. The CAN update path never writes the bootloader region, so the worst
+case is a waiting bootloader, never a brick. Re-run the flasher with a good
+image (the stock one from
+https://firmware.ardupilot.org/AP_Periph/latest/MatekL431-Periph/ always
+works). SWD pads are the absolute fallback; they have never been needed.

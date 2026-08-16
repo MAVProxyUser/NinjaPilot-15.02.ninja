@@ -9,7 +9,7 @@ integration base** with real sensors replacing the simulator.
 
 ---
 
-## Status: the board is up and reachable (2026-08-15)
+## Status: flight stack running on real sensors (2026-08-16)
 
 | | |
 |---|---|
@@ -19,10 +19,11 @@ integration base** with real sensors replacing the simulator.
 | USB console | **working** — `/dev/cu.usbmodem*`, autologin root |
 | SSH | **working** — key auth, dropbear |
 | Toolchain | gcc/g++ 9.3.0, make 4.3, python3 3.8.2 (**no git, no rsync**) |
-| SocketCAN | **DroneCAN bus working** — 2 Matek nodes allocated and publishing |
-| Live sensors | MPU-9150 @ 500 Hz, BMP388 @ 50 Hz, HMC5883L @ 50 Hz (I2C); RM3100 @ 25 Hz, GNSS @ 5 Hz (CAN) |
-| Sensor bridge | **working** — real sensors converted to UAVObjects at 190 Hz (`sensor_bridge.py --dry-run`) |
-| SimPosix | **built + running on OpenSTLinux** under `fwsimposix.service`, fed by real sensors |
+| SocketCAN | **DroneCAN bus working** — 2 Matek nodes allocated and publishing; allocator is a systemd service |
+| Live sensors | MPU-9150 @ 500 Hz, HMC5883L @ 50 Hz (I2C); **BMP388 @ 50 Hz**, RM3100 @ 25 Hz, GNSS @ 5 Hz (CAN) |
+| **realposix** | **`fw_realposix.elf` reads every sensor natively** (PIOS I2C driver + CAN hub, no Python in the loop) and publishes the full UAVObject set; 360 s soak graded **GO** |
+| Node 124 firmware | **custom AP_Periph** (`ap-periph-ninja-debug.patch`, gcc 10.2.1) — adds the declared BMP388 probe + an I2C debug scanner; flashed over CAN |
+| SimPosix | still builds and runs (`fwsimposix.service`, bridge-fed) — kept as the sim-parity target; never run both at once (same ports) |
 
 Ethernet was the long pole and the cause was **the wrong device tree**: this is
 a **V1.2** board and Octavo's v3.0 image ships only the V1.1 DTB. Details in
@@ -114,10 +115,21 @@ The edits are reproducible offline on macOS without sudo — `gpt.py` + `part.py
 | sensor | where | address / node | rate | state |
 |---|---|---|---|---|
 | MPU-9150 gyro+accel | I2C `/dev/i2c-3` | 0x68 | **500 Hz** | live, 1.011 g, 0 err |
-| BMP388 barometer | I2C `/dev/i2c-3` | 0x77 (CHIP_ID 0x50) | **50 Hz** | live, 98 680 Pa ±2 Pa, 0 err |
+| **BMP388 barometer** | **DroneCAN `can0`** | **node 124, msg 1028/1029** | **50 Hz** | **live, 98.57 kPa — on the L431's I2C, via the custom AP_Periph** |
 | HMC5883L mag (secondary) | I2C `/dev/i2c-3` | 0x1E (ID 'H43') | **50 Hz** | live, 42.8 uT, 0 err |
 | **RM3100 magnetometer** | **DroneCAN `can0`** | **node 125, msg 1001** | **25 Hz** | **live, 51.1 uT** |
-| GPS | DroneCAN `can0` | node 124 | 5 Hz | on the wire, not decoded |
+| GPS (M8N) | DroneCAN `can0` | node 124, msg 1063/1061/20003 | 5 Hz | **decoded** — Fix2 + Auxiliary + gnss.Status; indoors no-fix, `sats_visible=0` (antenna question open, needs the window test) |
+
+The BMP388 **moved** from the board's own I2C bus to the L431 CAN node
+(2026-08-16). That took a custom AP_Periph build — the stock hwdef marks the
+L431's only I2C bus INTERNAL, so no `BARO_PROBE_EXT` bit can ever reach it;
+the fix is a *declared* probe (`BARO BMP388 I2C:0:0x77`). The full diff is
+`ap-periph-ninja-debug.patch` (also: an I2C bench scanner with SDA/SCL-swap
+detection over `debug.LogMessage`, airspeed+battery trimmed for flash), the
+known-good binary is `fw/AP_Periph-ninja-gcc10.bin`, and the build **must use
+gcc 10.2.1** — a gcc 13.3 image holds the node in its bootloader. Recipe in
+`SKILLS.md`, saga in `CLAUDE.md`. The move freed ~10 % of the MP1's I2C budget
+(bus busy 30 % → ~20 %) and costs ~1 % of CAN.
 
 The KUSBA/ADXL345 was **removed from the bench permanently** (2026-08-15). It
 was only ever a vibration reference - it read 0.912 g at rest, ~9 % low and
@@ -436,27 +448,36 @@ axes that can be inverted.
 ## Order of work
 
 1. ~~Get Linux booting~~ **done** — V1.2 OpenSTLinux on SD.
-2. Ship source over (tar via ssh; no git/rsync on the board) and build
-   `fw_simposix.elf` on the A7.
-3. Point `gazebo_bridge.py` at the board and fly the **simulated** sensors over
-   the network — proves the whole stack on real hardware at zero sensor risk.
-   The star mission's 0.04 m cross-track is the regression target.
-4. Write `probe_sensors.py` (**does not exist yet** — spec in `SKILLS.md`) and
-   run `--i2c` with the MPU9150 wired directly; confirm identity registers.
-5. Replace one axis at a time (gyro first) with real data, keeping the rest
-   simulated, and compare against the sim baseline.
-6. Move sensors behind the Matek CAN node and repeat over SocketCAN.
+2. ~~Build the firmware on the A7~~ **done** — both `fw_simposix.elf` and
+   `fw_realposix.elf` build natively (see `SKILLS.md` for the Qt stub dance).
+3. ~~Prove the stack with simulated sensors~~ **done** — bridge-fed simposix.
+4. ~~Prove each sensor's identity~~ **done** — `probe_sensors.py` reads
+   identity registers, not just ACKs.
+5. ~~Real sensors natively in the firmware~~ **done** — the `realposix`
+   target reads I2C through the PIOS Posix driver and CAN through the sensor
+   hub, publishes the full UAVObject set, and passed a 360 s readiness soak.
+6. ~~Move slow sensors behind the CAN node~~ **done for the baro** — BMP388
+   on the L431 via the custom AP_Periph, decoded back into `BaroSensor`.
 
-Step 3 is the one people skip and regret: it separates "the port works" from
-"the sensors work", and those fail very differently.
+**Remaining before flight:** actuator output (PWM/DroneCAN ESC path), RC
+input, failsafe wiring, an outdoor GPS fix to validate the lat/lon decode
+(and settle the antenna question), then HITL against Gazebo.
 
 ## Files
 
 | file | what |
 |---|---|
+| `ap-periph-ninja-debug.patch` | **the custom AP_Periph diff** for node 124: declared BMP388 probe, I2C debug scanner (SDA/SCL-swap detection over `debug.LogMessage`), airspeed+battery trimmed. Apply to ArduPilot master, build with **gcc 10.2.1 only** |
+| `fw/AP_Periph-ninja-gcc10.bin` | the known-good binary built from that patch (195,244 B) — exactly what is flashed on node 124 |
+| `can_flash.py` | **flash an L431 node over CAN** (BeginFirmwareUpdate + FileServer); embeds the three dronecan-python traps |
+| `allocatord.py` | DroneCAN node-ID allocator **daemon** (runs on the board under `dronecan-allocator.service`; brings can0 up itself) |
+| `dronecan_allocator.py` | the older session tool — allocates, prints a report, then **exits by design**; useful for its report only |
+| `shmlogd.c` | consumer daemon for the firmware's `/dev/shm` log ring (`--dump` replays post-mortem, and **consumes** the ring) |
+| `flight_readiness.py` | grades a soak from the ring: per-sensor Hz, bus saturation, GO/NO-GO per window |
+| `probe_sensors.py` | sensor identity checks on an I2C bus — reads identity registers, not just ACKs (**on the board**) |
 | `board_cmd.py` | run commands over the USB console (no network needed) |
 | `can_poll.py` | who is on the DroneCAN bus; decodes node ids + message types |
-| `dronecan_allocator.py` | node-ID allocation server + live sensor monitor (**runs on the board**) |
+| `can_bandwidth.py` | CAN load + per-transfer timing (counts transfers, not frames) |
 | `klipper_probe.py` | Klipper wire protocol + data-dictionary fetch (**on the board**) |
 | `klipper_accel.py` | ADXL345 streaming from the KUSBA (**on the board**) |
 | `sensor_bridge.py` | **real sensors -> UAVTalk UAVObjects** for fw_simposix (**on the board**) |
@@ -467,7 +488,4 @@ Step 3 is the one people skip and regret: it separates "the port works" from
 | `usb_descriptors.py` | dump what the gadget actually offers |
 | `write_sdcard.sh` | guarded SD writer |
 | `image-edits/` | the exact files written into the image |
-
-Referenced by the plan but **not yet written**: `probe_sensors.py` (sensor
-identity checks — spec in `SKILLS.md`) and `build_on_board.sh` (native
-SimPosix build; for now the `make` line in `SKILLS.md` does the job).
+| `board-config/` | SCHED_FIFO + 400 kHz I2C deployment, with the measurements |
