@@ -387,7 +387,7 @@ index 1ab2a2e..4013ac7 100644
          uint16_t total_size = uavcan_equipment_ahrs_RawIMU_encode(&pkt, buffer, !canfdout());
          canard_broadcast(UAVCAN_EQUIPMENT_AHRS_RAWIMU_SIGNATURE,
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
-index 067210f..ce9945f 100644
+index 067210f..3dcf60d 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 +++ b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 @@ -45,9 +45,16 @@ define AP_PERIPH_BARO_ENABLED 1
@@ -417,7 +417,7 @@ index 067210f..ce9945f 100644
  
  define HAL_USE_ADC TRUE
  define STM32_ADC_USE_ADC1 TRUE
-@@ -85,3 +92,26 @@ define AP_SERIALLED_ENABLED 1
+@@ -85,3 +92,32 @@ define AP_SERIALLED_ENABLED 1
  
  define HAL_SERIAL_ESC_COMM_ENABLED 1
  USE_BOOTLOADER_FROM_BOARD MatekL431
@@ -444,6 +444,12 @@ index 067210f..ce9945f 100644
 +# QMC5883L the product name implies. Enable and declare the P driver.
 +define AP_COMPASS_QMC5883P_ENABLED 1
 +COMPASS QMC5883P I2C:0:0x2c false ROTATION_NONE
++
++# Holybro Micro M9N swap (2026-08-16): its compass is an IST8310 at 0x0E
++# (scan: id[00]=0x10). The part the STOCK build could never see - our build
++# simply compiles the driver. QMC5883P stays declared for the Matek module.
++define AP_COMPASS_IST8310_ENABLED 1
++COMPASS IST8310 I2C:0:0x0e false ROTATION_NONE
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h b/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h
 index f1cf94b..c55e218 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h

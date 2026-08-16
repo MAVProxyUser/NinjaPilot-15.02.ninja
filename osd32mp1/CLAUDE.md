@@ -1460,3 +1460,30 @@ ingestion-only. Verified: hub-health `mag=250 qmc=249` per 10 s, zero
 errors. Side effect noted: the compass driver's I2C traffic on the L431
 costs the IMU loop ~10-15 % (compact stream ~142 Hz at the saved setting,
 was ~158).
+
+## The IST8310 is BACK - and the "CLOSED forever" ruling gets its epilogue (2026-08-16)
+
+The GPS swapped again: Holybro Micro M9N, whose compass is an IST8310. One
+I2C_SCAN answered everything in ninety seconds: `ACK 0x0E id[00]=0x10` =
+IST8310 at 0x0E, wiring straight (swapped probe empty), BMP388 and MPU
+still ACKing beside it.
+
+The old "CLOSED - the IST8310 can NEVER appear" ruling was true of the
+STOCK build (driver not compiled). We ship custom firmware now, so it was
+one hwdef line: `AP_COMPASS_IST8310_ENABLED 1` + `COMPASS IST8310
+I2C:0:0x0e`. Publishing at 25 Hz on first boot, **|B| = 46.9 uT** - inside
+Earth's range and agreeing with the RM3100's 51, unlike the QMC5883P's
+76 uT bench reading. The hub's node-keying (mag=125, everything else from
+124 into qmc_* fields) already handles it unchanged - the qmc_* name now
+means "node 124's aux mag", whatever module is plugged in.
+
+Both compass declarations stay in the hwdef (QMC5883P @0x2C, IST8310
+@0x0E): whichever GPS module is attached gets found at boot, the other
+probe fails silently. HAL_COMPASS_MAX_SENSORS=1 means first-found wins if
+both were ever present.
+
+Also observed post-scan (previous session): repeated `IERR 0x200000`
+LogMessages after a param-triggered sweep - the bit-bang stealing the I2C
+pins mid-driver leaves an internal-error latch that chatters until reboot.
+Cosmetic, clears on restart; scan, then reboot the node before trusting
+error counters.
