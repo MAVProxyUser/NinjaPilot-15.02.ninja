@@ -30,6 +30,7 @@
 /* Project Includes */
 #include "pios.h"
 
+#include <pios_shmlog.h>
 #if defined(PIOS_INCLUDE_UDP)
 
 #include <signal.h>
@@ -125,10 +126,10 @@ void *PIOS_UDP_RxThread(void *udp_dev_n)
             uint32_t now_ms = (uint32_t)(tv2.tv_sec * 1000 + tv2.tv_usec / 1000);
             if (now_ms - dbg_last_ms >= 1000) {
                 dbg_last_ms = now_ms;
-                printf("[SIMPOSIX-IFDEF-MARKER] pios_udp.c dev sock=%i: datagrams=%u bytes=%u drops=%u n11=%u n27=%u nOther=%u\n",
+                PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] pios_udp.c dev sock=%i: datagrams=%u bytes=%u drops=%u n11=%u n27=%u nOther=%u\n",
                        udp_dev->socket, (unsigned)datagrams, (unsigned)bytes_total, (unsigned)whole_drops,
                        (unsigned)n11, (unsigned)n27, (unsigned)nOther);
-                fflush(stdout);
+                /* shmlog: no flush */
             }
         }
         do {
@@ -155,12 +156,12 @@ void *PIOS_UDP_RxThread(void *udp_dev_n)
                         static uint32_t tail01 = 0;
                         tail01++;
                         if ((tail01 % 200) == 1) {
-                            printf("[SIMPOSIX-IFDEF-MARKER] pios_udp.c 27B datagram with 0x01 tail #%u:", (unsigned)tail01);
+                            PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] pios_udp.c 27B datagram with 0x01 tail #%u:", (unsigned)tail01);
                             for (int b = 0; b < 27; b++) {
                                 printf(" %02X", udp_dev->rx_buffer[b]);
                             }
                             printf("\n");
-                            fflush(stdout);
+                            /* shmlog: no flush */
                         }
                     }
                 } else {
@@ -182,9 +183,9 @@ void *PIOS_UDP_RxThread(void *udp_dev_n)
                 if ((uint16_t)received > fifo_headroom) {
                     whole_drops++;
                     if ((whole_drops % 500) == 1) {
-                        printf("[SIMPOSIX-IFDEF-MARKER] pios_udp.c: whole-datagram drops=%u (com fifo full)\n",
+                        PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] pios_udp.c: whole-datagram drops=%u (com fifo full)\n",
                                (unsigned)whole_drops);
-                        fflush(stdout);
+                        /* shmlog: no flush */
                     }
                 } else {
                     bool rx_need_yield = false;

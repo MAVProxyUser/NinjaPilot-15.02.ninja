@@ -43,12 +43,58 @@ void SysTick_Handler(void);
 /**
  * Initialises all system peripherals
  */
+#include <sys/file.h>
+#include <pios_shmlog.h>
+
+/*
+ * Refuse to run beside another instance - and NAME the one already running.
+ *
+ * Learned the hard way: the Posix port renames the main thread to
+ * "Scheduler", so pkill/pgrep by ELF name match nothing and leaked instances
+ * silently fight over UDP 9000 and the I2C bus. Three were once found
+ * running at the same time, and every measurement taken in that state was
+ * garbage. flock (not just a pid in a file) means the lock dies WITH the
+ * process - no stale-pidfile ambiguity after a crash.
+ */
+static void PIOS_SYS_SingleInstance(void)
+{
+    const char *pidfile = "/var/run/ninjapilot-fw.pid";
+    int fd = open(pidfile, O_RDWR | O_CREAT, 0644);
+
+    if (fd < 0) {
+        pidfile = "/tmp/ninjapilot-fw.pid";
+        fd = open(pidfile, O_RDWR | O_CREAT, 0644);
+        if (fd < 0) {
+            return; /* no lock possible; proceed rather than brick the bench */
+        }
+    }
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        char other[16] = "unknown";
+        ssize_t n = read(fd, other, sizeof(other) - 1);
+        if (n > 0) {
+            other[n] = 0;
+        }
+        fprintf(stderr,
+                "FATAL: another NinjaPilot firmware instance is already running (pid %s, lock %s).\n"
+                "       Stop it first: kill %s   (note: its comm is 'Scheduler', not the ELF name)\n",
+                other, pidfile, other);
+        exit(1);
+    }
+    if (ftruncate(fd, 0) == 0) {
+        dprintf(fd, "%d\n", (int)getpid());
+    }
+    /* keep fd open forever - the lock lives exactly as long as we do */
+}
+
 void PIOS_SYS_Init(void)
 {
     /**
      * stub
      */
     printf("PIOS_SYS_Init\n");
+
+    PIOS_SYS_SingleInstance();
+    PIOS_SHMLOG_Init(NULL);
 
     /* Initialise Basic NVIC */
     NVIC_Configuration();

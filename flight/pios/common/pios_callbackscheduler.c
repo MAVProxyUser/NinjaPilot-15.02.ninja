@@ -25,6 +25,7 @@
  */
 
 #include <pios.h>
+#include <pios_shmlog.h>
 #ifdef PIOS_INCLUDE_CALLBACKSCHEDULER
 
 #include <utlist.h>
@@ -593,18 +594,18 @@ static void dumpCallbackSchedulerState(struct DelayedCallbackTaskStruct *t, uint
         return;
     }
     lastDumpMs[idx] = nowMs;
-    printf("[SIMPOSIX-IFDEF-MARKER] CallbackSchedulerTask task='%s' priorityTask=%d "
+    PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] CallbackSchedulerTask task='%s' priorityTask=%d "
            "loopIters=%lu sleptCount=%lu\n",
            t->name, (int)t->priorityTask, (unsigned long)loopIters, (unsigned long)sleptCount);
     for (int p = 0; p <= CALLBACK_PRIORITY_LOW; p++) {
         DelayedCallbackInfo *cb = t->callbackQueue[p];
         while (cb) {
-            printf("[SIMPOSIX-IFDEF-MARKER]   priority=%d callbackID=%d waiting=%d runCount=%lu\n",
+            PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER]   priority=%d callbackID=%d waiting=%d runCount=%lu\n",
                    p, (int)cb->callbackID, (int)cb->waiting, (unsigned long)cb->runCount);
             cb = cb->next;
         }
     }
-    fflush(stdout);
+    /* shmlog: no flush */
 }
 #endif
 

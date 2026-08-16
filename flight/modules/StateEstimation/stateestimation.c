@@ -31,6 +31,7 @@
 
 #include "inc/stateestimation.h"
 
+#include <pios_shmlog.h>
 #ifdef SIMPOSIX
 #include <stdio.h>
 #include <sys/time.h>
@@ -485,10 +486,10 @@ static void StateEstimationCb(void)
         portTickType nowTick = xTaskGetTickCount();
         if ((nowTick - lastPrintTick) / portTICK_RATE_MS >= 1000) {
             lastPrintTick = nowTick;
-            printf("[SIMPOSIX-IFDEF-MARKER] StateEstimationCb: totalCalls=%lu accelBitSetCalls=%lu ratio=%.4f\n",
+            PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] StateEstimationCb: totalCalls=%lu accelBitSetCalls=%lu ratio=%.4f\n",
                    (unsigned long)totalCalls, (unsigned long)accelBitSetCalls,
                    totalCalls ? (double)accelBitSetCalls / (double)totalCalls : 0.0);
-            fflush(stdout);
+            /* shmlog: no flush */
         }
     }
 #endif
@@ -518,11 +519,11 @@ static void StateEstimationCb(void)
 #ifdef SIMPOSIX
     if (doAccelDbgPrint) {
         lastAccelDbgTick = accelDbgNowTick;
-        printf("[SIMPOSIX-IFDEF-MARKER] accel fetch: preBit=%d postBit=%d x=%.5f y=%.5f z=%.5f isreal_x=%d isreal_y=%d isreal_z=%d\n",
+        PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] accel fetch: preBit=%d postBit=%d x=%.5f y=%.5f z=%.5f isreal_x=%d isreal_y=%d isreal_z=%d\n",
                preBitSet, IS_SET(states.updated, SENSORUPDATES_accel),
                (double)dbgAccel.x, (double)dbgAccel.y, (double)dbgAccel.z,
                IS_REAL(dbgAccel.x), IS_REAL(dbgAccel.y), IS_REAL(dbgAccel.z));
-        fflush(stdout);
+        /* shmlog: no flush */
     }
 #endif
     FETCH_SENSOR_FROM_UAVOBJECT_CHECK_AND_LOAD_TO_STATE_3_DIMENSIONS(MagSensor, boardMag, x, y, z);
@@ -553,11 +554,11 @@ static void StateEstimationCb(void)
         uint32_t nowMs = (uint32_t)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
         if (nowMs - lastPrintMs >= 1000) {
             lastPrintMs = nowMs;
-            printf("[SIMPOSIX-IFDEF-MARKER] filterChain=%p cfmQueue=%p fusionAlgorithm=%ld revoSettings.FusionAlgorithm=%d "
+            PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] filterChain=%p cfmQueue=%p fusionAlgorithm=%ld revoSettings.FusionAlgorithm=%d "
                    "altitudeFilterInChain=%d\n",
                    (void *)filterChain, (void *)cfmQueue, (long)fusionAlgorithm, (int)revoSettings.FusionAlgorithm,
                    (int)(current != NULL));
-            fflush(stdout);
+            /* shmlog: no flush */
         }
     }
 #endif
@@ -696,9 +697,9 @@ static void sensorUpdatedCb(UAVObjEvent *ev)
         portTickType nowTick = xTaskGetTickCount();
         if ((nowTick - lastPrintTick) / portTICK_RATE_MS >= 1000) {
             lastPrintTick = nowTick;
-            printf("[SIMPOSIX-IFDEF-MARKER] sensorUpdatedCb: gyroMatches=%lu accelMatches=%lu\n",
+            PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] sensorUpdatedCb: gyroMatches=%lu accelMatches=%lu\n",
                    (unsigned long)gyroMatches, (unsigned long)accelMatches);
-            fflush(stdout);
+            /* shmlog: no flush */
         }
     }
 #endif

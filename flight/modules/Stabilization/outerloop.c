@@ -32,6 +32,7 @@
  */
 
 #include <openpilot.h>
+#include <pios_shmlog.h>
 #ifdef SIMPOSIX
 #include <stdio.h>
 #include <sys/time.h>
@@ -320,9 +321,9 @@ static void stabilizationOuterloopTask()
         static bool marker_printed = false;
         if (!marker_printed) {
             marker_printed = true;
-            printf("[SIMPOSIX-IFDEF-MARKER] outerloop.c using rateDesired.Thrust=rateDesiredAxis[3] (%.4f), not stabilizationDesired.Thrust (%.4f)\n",
+            PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] outerloop.c using rateDesired.Thrust=rateDesiredAxis[3] (%.4f), not stabilizationDesired.Thrust (%.4f)\n",
                    (double)rateDesiredAxis[3], (double)stabilizationDesired.Thrust);
-            fflush(stdout);
+            /* shmlog: no flush */
         }
     }
     rateDesired.Thrust = rateDesiredAxis[3];
@@ -376,9 +377,9 @@ static void AttitudeStateUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
         double wallclock = (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
         if (callCount == 1 || wallclock - lastPrint > 0.5) {
             lastPrint = wallclock;
-            printf("[SIMPOSIX-IFDEF-MARKER] outerloop.c AttitudeStateUpdatedCb: t=%.3f callCount=%u\n",
+            PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] outerloop.c AttitudeStateUpdatedCb: t=%.3f callCount=%u\n",
                    wallclock, (unsigned)callCount);
-            fflush(stdout);
+            /* shmlog: no flush */
         }
     }
 #endif

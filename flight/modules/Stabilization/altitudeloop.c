@@ -27,6 +27,7 @@
  */
 
 #include <openpilot.h>
+#include <pios_shmlog.h>
 #ifdef SIMPOSIX
 #include <stdio.h>
 #include <sys/time.h>
@@ -119,9 +120,9 @@ float stabilizationAltitudeHold(float setpoint, ThrustModeType mode, bool reinit
         pid_zero(&pid1);
         newaltitude = true;
 #ifdef SIMPOSIX
-        printf("[SIMPOSIX-IFDEF-MARKER] stabilizationAltitudeHold REINIT: setpoint=%.4f mode=%d startThrust=%.4f\n",
+        PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] stabilizationAltitudeHold REINIT: setpoint=%.4f mode=%d startThrust=%.4f\n",
                (double)setpoint, (int)mode, (double)startThrust);
-        fflush(stdout);
+        /* shmlog: no flush */
 #endif
     }
 
@@ -276,10 +277,10 @@ static void altitudeHoldTask(void)
             struct timeval tv;
             gettimeofday(&tv, NULL);
             double wallclock = (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
-            printf("[althold] t=%.3f mode=%d posDown=%.4f velDown=%.4f dT=%.5f thrustSetpoint=%.4f startThrust=%.4f VelocityDesired=%.4f thrustDemand=%.4f\n",
+            PIOS_SHMLOG_Printf("[althold] t=%.3f mode=%d posDown=%.4f velDown=%.4f dT=%.5f thrustSetpoint=%.4f startThrust=%.4f VelocityDesired=%.4f thrustDemand=%.4f\n",
                    wallclock, (int)thrustMode, (double)positionStateDown, (double)velocityStateDown, (double)dT,
                    (double)thrustSetpoint, (double)startThrust, (double)altitudeHoldStatus.VelocityDesired, (double)thrustDemand);
-            fflush(stdout);
+            /* shmlog: no flush */
         }
     }
 #endif
@@ -316,8 +317,8 @@ static void VelocityStateUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
         portTickType nowTick = xTaskGetTickCount();
         if ((nowTick - lastPrintTick) / portTICK_RATE_MS >= 1000) {
             lastPrintTick = nowTick;
-            printf("[SIMPOSIX-IFDEF-MARKER] VelocityStateUpdatedCb: calls=%lu\n", (unsigned long)calls);
-            fflush(stdout);
+            PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] VelocityStateUpdatedCb: calls=%lu\n", (unsigned long)calls);
+            /* shmlog: no flush */
         }
     }
 #endif

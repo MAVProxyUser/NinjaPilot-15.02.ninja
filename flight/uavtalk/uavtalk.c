@@ -30,6 +30,7 @@
  */
 
 #include "openpilot.h"
+#include <pios_shmlog.h>
 #include "uavtalk_priv.h"
 #ifdef SIMPOSIX
 #include <stdio.h>
@@ -623,9 +624,9 @@ static int32_t receiveObject(UAVTalkConnectionData *connection, uint8_t type, ui
         uint32_t nowMs = (uint32_t)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
         if (nowMs - lastPrintMs >= 1000) {
             lastPrintMs = nowMs;
-            printf("[SIMPOSIX-IFDEF-MARKER] uavtalk.c receiveObject: rxErrors=%u gyroRx=%u accelRx=%u otherRx=%u\n",
+            PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] uavtalk.c receiveObject: rxErrors=%u gyroRx=%u accelRx=%u otherRx=%u\n",
                    (unsigned)connection->stats.rxErrors, (unsigned)gyroRx, (unsigned)accelRx, (unsigned)otherRx);
-            fflush(stdout);
+            /* shmlog: no flush */
         }
     }
 #endif
@@ -1107,12 +1108,12 @@ static bool UAVTalkProcess_CS(UAVTalkConnectionData *connection, UAVTalkInputPro
             static uint32_t crcFails = 0;
             crcFails++;
             if ((crcFails % 200) == 1) {
-                printf("[SIMPOSIX-IFDEF-MARKER] uavtalk.c BAD CRC #%u: objId=%08X type=%02X pktsize=%u rxPktLen=%u "
+                PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] uavtalk.c BAD CRC #%u: objId=%08X type=%02X pktsize=%u rxPktLen=%u "
                        "payloadLen=%u computed_cs=%02X got=%02X\n",
                        (unsigned)crcFails, (unsigned)iproc->objId, (unsigned)iproc->type,
                        (unsigned)iproc->packet_size, (unsigned)iproc->rxPacketLength,
                        (unsigned)iproc->length, (unsigned)iproc->cs, (unsigned)rxbyte);
-                fflush(stdout);
+                /* shmlog: no flush */
             }
         }
 #endif

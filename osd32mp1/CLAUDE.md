@@ -951,3 +951,41 @@ local 500 Hz Set() (metadata throttled to 1 Hz periodic - still dies).
    port bug, nothing to do with realposix; survives -> realposix-specific.
 Also verify the metadata throttle actually took (read the metadata back) -
 test 9's negative is only valid if it did.
+
+## SOLVED: the realposix starvation was STDIO IN THE FLIGHT LOOPS (2026-08-16)
+
+The user called it in one sentence: "doing a printf in an RTOS loop seems
+silly." Root cause: printf/fflush in flight and driver loops = write()
+syscalls plus a PROCESS-WIDE stdio mutex, taken by FreeRTOS tasks at mixed
+priorities and raw pthreads alike. A low-priority task preempted WHILE
+HOLDING the stdout lock leaves every higher task to block NATIVELY on that
+mutex - invisible to FreeRTOS, which keeps selecting them as Ready - priority
+inversion with no inheritance, permanent because the holder is never
+scheduled again. Rate-dependent (2-20 s to hit), which is why idle simposix
+lived for days and 500 Hz realposix died in seconds. The earlier
+stdout-to-a-FILE test failed to exonerate stdio because the LOCK, not the
+pipe, is the weapon - it inverts identically wherever fd 1 points.
+
+Hypothesis #4 of the hunt WAS this and was wrongly discarded: "prints
+continued post-stall" - they came from the +7 band round-robining above the
+convoy. An objection must explain ALL the evidence before it kills a theory.
+
+**Fix (all three parts, per the user's prescription):**
+1. `PIOS_SHMLOG_Printf` - lock-free MPSC ring in `/dev/shm/ninjapilot-log`
+   (pios_shmlog.c): vsnprintf + a few atomics, NO syscall, NO shared lock,
+   drops-when-full rather than ever waiting. All 23 loop printfs rerouted,
+   all 22 `fflush(stdout)` calls removed from those paths.
+2. `shmlogd` (osd32mp1/shmlogd.c) - separate consumer process does the I/O;
+   `--dump` replays the ring POST-MORTEM, since /dev/shm survives a firmware
+   crash. It just proved itself: the verdict above was read from the ring
+   after the firmware had already been stopped.
+3. Single-instance flock pidfile in PIOS_SYS_Init - a second instance exits
+   with the running pid named (and the reminder that its comm is
+   "Scheduler"). No more leaked-instance contamination, ever.
+
+Proof: 242 watchdog lines over 121.5 s = 1.99/s against the 2/s design rate,
+full soak, `rateupdates=-1/-2` (outer loop RUNNING, was pinned at -64).
+Config identical to ten consecutive 2-20 s deaths.
+
+**RULE going forward: no stdio in any FreeRTOS task or driver loop on the
+Posix port. Diagnostics go through PIOS_SHMLOG_Printf. stdout is for init.**

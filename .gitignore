@@ -73,3 +73,4 @@ RemoteSystemsTempFiles
 *.diff~
 ground/gazebo_bridge/gui_plugins/*/build/
 glc_lib_test/
+test.py

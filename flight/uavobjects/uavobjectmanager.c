@@ -32,6 +32,7 @@
  */
 
 #include "openpilot.h"
+#include <pios_shmlog.h>
 #include "pios_struct_helper.h"
 #include "inc/uavobjectprivate.h"
 
@@ -1582,9 +1583,9 @@ int32_t sendEvent(struct UAVOBase *obj, uint16_t instId, UAVObjEventType trigger
             uint32_t nowMs = (uint32_t)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
             if (nowMs - lastPrintMs >= 1000) {
                 lastPrintMs = nowMs;
-                printf("[SIMPOSIX-IFDEF-MARKER] UAVObj event stats: eventCallbackErrors=%lu eventQueueErrors=%lu\n",
+                PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] UAVObj event stats: eventCallbackErrors=%lu eventQueueErrors=%lu\n",
                        (unsigned long)stats.eventCallbackErrors, (unsigned long)stats.eventQueueErrors);
-                fflush(stdout);
+                /* shmlog: no flush */
             }
         }
 #endif

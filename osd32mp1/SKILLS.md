@@ -409,3 +409,18 @@ if node and (cid >> 8) & 0xFFFF == 1001:
 Sanity check the magnitude before trusting any of it: Earth's field is
 0.25-0.65 Ga (25-65 uT). A reading of thousands of Gauss means the offset is
 wrong, not that the sensor is broken.
+
+## Read firmware diagnostics (the ring, not stdout)
+
+Flight-loop diagnostics go to a lock-free ring in `/dev/shm/ninjapilot-log`
+(printf in a flight loop caused priority-inversion deadlock - see CLAUDE.md).
+
+```bash
+shmlogd            # follow live, like tail -f
+shmlogd --dump     # replay backlog and exit - WORKS AFTER A CRASH
+```
+
+The ring survives firmware death, so `--dump` after a wedge shows the final
+seconds. Build if missing: `cc -O2 -o /usr/bin/shmlogd osd32mp1/shmlogd.c`.
+Only one firmware instance can run: the flock pidfile at
+`/var/run/ninjapilot-fw.pid` names the pid of whoever holds it.

@@ -45,6 +45,7 @@
  */
 
 #include "inc/stateestimation.h"
+#include <pios_shmlog.h>
 #include <attitudestate.h>
 #include <altitudefiltersettings.h>
 #include <homelocation.h>
@@ -298,11 +299,11 @@ static filterResult filter(stateFilter *self, stateEstimation *state)
         uint32_t nowMs = (uint32_t)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
         if (callCount == 1 || nowMs - lastPrintMs >= 1000) {
             lastPrintMs = nowMs;
-            printf("[SIMPOSIX-IFDEF-MARKER] filteraltitude.c(V3-KF) filter() ENTRY: callCount=%lu first_run=%d "
+            PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] filteraltitude.c(V3-KF) filter() ENTRY: callCount=%lu first_run=%d "
                    "state->updated=0x%02x accelBitOnEntry=%d\n",
                    (unsigned long)callCount, (int)this->first_run, (unsigned)state->updated,
                    (int)IS_SET(state->updated, SENSORUPDATES_accel));
-            fflush(stdout);
+            /* shmlog: no flush */
         }
     }
 #endif
@@ -360,13 +361,13 @@ static filterResult filter(stateFilter *self, stateEstimation *state)
                     struct timeval tv;
                     gettimeofday(&tv, NULL);
                     double wallclock = (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
-                    printf("[SIMPOSIX-IFDEF-MARKER] filteraltitude.c(V3-KF) predict: "
+                    PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] filteraltitude.c(V3-KF) predict: "
                            "t=%.3f callCount=%d dT=%.6f current=%.5f alt=%.5f vel=%.5f bias=%.5f "
                            "Palt=%.5f Pvel=%.5f Pbias=%.5f\n",
                            wallclock, callCount, (double)dT, (double)current,
                            (double)this->x[0], (double)this->x[1], (double)this->x[2],
                            (double)this->P[0][0], (double)this->P[1][1], (double)this->P[2][2]);
-                    fflush(stdout);
+                    /* shmlog: no flush */
                 }
             }
 #endif
@@ -391,11 +392,11 @@ static filterResult filter(stateFilter *self, stateEstimation *state)
 
 #ifdef SIMPOSIX
             if (fabsf(this->x[1] - velBefore) > 3.0f || fabsf(this->x[0] - altBefore) > 3.0f) {
-                printf("[SIMPOSIX-IFDEF-MARKER] filteraltitude.c(V3-KF) correct spike: "
+                PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] filteraltitude.c(V3-KF) correct spike: "
                        "baro=%.4f altBefore=%.4f altAfter=%.4f velBefore=%.4f velAfter=%.4f Palt=%.5f\n",
                        (double)state->baro[0], (double)altBefore, (double)this->x[0],
                        (double)velBefore, (double)this->x[1], (double)this->P[0][0]);
-                fflush(stdout);
+                /* shmlog: no flush */
             }
 #endif
 

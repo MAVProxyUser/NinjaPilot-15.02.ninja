@@ -32,6 +32,7 @@
  */
 
 #include <openpilot.h>
+#include <pios_shmlog.h>
 #include <pid.h>
 #include <sin_lookup.h>
 #include <callbackinfo.h>
@@ -243,10 +244,10 @@ static void stabilizationInnerloopTask()
             double wcm = (double)tvm.tv_sec + (double)tvm.tv_usec / 1e6;
             if (wcm - lastMonPrint > 0.5) {
                 lastMonPrint = wcm;
-                printf("[SIMPOSIX-IFDEF-MARKER] innerloop.c watchdog: t=%.3f gyroupdates=%d rateupdates=%d "
+                PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] innerloop.c watchdog: t=%.3f gyroupdates=%d rateupdates=%d "
                        "warn=%d error=%d crit=%d\n", wcm, (int)stabSettings.monitor.gyroupdates,
                        (int)stabSettings.monitor.rateupdates, (int)warn, (int)error, (int)crit);
-                fflush(stdout);
+                /* shmlog: no flush */
             }
         }
 #endif
@@ -374,9 +375,9 @@ static void stabilizationInnerloopTask()
             struct timeval tv;
             gettimeofday(&tv, NULL);
             double wallclock = (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
-            printf("[SIMPOSIX-IFDEF-MARKER] innerloop.c cchain.Stabilization gate CHANGED: t=%.3f gateOpen=%d "
+            PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] innerloop.c cchain.Stabilization gate CHANGED: t=%.3f gateOpen=%d "
                    "actuator.Thrust=%.4f\n", wallclock, (int)gateOpen, (double)actuator.Thrust);
-            fflush(stdout);
+            /* shmlog: no flush */
         }
         static double lastPeriodicPrint = 0.0;
         struct timeval tv2;
@@ -384,13 +385,13 @@ static void stabilizationInnerloopTask()
         double wallclock2 = (double)tv2.tv_sec + (double)tv2.tv_usec / 1e6;
         if (wallclock2 - lastPeriodicPrint > 0.5) {
             lastPeriodicPrint = wallclock2;
-            printf("[SIMPOSIX-IFDEF-MARKER] innerloop.c PERIODIC: t=%.3f gateOpen=%d "
+            PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] innerloop.c PERIODIC: t=%.3f gateOpen=%d "
                    "rateDesired.Thrust=%.4f actuatorDesiredAxis3_BEFORE_LOOP=%.4f actuator.Thrust_BEFORE_LOOP=%.4f "
                    "InnerLoop[3]=%d OuterLoop_n/a StabMode3=%d\n",
                    wallclock2, (int)gateOpen, (double)rateDesired.Thrust, (double)actuatorDesiredAxis[3],
                    (double)actuator.Thrust, (int)StabilizationStatusInnerLoopToArray(enabled)[3],
                    (int)previous_mode[3]);
-            fflush(stdout);
+            /* shmlog: no flush */
         }
     }
 #endif
