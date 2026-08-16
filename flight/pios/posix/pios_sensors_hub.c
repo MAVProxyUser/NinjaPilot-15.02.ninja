@@ -98,11 +98,19 @@ static int i2c_fd = -1;
  * instead of STOP/START. Cheaper than two ioctls and it is what makes reading
  * several devices in one syscall possible.
  */
+static uint64_t i2c_busy_ns;      /* hub thread only - no atomics needed */
+
 static int i2c_xfer(struct lin_i2c_msg *msgs, uint32_t n)
 {
     struct lin_i2c_rdwr req = { .msgs = msgs, .nmsgs = n };
+    struct timespec a, b;
 
-    return ioctl(i2c_fd, LINUX_I2C_RDWR, &req) < 0 ? -1 : 0;
+    clock_gettime(CLOCK_MONOTONIC, &a);
+    int r = ioctl(i2c_fd, LINUX_I2C_RDWR, &req);
+    clock_gettime(CLOCK_MONOTONIC, &b);
+    i2c_busy_ns += (uint64_t)(b.tv_sec - a.tv_sec) * 1000000000ull
+                   + (uint64_t)(b.tv_nsec - a.tv_nsec);
+    return r < 0 ? -1 : 0;
 }
 
 static int i2c_wr8(uint8_t addr, uint8_t reg, uint8_t val)
@@ -461,6 +469,7 @@ static bool hmc_read(float ga[3])
 #define DC_MSG_GNSS_STATUS   20003  /* ardupilot.gnss.Status */
 
 static int can_fd = -1;
+static uint64_t can_bits;   /* hub thread only */
 
 static bool can_init(const char *ifname)
 {
@@ -753,6 +762,7 @@ static void can_poll(void)
     struct can_frame f;
 
     while (can_fd >= 0 && read(can_fd, &f, sizeof(f)) == (ssize_t)sizeof(f)) {
+        can_bits += 67u + 8u * f.can_dlc;   /* nominal ext-frame cost */
         if (!(f.can_id & CAN_EFF_FLAG) || f.can_dlc < 1) {
             continue;
         }
@@ -900,6 +910,10 @@ static void *hub_main(void *arg)
     double next_baro = now_s();
     double next_hmc = now_s();
     const double hmc_dt = 1.0 / 50.0;
+    double next_health = now_s() + 10.0;
+    struct pios_sensors_hub_data prev;
+    memset(&prev, 0, sizeof(prev));
+    uint64_t prev_i2c_ns = 0, prev_can_bits = 0;
     const double imu_dt = 1.0 / 500.0;   /* matches PIOS_SENSOR_RATE */
     const double baro_dt = 1.0 / 50.0;
 
@@ -962,6 +976,34 @@ static void *hub_main(void *arg)
 
         if (have_can) {
             can_poll();
+        }
+
+        if (t >= next_health) {
+            next_health += 10.0;
+            /*
+             * Flight-readiness checkpoint, every 10 s. Counts are DELTAS over
+             * the interval, so rate = count / 10. i2c_pm / can_pm are bus
+             * utilisation in PERMILLE, from measured transfer wall-time and
+             * actual frame sizes - not datasheet arithmetic. Integer-only:
+             * the %u-after-doubles varargs artifact is still open.
+             */
+            PIOS_SHMLOG_Printf("[hub-health] imu=%lu baro=%lu hmc=%lu mag=%lu "
+                               "fix2=%lu aux=%lu ierr=%lu berr=%lu gbad=%lu "
+                               "i2c_pm=%lu can_pm=%lu",
+                               (unsigned long)(hub.imu_count - prev.imu_count),
+                               (unsigned long)(hub.baro_count - prev.baro_count),
+                               (unsigned long)(hub.mag2_count - prev.mag2_count),
+                               (unsigned long)(hub.mag_count - prev.mag_count),
+                               (unsigned long)(hub.gps_count - prev.gps_count),
+                               (unsigned long)(hub.gps_aux_count - prev.gps_aux_count),
+                               (unsigned long)(hub.imu_errors - prev.imu_errors),
+                               (unsigned long)(hub.baro_errors - prev.baro_errors),
+                               (unsigned long)(hub.gps_bad - prev.gps_bad),
+                               (unsigned long)((i2c_busy_ns - prev_i2c_ns) / 10000000ull),
+                               (unsigned long)((can_bits - prev_can_bits) / 10000ull));
+            prev = hub;
+            prev_i2c_ns = i2c_busy_ns;
+            prev_can_bits = can_bits;
         }
 
         /* Sleep to the next due event rather than spinning - this thread has

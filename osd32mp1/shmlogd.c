@@ -27,9 +27,14 @@ int main(int argc, char **argv)
     close(fd);
     if (r == MAP_FAILED || r->magic != MAGIC) { fprintf(stderr, "bad ring\n"); return 1; }
 
-    /* start a full lap back if the backlog is deeper than the ring */
+    /* This is a DROP-ON-FULL ring, not an overwrite ring: the writer never
+     * clobbers an unconsumed slot, it drops and counts. So the oldest valid
+     * record is ALWAYS at r->tail - "skip ahead" logic belongs to overwrite
+     * rings and here it lands on never-rewritten sequence numbers and reads
+     * nothing (found the hard way: head=12191, tail=0, 8095 drops, dump=0).
+     * Run the daemon CONCURRENTLY for long captures; a post-mortem dump only
+     * holds the first ring-full. */
     uint64_t tail = r->tail;
-    if (r->head > tail + SLOTS) tail = r->head - SLOTS;
 
     uint64_t last_drop = r->dropped;
     for (;;) {

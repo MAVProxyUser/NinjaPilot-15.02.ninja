@@ -1055,3 +1055,32 @@ antenna/RF - connector seated? patch facing sky? buried under bench metal? -
 not at receiver settings, which AP_Periph configures itself (healthy=1,
 5 Hz cadence proves comms). Definitive test: near a window, 15 min;
 sats_visible stays 0 -> antenna.
+
+## FLIGHT-READINESS SOAK: 360 s, graded GO (2026-08-16)
+
+`flight_readiness.py` grades a soak from the ring: [hub-health] checkpoints
+every 10 s (per-sensor deltas, MEASURED i2c busy-time, CAN bits from actual
+frame sizes) bucketed into 30/60/90/180/360 s windows against explicit
+thresholds. Result, 23,182 records, zero ring drops:
+
+    window     imu    baro  hmc   mag   gps  err  i2c%  can%  wd/s  verdict
+    0-30s      498.6  50.0  50.0  25.0  5.0  0    30.4  1.2   2.00  NO-GO outer*
+    30-360s    498.2+ 50.0  50.0  25.0  5.0  0    30.5  1.2   ~2.0  GO (all)
+
+*The 0-30 s "outer" flag is rateupdates touching -64 during filtercf's
+DELIBERATE startup calibration windows (4 s ERROR + 6 s CRITICAL, no attitude
+until init completes - documented in the main CLAUDE.md). Expected, not a
+fault. Every window after: GO on every criterion.
+
+Bottom line: sensors, buses and loops are flight-stable for 6 minutes
+continuous. I2C sits at 30 % busy, CAN at 1.2 %. The flyable envelope on
+this evidence: attitude / AxisLock / AltHold - no GPS modes until an outdoor
+fix validates lat/lon (and the antenna question is answered).
+
+### Ring lesson: it is DROP-ON-FULL, and that changes how you read it
+The writer never overwrites an unconsumed slot - it drops and counts. So the
+oldest valid record is ALWAYS at tail; "skip a lap back from head" logic
+belongs to overwrite rings and reads ZERO here (found live: head=12191,
+tail=0, dropped=8095, dump empty). And a post-mortem dump holds only the
+FIRST ring-full (~2 min at current rates): for long captures run shmlogd
+CONCURRENTLY into a file. Both now encoded in shmlogd itself.
