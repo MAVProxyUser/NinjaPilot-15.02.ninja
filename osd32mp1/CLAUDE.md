@@ -1571,3 +1571,29 @@ bench height difference) - both track changes together; the arm-time ground
 zero removes it. NOT yet a flight sensor: the hub has no BMP280 driver (its
 local-baro path was written for the BMP388's registers, now on CAN). Wiring
 one in gives BaroSensor a local source + failover like the IMU pair.
+
+## GRAND BENCHMARK: both buses, all sensors, max rates, 360 s (2026-08-16, final)
+
+Windows 30/60/90/120/360 s, all cumulative, all stable to 3 decimals:
+
+    I2C  MPU-9150#1 free-run (DLPF off)   1440.0 Hz  <- the MP1 bus transport max
+    I2C  HMC5883L reads / unique           75.0 / 69.3 Hz  (real ODR ~69, its max)
+    I2C  BMP280 reads / unique             25.0 / 22.2 Hz  (x16 osrs conversion time)
+    CAN  MPU#2 raw proxy                   47* -> 411 Hz released (430 solo peak)
+    CAN  BMP388 press/temp                 50.00 / 50.00 Hz
+    CAN  IST8310 / RM3100 mags             24.84 / 24.98 Hz
+    CAN  gnss Fix2/Aux/Status              10.00 Hz ALL (GPS1_RATE_MS=100 - the
+                                           M9N sustains 10 Hz for the full 360 s)
+    CAN  NodeStatus x3                     1.00 Hz
+    total CAN 386 fr/s, controller overruns ZERO across the whole 6 minutes
+
+*The 47 Hz was DEGRADEDHZ doing its job (flag verified latched, vendor
+0xb3b0). GOTCHA discovered: the release-on-new-request binds to the param
+VALUE at trip time - re-requesting the SAME value (1000) does not release;
+any different value (999) does, instantly (47 -> 411 Hz measured). A reboot
+also clears it. Document-worthy because "I set the rate again and nothing
+happened" is exactly how it presents.
+
+Headlines: the MP1's local bus tops at 1440 Hz reads (Python! - C will be
+higher), the M9N delivers 10 Hz GNSS sustained, and six minutes of both
+buses at max produced zero overruns anywhere.
