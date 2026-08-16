@@ -1428,3 +1428,35 @@ build); the always-on-boot I2C sweep was in the image that held the BL
 through five deliveries. Do not re-add the unconditional sweep without
 investigating; the baro-unhealthy-gated sweep remains fine. Operating
 point saved: cmd 200 (=158 delivered), raw 25, baro native.
+
+## SOLVED: the M9N's "missing" compass is a QMC5883P at 0x2C, not a QMC5883L at 0x0D (2026-08-16)
+
+The detective chain, because each link mattered:
+- hwdef truth: the L431 runs ONE I2C peripheral (I2C2, PB13/PB14; I2C1's
+  pins are burned on USART1) and BOTH connectors (4-pin I2C JST, 6-pin GPS
+  combo) share that net - no hidden second bus, so "enable another bus" was
+  never the answer.
+- A PARAM-TRIGGERED I2C sweep (`I2C_SCAN=1`, one-shot, reports over
+  debug.LogMessage) replaced the always-at-boot sweep that had bricked an
+  image. Its report: `ACK 0x2C id[00]=80` - a live device at an address no
+  QMC5883L ever uses.
+- 0x2C + chip-id 0x80 is the QMC5883P - the successor die vendors quietly
+  ship on "5883"-branded modules. ArduPilot's SEPARATE AP_Compass_QMC5883P
+  driver expects exactly those constants. The wiring was perfect all along;
+  the firmware was probing 0x0D for a part that is not there.
+- Fix: `AP_COMPASS_QMC5883P_ENABLED 1` + `COMPASS QMC5883P I2C:0:0x2c` -
+  compass publishing at 25 Hz on the first boot after flashing.
+
+**Do not trust the part number on a "5883" module. Scan and read the ID.**
+
+Reading: bench |B| = 76 uT vs the RM3100's 51 - uncalibrated hard-iron
+offset (the M9N manual itself demands 10 cm from wiring). Calibrate before
+any heading use.
+
+**Hub fix that this forced**: node 124 and node 125 BOTH broadcast msg 1001
+now. The hub's mag decode is keyed to node 125 (the calibrated RM3100 = the
+flight mag); node 124's QMC lands in separate qmc_* snapshot fields,
+ingestion-only. Verified: hub-health `mag=250 qmc=249` per 10 s, zero
+errors. Side effect noted: the compass driver's I2C traffic on the L431
+costs the IMU loop ~10-15 % (compact stream ~142 Hz at the saved setting,
+was ~158).

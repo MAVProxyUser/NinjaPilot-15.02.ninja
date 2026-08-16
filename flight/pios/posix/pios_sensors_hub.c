@@ -946,16 +946,28 @@ static void can_poll(void)
         }
 
         if (mt == DC_MSG_MAGNETIC_FIELD && f.can_dlc >= 7) {
+            /* TWO nodes broadcast 1001 now: node 125's RM3100 (calibrated,
+             * the flight mag) and node 124's QMC5883P (M9N module, raw).
+             * They MUST stay separate - interleaving them corrupts heading. */
             float x = f16_to_f32((uint16_t)(f.data[0] | (f.data[1] << 8)));
             float y = f16_to_f32((uint16_t)(f.data[2] | (f.data[3] << 8)));
             float z = f16_to_f32((uint16_t)(f.data[4] | (f.data[5] << 8)));
             hub_publish_begin();
-            hub.mag_ga[0] = x;                 /* Gauss */
-            hub.mag_ga[1] = y;
-            hub.mag_ga[2] = z;
-            hub.mag_node = node;
-            hub.mag_time = now_s();
-            hub.mag_count++;
+            if (node == 125) {
+                hub.mag_ga[0] = x;             /* Gauss */
+                hub.mag_ga[1] = y;
+                hub.mag_ga[2] = z;
+                hub.mag_node = node;
+                hub.mag_time = now_s();
+                hub.mag_count++;
+            } else {
+                hub.qmc_ga[0] = x;
+                hub.qmc_ga[1] = y;
+                hub.qmc_ga[2] = z;
+                hub.qmc_node = node;
+                hub.qmc_time = now_s();
+                hub.qmc_count++;
+            }
             hub_publish_end();
         }
     }
@@ -1050,7 +1062,7 @@ static void *hub_main(void *arg)
              * actual frame sizes - not datasheet arithmetic. Integer-only:
              * the %u-after-doubles varargs artifact is still open.
              */
-            PIOS_SHMLOG_Printf("[hub-health] imu=%lu imu2=%lu baro=%lu hmc=%lu mag=%lu "
+            PIOS_SHMLOG_Printf("[hub-health] imu=%lu imu2=%lu baro=%lu hmc=%lu mag=%lu qmc=%lu "
                                "fix2=%lu aux=%lu ierr=%lu berr=%lu gbad=%lu "
                                "i2c_pm=%lu can_pm=%lu",
                                (unsigned long)(hub.imu_count - prev.imu_count),
@@ -1058,6 +1070,7 @@ static void *hub_main(void *arg)
                                (unsigned long)(hub.baro_count - prev.baro_count),
                                (unsigned long)(hub.mag2_count - prev.mag2_count),
                                (unsigned long)(hub.mag_count - prev.mag_count),
+                               (unsigned long)(hub.qmc_count - prev.qmc_count),
                                (unsigned long)(hub.gps_count - prev.gps_count),
                                (unsigned long)(hub.gps_aux_count - prev.gps_aux_count),
                                (unsigned long)(hub.imu_errors - prev.imu_errors),

@@ -1,5 +1,5 @@
 diff --git a/Tools/AP_Periph/AP_Periph.cpp b/Tools/AP_Periph/AP_Periph.cpp
-index 04cc75e..1aa48bf 100644
+index 04cc75e..2f6bc1f 100644
 --- a/Tools/AP_Periph/AP_Periph.cpp
 +++ b/Tools/AP_Periph/AP_Periph.cpp
 @@ -177,9 +177,12 @@ void AP_Periph_FW::init()
@@ -17,7 +17,7 @@ index 04cc75e..1aa48bf 100644
          }
      }
  #endif
-@@ -426,6 +429,88 @@ void AP_Periph_FW::update()
+@@ -426,6 +429,95 @@ void AP_Periph_FW::update()
  
      static uint32_t last_led_ms;
      uint32_t now = AP_HAL::millis();
@@ -35,7 +35,8 @@ index 04cc75e..1aa48bf 100644
 +    {
 +        static uint32_t last_scan_ms;
 +        static uint8_t scan_count;
-+        if (!baro.healthy() && scan_count < 8 && now - last_scan_ms > 15000) {
++        const bool param_scan = (g.debug_scan != 0);
++        if ((param_scan || (!baro.healthy() && scan_count < 8)) && now - last_scan_ms > 15000) {
 +            last_scan_ms = now;
 +            scan_count++;
 +            uint8_t found = 0;
@@ -57,8 +58,11 @@ index 04cc75e..1aa48bf 100644
 +                    found++;
 +                }
 +            }
-+            if (found == 0) {
-+                can_printf("I2CDBG bus EMPTY (scan %u) - trying SWAPPED SDA/SCL", scan_count);
++            if (found == 0 || param_scan) {
++                can_printf("I2CDBG %u straight ACKs (scan %u) - trying SWAPPED SDA/SCL", found, scan_count);
++                /* exclude the hardware I2C drivers while the pins are ours */
++                auto busdev = hal.i2c_mgr->get_device(0, 0x0d);
++                WITH_SEMAPHORE(busdev->get_semaphore());
 +                /* bit-bang with roles swapped: PB14 clocks, PB13 is data */
 +                const ioline_t SCLp = PAL_LINE(GPIOB, 14U);   /* normally SDA */
 +                const ioline_t SDAp = PAL_LINE(GPIOB, 13U);   /* normally SCL */
@@ -99,6 +103,9 @@ index 04cc75e..1aa48bf 100644
 +                palSetLineMode(SDAp, PAL_MODE_ALTERNATE(4) | PAL_STM32_OTYPE_OPENDRAIN);
 +                palSetLineMode(SCLp, PAL_MODE_ALTERNATE(4) | PAL_STM32_OTYPE_OPENDRAIN);
 +            }
++            if (param_scan) {
++                g.debug_scan.set(0);   /* one-shot */
++            }
 +        }
 +    }
 +#endif /* NINJA_I2C_DEBUG */
@@ -122,10 +129,10 @@ index 0ab36ee..2538eb1 100644
  #if AP_PERIPH_AIRSPEED_ENABLED
      uint32_t last_airspeed_update_ms;
 diff --git a/Tools/AP_Periph/Parameters.cpp b/Tools/AP_Periph/Parameters.cpp
-index c36ab3e..821f244 100644
+index c36ab3e..25309da 100644
 --- a/Tools/AP_Periph/Parameters.cpp
 +++ b/Tools/AP_Periph/Parameters.cpp
-@@ -281,6 +281,13 @@ const AP_Param::Info AP_Periph_FW::var_info[] = {
+@@ -281,6 +281,20 @@ const AP_Param::Info AP_Periph_FW::var_info[] = {
      // @Values: 0:Disabled, 1:Enabled
      // @User: Standard
      GSCALAR(baro_enable, "BARO_ENABLE", AP_PERIPH_BARO_ENABLE_DEFAULT),
@@ -136,10 +143,17 @@ index c36ab3e..821f244 100644
 +    // @Range: 0 100
 +    // @User: Standard
 +    GSCALAR(baro_max_rate, "BARO_MAX_RATE", 0),
++
++    // @Param: I2C_SCAN
++    // @DisplayName: Trigger I2C debug scan
++    // @Description: Set to 1 to run one bus sweep plus the swapped-SDA/SCL bit-bang probe, reported over debug.LogMessage. Self-clears.
++    // @Range: 0 1
++    // @User: Advanced
++    GSCALAR(debug_scan, "I2C_SCAN", 0),
  #endif
  
  #if AP_PERIPH_HAVE_LED_WITHOUT_NOTIFY
-@@ -724,6 +731,13 @@ const AP_Param::Info AP_Periph_FW::var_info[] = {
+@@ -724,6 +738,13 @@ const AP_Param::Info AP_Periph_FW::var_info[] = {
      // @User: Standard
      GSCALAR(imu_sample_rate, "INS_SAMPLE_RATE", 0),
  
@@ -154,27 +168,29 @@ index c36ab3e..821f244 100644
      // @Path: ../libraries/AP_InertialSensor/AP_InertialSensor.cpp
      GOBJECT(imu, "INS", AP_InertialSensor),
 diff --git a/Tools/AP_Periph/Parameters.h b/Tools/AP_Periph/Parameters.h
-index 16604f3..0d05d28 100644
+index 16604f3..bc2d731 100644
 --- a/Tools/AP_Periph/Parameters.h
 +++ b/Tools/AP_Periph/Parameters.h
-@@ -106,6 +106,8 @@ public:
+@@ -106,6 +106,9 @@ public:
          k_param_servo_command_timeout_ms,
          k_param_servo_telem_msg_rate,
          k_param_battery_bms,
 +        k_param_baro_max_rate,
 +        k_param_imu_raw_rate,
++        k_param_debug_scan,
      };
  
      AP_Int16 format_version;
-@@ -128,6 +130,7 @@ public:
+@@ -128,6 +131,8 @@ public:
  #endif
  #if AP_PERIPH_BARO_ENABLED
      AP_Int8 baro_enable;
 +    AP_Int16 baro_max_rate;
++    AP_Int8 debug_scan;
  #endif
  #if !defined(HAL_NO_FLASH_SUPPORT) && !defined(HAL_NO_ROMFS_SUPPORT)
      AP_Int8 flash_bootloader;
-@@ -222,6 +225,7 @@ public:
+@@ -222,6 +227,7 @@ public:
  
  #if AP_PERIPH_IMU_ENABLED
      AP_Int16 imu_sample_rate;
@@ -371,7 +387,7 @@ index 1ab2a2e..4013ac7 100644
          uint16_t total_size = uavcan_equipment_ahrs_RawIMU_encode(&pkt, buffer, !canfdout());
          canard_broadcast(UAVCAN_EQUIPMENT_AHRS_RAWIMU_SIGNATURE,
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
-index 067210f..dda096c 100644
+index 067210f..ce9945f 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 +++ b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 @@ -45,9 +45,16 @@ define AP_PERIPH_BARO_ENABLED 1
@@ -401,7 +417,7 @@ index 067210f..dda096c 100644
  
  define HAL_USE_ADC TRUE
  define STM32_ADC_USE_ADC1 TRUE
-@@ -85,3 +92,20 @@ define AP_SERIALLED_ENABLED 1
+@@ -85,3 +92,26 @@ define AP_SERIALLED_ENABLED 1
  
  define HAL_SERIAL_ESC_COMM_ENABLED 1
  USE_BOOTLOADER_FROM_BOARD MatekL431
@@ -422,6 +438,12 @@ index 067210f..dda096c 100644
 +# defaults_periph.h compiles the no-IMU panic in (reset loop -> bootloader
 +# hold, looks exactly like a dead flash). Boot anyway and publish the rest.
 +define AP_INERTIALSENSOR_ALLOW_NO_SENSORS 0
++
++# The M9N-5883 module actually carries a QMC5883P (successor die, addr 0x2C,
++# chip id 0x80 at reg 0x00 - confirmed by the on-node I2C sweep), not the
++# QMC5883L the product name implies. Enable and declare the P driver.
++define AP_COMPASS_QMC5883P_ENABLED 1
++COMPASS QMC5883P I2C:0:0x2c false ROTATION_NONE
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h b/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h
 index f1cf94b..c55e218 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h

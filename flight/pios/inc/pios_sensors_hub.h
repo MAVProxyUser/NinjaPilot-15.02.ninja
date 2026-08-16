@@ -38,6 +38,14 @@ struct pios_sensors_hub_data {
     uint32_t imu_count;
     uint32_t imu_errors;
 
+    /* Third magnetometer: the QMC5883P on the M9N-5883, via node 124's
+     * MagneticFieldStrength. UNCALIBRATED (bench |B| reads ~76 uT vs the
+     * RM3100's 51) - ingested for visibility, not yet published. */
+    float    qmc_ga[3];
+    uint8_t  qmc_node;
+    double   qmc_time;
+    uint32_t qmc_count;
+
     /* Second IMU: the MPU-9150 on the L431 CAN node, via the compact
      * single-frame stream (msgs 20500/20501). Failover source only. */
     float    imu2_gyro_dps[3];
