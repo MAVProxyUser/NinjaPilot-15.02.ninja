@@ -474,3 +474,29 @@ case is a waiting bootloader, never a brick. Re-run the flasher with a good
 image (the stock one from
 https://firmware.ardupilot.org/AP_Periph/latest/MatekL431-Periph/ always
 works). SWD pads are the absolute fallback; they have never been needed.
+
+## Recover a CAN node that has gone deaf (TX storm / pool starvation)
+
+Symptom: the node heartbeats but answers NOTHING (params, restart, Begin all
+time out), sensor rates collapsed, multi-frame transfers never complete.
+Software cannot break in — the shared canard pool is exhausted.
+
+Arm the ambush on the board, then power-cycle the node:
+
+```python
+# spam BeginFirmwareUpdate ~5/s; the app's ~1s init calm after power-on
+# hears it before the storm starts and parks in the bootloader (mode 3)
+node = dronecan.make_node("can0", node_id=126, bitrate=1000000)
+fs = dronecan.app.file_server.FileServer(node, lookup_paths=["/home/root/fw"])
+begin = dronecan.uavcan.protocol.file.BeginFirmwareUpdate.Request(
+    source_node_id=126,
+    image_file_remote_path=dronecan.uavcan.protocol.file.Path(path="AP_Periph.bin"))
+while True:
+    node.request(begin, 124, lambda e: None, timeout=0.2)
+    node.spin(0.1)   # watch NodeStatus for mode 3, then keep serving
+```
+
+Once parked, run `flash124b.py` (a fresh Begin re-attaches cleanly even if
+the ambush server died mid-feed). Judge success ONLY by mode==0 AND the
+sensor suite publishing — `mode = (b[4]>>3)&7`, and health `(b[4]>>6)` is
+NOT mode.

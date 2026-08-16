@@ -1230,3 +1230,49 @@ unchanged. Verified live: hub-health `baro=500`/10 s = 50 Hz from CAN, zero
 errors, can_pm 23 (2.3 % bus with baro added), flight loops healthy
 (rateupdates -2). The baro's migration MP1-I2C -> L431-CAN is COMPLETE and
 freed ~25 % of the MP1 I2C bus budget (was 30.5 % busy with three devices).
+
+## Second MPU-9150 on the L431: detected, publishing — and THREE traps (2026-08-16)
+
+The IMU itself was the easy part: `IMU Invensense I2C:0:0x68` + 
+`AP_PERIPH_IMU_ENABLED 1` in the custom hwdef, and the AP driver accepts
+WHO_AM_I 0x68 (MPU-9150 = MPU-6000-compatible core; the driver does the
+reset/wake itself). RawIMU (1003) publishing gated on `INS_SAMPLE_RATE`
+(default 0 = thread never starts). Verified live: **47.6 Hz, 476/476
+transfers complete, |a| = 1.044 g, gyro zero-mean sd < 0.008 rad/s**, with
+baro at 50 Hz and the full GPS suite at 5 Hz alongside.
+
+Getting there hit three traps, each of which looked like something else:
+
+**1. RawIMU at 200 Hz MELTS the node — pool starvation, not bandwidth.**
+7 frames/transfer × 200 Hz floods the L431's 4 KB canard pool, which is
+SHARED between TX and RX. Signature: start-frames on the wire with the tails
+missing (zero completable transfers), baro collapsing 50→5 Hz, NodeStatus
+0.1 Hz — and the node goes DEAF, because inbound param/restart/Begin
+requests need pool blocks too. 90 single-frame requests over 45 s: all
+eaten. Software-only recovery is impossible at that point.
+
+**The recovery that works — the power-cycle ambush**: spam
+`BeginFirmwareUpdate` continuously while the node power-cycles; the app's
+~1 s init calm (before the IMU thread starts) hears it and reboots into the
+bootloader, parked. Recipe in SKILLS.md. Publish rate is now CLAMPED to
+50 Hz in code (imu.cpp + AP_Periph.cpp) so a bad saved param can never
+re-create the storm. High-rate gyro-over-CAN needs the single-frame vendor
+message (1 frame/sample), not RawIMU.
+
+**2. "The new firmware won't boot" was the INS no-IMU PANIC.** Every image
+flashed after the MPU was unplugged held in the bootloader — three
+deliveries, md5-verified, all blamed on delivery/toolchain/pool. The real
+cause: `defaults_periph.h` sets `AP_INERTIALSENSOR_ALLOW_NO_SENSORS` to
+`AP_PERIPH_IMU_ENABLED`, which compiles in
+`AP_HAL::panic("INS needs at least 1 gyro and 1 accel")` — boot, probe
+empty bus, panic, reset, BL hold. Indistinguishable from a dead flash from
+the wire. Fixed: the default is now #ifndef-guarded and the hwdef sets it
+to 0 — the node boots and publishes the rest of its suite when the IMU is
+absent. **When a flash "fails", ask what the app does in its first 100 ms.**
+
+**3. NodeStatus bit positions: health is (b[4]>>6), MODE is (b[4]>>3)&7.**
+A watcher decoding `>>6` as "mode" read the bootloader's health=OK as
+mode=OPERATIONAL and blessed a dead node. The BL also answers GetNodeInfo
+DURING the boot transition, so a flasher sampling right after completion
+prints the BL identity even when the app boots fine a second later — judge
+by mode + the sensor suite publishing, never by one GetNodeInfo.

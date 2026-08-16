@@ -1,8 +1,23 @@
 diff --git a/Tools/AP_Periph/AP_Periph.cpp b/Tools/AP_Periph/AP_Periph.cpp
-index 04cc75e..5d26e2f 100644
+index 04cc75e..40efddf 100644
 --- a/Tools/AP_Periph/AP_Periph.cpp
 +++ b/Tools/AP_Periph/AP_Periph.cpp
-@@ -426,6 +426,88 @@ void AP_Periph_FW::update()
+@@ -177,9 +177,12 @@ void AP_Periph_FW::init()
+ 
+ #if AP_PERIPH_IMU_ENABLED
+     if (g.imu_sample_rate) {
+-        imu.init(g.imu_sample_rate);
++        // NinjaPilot: the L431's canard pool cannot survive RawIMU at 200 Hz
++        // (7 frames/transfer floods TX AND starves RX reassembly - the node
++        // goes deaf to params). 50 Hz is the measured-safe redundant band.
++        imu.init(MIN(g.imu_sample_rate.get(), 50));
+         if (imu.get_accel_count() > 0 || imu.get_gyro_count() > 0) {
+-            hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_Periph_FW::can_imu_update, void), "IMU_UPDATE", 16384, AP_HAL::Scheduler::PRIORITY_CAN, 0);
++            hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_Periph_FW::can_imu_update, void), "IMU_UPDATE", 4096, AP_HAL::Scheduler::PRIORITY_CAN, 0);
+         }
+     }
+ #endif
+@@ -426,6 +429,88 @@ void AP_Periph_FW::update()
  
      static uint32_t last_led_ms;
      uint32_t now = AP_HAL::millis();
@@ -91,8 +106,22 @@ index 04cc75e..5d26e2f 100644
      if (now - last_led_ms > 1000) {
          last_led_ms = now;
  #ifdef HAL_GPIO_PIN_LED
+diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
+index 1ab2a2e..c14ee1b 100644
+--- a/Tools/AP_Periph/imu.cpp
++++ b/Tools/AP_Periph/imu.cpp
+@@ -13,7 +13,8 @@ void AP_Periph_FW::can_imu_update(void)
+     while (true) {
+         // we need to delay by a ms value as hal->schedule->delay_microseconds_boost
+         // used in wait_for_sample() takes uint16_t
+-        const uint32_t delay_ms = 1000U / g.imu_sample_rate;
++        const uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 50);
++        const uint32_t delay_ms = 1000U / rate;
+         hal.scheduler->delay(delay_ms);
+ 
+         if (delay_ms == 0) {
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
-index 067210f..ec58a74 100644
+index 067210f..8721fd9 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 +++ b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 @@ -45,9 +45,16 @@ define AP_PERIPH_BARO_ENABLED 1
@@ -122,3 +151,39 @@ index 067210f..ec58a74 100644
  
  define HAL_USE_ADC TRUE
  define STM32_ADC_USE_ADC1 TRUE
+@@ -85,3 +92,21 @@ define AP_SERIALLED_ENABLED 1
+ 
+ define HAL_SERIAL_ESC_COMM_ENABLED 1
+ USE_BOOTLOADER_FROM_BOARD MatekL431
++
++# NinjaPilot: second MPU-9150 shares the I2C bus with the BMP388 (0x68 vs 0x77).
++# WHO_AM_I 0x68 detects as Invensense_MPU6000 (register-compatible core).
++define AP_PERIPH_IMU_ENABLED 1
++IMU Invensense I2C:0:0x68 ROTATION_NONE
++
++# node 124 carries no magnetometer (the RM3100 is node 125) - free the flash
++undef AP_PERIPH_MAG_ENABLED
++define AP_PERIPH_MAG_ENABLED 0
++
++# baro: compile only the part actually fitted
++define AP_BARO_BACKEND_DEFAULT_ENABLED 0
++define AP_BARO_BMP388_ENABLED 1
++
++# A sensor node must not brick itself because a sensor fell off the bus:
++# defaults_periph.h compiles the no-IMU panic in (reset loop -> bootloader
++# hold, looks exactly like a dead flash). Boot anyway and publish the rest.
++define AP_INERTIALSENSOR_ALLOW_NO_SENSORS 0
+diff --git a/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h b/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h
+index f1cf94b..c55e218 100644
+--- a/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h
++++ b/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h
+@@ -393,7 +393,9 @@
+ #define AP_RANGEFINDER_ENABLED AP_PERIPH_RANGEFINDER_ENABLED
+ #endif
+ #define AP_INERTIALSENSOR_ENABLED AP_PERIPH_IMU_ENABLED
++#ifndef AP_INERTIALSENSOR_ALLOW_NO_SENSORS
+ #define AP_INERTIALSENSOR_ALLOW_NO_SENSORS AP_PERIPH_IMU_ENABLED
++#endif
+ #define AP_RTC_ENABLED AP_PERIPH_RTC_ENABLED
+ #ifndef AP_RCPROTOCOL_ENABLED
+ #define AP_RCPROTOCOL_ENABLED AP_PERIPH_RCIN_ENABLED
