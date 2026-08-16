@@ -1276,3 +1276,51 @@ mode=OPERATIONAL and blessed a dead node. The BL also answers GetNodeInfo
 DURING the boot transition, so a flasher sampling right after completion
 prints the BL identity even when the app boots fine a second later — judge
 by mode + the sensor suite publishing, never by one GetNodeInfo.
+
+## Per-sensor rate knobs, the compact IMU stream, and DEGRADEDHZ (2026-08-16, late)
+
+Node 124 now carries live-tunable CAN parameters (set over the wire, no
+reflash): `INS_SAMPLE_RATE` (compact IMU stream, 1-200 Hz), `IMU_RAW_RATE`
+(RawIMU 1003, 0-200, **0 disables it** - halves the bus), `BARO_MAX_RATE`
+(0 = native 50 Hz, else a cap - proven live: 10 -> 9.2 Hz measured), plus
+stock `GPS1_RATE_MS` (200 ms = 5 Hz; the M8N takes 100 for 10 Hz).
+
+**The compact stream** replaces RawIMU for rate: two vendor SINGLE-FRAME
+messages, no multi-frame tails to lose:
+
+    20500  gyro   int16[3] LE, rad/s * 1000    (6 bytes, 1 frame)
+    20501  accel  int16[3] LE, m/s^2 * 500     (6 bytes, 1 frame)
+
+Verified at 186 Hz with the full suite intact (890 fr/s total, all clean).
+NOT yet decoded by the realposix hub - that is the next task; scaling above
+is the contract.
+
+**DEGRADEDHZ guardrail** (user-specified): sustained compact-TX failures
+throttle the IMU streams back to defaults and latch bit 15 of the NodeStatus
+vendor code until reboot. It works - and it FALSE-TRIPPED at boot on its
+first flight, because broadcasts fail while the node is still anonymous
+(allocation takes seconds): a 15 s boot grace now covers that. The latch and
+throttle were proven BY the false trip: knob writes landed but rates stayed
+pinned at 50, exactly as designed.
+
+**Ramp-test findings (the real envelope):**
+- compact 200 + raw 50  = ~890 fr/s: everything clean. THE operating point.
+- raw >= 100: the L431 collapses its own output and the whole WIRE degrades
+  (node 125's mag drops too; MP1 controller goes ERROR-WARNING). This is a
+  wire-level error storm, NOT pool exhaustion - canard_broadcast keeps
+  returning true (queued != transmitted), so the TX-failure guardrail never
+  fires. Next guardrail iteration needs a wire-error or queue-depth signal.
+- The MP1's OWN RX path caps around ~155 delivered fr/s during error storms
+  (kernel counters agree with userspace - the loss is real, in the
+  controller). Do not diagnose node health through a storming bus.
+- Recovery: reboot node 124 (rates reload from saved params) - the wire
+  clears immediately. can0 down/up on the MP1 is blocked by allocatord
+  holding the interface; not needed anyway.
+
+**BUILD RULE that cost two dead images: after ANY Parameters.h / k_param
+change, `rm -rf build/<board>` and full configure+build.** Two consecutive
+incremental builds produced images that flashed, CRC-verified, and then
+either reset-looped silently or held in the bootloader; the identical source
+built clean booted first try. The ambush flasher recovers either way (it
+caught a reset-looping node in 2.9 s with no power cycle - the BL window
+recurs every watchdog reset).
