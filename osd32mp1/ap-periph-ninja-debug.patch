@@ -1,23 +1,23 @@
 diff --git a/Tools/AP_Periph/AP_Periph.cpp b/Tools/AP_Periph/AP_Periph.cpp
-index 04cc75e..2f6bc1f 100644
+index 04cc75e..d6e20c8 100644
 --- a/Tools/AP_Periph/AP_Periph.cpp
 +++ b/Tools/AP_Periph/AP_Periph.cpp
-@@ -177,9 +177,12 @@ void AP_Periph_FW::init()
+@@ -177,10 +177,10 @@ void AP_Periph_FW::init()
  
  #if AP_PERIPH_IMU_ENABLED
      if (g.imu_sample_rate) {
 -        imu.init(g.imu_sample_rate);
-+        // NinjaPilot: wait_for_sample() paces the publish loop at the INIT
-+        // rate, so init at the knob ceiling. 500 starves the watchdog on
-+        // this 80 MHz part (silent reset loop); 400 is the sweep ceiling.
-+        imu.init(400);
-         if (imu.get_accel_count() > 0 || imu.get_gyro_count() > 0) {
+-        if (imu.get_accel_count() > 0 || imu.get_gyro_count() > 0) {
 -            hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_Periph_FW::can_imu_update, void), "IMU_UPDATE", 16384, AP_HAL::Scheduler::PRIORITY_CAN, 0);
-+            hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_Periph_FW::can_imu_update, void), "IMU_UPDATE", 4096, AP_HAL::Scheduler::PRIORITY_CAN, 0);
-         }
+-        }
++        // NinjaPilot raw proxy: AP_InertialSensor is bypassed entirely - the
++        // thread talks straight to the MPU registers. No init-rate ceiling,
++        // no boot calibration, no no-IMU panic.
++        hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_Periph_FW::can_imu_update, void), "IMU_UPDATE", 4096, AP_HAL::Scheduler::PRIORITY_CAN, 0);
      }
  #endif
-@@ -426,6 +429,95 @@ void AP_Periph_FW::update()
+ 
+@@ -426,6 +426,95 @@ void AP_Periph_FW::update()
  
      static uint32_t last_led_ms;
      uint32_t now = AP_HAL::millis();
@@ -236,36 +236,33 @@ index ec0e76a..0813508 100644
          uint32_t len = uavcan_protocol_NodeStatus_encode(&node_status, buffer, !canfdout());
  
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
-index 1ab2a2e..4013ac7 100644
+index 1ab2a2e..2728868 100644
 --- a/Tools/AP_Periph/imu.cpp
 +++ b/Tools/AP_Periph/imu.cpp
-@@ -3,6 +3,11 @@
+@@ -2,61 +2,98 @@
+ 
  #if AP_PERIPH_IMU_ENABLED
  #include <dronecan_msgs.h>
++#include <AP_HAL/I2CDevice.h>
  
-+// NinjaPilot compact IMU stream (vendor message ids, single frame each)
+ extern const AP_HAL::HAL &hal;
+ 
+-/*
+-  update CAN magnetometer
+- */
++// NinjaPilot compact IMU stream - RAW PROXY contract (v2):
++//   20500  gyro  raw int16[3] little-endian counts, +/-2000 dps FS (16.4 LSB/dps)
++//   20501  accel raw int16[3] little-endian counts, +/-2 g FS (16384 LSB/g)
++// The node does NO calibration, NO filtering, NO unit conversion - it is a
++// bare-metal handoff. PIOS/flight code owns all interpretation when it
++// acquires the stream. DLPF is OFF (256 Hz BW, 8 kHz internal gyro ODR).
 +#define NINJA_MSG_GYRO       20500
 +#define NINJA_MSG_ACCEL      20501
 +#define NINJA_IMU_SIGNATURE  0x4E494E4A49505331ULL  // "NINJIPS1"
 +
- extern const AP_HAL::HAL &hal;
- 
- /*
-@@ -10,16 +15,40 @@ extern const AP_HAL::HAL &hal;
-  */
  void AP_Periph_FW::can_imu_update(void)
  {
-+    /*
-+      Compact high-rate stream: two vendor SINGLE-FRAME messages, so no
-+      multi-frame tails exist to lose and the canard pool cannot be starved
-+      the way 200 Hz RawIMU starved it (measured: suite collapse + node deaf).
-+        20500  gyro   int16[3] little-endian, rad/s * 1000   (6 bytes)
-+        20501  accel  int16[3] little-endian, m/s^2 * 500    (6 bytes)
-+      Rate follows INS_SAMPLE_RATE live (1..500 Hz). The standard RawIMU
-+      (1003) stays for stock consumers, internally capped at 50 Hz.
-+    */
-+    uint32_t last_raw_ms = 0;
-     while (true) {
+-    while (true) {
 -        // we need to delay by a ms value as hal->schedule->delay_microseconds_boost
 -        // used in wait_for_sample() takes uint16_t
 -        const uint32_t delay_ms = 1000U / g.imu_sample_rate;
@@ -274,118 +271,117 @@ index 1ab2a2e..4013ac7 100644
 -        if (delay_ms == 0) {
 -            // sleep for a bit to avoid flooding the CPU
 -            hal.scheduler->delay_microseconds(100);
-+        /*
-+         * Degradation policy (user-specified): tripping throttles the
-+         * streams to defaults and latches the DEGRADEDHZ flag, but a NEW
-+         * rate request made after the trip is honored - the throttle binds
-+         * only to the value that was active when the trip happened. The
-+         * NodeStatus flag stays latched until reboot as the telltale.
-+         */
-+        static int16_t tripped_rate = -1;
-+        static int16_t tripped_raw  = -1;
-+        uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 400);
++    // 400 kHz explicitly: at the default the 14-byte burst measured ~2 ms
++    // (100 kHz signature), capping delivery at ~400 Hz. MPU-9150 max is 400k.
++    auto dev = hal.i2c_mgr->get_device(0, 0x68, 400000);
++    if (!dev) {
++        return;
++    }
++    {
++        WITH_SEMAPHORE(dev->get_semaphore());
++        dev->set_retries(2);
++        uint8_t who = 0;
++        if (!dev->read_registers(0x75, &who, 1) || who != 0x68) {
++            can_printf("IMU proxy: no MPU at 0x68 (who=%02x)", who);
++            return;             // absent sensor = quiet exit, never a panic
+         }
++        dev->write_register(0x6B, 0x01);   // wake, PLL clock
++        hal.scheduler->delay(10);
++        dev->write_register(0x19, 0x00);   // no sample-rate divider
++        dev->write_register(0x1A, 0x00);   // DLPF OFF - raw 256 Hz BW
++        dev->write_register(0x1B, 0x18);   // gyro +/-2000 dps
++        dev->write_register(0x1C, 0x00);   // accel +/-2 g
++    }
++    can_printf("IMU proxy: MPU-9150 raw handoff up");
+ 
+-        imu.update();
++    static int16_t tripped_rate = -1;
++    uint16_t tx_fail_run = 0;
++
++    while (true) {
++        uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 1000);
 +        if (imu_hz_degraded && g.imu_sample_rate.get() == tripped_rate) {
 +            rate = MIN(rate, (uint16_t)50);
-         }
-+        /*
-+         * Divider pacing: never sleep - wait_for_sample() inside
-+         * imu.update() blocks until the next 400 Hz sample, and we publish
-+         * every Nth one. Rates are exact submultiples of the 400 Hz base
-+         * (400/200/133/100/80/...), commands round to the nearest divider,
-+         * and every rate runs as fast as the sample clock allows. The old
-+         * sleep-based pacing either stacked waits (capped ~270) or lost
-+         * command tracking; this does neither.
-+         */
-+        const uint16_t divider = (rate >= 400) ? 1 : (uint16_t)((400 + rate / 2) / rate);
++        }
  
-         imu.update();
- 
-@@ -27,6 +56,61 @@ void AP_Periph_FW::can_imu_update(void)
+-        if (!imu.healthy()) {
++        uint8_t d[14];
++        bool ok;
++        {
++            WITH_SEMAPHORE(dev->get_semaphore());
++            ok = dev->read_registers(0x3B, d, 14);
++        }
++        if (!ok) {
++            hal.scheduler->delay_microseconds(1000);
              continue;
          }
  
-+        static uint16_t decim;
-+        if (++decim < divider) {
-+            continue;
-+        }
-+        decim = 0;
-+
-+        const Vector3f gyr = imu.get_gyro();
-+        const Vector3f acc = imu.get_accel();
-+
-+        int16_t pkt6[3];
-+        pkt6[0] = (int16_t)constrain_float(gyr.x * 1000.0f, -32767.0f, 32767.0f);
-+        pkt6[1] = (int16_t)constrain_float(gyr.y * 1000.0f, -32767.0f, 32767.0f);
-+        pkt6[2] = (int16_t)constrain_float(gyr.z * 1000.0f, -32767.0f, 32767.0f);
-+        bool tx_fail = !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_GYRO,
-+                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
-+
-+        pkt6[0] = (int16_t)constrain_float(acc.x * 500.0f, -32767.0f, 32767.0f);
-+        pkt6[1] = (int16_t)constrain_float(acc.y * 500.0f, -32767.0f, 32767.0f);
-+        pkt6[2] = (int16_t)constrain_float(acc.z * 500.0f, -32767.0f, 32767.0f);
-+        tx_fail |= !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_ACCEL,
-+                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
-+
-+        // Self-protection: sustained TX failure means the pool/bus cannot
-+        // carry the asked-for rate. Throttle to defaults, warn, stay sticky
-+        // until reboot (surfaced as DEGRADEDHZ in NodeStatus vendor code).
-+        static uint16_t tx_fail_run;
-+        if (AP_HAL::millis() < 15000) {
-+            // boot grace: broadcasts fail while the node is still anonymous
-+            // (no allocator grant yet) - do not let that trip the flag
-+            tx_fail_run = 0;
-+        } else if (tx_fail) {
-+            if (++tx_fail_run >= 50 && !imu_hz_degraded) {
-+                imu_hz_degraded = true;
-+                tripped_rate = g.imu_sample_rate.get();
-+                tripped_raw  = g.imu_raw_rate.get();
-+                can_printf("DEGRADEDHZ: CAN TX failing, IMU throttled to defaults (new rate requests still honored)");
-+            }
-+        } else if (tx_fail_run > 0) {
-+            tx_fail_run--;
-+        }
-+        (void)0;
-+
-+        int16_t raw_rate = constrain_int16(g.imu_raw_rate.get(), 0, 200);
-+        if (imu_hz_degraded && g.imu_raw_rate.get() == tripped_raw) {
-+            raw_rate = MIN(raw_rate, (int16_t)25);
-+        }
-+        if (raw_rate == 0) {
-+            continue;   // RawIMU disabled - compact stream only
-+        }
-+        const uint32_t now_ms = AP_HAL::millis();
-+        if (now_ms - last_raw_ms < 1000U / (uint16_t)raw_rate) {
-+            continue;
-+        }
-+        last_raw_ms = now_ms;
-+
-         uavcan_equipment_ahrs_RawIMU pkt {};
- 
-         Vector3f tmp;
-@@ -40,16 +124,14 @@ void AP_Periph_FW::can_imu_update(void)
-         pkt.rate_gyro_integral[1] = tmp.y;
-         pkt.rate_gyro_integral[2] = tmp.z;
- 
+-        uavcan_equipment_ahrs_RawIMU pkt {};
+-
+-        Vector3f tmp;
+-        imu.get_delta_velocity(tmp, pkt.integration_interval);
+-        pkt.accelerometer_integral[0] = tmp.x;
+-        pkt.accelerometer_integral[1] = tmp.y;
+-        pkt.accelerometer_integral[2] = tmp.z;
+-
+-        imu.get_delta_angle(tmp, pkt.integration_interval);
+-        pkt.rate_gyro_integral[0] = tmp.x;
+-        pkt.rate_gyro_integral[1] = tmp.y;
+-        pkt.rate_gyro_integral[2] = tmp.z;
+-
 -        tmp = imu.get_accel();
 -        pkt.accelerometer_latest[0] = tmp.x;
 -        pkt.accelerometer_latest[1] = tmp.y;
 -        pkt.accelerometer_latest[2] = tmp.z;
-+        pkt.accelerometer_latest[0] = acc.x;
-+        pkt.accelerometer_latest[1] = acc.y;
-+        pkt.accelerometer_latest[2] = acc.z;
-+
-+        pkt.rate_gyro_latest[0] = gyr.x;
-+        pkt.rate_gyro_latest[1] = gyr.y;
-+        pkt.rate_gyro_latest[2] = gyr.z;
- 
+-
 -        tmp = imu.get_gyro();
 -        pkt.rate_gyro_latest[0] = tmp.x;
 -        pkt.rate_gyro_latest[1] = tmp.y;
 -        pkt.rate_gyro_latest[2] = tmp.z;
 -        
-         uint8_t buffer[UAVCAN_EQUIPMENT_AHRS_RAWIMU_MAX_SIZE];
-         uint16_t total_size = uavcan_equipment_ahrs_RawIMU_encode(&pkt, buffer, !canfdout());
-         canard_broadcast(UAVCAN_EQUIPMENT_AHRS_RAWIMU_SIGNATURE,
+-        uint8_t buffer[UAVCAN_EQUIPMENT_AHRS_RAWIMU_MAX_SIZE];
+-        uint16_t total_size = uavcan_equipment_ahrs_RawIMU_encode(&pkt, buffer, !canfdout());
+-        canard_broadcast(UAVCAN_EQUIPMENT_AHRS_RAWIMU_SIGNATURE,
+-                         UAVCAN_EQUIPMENT_AHRS_RAWIMU_ID,
+-                         CANARD_TRANSFER_PRIORITY_HIGH,
+-                         &buffer[0],
+-                         total_size);
++        int16_t pkt6[3];
++        // registers are big-endian; wire contract is little-endian raw counts
++        pkt6[0] = (int16_t)((d[8]  << 8) | d[9]);
++        pkt6[1] = (int16_t)((d[10] << 8) | d[11]);
++        pkt6[2] = (int16_t)((d[12] << 8) | d[13]);
++        bool tx_fail = !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_GYRO,
++                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
++
++        pkt6[0] = (int16_t)((d[0] << 8) | d[1]);
++        pkt6[1] = (int16_t)((d[2] << 8) | d[3]);
++        pkt6[2] = (int16_t)((d[4] << 8) | d[5]);
++        tx_fail |= !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_ACCEL,
++                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
++
++        // DEGRADEDHZ guardrail: throttle to defaults on sustained TX failure,
++        // latch the NodeStatus flag, release when a NEW rate is requested.
++        if (AP_HAL::millis() < 15000) {
++            tx_fail_run = 0;    // boot grace: anonymous-phase sends fail
++        } else if (tx_fail) {
++            if (++tx_fail_run >= 50 && !imu_hz_degraded) {
++                imu_hz_degraded = true;
++                tripped_rate = g.imu_sample_rate.get();
++                can_printf("DEGRADEDHZ: CAN TX failing, IMU throttled (new rate requests honored)");
++            }
++        } else if (tx_fail_run > 0) {
++            tx_fail_run--;
++        }
++
++        // the burst read above costs ~550 us; sleep only the remainder
++        const uint32_t period_us = 1000000UL / rate;
++        if (period_us > 600) {
++            hal.scheduler->delay_microseconds(period_us - 600);
++        }
+     }
+ }
+ #endif // AP_PERIPH_IMU_ENABLED
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 index 067210f..3dcf60d 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat

@@ -115,7 +115,7 @@ The edits are reproducible offline on macOS without sudo — `gpt.py` + `part.py
 | sensor | where | address / node | rate | state |
 |---|---|---|---|---|
 | MPU-9150 #1 gyro+accel | MP1 I2C `/dev/i2c-3` | 0x68 | **500 Hz** | live — the PRIMARY IMU |
-| MPU-9150 #2 gyro+accel | DroneCAN, L431 I2C | node 124, msg 20500/20501 | **up to ~305 Hz** | live — compact single-frame stream, realposix failover IMU |
+| MPU-9150 #2 gyro+accel | DroneCAN, L431 I2C | node 124, msg 20500/20501 | **up to ~430 Hz** | live — RAW-count proxy stream (no cal/filter on the node), realposix failover IMU |
 | BMP388 barometer | DroneCAN, L431 I2C | node 124, msg 1028/1029 | **50 Hz** | live, 98.6 kPa |
 | HMC5883L mag | MP1 I2C `/dev/i2c-3` | 0x1E (ID 'H43') | **50 Hz** | live → AuxMagSensor |
 | RM3100 mag | DroneCAN | node 125, msg 1001 | **25 Hz** | live, 51 uT — the FLIGHT mag (hub keys 1001 to node 125) |

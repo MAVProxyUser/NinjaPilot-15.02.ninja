@@ -1500,3 +1500,35 @@ I2C2, where I2C_SCAN sees them). Never attach a second HOST - TX/RX are
 duplicated. And because the two sides are mirror-ordered, check hand-made
 cables against the silk per side. Lesson generalized: the page-text fetch
 missed what the product PHOTO showed plainly - check images, not just specs.
+
+## RAW PROXY v2: the L431 IMU path is now a bare-metal handoff - 430 Hz measured (2026-08-16)
+
+Per user directive: NO calibration, NO filtering, NO grooming on the node -
+PIOS owns all interpretation. AP_InertialSensor is bypassed entirely (never
+initialized): the IMU thread talks straight to the MPU-9150's registers
+(wake, DLPF OFF, +/-2000 dps, +/-2 g) and broadcasts the RAW register
+counts. Consequences by construction: no init-rate ceiling, no boot gyro
+cal, no no-IMU panic (absent sensor = thread exits with a LogMessage), no
+RawIMU stream at all (the 7-frame storm hazard cannot recur; IMU_RAW_RATE
+is inert).
+
+**Wire contract v2** (hub updated to match - keep them in lockstep):
+    20500  gyro  RAW int16[3] LE counts, +/-2000 dps FS -> dps = raw/16.4
+    20501  accel RAW int16[3] LE counts, +/-2 g FS -> m/s2 = raw*9.80665/16384
+
+**Measured ramp** (full suite running, zero overruns, canaries flat):
+    cmd  200 -> 160    cmd 400 -> 256    cmd 600 -> 334
+    cmd  800 -> 372    cmd 1000 -> 402 (default clk) -> **430.5 (400 kHz explicit)**
+    at max: bus 1100 fr/s (~16 %), |a| decode stable, mag/baro/GPS untouched
+
+**Why 430 and not ~1 kHz**: the 14-byte burst is ~520 us at 400 kHz, but
+each iteration really costs ~2.3 ms - ChibiOS per-transfer overhead
+(semaphore/DMA/IRQ/thread wake) plus bus-sharing with the BMP388 and
+IST8310 drivers. Further levers, in order: drop the compass/baro onto a
+different rate, trim the per-transfer stack, or the long-documented real
+answer - SPI-class hardware. The CAN wire itself remains a bystander.
+
+Comparison context (pre-proxy, AP-groomed stream): CAN gyro bias 0.005 dps
+came from AP's BOOT CALIBRATION, not the silicon - the raw proxy now ships
+true uncalibrated counts (bias ~1-2 dps, scale error visible in |a|),
+exactly what PIOS-side calibration expects to receive.

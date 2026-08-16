@@ -466,8 +466,8 @@ static bool hmc_read(float ga[3])
 #define DC_MSG_NODE_STATUS     341
 #define DC_MSG_STATIC_PRESS   1028  /* float32 Pa + float16 variance      */
 #define DC_MSG_STATIC_TEMP    1029  /* float16 KELVIN + float16 variance  */
-#define DC_MSG_NINJA_GYRO    20500  /* int16[3] LE, rad/s * 1000, 1 frame */
-#define DC_MSG_NINJA_ACCEL   20501  /* int16[3] LE, m/s^2 * 500,  1 frame */
+#define DC_MSG_NINJA_GYRO    20500  /* RAW int16[3] LE counts, +/-2000dps FS */
+#define DC_MSG_NINJA_ACCEL   20501  /* RAW int16[3] LE counts, +/-2g FS      */
 #define DC_MSG_FIX2_REAL      1063  /* the DEPRECATED Fix is 1060; an earlier
                                        bus table here had the two swapped */
 #define DC_MSG_GNSS_STATUS   20003  /* ardupilot.gnss.Status */
@@ -808,9 +808,12 @@ static void can_poll(void)
             int16_t r[3];
             memcpy(r, f.data, 6);
             hub_publish_begin();
-            hub.imu2_gyro_dps[0] = (float)r[0] * 0.057295779513f; /* mrad/s -> deg/s */
-            hub.imu2_gyro_dps[1] = (float)r[1] * 0.057295779513f;
-            hub.imu2_gyro_dps[2] = (float)r[2] * 0.057295779513f;
+            /* raw-proxy contract v2: the node ships the MPU's registers
+             * untouched (no cal, no filter, no conversion - by design).
+             * +/-2000 dps FS = 16.4 LSB/dps. WE own interpretation. */
+            hub.imu2_gyro_dps[0] = (float)r[0] * (1.0f / 16.4f);
+            hub.imu2_gyro_dps[1] = (float)r[1] * (1.0f / 16.4f);
+            hub.imu2_gyro_dps[2] = (float)r[2] * (1.0f / 16.4f);
             hub_publish_end();
             continue;
         }
@@ -819,9 +822,10 @@ static void can_poll(void)
             int16_t r[3];
             memcpy(r, f.data, 6);
             hub_publish_begin();
-            hub.imu2_accel_mss[0] = (float)r[0] * 0.002f;
-            hub.imu2_accel_mss[1] = (float)r[1] * 0.002f;
-            hub.imu2_accel_mss[2] = (float)r[2] * 0.002f;
+            /* +/-2 g FS = 16384 LSB/g */
+            hub.imu2_accel_mss[0] = (float)r[0] * (9.80665f / 16384.0f);
+            hub.imu2_accel_mss[1] = (float)r[1] * (9.80665f / 16384.0f);
+            hub.imu2_accel_mss[2] = (float)r[2] * (9.80665f / 16384.0f);
             hub.imu2_time  = now_s();
             hub.imu2_count++;
             hub.have_imu2  = true;

@@ -522,8 +522,8 @@ All set over DroneCAN param GetSet on node 124, effective immediately:
 
 | param | range | what |
 |---|---|---|
-| `INS_SAMPLE_RATE` | 1-400 | compact gyro/accel pair rate; delivered = ~316/N (divider of the real 316 Hz loop base; max ~305-317) |
-| `IMU_RAW_RATE` | 0-200 | standard RawIMU; **0 disables** (halves the bus); >=100 storms the wire - deliberately allowed to exercise DEGRADEDHZ |
+| `INS_SAMPLE_RATE` | 1-1000 | raw proxy pair rate; delivered tracks command up to the ~430 Hz I2C ceiling |
+| `IMU_RAW_RATE` | (inert) | RawIMU stream REMOVED in the raw-proxy firmware - compact only; the 7-frame storm hazard is gone by construction |
 | `BARO_MAX_RATE` | 0-100 | 0 = native 50 Hz, else cap |
 | `GPS1_RATE_MS` | 100-200 | 100 = 10 Hz on the M9N |
 
