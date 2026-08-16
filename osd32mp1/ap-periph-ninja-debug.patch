@@ -220,7 +220,7 @@ index ec0e76a..0813508 100644
          uint32_t len = uavcan_protocol_NodeStatus_encode(&node_status, buffer, !canfdout());
  
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
-index 1ab2a2e..b9bb92b 100644
+index 1ab2a2e..4013ac7 100644
 --- a/Tools/AP_Periph/imu.cpp
 +++ b/Tools/AP_Periph/imu.cpp
 @@ -3,6 +3,11 @@
@@ -235,7 +235,7 @@ index 1ab2a2e..b9bb92b 100644
  extern const AP_HAL::HAL &hal;
  
  /*
-@@ -10,15 +15,39 @@ extern const AP_HAL::HAL &hal;
+@@ -10,16 +15,40 @@ extern const AP_HAL::HAL &hal;
   */
  void AP_Periph_FW::can_imu_update(void)
  {
@@ -270,23 +270,30 @@ index 1ab2a2e..b9bb92b 100644
 +        uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 400);
 +        if (imu_hz_degraded && g.imu_sample_rate.get() == tripped_rate) {
 +            rate = MIN(rate, (uint16_t)50);
-+        }
-+        /*
-+         * wait_for_sample() inside imu.update() already blocks until the
-+         * next 400 Hz sample (~2.5 ms), so sleep only the REMAINDER of the
-+         * requested period. Sleeping the full period stacked the two waits
-+         * and capped delivery at ~270 Hz no matter what was asked.
-+         */
-+        const uint32_t period_us = 1000000UL / rate;
-+        if (period_us > 2500) {
-+            hal.scheduler->delay_microseconds(period_us - 2500);
          }
++        /*
++         * Divider pacing: never sleep - wait_for_sample() inside
++         * imu.update() blocks until the next 400 Hz sample, and we publish
++         * every Nth one. Rates are exact submultiples of the 400 Hz base
++         * (400/200/133/100/80/...), commands round to the nearest divider,
++         * and every rate runs as fast as the sample clock allows. The old
++         * sleep-based pacing either stacked waits (capped ~270) or lost
++         * command tracking; this does neither.
++         */
++        const uint16_t divider = (rate >= 400) ? 1 : (uint16_t)((400 + rate / 2) / rate);
  
          imu.update();
-@@ -27,6 +56,55 @@ void AP_Periph_FW::can_imu_update(void)
+ 
+@@ -27,6 +56,61 @@ void AP_Periph_FW::can_imu_update(void)
              continue;
          }
  
++        static uint16_t decim;
++        if (++decim < divider) {
++            continue;
++        }
++        decim = 0;
++
 +        const Vector3f gyr = imu.get_gyro();
 +        const Vector3f acc = imu.get_accel();
 +
@@ -339,7 +346,7 @@ index 1ab2a2e..b9bb92b 100644
          uavcan_equipment_ahrs_RawIMU pkt {};
  
          Vector3f tmp;
-@@ -40,16 +118,14 @@ void AP_Periph_FW::can_imu_update(void)
+@@ -40,16 +124,14 @@ void AP_Periph_FW::can_imu_update(void)
          pkt.rate_gyro_integral[1] = tmp.y;
          pkt.rate_gyro_integral[2] = tmp.z;
  

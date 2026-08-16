@@ -1404,3 +1404,27 @@ mid-range command tracking is gone - commands 200-375 all deliver ~265-270
 (sleep and sample-wait no longer stack). Fix queued: divider pacing -
 publish every Nth sample of the 400 Hz base for exact 400/N rates.
 Operating point saved at cmd 200 = ~263 delivered.
+
+## Divider pacing measured: the loop's TRUE base is ~316 Hz, and rates are 316/N (2026-08-16)
+
+The divider build (publish every Nth sample of the 400 Hz INS base, no
+sleeps) delivers exactly 79 % of every commanded rate:
+
+    cmd 400 -> 305.4    cmd 200 -> 157.8    cmd 133 -> 105.4    cmd 100 -> 79.0
+
+79 % everywhere = the base loop actually cycles at ~316 Hz, not 400: the
+per-iteration work (imu.update bookkeeping + two broadcasts) overruns the
+2.5 ms sample budget ~1 cycle in 5, and the divider divides the REAL base.
+So the achievable gyro rates on this node are ~316/N: 305-317, 158, 105,
+79... **Max sustained = ~305 Hz (317 peak), bus at 710 fr/s, zero overruns,
+mag canary flat - the wire remains a bystander.** Exact round rates (200)
+are unreachable by integer division of a 316 base; pushing the true base to
+400+ means trimming loop work or a 450-500 init base (500 = watchdog death,
+untested between). This is the L431's practical ceiling; more wants
+SPI-class hardware or a leaner node.
+
+**Bisect verdict on the dud image**: divider-only boots and runs (this
+build); the always-on-boot I2C sweep was in the image that held the BL
+through five deliveries. Do not re-add the unconditional sweep without
+investigating; the baro-unhealthy-gated sweep remains fine. Operating
+point saved: cmd 200 (=158 delivered), raw 25, baro native.
