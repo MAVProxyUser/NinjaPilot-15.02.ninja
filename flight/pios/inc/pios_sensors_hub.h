@@ -83,6 +83,13 @@ struct pios_sensors_hub_data {
     uint32_t gps_count;
     uint32_t gps_bad;          /* reassembly/decode rejects */
 
+    /* gnss.Auxiliary (msg 1061): the DOPs Fix2 lacks, and the field that
+     * separates "antenna sees nothing" from "solution uses nothing" */
+    float    gps_hdop;
+    float    gps_vdop;
+    uint8_t  gps_sats_visible;
+    uint32_t gps_aux_count;
+
     bool     have_imu;
     bool     have_baro;
     bool     have_mag;        /* RM3100 over CAN   */

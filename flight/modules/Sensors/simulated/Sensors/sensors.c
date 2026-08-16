@@ -332,8 +332,10 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                     gp.Altitude   = h.gps_alt_msl_m;
                     gp.Satellites = (int8_t)h.gps_sats;
                     gp.PDOP       = h.gps_pdop;
-                    gp.HDOP       = h.gps_pdop;
-                    gp.VDOP       = h.gps_pdop;
+                    /* real HDOP/VDOP from gnss.Auxiliary when it has
+                     * arrived; PDOP stands in only until then */
+                    gp.HDOP       = (h.gps_aux_count > 0) ? h.gps_hdop : h.gps_pdop;
+                    gp.VDOP       = (h.gps_aux_count > 0) ? h.gps_vdop : h.gps_pdop;
                     gp.SensorType = GPSPOSITIONSENSOR_SENSORTYPE_UNKNOWN;
                     gp.Status     = (h.gps_fix == 3) ? GPSPOSITIONSENSOR_STATUS_FIX3D :
                                     (h.gps_fix == 2) ? GPSPOSITIONSENSOR_STATUS_FIX2D :

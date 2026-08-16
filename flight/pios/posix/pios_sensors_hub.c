@@ -548,17 +548,22 @@ static float dc_f32(const uint8_t *buf, uint32_t bit_ofs)
  * bit6 end, bit5 toggle, bits 0-4 transfer id. Multi-frame payloads carry a
  * 2-byte transfer CRC first; validating it needs the DSDL 64-bit signature,
  * so acceptance here rests on the structural field checks below instead. */
-static struct {
+struct dc_reasm {
     uint8_t buf[128];
     uint8_t len;
     uint8_t tid;
     uint8_t toggle;
     bool    active;
-} fix2_rx;
+};
+static struct dc_reasm fix2_rx, aux_rx;
 
 static void fix2_decode(const uint8_t *p, uint8_t n);
+static void aux_decode(const uint8_t *p, uint8_t n);
 
-static void fix2_feed(const uint8_t *data, uint8_t dlc)
+/* Returns payload length (CRC prefix stripped) when a transfer completes,
+ * 0 otherwise. Same tail-byte protocol for every multi-frame v0 message. */
+static uint8_t dc_reasm_feed(struct dc_reasm *rx, const uint8_t *data, uint8_t dlc,
+                             const uint8_t **payload)
 {
     uint8_t tail = data[dlc - 1];
     uint8_t sot = (uint8_t)(tail >> 7) & 1u, eot = (uint8_t)(tail >> 6) & 1u;
@@ -566,39 +571,70 @@ static void fix2_feed(const uint8_t *data, uint8_t dlc)
     uint8_t nb = (uint8_t)(dlc - 1);
 
     if (sot && eot) {                              /* single-frame: no CRC */
-        fix2_decode(data, nb);
-        return;
+        *payload = data;
+        return nb;
     }
     if (sot) {
-        fix2_rx.active = true;
-        fix2_rx.len    = 0;
-        fix2_rx.tid    = tid;
-        fix2_rx.toggle = 0;
+        rx->active = true;
+        rx->len    = 0;
+        rx->tid    = tid;
+        rx->toggle = 0;
         if (tog != 0) {
-            fix2_rx.active = false;
+            rx->active = false;
             hub.gps_bad++;
-            return;
+            return 0;
         }
-    } else if (!fix2_rx.active || tid != fix2_rx.tid || tog != (fix2_rx.toggle ^ 1u)) {
-        fix2_rx.active = false;                    /* lost/foreign frame */
+    } else if (!rx->active || tid != rx->tid || tog != (rx->toggle ^ 1u)) {
+        rx->active = false;                        /* lost/foreign frame */
         hub.gps_bad++;
-        return;
+        return 0;
     }
     if (!sot) {
-        fix2_rx.toggle = tog;
+        rx->toggle = tog;
     }
-    if (fix2_rx.len + nb > sizeof(fix2_rx.buf)) {
-        fix2_rx.active = false;
+    if (rx->len + nb > sizeof(rx->buf)) {
+        rx->active = false;
         hub.gps_bad++;
+        return 0;
+    }
+    memcpy(&rx->buf[rx->len], data, nb);
+    rx->len += nb;
+    if (eot) {
+        rx->active = false;
+        if (rx->len > 2) {
+            *payload = &rx->buf[2];
+            return (uint8_t)(rx->len - 2);
+        }
+    }
+    return 0;
+}
+
+/* uavcan.equipment.gnss.Auxiliary: 7x float16 DOPs, then sats. Byte-aligned
+ * through the floats, so offsets are trivially checkable. */
+static void aux_decode(const uint8_t *p, uint8_t n)
+{
+    if (n < 16) {
         return;
     }
-    memcpy(&fix2_rx.buf[fix2_rx.len], data, nb);
-    fix2_rx.len += nb;
-    if (eot) {
-        fix2_rx.active = false;
-        if (fix2_rx.len > 2) {
-            fix2_decode(&fix2_rx.buf[2], (uint8_t)(fix2_rx.len - 2));
-        }
+    float hdop = f16_to_f32((uint16_t)dc_bits(p, 32, 16));   /* after gdop,pdop */
+    float vdop = f16_to_f32((uint16_t)dc_bits(p, 48, 16));
+    uint8_t vis  = (uint8_t)dc_bits(p, 112, 7);
+    uint8_t used = (uint8_t)dc_bits(p, 119, 6);
+
+    if (vis > 100) {
+        return;                                    /* offset suspect: reject */
+    }
+    hub_publish_begin();
+    hub.gps_hdop = hdop;
+    hub.gps_vdop = vdop;
+    hub.gps_sats_visible = vis;
+    hub.gps_aux_count++;
+    hub_publish_end();
+
+    if ((hub.gps_aux_count % 25u) == 1u) {
+        /* integers only - the %u-after-doubles varargs artifact is unresolved */
+        PIOS_SHMLOG_Printf("[hub-aux] sats_visible=%u sats_used=%u hdop_c=%d vdop_c=%d",
+                           vis, used, (int)(hdop * 100.0f), (int)(vdop * 100.0f));
     }
 }
 
@@ -731,8 +767,17 @@ static void can_poll(void)
          * so dispatch it BEFORE the start-of-transfer filter below. Feeding
          * it only start frames (the first version of this code) means
          * reassembly silently never completes. */
-        if (mt == DC_MSG_FIX2_REAL) {
-            fix2_feed(f.data, f.can_dlc);
+        if (mt == DC_MSG_FIX2_REAL || mt == 1061) {
+            const uint8_t *pl = NULL;
+            struct dc_reasm *rx = (mt == DC_MSG_FIX2_REAL) ? &fix2_rx : &aux_rx;
+            uint8_t n = dc_reasm_feed(rx, f.data, f.can_dlc, &pl);
+            if (n > 0) {
+                if (mt == DC_MSG_FIX2_REAL) {
+                    fix2_decode(pl, n);
+                } else {
+                    aux_decode(pl, n);
+                }
+            }
             continue;
         }
 

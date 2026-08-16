@@ -1034,3 +1034,24 @@ bare M8N: no assistance data, cold almanac, indoor attenuation - a phone
 cheats with A-GPS. If it still shows 0 sats NEAR A WINDOW after ~15 min,
 suspect the antenna; decode gnss.Auxiliary (1061, 3 frames) for sats_visible
 to separate "sees nothing" from "uses nothing".
+
+## gnss.Auxiliary decoded - and the GPS verdict it delivered (2026-08-16)
+
+Fix2 carries only PDOP; HDOP/VDOP and **sats_visible** live in
+`gnss.Auxiliary` (1061, 3 frames, 5 Hz), now decoded through the generalized
+reassembler. GPSPositionSensor uses the real HDOP/VDOP once Auxiliary has
+arrived.
+
+The decode self-validates: HDOP and VDOP read **exactly 100.0** - the
+u-blox/AP "no solution" sentinel - at byte-aligned offsets. A coherent
+documented sentinel in the right position is strong evidence the field frame
+is correct, and Fix2's independent sats_used agrees with Auxiliary's.
+
+**The finding: sats_visible = 0.** Not "sees satellites but can't fix" -
+the RF front end is tracking NOTHING. A working M8N indoors typically shows
+a few visible sats within minutes even without fixing (a phone does better
+only because A-GPS cheats). Persistent zero VISIBLE points at
+antenna/RF - connector seated? patch facing sky? buried under bench metal? -
+not at receiver settings, which AP_Periph configures itself (healthy=1,
+5 Hz cadence proves comms). Definitive test: near a window, 15 min;
+sats_visible stays 0 -> antenna.
