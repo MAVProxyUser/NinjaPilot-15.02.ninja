@@ -1744,6 +1744,25 @@ a small extension). And the L431 can BECOME a 5-channel CAN PWM node
 (PA8-PA11, PA15) via HAL_PERIPH_ENABLE_RC_OUT + esc.RawCommand - a CAN
 "ESC node" on this bench with zero new hardware.
 
+### CORRECTED against the DTB + schematic (2026-08-17): it is TIM5, and ONE pad
+
+Two errors above, both fixed by reading the actual sources:
+- **0x40003000 is TIM5, not TIM4** (MP1 APB1 map: TIM2=40000000,
+  TIM3=40001000, TIM4=40002000, TIM5=40003000). The DTB's own pinctrl
+  node is named `tim5_pwm_mx`.
+- npwm=4 but **only ONE channel reaches a pad**: pinmux 0x7b03 =
+  **PH11 AF2 = TIM5_CH2**, routed to the RPi header (sheet 12). That is
+  pwmchip0 **pwm1** (0-indexed CH2) - exporting pwm0/2/3 toggles nothing
+  external. Verified live: pwm1 exports, runs 50 Hz / 1.5 ms, clean.
+- JP19 "Motor Control" (sheet 11) is NOT hobby-PWM: it is TIM8's
+  three-phase complementary pairs (MC_UH/UL/VH/VL/WH/WL on
+  PI5/PH13/PI6/PH14/PI7/PH15) plus current-sense/encoder/brake lines -
+  a gate-driver bridge header for FOC, wrong shape for a servo lead.
+- More pads need one DT edit each (same fdtput pattern as the I2C clock):
+  mikroBUS PWM pin = **PD14 = TIM4_CH3** (sheet 12, MCLICK_PWM), RPi
+  header also carries **PD13 = TIM4_CH2**; TIM4's pwm node is disabled
+  in the stock DT.
+
 ## THE 100 kHz CLAMP, proxy v3, and the storm that killed journald (2026-08-17)
 
 **Root cause of the 458 Hz ceiling, three layers deep, each disproven
