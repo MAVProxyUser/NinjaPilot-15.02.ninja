@@ -1806,19 +1806,27 @@ phandles 0x75/0x76; +4 nodes, dtc warnings unchanged from stock):
     pinmux 0x3d03 0x3e03           PD13/PD14 AF2 = TIM4_CH2/CH3
     pinmux 0x8504 0x8604 0x8704    PI5/PI6/PI7 AF3 = TIM8_CH1/2/3
 
-Post-reboot map - NOTE THE RENUMBERING, old recipes said pwmchip0=TIM5:
+**TIM3 added the same day** (pin 33 = PB5 = TIM3_CH2, pinmux 0x1503,
+phandle 0x77, backup .pre-tim3) - a FOURTH independent timer, swept
+immediately after reboot. Full recipe now lives in `dt-pwm-unlock.sh`
+(reproducible on a fresh image). SEVEN channels total.
 
-    pwmchip0 = TIM4 (40002000)  pwm1=PD13 (RPi hdr)  pwm2=PD14 (mikroBUS)
-    pwmchip4 = TIM5 (40003000)  pwm1=PH11 (RPi hdr, the servo)
-    pwmchip8 = TIM8 (44001000)  pwm0/1/2=PI5/PI6/PI7 (JP19 MC_UH/VH/WH)
+Post-second-reboot map - chip numbers SHIFT whenever a lower-address
+timer is enabled; NEVER hardcode pwmchipN, find by address via
+`readlink -f /sys/class/pwm/pwmchip*/device`:
+
+    pwmchip0  = TIM3 (40001000)  pwm1=PB5  (RPi hdr pin 33)
+    pwmchip4  = TIM4 (40002000)  pwm1=PD13 (pin 32)  pwm2=PD14 (mikroBUS)
+    pwmchip8  = TIM5 (40003000)  pwm1=PH11 (pin 31)
+    pwmchip12 = TIM8 (44001000)  pwm0/1/2=PI5/PI6/PI7 (pins 12/38/35 + JP19)
 
 Total 6 channels; 5 verified enabled at 50 Hz immediately, and FOUR
 channels across all three timers verified moving a real servo -
 pin 31 (PH11/TIM5_CH2), pin 32 (PD13/TIM4_CH2), pin 38 (PI6/TIM8_CH2),
-pin 35 (PI7/TIM8_CH3) - user-confirmed motion on each. That is a full
-quad's worth of servo-proven outputs on the RPi header alone; pin 12
-(PI5/TIM8_CH1) and PD14 (TIM4_CH3, mikroBUS) remain as spares on
-already-verified timers. JP20 pin map now read
+pin 35 (PI7/TIM8_CH3), pin 12 (PI5/TIM8_CH1) - user-confirmed motion
+on each: ALL FIVE RPi-header PWM pins servo-verified. Pin 33
+(PB5/TIM3_CH2) swept right after its unlock. Only PD14 (TIM4_CH3,
+mikroBUS) is untested anywhere - a sibling on a verified timer. JP20 pin map now read
 from the schematic crop: PWM on pins 31 (PH11/TIM5_CH2), 32
 (PD13/TIM4_CH2), 12/35/38 (PI5/PI7/PI6 = TIM8 CH1/CH3/CH2 - the JP19
 nets alias onto the RPi header), and pin 33 = PB5 TIM3_CH2, a seventh
