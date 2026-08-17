@@ -1778,3 +1778,28 @@ degrade itself." Correct, and it is TWO gaps compounding:
 - **Soft-start**: effective rate ramps 100 -> 500 Hz over the first 10 s
   of every boot regardless of the saved param - so no saved value can
   ever storm a boot again, independent of the hard 500 ceiling.
+
+**Recovery + verification (same day):** with the MPU unplugged the node
+boots quiet even on the poisoned saved param (proxy exits at probe), so
+the flash landed normally - remember this: PULLING THE IMU IS THE
+UNIVERSAL DE-STORM. Flash #1 delivered but parked in mode 2 (the ~50 %
+delivery lottery); the retry booted 3 -> 1 -> 0. Post-flash identity
+reads sw 1.9 vcs=381357f8 - that vcs is ~/ardupilot's HEAD (all work is
+uncommitted patch-on-top), so it is OUR build's identity, not the old
+firmware's.
+
+**MEASURED, the v3 steady state (saved INS_SAMPLE_RATE still 1000):**
+
+    CAN MPU-9150 proxy   491.8 Hz sustained  (clamp 500 binding; pair
+                         symmetry EXACT, gyro==accel frame counts)
+    baro 50.0 / mag 25.0 / node-125 mag 25.0 / GPS suite 5.0 - all nominal
+    total bus ~1215 fr/s, RX overrun delta ZERO across loaded windows
+    IMUSTAT: n=2466/5s (493 Hz), bc_avg~58 us
+
+The boot-with-poison test passed by construction and by observation:
+multiple boots at saved 1000, zero storms. 492 Hz over CAN vs 493 Hz
+local paced = TRANSPORT PARITY with the MP1's own bus. The clamp, not
+physics, is the current ceiling (unclamped pre-storm observations hit
+~590-600); raising it is gated on proving the pool-occupancy guardrail
+under real induced distress first. The old m_can loss at uptime 18511 s
+and abs overrun 6400 are storm-era residue - always judge by DELTA.
