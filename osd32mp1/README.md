@@ -20,7 +20,7 @@ integration base** with real sensors replacing the simulator.
 | SSH | **working** — key auth, dropbear |
 | Toolchain | gcc/g++ 9.3.0, make 4.3, python3 3.8.2 (**no git, no rsync**) |
 | SocketCAN | **DroneCAN bus working** — 2 Matek nodes allocated and publishing; allocator is a systemd service |
-| Live sensors | MPU-9150 @ 500 Hz (1440 free-run max), HMC5883L @ 69 Hz max, BMP280 @ 22 Hz (MP1 I2C); MPU-9150 raw proxy 492 Hz (400 kHz bus, clamp-500 guardrail v3), BMP388 @ 50 Hz, RM3100 @ 25 Hz, IST8310 @ 97 Hz max, GNSS @ 10 Hz (20 max) (CAN) |
+| Live sensors | MPU-9150 @ 500 Hz (1440 free-run max), HMC5883L @ 69 Hz max, BMP280 @ 22 Hz (MP1 I2C); MPU-9150 raw proxy 589 Hz (400 kHz bus, clamp-600, guardrail v3), BMP388 @ 50 Hz, RM3100 @ 25 Hz, IST8310 @ 97 Hz max, GNSS @ 10 Hz (20 max) (CAN) |
 | **realposix** | **`fw_realposix.elf` reads every sensor natively** (PIOS I2C driver + CAN hub, no Python in the loop) and publishes the full UAVObject set; 360 s soak graded **GO** |
 | Node 124 firmware | **custom AP_Periph** (`ap-periph-ninja-debug.patch`, gcc 10.2.1) — adds the declared BMP388 probe + an I2C debug scanner; flashed over CAN |
 | SimPosix | still builds and runs (`fwsimposix.service`, bridge-fed) — kept as the sim-parity target; never run both at once (same ports) |
@@ -115,7 +115,7 @@ The edits are reproducible offline on macOS without sudo — `gpt.py` + `part.py
 | sensor | where | address / node | rate | state |
 |---|---|---|---|---|
 | MPU-9150 #1 gyro+accel | MP1 I2C `/dev/i2c-3` | 0x68 | **500 Hz** | live — the PRIMARY IMU |
-| MPU-9150 #2 gyro+accel | DroneCAN, L431 I2C | node 124, msg 20500/20501 | **491.8 Hz** | live — RAW-count proxy (no cal/filter on the node), 400 kHz bus, hard-clamped 500 with guardrail v3 (pool-occupancy wire-health, tiered backoff to a 100 Hz floor, 10 s boot soft-start); realposix failover IMU |
+| MPU-9150 #2 gyro+accel | DroneCAN, L431 I2C | node 124, msg 20500/20501 | **589 Hz** | live — RAW-count proxy (no cal/filter on the node), 400 kHz bus, hard-clamped 500 with guardrail v3 (pool-occupancy wire-health, tiered backoff to a 100 Hz floor, 10 s boot soft-start); realposix failover IMU |
 | BMP388 barometer | DroneCAN, L431 I2C | node 124, msg 1028/1029 | **50 Hz** | live, 98.1 kPa |
 | BMP280 barometer | MP1 I2C `/dev/i2c-3` | 0x76 (CHIP_ID 0x58) | **25 Hz** | live in the hub (baro2_*) — BaroSensor failover if the CAN baro dies; latent CAN probe also declared on the L431 |
 | HMC5883L mag | MP1 I2C `/dev/i2c-3` | 0x1E (ID 'H43') | **50 Hz** | live → AuxMagSensor |
@@ -134,7 +134,7 @@ IST8310 probes, and `I2C_SCAN=1` identifies anything new in one sweep.
 
 | class | MP1 I2C (local) | DroneCAN (L431 node 124/125) | verdict |
 |---|---|---|---|
-| IMU rate | MPU-9150 #1: **493 Hz** paced (1440 free-run) | MPU-9150 #2: **491.8 Hz** sustained | TRANSPORT PARITY — the wire costs ~1 Hz |
+| IMU rate | MPU-9150 #1: **493 Hz** paced (1440 free-run) | MPU-9150 #2: **589 Hz** sustained | the CAN IMU now OUTRUNS the local paced read |
 | gyro bias | 1.184 dps (DLPF 44) | 0.640 dps TRUE (raw, DLPF off) | both raw die properties; PIOS calibrates |
 | gyro noise sd | 0.041–0.047 dps | 0.085–0.094 dps | 2x = bandwidth physics (42 vs 256 Hz BW), not transport |
 | gyro quantization | 0.0610 dps | **0.0610 dps IDENTICAL** | the proxy is bit-transparent |

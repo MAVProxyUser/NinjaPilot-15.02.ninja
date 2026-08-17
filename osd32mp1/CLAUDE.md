@@ -1943,6 +1943,27 @@ The two instabilities, BOTH root-caused the same day:
   RULE (now twice-learned): NO stdio ANYWHERE in realposix runtime -
   init prints go to a pipe that can block too.
 
+## 589 Hz: the clamp raised to 600 once the log-loop myth died (2026-08-17)
+
+The user asked the right question ("can we pull faster now?"): with the
+MP1 log-amplification loop dead, the old "wire destabilizes >1200 fr/s"
+conclusion was re-tested and DISPROVEN - it was the receiver's own
+logging cascade all along. Node clamp raised 500 -> 600 (imu.cpp),
+flashed (flash retries needed - flash with fw_realposix STOPPED, the
+running firmware's CPU+bus load starves the file server):
+
+    delivered   ~590 Hz wire (18837/18837 EXACTLY symmetric)
+                589.1 Hz through the hub (imu2=5891/10 s)
+    bus         ~1400 fr/s total, overrun delta ZERO (firmware running too)
+    suite       baro 50 / mags 25+25 / GPS 5 - untouched
+    loops       watchdog rateupdates -1..-4, no crit
+
+590 is the NODE's own physics ceiling (I2C read + loop overhead), the
+same number the pre-storm unclamped observations hit - the clamp at 600
+leaves it the binding constraint. Beyond ~600 wants SPI-class hardware
+or a leaner node loop, not a bigger clamp. Guardrail v3 + soft-start
+remain armed underneath.
+
 ## THE MP1 LOG-STORM FEEDBACK LOOP: how a healthy bus looks broken (2026-08-17)
 
 After the IMU cord replug, every census showed "storm signatures"

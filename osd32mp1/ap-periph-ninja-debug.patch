@@ -303,7 +303,7 @@ index ad455b0..934c23a 100644
      compass.read();
  
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
-index 1ab2a2e..480d21a 100644
+index 1ab2a2e..3acf13b 100644
 --- a/Tools/AP_Periph/imu.cpp
 +++ b/Tools/AP_Periph/imu.cpp
 @@ -2,61 +2,167 @@
@@ -392,7 +392,7 @@ index 1ab2a2e..480d21a 100644
 +        // re-storms the wire on every boot before any command can land
 +        // (lived experience, 2026-08-17). Raise only with a matching
 +        // receiver-side fix on the MP1's m_can RX path.
-+        const uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 500);
++        const uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 600);
  
 -        if (delay_ms == 0) {
 -            // sleep for a bit to avoid flooding the CPU
