@@ -1905,27 +1905,43 @@ with their recipes, and the chain is proven up to the LAST hop:
    ActuatorDesired.Roll saturated to -0.878. THE WHOLE CHAIN LIVES:
    CAN IMU -> hub -> failover -> filtercf -> outer/inner loops ->
    ActuatorDesired.
-4. **STILL CLOSED: the actuator task's ActuatorDesired queue receives
-   NO events** - ActuatorCommand.UpdateTime/MaxUpdateTime pinned at 0
-   since boot = the armed mixer path has NEVER executed; the task lives
-   in the failsafe-timeout branch (which is why the failsafe-driven
-   neutral sweep worked but armed stabilization output does not).
-   ActuatorDesired itself updates live (~innerloop rate), the queue is
-   ConnectQueue'd in ActuatorInitialize, remote (unpacked) writes also
-   wake nothing. Next probes: TaskInfo for the Actuator task, the
-   generated ConnectQueue event mask, xQueueCreate failure at init,
-   event-dispatch on realposix under load. UpdateTime==0 is the
-   one-field test for this gate.
+4. **SOLVED - and it was never the queue.** Ring instrumentation showed
+   the queue PERFECT (recv_ok 1:1 with innerloop Sets, zero timeouts,
+   connect_rc=0) while UpdateTime stayed 0. The real gate:
+   **actuator.c refuses to mix with fewer than TWO active mixers**
+   ("Nothing can fly with less than two mixers" -
+   `if (mixer_settings_count < 2) ... continue;`) - the single-servo
+   bench config (only Mixer7) tripped it silently on every event, every
+   boot. Fix is pure config: declare a second mixer (Mixer8=Servo on
+   the inert 8th channel). RESULT: **ch6 jumped 1500 -> 1062 us, the
+   saturated roll correction from the +118 deg tilt - the FULL chain
+   CAN IMU -> attitude -> stabilization -> mixer -> PWM -> servo is
+   CLOSED and moving metal in Attitude mode.** The queue-starvation
+   readings that started this hunt were all taken on WEDGED firmware
+   instances (see below) - UpdateTime==0 on a healthy boot was the
+   two-mixer guard, not events.
 
-Two OPEN instabilities observed the same session, unresolved:
-- **AttitudeState freezes after some minutes of client cycling** (byte-
-  identical reads, arming stops); a firmware restart clears it.
-  Coincided once with high load, recurred once without.
-- **The shmlog ring goes permanently dump-empty mid-session** (head/tail
-  show pending records, shmlogd --dump reads zero even for boot-time
-  lines after a fresh firmware start). The killed-mid-read concurrent
-  shmlogd is suspect. Until fixed, judge firmware health via UAVTalk
-  (watchdog fields, object freshness), not the ring.
+The two instabilities, BOTH root-caused the same day:
+- **The ring dump-empty state = a STALE CORRUPT RING FILE.** The writer
+  attaches to an existing /dev/shm/ninjapilot-log; one left with insane
+  head/tail (from a shmlogd killed mid-read) reads as forever-full and
+  every write drops. Fix: `rm /dev/shm/ninjapilot-log` while the
+  firmware is stopped - it creates a fresh ring at boot. Rule: delete
+  the ring file on every firmware restart.
+- **The AttitudeState freeze = the stdio convoy RETURNED through the
+  systemd pipe.** pios_led.c still had a RUNTIME printf ("PIOS: LED...")
+  per heartbeat toggle; block-buffered stdout fills 4 KB over minutes,
+  then flushes in ONE blocking write into the journald pipe - a stall
+  there blocks the task WHILE HOLDING the process-wide stdio lock, and
+  the event-driven chain (Sensors -> StateEstimation -> inner/outer
+  loops) convoys to death while the hub pthread, telemetry and actuator
+  task live on. Ring forensics: [inner] Set counter and innerloop
+  watchdog died at the same second while [actu] timeouts started
+  climbing and hub-health continued. Fixes: the printf is compiled out
+  for realposix, AND the firmware now launches with
+  `-p StandardOutput=null -p StandardError=null`. No wedge since.
+  RULE (now twice-learned): NO stdio ANYWHERE in realposix runtime -
+  init prints go to a pipe that can block too.
 
 ## THE MP1 LOG-STORM FEEDBACK LOOP: how a healthy bus looks broken (2026-08-17)
 

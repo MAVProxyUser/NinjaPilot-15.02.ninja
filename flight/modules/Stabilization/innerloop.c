@@ -397,6 +397,21 @@ static void stabilizationInnerloopTask()
 #endif
     if (cchain.Stabilization == FLIGHTSTATUS_CONTROLCHAIN_TRUE) {
         ActuatorDesiredSet(&actuator);
+#ifdef SIMPOSIX
+        {
+            static uint32_t setCount = 0;
+            static double lastSetPrint = 0.0;
+            struct timeval tvs;
+            setCount++;
+            gettimeofday(&tvs, NULL);
+            double now = (double)tvs.tv_sec + (double)tvs.tv_usec / 1e6;
+            if (now - lastSetPrint > 1.0) {
+                lastSetPrint = now;
+                PIOS_SHMLOG_Printf("[inner] ActuatorDesiredSet calls=%u handle=%p",
+                                   (unsigned)setCount, (void *)ActuatorDesiredHandle());
+            }
+        }
+#endif
     } else {
         // Force all axes to reinitialize when engaged
         for (t = 0; t < AXES; t++) {

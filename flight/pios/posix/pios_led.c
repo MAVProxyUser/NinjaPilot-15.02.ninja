@@ -43,7 +43,13 @@ static uint8_t LED_GPIO[PIOS_LED_NUM];
 
 static inline void PIOS_SetLED(uint32_t LED, uint8_t stat)
 {
+#if !defined(PIOS_REALPOSIX)
+    /* simposix bench chatter; on realposix this was a RUNTIME printf whose
+     * buffered flush through the systemd/journald pipe could block while
+     * holding the process-wide stdio lock - the shmlog-era convoy returning
+     * through the back door. No stdio in any runtime path. */
     printf("PIOS: LED %i status %i\n", LED, stat);
+#endif
     LED_GPIO[LED] = stat;
 }
 

@@ -36,6 +36,9 @@
 
 #include "accessorydesired.h"
 #include "actuator.h"
+#ifdef SIMPOSIX
+#include <pios_shmlog.h>
+#endif
 #include "actuatorsettings.h"
 #include "systemsettings.h"
 #include "actuatordesired.h"
@@ -149,7 +152,13 @@ int32_t ActuatorInitialize()
     // Listen for ActuatorDesired updates (Primary input to this module)
     ActuatorDesiredInitialize();
     queue = xQueueCreate(MAX_QUEUE_SIZE, sizeof(UAVObjEvent));
-    ActuatorDesiredConnectQueue(queue);
+    {
+        int32_t connect_rc = ActuatorDesiredConnectQueue(queue);
+#ifdef SIMPOSIX
+        PIOS_SHMLOG_Printf("[actu] init queue=%p connect_rc=%d", (void *)queue, (int)connect_rc);
+#endif
+        (void)connect_rc;
+    }
 
     // Register AccessoryDesired (Secondary input to this module)
     AccessoryDesiredInitialize();
@@ -226,6 +235,19 @@ static void actuatorTask(__attribute__((unused)) void *parameters)
 
         // Wait until the ActuatorDesired object is updated
         uint8_t rc = xQueueReceive(queue, &ev, FAILSAFE_TIMEOUT_MS / portTICK_RATE_MS);
+#ifdef SIMPOSIX
+        {
+            static uint32_t evOk = 0, evTimeout = 0, lastPrint = 0;
+            if (rc == pdTRUE) { evOk++; } else { evTimeout++; }
+            uint32_t nowTicks = xTaskGetTickCount();
+            if (nowTicks - lastPrint > 1000 / portTICK_RATE_MS) {
+                lastPrint = nowTicks;
+                PIOS_SHMLOG_Printf("[actu] loop recv_ok=%u timeouts=%u queue=%p waiting=%u",
+                                   (unsigned)evOk, (unsigned)evTimeout, (void *)queue,
+                                   (unsigned)uxQueueMessagesWaiting(queue));
+            }
+        }
+#endif
 #ifdef PIOS_INCLUDE_INSTRUMENTATION
         PIOS_Instrumentation_TimeStart(counter);
 #endif
