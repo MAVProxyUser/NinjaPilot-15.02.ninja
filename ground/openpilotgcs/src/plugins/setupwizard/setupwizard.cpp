@@ -97,6 +97,7 @@ int SetupWizard::nextId() const
         case CONTROLLER_CC:
         case CONTROLLER_CC3D:
         case CONTROLLER_REVO:
+        case CONTROLLER_REALPOSIX:
         case CONTROLLER_NANO:
         case CONTROLLER_DISCOVERYF4:
             return PAGE_INPUT;
@@ -149,6 +150,7 @@ int SetupWizard::nextId() const
         } else {
             switch (getControllerType()) {
             case CONTROLLER_REVO:
+            case CONTROLLER_REALPOSIX:
             case CONTROLLER_NANO:
                 return PAGE_GPS;
 
@@ -161,6 +163,7 @@ int SetupWizard::nextId() const
     {
         switch (getControllerType()) {
         case CONTROLLER_REVO:
+        case CONTROLLER_REALPOSIX:
         case CONTROLLER_NANO:
             return PAGE_GPS;
 
@@ -206,6 +209,7 @@ int SetupWizard::nextId() const
         case CONTROLLER_CC:
         case CONTROLLER_CC3D:
         case CONTROLLER_REVO:
+        case CONTROLLER_REALPOSIX:
         case CONTROLLER_NANO:
         case CONTROLLER_DISCOVERYF4:
             switch (getVehicleType()) {
@@ -244,6 +248,9 @@ QString SetupWizard::getSummaryText()
         break;
     case CONTROLLER_REVO:
         summary.append(tr("OpenPilot Revolution"));
+        break;
+    case CONTROLLER_REALPOSIX:
+        summary.append(tr("NinjaPilot RealPosix (OSD32MP1)"));
         break;
     case CONTROLLER_NANO:
         summary.append(tr("OpenPilot Nano"));
@@ -412,7 +419,7 @@ QString SetupWizard::getSummaryText()
     }
 
     // Show GPS Type
-    if (getControllerType() == CONTROLLER_REVO || getControllerType() == CONTROLLER_NANO) {
+    if (getControllerType() == CONTROLLER_REVO || getControllerType() == CONTROLLER_REALPOSIX || getControllerType() == CONTROLLER_NANO) {
         summary.append("<br>");
         summary.append("<b>").append(tr("GPS type: ")).append("</b>");
         switch (getGpsType()) {
@@ -431,7 +438,7 @@ QString SetupWizard::getSummaryText()
     }
 
     // Show Airspeed sensor type
-    if ((getControllerType() == CONTROLLER_REVO || getControllerType() == CONTROLLER_NANO) && getVehicleType() == VEHICLE_FIXEDWING) {
+    if ((getControllerType() == CONTROLLER_REVO || getControllerType() == CONTROLLER_REALPOSIX || getControllerType() == CONTROLLER_NANO) && getVehicleType() == VEHICLE_FIXEDWING) {
         summary.append("<br>");
         summary.append("<b>").append(tr("Airspeed Sensor: ")).append("</b>");
         switch (getAirspeedType()) {

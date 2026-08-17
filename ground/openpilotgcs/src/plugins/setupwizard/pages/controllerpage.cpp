@@ -112,6 +112,9 @@ SetupWizard::CONTROLLER_TYPE ControllerPage::getControllerType()
     case 0x0903:
         return SetupWizard::CONTROLLER_REVO;
 
+    case 0x1101:
+        return SetupWizard::CONTROLLER_REALPOSIX;
+
     case 0x0904:
         return SetupWizard::CONTROLLER_DISCOVERYF4;
 
@@ -134,6 +137,7 @@ void ControllerPage::setupBoardTypes()
     ui->boardTypeCombo->addItem(tr("OpenPilot CopterControl"), SetupWizard::CONTROLLER_CC);
     ui->boardTypeCombo->addItem(tr("OpenPilot CopterControl 3D"), SetupWizard::CONTROLLER_CC3D);
     ui->boardTypeCombo->addItem(tr("OpenPilot Revolution"), SetupWizard::CONTROLLER_REVO);
+    ui->boardTypeCombo->addItem(tr("NinjaPilot RealPosix (OSD32MP1)"), SetupWizard::CONTROLLER_REALPOSIX);
     ui->boardTypeCombo->addItem(tr("OpenPilot OPLink Radio Modem"), SetupWizard::CONTROLLER_OPLINK);
     ui->boardTypeCombo->addItem(tr("OpenPilot DiscoveryF4"), SetupWizard::CONTROLLER_DISCOVERYF4);
 }

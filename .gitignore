@@ -90,3 +90,9 @@ build/
 .qmake.stash
 ground/.qmake.stash
 ground/openpilotgcs/**/.qmake.stash
+# GCS in-tree build artifacts (qmake/moc/object dirs)
+ground/openpilotgcs/**/moc/
+ground/openpilotgcs/**/mocs/
+ground/openpilotgcs/**/objs/
+ground/openpilotgcs/**/*.o
+ground/openpilotgcs/share/openpilotgcs/translations/phony_target*/

@@ -501,6 +501,15 @@ void ConnectionManager::updateConnectionDropdown()
                 m_availableDevList->setCurrentIndex(i);
             }
         }
+    } else {
+        // NinjaPilot: the flight controller is a network device (UDP telemetry to
+        // the OSD32MP1), so an idle GCS should offer that first, not a serial port.
+        for (int i = 0; i < m_availableDevList->count(); i++) {
+            if (m_availableDevList->itemData(i, Qt::ToolTipRole).toString().startsWith("UDP")) {
+                m_availableDevList->setCurrentIndex(i);
+                break;
+            }
+        }
     }
     // update combo box tooltip
     onDeviceSelectionChanged(m_availableDevList->currentIndex());

@@ -55,6 +55,11 @@ public:
             return QString("DiscoveryF4");
 
             break;
+        case 0x1101:
+            // NinjaPilot realposix on the OSD32MP1 (Linux/FreeRTOS port)
+            return QString("RealPosix");
+
+            break;
         default:
             return QString("");
 

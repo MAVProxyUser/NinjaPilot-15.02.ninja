@@ -2152,3 +2152,35 @@ physics, is the current ceiling (unclamped pre-storm observations hit
 ~590-600); raising it is gated on proving the pool-occupancy guardrail
 under real induced distress first. The old m_can loss at uptime 18511 s
 and abs overrun 6400 are storm-era residue - always judge by DELTA.
+
+## Native board identity + honest health tiles (2026-08-17, evening)
+
+- **realposix is its own GCS-recognized board now: BOARD_TYPE 0x11 restored**
+  (board model 0x1101). The Revolution masquerade (0x09) is gone. GCS side:
+  `CONTROLLER_REALPOSIX` in vehicleconfigurationsource.h; 0x1101 detection +
+  "NinjaPilot RealPosix (OSD32MP1)" combo entry in controllerpage.cpp; case
+  fallthroughs beside every CONTROLLER_REVO gate (setupwizard.cpp,
+  connectiondiagram.cpp, vehicleconfigurationhelper.cpp, inputpage.cpp);
+  "RealPosix" in devicedescriptorstruct.h (matches the fw_realposix filename
+  convention); Revolution artwork reused in uploader device widgets.
+- **TRAP: BOARD_TYPE lives in pios_board_info.c's objects, and make does not
+  track board-info.mk.** After changing BOARD_TYPE the incremental build only
+  regenerates firmware_info.c and the board still reports the OLD type over
+  UAVTalk. `touch flight/pios/posix/pios_board_info.c` and rebuild.
+- **STAB tile red was the gyro-coalescing watchdog, not a control failure.**
+  innerloop's `gyroupdates > 1 warn / > 3 crit` assumes the STM32 design
+  where the inner loop turns around once per gyro sample. On realposix the
+  transport (959 Hz) deliberately outruns the loop (~200-400 Hz, always
+  consuming the LATEST sample), so 2-6 samples/pass is steady state.
+  Diagnosed from shmlog: rateupdates -1/-2 (outer loop healthy) while
+  gyroupdates 2-6 tripped crit. Fixed under PIOS_REALPOSIX: warn > 8
+  (~<120 Hz), crit > 16 (~<60 Hz). STAB now reads OK.
+- **INPUT responds now: ManualControlSettings persisted onboard** with
+  ChannelGroups GCS on Thr/Roll/Pitch/Yaw/Mode (ground/pyuavtalk/
+  persist_gcs_receiver.py, saved via ObjectPersistence, verified across
+  restart). Receiver alarm sits at Warning until something streams
+  GCSReceiver - the GCS Control gadget (with joystick support) or a script.
+- **GCS defaults to the board**: default_configurations seeds IPconnection
+  UDP 192.168.0.90:9000, and connectionmanager.cpp now auto-selects the
+  first "UDP:" entry in the connection dropdown when the GCS is idle
+  (serial ports used to win by list order).

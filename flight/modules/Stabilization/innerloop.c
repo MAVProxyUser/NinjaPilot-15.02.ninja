@@ -228,6 +228,20 @@ static void stabilizationInnerloopTask()
             // error if gyro didn't update at all!
             error = true;
         }
+#if defined(PIOS_REALPOSIX)
+        /* The Linux port runs the sensor transport (959 Hz wire) faster than
+         * this core can close the inner loop; the callback scheduler
+         * coalesces intermediate samples and the loop always consumes the
+         * LATEST gyro data, so 2-6 samples per pass is the designed steady
+         * state, not a missed deadline. Alarm only when the loop itself
+         * slows: >8 samples/pass ~= below 120 Hz, >16 ~= below 60 Hz. */
+        if (stabSettings.monitor.gyroupdates > 8) {
+            warn = true;
+        }
+        if (stabSettings.monitor.gyroupdates > 16) {
+            crit = true;
+        }
+#else
         if (stabSettings.monitor.gyroupdates > 1) {
             // warning if we missed a gyro update
             warn = true;
@@ -236,6 +250,7 @@ static void stabilizationInnerloopTask()
             // critical if we missed 3 gyro updates
             crit = true;
         }
+#endif
 #ifdef SIMPOSIX
         {
             static double lastMonPrint = 0.0;

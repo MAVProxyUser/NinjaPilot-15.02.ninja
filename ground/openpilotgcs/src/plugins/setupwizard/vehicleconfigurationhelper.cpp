@@ -169,6 +169,7 @@ void VehicleConfigurationHelper::applyHardwareConfiguration()
         }
         break;
     case VehicleConfigurationSource::CONTROLLER_REVO:
+    case VehicleConfigurationSource::CONTROLLER_REALPOSIX:
     case VehicleConfigurationSource::CONTROLLER_NANO:
     case VehicleConfigurationSource::CONTROLLER_DISCOVERYF4:
         // Reset all ports to their defaults
@@ -176,7 +177,7 @@ void VehicleConfigurationHelper::applyHardwareConfiguration()
         data.RM_FlexiPort = HwSettings::RM_FLEXIPORT_DISABLED;
 
         // Revo uses inbuilt Modem do not set mainport to be active telemetry link for the Revo
-        if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REVO) {
+        if ((m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REVO || m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REALPOSIX)) {
             data.RM_MainPort = HwSettings::RM_MAINPORT_DISABLED;
         } else {
             data.RM_MainPort = HwSettings::RM_MAINPORT_TELEMETRY;
@@ -192,7 +193,7 @@ void VehicleConfigurationHelper::applyHardwareConfiguration()
         case VehicleConfigurationSource::INPUT_SBUS:
             data.RM_MainPort = HwSettings::RM_MAINPORT_SBUS;
             // We have to set telemetry on flexport since s.bus needs the mainport on all but Revo.
-            if (m_configSource->getControllerType() != VehicleConfigurationSource::CONTROLLER_REVO) {
+            if ((m_configSource->getControllerType() != VehicleConfigurationSource::CONTROLLER_REVO && m_configSource->getControllerType() != VehicleConfigurationSource::CONTROLLER_REALPOSIX)) {
                 data.RM_FlexiPort = HwSettings::RM_FLEXIPORT_TELEMETRY;
             }
             break;
@@ -433,7 +434,7 @@ void VehicleConfigurationHelper::applyActuatorConfiguration()
                 m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_CC3D) {
                 data.BankUpdateFreq[1] = servoFrequence;
                 data.BankMode[1] = bankMode;
-            } else if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REVO) {
+            } else if ((m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REVO || m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REALPOSIX)) {
                 data.BankUpdateFreq[1] = escFrequence;
                 data.BankMode[1] = bankMode;
                 data.BankUpdateFreq[2] = servoFrequence;
@@ -451,7 +452,7 @@ void VehicleConfigurationHelper::applyActuatorConfiguration()
             data.BankMode[0] = bankMode;
             data.BankUpdateFreq[1] = escFrequence;
             data.BankMode[1] = bankMode;
-            if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REVO) {
+            if ((m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REVO || m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REALPOSIX)) {
                 data.BankUpdateFreq[2] = escFrequence;
                 data.BankMode[2] = bankMode;
             }
@@ -498,7 +499,7 @@ void VehicleConfigurationHelper::applyActuatorConfiguration()
         for (quint16 i = 0; i < ActuatorSettings::BANKUPDATEFREQ_NUMELEM; i++) {
             data.BankUpdateFreq[i] = servoFrequence;
             data.BankMode[i] = ActuatorSettings::BANKMODE_PWM;
-            if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REVO) {
+            if ((m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REVO || m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REALPOSIX)) {
                 if (i == 1) {
                     data.BankUpdateFreq[i] = escFrequence;
                 }
@@ -535,7 +536,7 @@ void VehicleConfigurationHelper::applyActuatorConfiguration()
         for (quint16 i = 0; i < ActuatorSettings::BANKUPDATEFREQ_NUMELEM; i++) {
             data.BankUpdateFreq[i] = servoFrequence;
             data.BankMode[i] = ActuatorSettings::BANKMODE_PWM;
-            if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REVO) {
+            if ((m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REVO || m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REALPOSIX)) {
                 if (i == 1) {
                     data.BankUpdateFreq[i] = escFrequence;
                 }
