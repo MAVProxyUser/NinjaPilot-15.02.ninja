@@ -74,8 +74,11 @@ void ControllerPage::initializePage()
 bool ControllerPage::isComplete() const
 {
     QString connName = m_connectionManager->getCurrentDevice().getConName();
-    bool isValidConnection = connName.startsWith("USB:", Qt::CaseInsensitive) || 
-                            connName.startsWith("Serial:", Qt::CaseInsensitive);
+    bool isValidConnection = connName.startsWith("USB:", Qt::CaseInsensitive) ||
+                            connName.startsWith("Serial:", Qt::CaseInsensitive) ||
+                            // NinjaPilot: realposix telemeters over the network
+                            connName.startsWith("UDP:", Qt::CaseInsensitive) ||
+                            connName.startsWith("TCP:", Qt::CaseInsensitive);
     return m_telemtryManager->isConnected() && ui->boardTypeCombo->currentIndex() > 0 && isValidConnection;
 }
 

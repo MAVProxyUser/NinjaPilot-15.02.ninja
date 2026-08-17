@@ -2192,3 +2192,27 @@ and abs overrun 6400 are storm-era residue - always judge by DELTA.
   delivery gaps (hub aux work? Linux scheduling?) or PIOS_DELAY_DiffuS
   misreports on this platform. Instrument the actual gap distribution
   before touching TIMEOUT_MS - do not blind-relax the threshold.
+- **Wizard "Next" gate**: controllerpage.cpp isComplete() only accepted
+  connections named "USB:"/"Serial:" - a detected board on "UDP:" could
+  never proceed. UDP/TCP now accepted.
+- **ground/pyuavtalk/health_monitor.py**: the System Health tiles without
+  the GCS. One-shot table (tile, alarm, status, GCS color, why), --watch N
+  transition timeline with JSONL log + incidence summary, --enable-fclogs
+  (DebugLogSettings Always + SystemAlarms/FlightStatus onchange +
+  SystemStats 1s periodic logging metadata, persisted). Slots are host
+  files /usr/local/ninja/fcwd/233CDC*.o* - scp + decode_fcwd.py. NOTE:
+  one UDP client at a time - running it steals a live GCS link.
+- **The ATTI/STAB/EVENT flicker is ONE phenomenon** (measured, host
+  monitor + onboard log agree): ~1.2s degraded windows recurring every
+  ~1.8s median. In a window: estimator 10ms staleness timeouts (ATTI),
+  gyro coalescing >8/pass (STAB), AttitudeState callback queue overflow
+  (EVENT orange; SystemStats.ObjectManagerCallbackID latches AttitudeState).
+  Onset phase is UNIFORM within the second - NOT aligned to the 1 Hz
+  telemetry/SystemStats cadence (hypothesis tested and dead). The ~1.8s
+  rhythm with uniform phase suggests a BEAT between two near-equal rates
+  (wire 958.6 Hz vs hub 959.7 Hz gives ~0.9s; 2x = 1.8s). Confirm with
+  shmlog gyroupdates series once the ring is healthy again - the ring is
+  currently in the corrupt/dump-empty state (rm + firmware restart ritual).
+- **Onboard DebugLog is now Always + persisted** on the bench board:
+  233CDC slots accumulate in fcwd between sessions - purge before timed
+  comparisons, and expect ~1 slot per few seconds from SystemStats 1s.
