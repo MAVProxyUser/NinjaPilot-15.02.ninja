@@ -584,3 +584,31 @@ magnitude, |gyro-mean| bias, per-axis noise sd in each unit's own frame,
 and empirical quantization step (min nonzero delta). Windows 30/90/120 s;
 on a stationary bench they should agree to ~3 decimals or the capture is
 suspect. Restore/verify the node's saved rates afterwards.
+
+
+## The NinjaPilot GCS on macOS (rebuilt 2026-08-17, 71 plugins, arm64)
+
+Build (from ground/openpilotgcs; NEVER via the top Makefile - spaces):
+
+    Q5=$(ls -d /opt/homebrew/Cellar/qt@5/*/bin/qmake | head -1)
+    export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+    export PATH="$(dirname $Q5):$PATH"          # bare `moc` rule needs it
+    # generate synthetics first (from ground/uavobject-synthetics):
+    #   uavobjgenerator -gcs ../../shared/uavobjectdefinition ../..
+    $Q5 -o Makefile openpilotgcs.pro -spec "$(dirname $(dirname $Q5))/mkspecs/macx-clang" \
+        CONFIG+=release CONFIG+=sdk_no_version_check -r
+    make -j8
+
+Traps (each cost a build cycle): stale .qmake.stash files pin DELETED
+Xcode SDKs (delete ALL of them incl. src/libs/qwt, glc_lib, sdlgamepad);
+generated Makefiles survive `test -e Makefile ||` and keep old SDKs (rm
+them all after any SDK change); uavobjects.pro's synthetics list is
+HAND-maintained and drifts behind the XML (regenerate it from
+ground/uavobject-synthetics/gcs - script in git history); the qmake
+moc-from-cpp rule for utils/submiteditorwidget is unquoted (re-quote
+after regenerating that Makefile); synthetics are expected at BOTH
+ground/build/ and REPO-ROOT/build/ (two symlinks). After every rebuild:
+`PlistBuddy -c "Add :NSHighResolutionCapable bool true"` on the bundle's
+Info.plist or macOS renders it blurry-upscaled. The firmware-vs-GCS
+"UAVO set mismatch" warning compares GIT STAMPS (board repo vs Mac
+repo), not objects - benign while both build from the same XML.
