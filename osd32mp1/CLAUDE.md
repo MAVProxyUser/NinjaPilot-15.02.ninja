@@ -1812,7 +1812,14 @@ Post-reboot map - NOTE THE RENUMBERING, old recipes said pwmchip0=TIM5:
     pwmchip4 = TIM5 (40003000)  pwm1=PH11 (RPi hdr, the servo)
     pwmchip8 = TIM8 (44001000)  pwm0/1/2=PI5/PI6/PI7 (JP19 MC_UH/VH/WH)
 
-Total 6 channels; 5 verified enabled at 50 Hz immediately. The 6th
+Total 6 channels; 5 verified enabled at 50 Hz immediately, and BOTH
+RPi-header channels verified moving a real servo (PH11=pin 31, then
+PD13=pin 32 - user-confirmed motion on each). JP20 pin map now read
+from the schematic crop: PWM on pins 31 (PH11/TIM5_CH2), 32
+(PD13/TIM4_CH2), 12/35/38 (PI5/PI7/PI6 = TIM8 CH1/CH3/CH2 - the JP19
+nets alias onto the RPi header), and pin 33 = PB5 TIM3_CH2, a seventh
+channel behind one more DT enable. Grounds 6/9/14/20/25/30/34/39;
+3.3 V pins 1/17; 5 V pins 2/4 = the dead-ish VBUSOTG rail. The 6th
 (PD14) exposed the constraint worth knowing: **channels of one timer
 share a single period register** - "Device or resource busy" when
 setting a different period while a sibling channel runs. Per-channel
