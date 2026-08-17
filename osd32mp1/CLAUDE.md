@@ -1943,6 +1943,34 @@ The two instabilities, BOTH root-caused the same day:
   RULE (now twice-learned): NO stdio ANYWHERE in realposix runtime -
   init prints go to a pipe that can block too.
 
+## 958 Hz: THE LADDER - the user demanded empiricism and the theory died rung by rung (2026-08-17)
+
+"prove your theory... 50hz bumps until it falls over. find the real max,
+not theoretical." It NEVER fell over. Every claimed ceiling died:
+
+    clamp   delivered   symmetry   overruns   aux suite
+    500     491.8       exact      0          full     (the old "max")
+    600     ~590        exact      0          full     ("node ceiling" - wrong)
+    650     637.0       99.99%     0          full
+    700     683.1       99.99%     0          full     (1589 fr/s - past the old "death zone")
+    750     730.5       100.00%    2fr/27s    full
+    800     783.3       100.00%    0          full     (sampling-limited, 1250us callback)
+    1000*   958.6 wire  100.00%    0          FULL - baro 50, mag 25, GPS 5
+            959.7 hub   (*callback 1250 -> 1000 us + clamp 1000)
+
+THE REAL MAX = ~960 Hz, limited by the MPU-9150's OWN 1 kHz accel output
+rate - the silicon, not the node, not the wire, not the receiver. Wire at
+2141 fr/s (~32 %), MP1 ingesting everything with zero overruns and
+healthy loops (imu2=9597/10 s). Three dead theories, each disproven by a
+rung: "wire destabilizes >1200 fr/s" (the receiver's log cascade),
+"~590 is the node I2C/loop ceiling" (pacing overhead, scales with clamp),
+"1 kHz callback starves aux to 14/7 Hz" (measured in the 100 kHz-clamp
+era when reads took 2.1 ms; at true 400 kHz reads are ~520 us and
+EVERYTHING fits). Ladder ops note: CAN flash delivery got flakier during
+the ladder (several mode-2 holds; one run took 4 attempts) - flash with
+fw_realposix STOPPED and just retry with patience; allocatord was seen
+at ~23 % CPU and is worth an eye.
+
 ## 589 Hz: the clamp raised to 600 once the log-loop myth died (2026-08-17)
 
 The user asked the right question ("can we pull faster now?"): with the

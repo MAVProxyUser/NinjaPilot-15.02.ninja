@@ -303,7 +303,7 @@ index ad455b0..934c23a 100644
      compass.read();
  
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
-index 1ab2a2e..3acf13b 100644
+index 1ab2a2e..1843ae8 100644
 --- a/Tools/AP_Periph/imu.cpp
 +++ b/Tools/AP_Periph/imu.cpp
 @@ -2,61 +2,167 @@
@@ -376,7 +376,7 @@ index 1ab2a2e..3acf13b 100644
 +    // ~0.9 ms, so 1 kHz would consume >90% of the bus thread and starve
 +    // the baro/mag drivers (measured: baro 50->14 Hz when oversubscribed).
 +    // 1250 us leaves them room. Publish rate is governed below.
-+    s_imu_dev->register_periodic_callback(1250,
++    s_imu_dev->register_periodic_callback(1000,
 +        FUNCTOR_BIND_MEMBER(&AP_Periph_FW::imu_sample_cb, void));
 +
 +    uint32_t last_seq = 0;
@@ -392,7 +392,7 @@ index 1ab2a2e..3acf13b 100644
 +        // re-storms the wire on every boot before any command can land
 +        // (lived experience, 2026-08-17). Raise only with a matching
 +        // receiver-side fix on the MP1's m_can RX path.
-+        const uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 600);
++        const uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 1000);
  
 -        if (delay_ms == 0) {
 -            // sleep for a bit to avoid flooding the CPU
