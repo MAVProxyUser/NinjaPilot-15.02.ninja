@@ -53,6 +53,12 @@
  */
 #define PIOS_REALPOSIX
 
+/* The shared event-dispatcher queue is 20 slots by default and ALL
+ * ConnectCallback notifications in the firmware funnel through it; config
+ * bursts overflow it and drop notifications silently (EVENT alarm orange).
+ * 64 gives bursts room. (Macro name carries upstream's typo.) */
+#define PIOS_EVENTDISAPTCHER_QUEUE 64
+
 /*
  * Which devices the sensor hub opens. Named here rather than buried in the
  * driver so a rewired bench is a one-line change.

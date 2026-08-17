@@ -1992,6 +1992,35 @@ leaves it the binding constraint. Beyond ~600 wants SPI-class hardware
 or a leaner node loop, not a bigger clamp. Guardrail v3 + soft-start
 remain armed underneath.
 
+## FLIGHT CONFIG ERA: QuadX saved onboard, Revolution masquerade, event queue widened (2026-08-17, night)
+
+- **realposix now reports BOARD_TYPE 0x09 (Revolution)** instead of the
+  unknown 0x11, so the GCS wizard/uploader recognize it. Revo is the
+  closest real board (6 outputs, full sensor suite). Revo-specific wizard
+  pages (SPI cal, radio) may look odd - vehicle/output config works.
+- **Event dispatcher queue 20 -> 64** via PIOS_EVENTDISAPTCHER_QUEUE
+  (typo is upstream's) in realposix pios_config.h - the shared
+  ConnectCallback queue overflowed on config bursts and dropped
+  notifications silently (the EVENT tile's orange flashes).
+- **QuadX config written AND PERSISTED via ObjectPersistence** (survives
+  firmware restarts, greets the wizard): AirframeType=QuadX, Mixer1-4 =
+  Motor with the standard X matrix (NW 64/64/-64, NE -64/64/64,
+  SE -64/-64/-64, SW 64/-64/64, throttle 127), motors on out0-3 =
+  TIM8 pins 12/38/35 + TIM4 pin 32, ChannelMin/Neutral/Max
+  1000/1100/2000, banks 400/400/50/50 Hz, MotorsSpinWhileArmed FALSE.
+- **RATE A/B MEASURED - the 958 Hz stream is FREE**: innerloop watchdog
+  warn incidence 39/60 at 492 Hz vs 41/60 at 959 Hz (identical). The
+  STAB flicker is NOT sensor-rate CPU load; it is the outer-loop
+  callback cadence running marginally behind its 4-update window at ANY
+  rate - structural scheduling granularity, the same -1..-3 rateupdates
+  every healthy soak has shown. Keep max rate: lower latency, no cost.
+  (My CPU-load hypothesis: disproven out loud, per the repo rule.)
+- str.replace on '#define PIOS_REALPOSIX' hit the _I2C_DEV/_CAN_IF
+  prefixed defines too and mangled the header - anchor unique strings
+  (newline-terminated) when patching defines programmatically.
+- pios_config.h touches = FULL rebuild on the board (~12 min on 2 cores);
+  run it as a detached systemd unit, never inside an ssh timeout.
+
 ## THE MP1 LOG-STORM FEEDBACK LOOP: how a healthy bus looks broken (2026-08-17)
 
 After the IMU cord replug, every census showed "storm signatures"
