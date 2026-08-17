@@ -1880,6 +1880,71 @@ The missing output half of "realposix can fly" is in:
   transient, disproven by duty=0; re-config after every restart or
   save via ObjectPersistence).
 
+## THE STABILIZE-DEMO HUNT: four gates found, one still closed (2026-08-17)
+
+Goal: armed Attitude-mode stabilization driving the pin-33 servo from the
+CAN IMU. Four sequential gates were found; three are OPEN, documented
+with their recipes, and the chain is proven up to the LAST hop:
+
+1. **Arming needs a valid RECEIVER, not just Always Armed.** The
+   Always-Armed branch of armhandler.c only runs in the throttle-low
+   path; with no RC, ManualControlCommand reads Connected=False,
+   Throttle=0.00 (not low) and arming never fires. Recipe (the bridge's,
+   replayed over UAVTalk from the Mac): ManualControlSettings
+   ChannelGroups=[5,5,5,5,5,7,7,7,7] / ChannelNumber=[1..5] (GCS group),
+   then STREAM GCSReceiver at >=20 Hz (it goes stale in 100 ms) with
+   throttle 1000. Verified: FlightStatus -> Armed.
+2. **Stabilized-bank settings only latch on a flight-mode TRANSITION**
+   (the StabilizationBank-mirror family): writing
+   Stabilization1Settings=Attitude changed nothing until the GCS mode
+   channel toggled 2000->1000, forcing a mode change. Verified:
+   StabilizationDesired modes Rate,Rate -> Attitude,Attitude.
+3. **Rate mode is why a tilted-but-still board commands nothing** - the
+   default Stabilized1 banks are Rate; a stabilize DEMO wants Attitude.
+   With Attitude latched and the bench IMU at +117 deg roll,
+   ActuatorDesired.Roll saturated to -0.878. THE WHOLE CHAIN LIVES:
+   CAN IMU -> hub -> failover -> filtercf -> outer/inner loops ->
+   ActuatorDesired.
+4. **STILL CLOSED: the actuator task's ActuatorDesired queue receives
+   NO events** - ActuatorCommand.UpdateTime/MaxUpdateTime pinned at 0
+   since boot = the armed mixer path has NEVER executed; the task lives
+   in the failsafe-timeout branch (which is why the failsafe-driven
+   neutral sweep worked but armed stabilization output does not).
+   ActuatorDesired itself updates live (~innerloop rate), the queue is
+   ConnectQueue'd in ActuatorInitialize, remote (unpacked) writes also
+   wake nothing. Next probes: TaskInfo for the Actuator task, the
+   generated ConnectQueue event mask, xQueueCreate failure at init,
+   event-dispatch on realposix under load. UpdateTime==0 is the
+   one-field test for this gate.
+
+Two OPEN instabilities observed the same session, unresolved:
+- **AttitudeState freezes after some minutes of client cycling** (byte-
+  identical reads, arming stops); a firmware restart clears it.
+  Coincided once with high load, recurred once without.
+- **The shmlog ring goes permanently dump-empty mid-session** (head/tail
+  show pending records, shmlogd --dump reads zero even for boot-time
+  lines after a fresh firmware start). The killed-mid-read concurrent
+  shmlogd is suspect. Until fixed, judge firmware health via UAVTalk
+  (watchdog fields, object freshness), not the ring.
+
+## THE MP1 LOG-STORM FEEDBACK LOOP: how a healthy bus looks broken (2026-08-17)
+
+After the IMU cord replug, every census showed "storm signatures"
+(pair asymmetry 10:1, NodeStatus missing, node-125 mag at 3 Hz, ~10 %
+delivery) while node 124's own telltales read HEALTHY (mode 0, guardrail
+clear, clean IMUSTAT) and the MP1 transceiver saw a clean wire
+(ERROR-ACTIVE, berr 0/0). Cause: **MP1-side CPU starvation feedback** -
+RX FIFO loss -> m_can logs EVERY lost frame -> journald churns (41 %
+CPU, loadavg 10 on 2 cores) -> CAN IRQ starved -> more loss. The frames
+never made it off the controller; every "wire" symptom was RX-side.
+Break the loop: `systemctl stop systemd-journald.service
+systemd-journald.socket systemd-journald-dev-log.socket` + `dmesg -n 1`;
+the bus healed INSTANTLY (5896/5896 symmetric, zero overrun delta).
+Rules: (1) loadavg is part of every bus diagnosis on this board;
+(2) node self-telltales (mode, vendor bit 15, IMUSTAT) outrank MP1-side
+censuses; (3) the m_can per-frame error logging is an amplifier -
+consider rate-limiting it permanently.
+
 ### FIRST ACTUATOR MOTION (2026-08-17): a real servo swept from PH11
 
 Signal on PH11 (RPi header), ground on pin 34, servo powered from its
