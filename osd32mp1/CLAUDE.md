@@ -1797,6 +1797,25 @@ Two errors above, both fixed by reading the actual sources:
   header also carries **PD13 = TIM4_CH2**; TIM4's pwm node is disabled
   in the stock DT.
 
+### FIRST ACTUATOR MOTION (2026-08-17): a real servo swept from PH11
+
+Signal on PH11 (RPi header), ground on pin 34, servo powered from its
+OWN external 5 V (the servo-melt lesson applied) - full sweep
+1.5/1.0/2.0 ms x2 via sysfs, user-confirmed motion ("that absolutely
+moved it"). The working recipe, including the sysfs constraint that
+bites (duty must be lowered BEFORE the period can shrink below it):
+
+    cd /sys/class/pwm/pwmchip0; echo 1 > export; cd pwm1
+    echo 0 > enable; echo 1000000 > duty_cycle   # duty first!
+    echo 20000000 > period                       # 50 Hz
+    echo 1500000 > duty_cycle; echo 1 > enable   # 1.5 ms center
+    # 1000000..2000000 ns sweeps the range
+
+With CAN-only sensing verified the same day, the MP1 now has BOTH
+halves in primitive form: flight-rate sensors in, and one hardware PWM
+out. Next rungs: PIOS actuator driver on this pwmchip, DT-enable TIM4
+for PD13/PD14 (two more channels), then an ESC on external power.
+
 ## THE 100 kHz CLAMP, proxy v3, and the storm that killed journald (2026-08-17)
 
 **Root cause of the 458 Hz ceiling, three layers deep, each disproven
