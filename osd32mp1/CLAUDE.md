@@ -1823,10 +1823,13 @@ timer is enabled; NEVER hardcode pwmchipN, find by address via
 Total 6 channels; 5 verified enabled at 50 Hz immediately, and FOUR
 channels across all three timers verified moving a real servo -
 pin 31 (PH11/TIM5_CH2), pin 32 (PD13/TIM4_CH2), pin 38 (PI6/TIM8_CH2),
-pin 35 (PI7/TIM8_CH3), pin 12 (PI5/TIM8_CH1) - user-confirmed motion
-on each: ALL FIVE RPi-header PWM pins servo-verified. Pin 33
-(PB5/TIM3_CH2) swept right after its unlock. Only PD14 (TIM4_CH3,
-mikroBUS) is untested anywhere - a sibling on a verified timer. JP20 pin map now read
+pin 35 (PI7/TIM8_CH3), pin 12 (PI5/TIM8_CH1), PD14 (TIM4_CH3,
+mikroBUS PWM pin), pin 33 (PB5/TIM3_CH2) - user-confirmed motion on
+EVERY ONE: **7/7 channels servo-verified across four independent
+timers.** Remaining unlockable-if-ever-needed: TIM5_CH1 (PH10, on JP19
+as MC_EN_A) for an 8th; TIM4_CH1 (PD12) only by sacrificing I2C1_SCL
+on pin 28; TIM8's PH13/14/15 are complementary twins of existing
+channels, not independent outputs. JP20 pin map now read
 from the schematic crop: PWM on pins 31 (PH11/TIM5_CH2), 32
 (PD13/TIM4_CH2), 12/35/38 (PI5/PI7/PI6 = TIM8 CH1/CH3/CH2 - the JP19
 nets alias onto the RPi header), and pin 33 = PB5 TIM3_CH2, a seventh

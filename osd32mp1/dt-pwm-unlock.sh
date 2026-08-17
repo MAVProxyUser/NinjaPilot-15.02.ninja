@@ -7,9 +7,9 @@
 # (TIM5 ships enabled in the stock DT; this adds the other three).
 #
 #   chip (addr)        channel  MCU pin  where            verified
-#   TIM3 40001000      pwm1     PB5      RPi hdr pin 33   swept 2026-08-17
+#   TIM3 40001000      pwm1     PB5      RPi hdr pin 33   servo-verified
 #   TIM4 40002000      pwm1     PD13     RPi hdr pin 32   servo-verified
-#   TIM4 40002000      pwm2     PD14     mikroBUS PWM     untested spare
+#   TIM4 40002000      pwm2     PD14     mikroBUS PWM     servo-verified
 #   TIM5 40003000      pwm1     PH11     RPi hdr pin 31   servo-verified
 #   TIM8 44001000      pwm0     PI5      pin 12 / JP19    servo-verified
 #   TIM8 44001000      pwm1     PI6      pin 38 / JP19    servo-verified
