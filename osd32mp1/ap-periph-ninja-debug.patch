@@ -295,10 +295,10 @@ index ad455b0..934c23a 100644
      compass.read();
  
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
-index 1ab2a2e..66dc78e 100644
+index 1ab2a2e..3c85727 100644
 --- a/Tools/AP_Periph/imu.cpp
 +++ b/Tools/AP_Periph/imu.cpp
-@@ -2,61 +2,103 @@
+@@ -2,61 +2,116 @@
  
  #if AP_PERIPH_IMU_ENABLED
  #include <dronecan_msgs.h>
@@ -358,6 +358,7 @@ index 1ab2a2e..66dc78e 100644
  
 -        if (!imu.healthy()) {
 +    while (true) {
++        const uint32_t iter_start_us = AP_HAL::micros();
 +        // The IMU is the inner loop's heartbeat: it ALWAYS gets the
 +        // requested rate. Degradation throttles the aux streams instead.
 +        const uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 1000);
@@ -438,16 +439,28 @@ index 1ab2a2e..66dc78e 100644
 +            can_printf("DEGRADEDHZ: TX healthy 10 s - aux streams restored");
 +        }
 +
-+        // the burst read above costs ~550 us; sleep only the remainder
++        // Measured-remainder pacing: sleep only what is left of the period
++        // after the real work (read + broadcasts + ChibiOS transfer stack),
++        // in <=50 ms chunks because delay_microseconds wraps at 65,536 us.
++        // A static reserve under-subtracted and wasted ~400 us/iteration at
++        // max rate - this tracks the true cost every cycle.
 +        const uint32_t period_us = 1000000UL / rate;
-+        if (period_us > 600) {
-+            hal.scheduler->delay_microseconds(period_us - 600);
++        const uint32_t spent_us = AP_HAL::micros() - iter_start_us;
++        if (period_us > spent_us) {
++            uint32_t remain = period_us - spent_us;
++            while (remain > 50000) {
++                hal.scheduler->delay_microseconds(50000);
++                remain -= 50000;
++            }
++            if (remain > 0) {
++                hal.scheduler->delay_microseconds(remain);
++            }
 +        }
      }
  }
  #endif // AP_PERIPH_IMU_ENABLED
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
-index 067210f..3dcf60d 100644
+index 067210f..9876a75 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 +++ b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 @@ -45,9 +45,16 @@ define AP_PERIPH_BARO_ENABLED 1
@@ -477,7 +490,7 @@ index 067210f..3dcf60d 100644
  
  define HAL_USE_ADC TRUE
  define STM32_ADC_USE_ADC1 TRUE
-@@ -85,3 +92,32 @@ define AP_SERIALLED_ENABLED 1
+@@ -85,3 +92,38 @@ define AP_SERIALLED_ENABLED 1
  
  define HAL_SERIAL_ESC_COMM_ENABLED 1
  USE_BOOTLOADER_FROM_BOARD MatekL431
@@ -510,6 +523,12 @@ index 067210f..3dcf60d 100644
 +# simply compiles the driver. QMC5883P stays declared for the Matek module.
 +define AP_COMPASS_IST8310_ENABLED 1
 +COMPASS IST8310 I2C:0:0x0e false ROTATION_NONE
++
++# BMP280 latent probe ("CAN IF present"): if a BMP280 lands on this bus it
++# registers as a second AP_Baro instance; with the BMP388 absent it becomes
++# primary automatically and 1028/1029 continue - the hub never notices.
++define AP_BARO_BMP280_ENABLED 1
++BARO BMP280 I2C:0:0x76
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h b/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h
 index f1cf94b..c55e218 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h

@@ -395,6 +395,101 @@ static bool bmp_read(float *press_pa, float *temp_c)
     return true;
 }
 
+/* ------------------------------------------------------------------ BMP280 */
+/* The CAN baro's local twin. Registers, calibration layout and float
+ * compensation are per the Bosch BMP280 datasheet - distinct from the
+ * BMP388 above in every way that matters. Optional: absent is normal. */
+#define B280_REG_ID     0xD0
+#define B280_REG_CALIB  0x88
+#define B280_REG_CONFIG 0xF5
+#define B280_REG_CTRL   0xF4
+#define B280_REG_DATA   0xF7
+
+static uint8_t b280_addr;
+struct b280_calib {
+    float T1, T2, T3;
+    float P1, P2, P3, P4, P5, P6, P7, P8, P9;
+    float t_fine;
+};
+static struct b280_calib b2c;
+
+static bool bmp280_init(void)
+{
+    static const uint8_t addrs[2] = { 0x76, 0x77 };
+    uint8_t id = 0;
+
+    b280_addr = 0;
+    for (unsigned i = 0; i < 2; i++) {
+        if (i2c_rd(addrs[i], B280_REG_ID, &id, 1) >= 0 && id == 0x58) {
+            b280_addr = addrs[i];
+            break;
+        }
+    }
+    if (b280_addr == 0) {
+        printf("[hub] BMP280: not present (optional)\n");
+        return false;
+    }
+
+    uint8_t c[24];
+    if (i2c_rd(b280_addr, B280_REG_CALIB, c, sizeof(c)) < 0) {
+        printf("[hub] BMP280: calibration read failed\n");
+        return false;
+    }
+    b2c.T1 = (float)(uint16_t)(c[1] << 8 | c[0]);
+    b2c.T2 = (float)(int16_t)(c[3] << 8 | c[2]);
+    b2c.T3 = (float)(int16_t)(c[5] << 8 | c[4]);
+    b2c.P1 = (float)(uint16_t)(c[7] << 8 | c[6]);
+    b2c.P2 = (float)(int16_t)(c[9] << 8 | c[8]);
+    b2c.P3 = (float)(int16_t)(c[11] << 8 | c[10]);
+    b2c.P4 = (float)(int16_t)(c[13] << 8 | c[12]);
+    b2c.P5 = (float)(int16_t)(c[15] << 8 | c[14]);
+    b2c.P6 = (float)(int16_t)(c[17] << 8 | c[16]);
+    b2c.P7 = (float)(int16_t)(c[19] << 8 | c[18]);
+    b2c.P8 = (float)(int16_t)(c[21] << 8 | c[20]);
+    b2c.P9 = (float)(int16_t)(c[23] << 8 | c[22]);
+
+    /* IIR x4, osrs_t x2 / osrs_p x16, normal mode: ~23 Hz of unique
+     * samples, matching the bench characterization (sd 1.5 Pa). */
+    i2c_wr8(b280_addr, B280_REG_CONFIG, 0x08);
+    i2c_wr8(b280_addr, B280_REG_CTRL, 0x57);
+    msleep(50);
+    printf("[hub] BMP280 ok at 0x%02X (osrs x16, IIR 4, ~23 Hz)\n", b280_addr);
+    return true;
+}
+
+static bool bmp280_read(float *press_pa, float *temp_c)
+{
+    uint8_t d[6];
+
+    if (i2c_rd(b280_addr, B280_REG_DATA, d, sizeof(d)) < 0) {
+        return false;
+    }
+    uint32_t rp = ((uint32_t)d[0] << 12) | ((uint32_t)d[1] << 4) | (d[2] >> 4);
+    uint32_t rt = ((uint32_t)d[3] << 12) | ((uint32_t)d[4] << 4) | (d[5] >> 4);
+
+    /* temperature first - pressure consumes t_fine (same rule as the 388) */
+    float v1 = ((float)rt / 16384.0f - b2c.T1 / 1024.0f) * b2c.T2;
+    float d1 = (float)rt / 131072.0f - b2c.T1 / 8192.0f;
+    b2c.t_fine = v1 + d1 * d1 * b2c.T3;
+    *temp_c = b2c.t_fine / 5120.0f;
+
+    v1 = b2c.t_fine / 2.0f - 64000.0f;
+    float v2 = v1 * v1 * b2c.P6 / 32768.0f;
+    v2 = v2 + v1 * b2c.P5 * 2.0f;
+    v2 = v2 / 4.0f + b2c.P4 * 65536.0f;
+    v1 = (b2c.P3 * v1 * v1 / 524288.0f + b2c.P2 * v1) / 524288.0f;
+    v1 = (1.0f + v1 / 32768.0f) * b2c.P1;
+    if (v1 == 0.0f) {
+        return false;
+    }
+    float pr = 1048576.0f - (float)rp;
+    pr = (pr - v2 / 4096.0f) * 6250.0f / v1;
+    v1 = b2c.P9 * pr * pr / 2147483648.0f;
+    v2 = pr * b2c.P8 / 32768.0f;
+    *press_pa = pr + (v1 + v2 + b2c.P7) / 16.0f;
+    return true;
+}
+
 /* ---------------------------------------------------------------- HMC5883L */
 #define HMC_ADDR   0x1E
 #define HMC_CRA    0x00
@@ -981,6 +1076,7 @@ static void can_poll(void)
 static pthread_t hub_thread;
 static volatile bool hub_run;
 static bool have_mpu, have_bmp, have_can, have_hmc;
+static bool have_b280;
 
 static void *hub_main(void *arg)
 {
@@ -988,7 +1084,9 @@ static void *hub_main(void *arg)
     double next_imu = now_s();
     double next_baro = now_s();
     double next_hmc = now_s();
+    double next_b280 = now_s();
     const double hmc_dt = 1.0 / 50.0;
+    const double b280_dt = 1.0 / 25.0;
     double next_health = now_s() + 10.0;
     struct pios_sensors_hub_data prev;
     memset(&prev, 0, sizeof(prev));
@@ -1036,6 +1134,23 @@ static void *hub_main(void *arg)
             }
         }
 
+        if (have_b280 && t >= next_b280) {
+            float p, tc;
+            if (bmp280_read(&p, &tc) && p > 30000.0f && p < 120000.0f) {
+                hub_publish_begin();
+                hub.baro2_press_pa = p;
+                hub.baro2_temp_c = tc;
+                hub.baro2_time = t;
+                hub.baro2_count++;
+                hub.have_baro2 = true;
+                hub_publish_end();
+            }
+            next_b280 += b280_dt;
+            if (next_b280 < t) {
+                next_b280 = t + b280_dt;
+            }
+        }
+
         if (have_hmc && t >= next_hmc) {
             float m[3];
             if (hmc_read(m)) {
@@ -1066,12 +1181,13 @@ static void *hub_main(void *arg)
              * actual frame sizes - not datasheet arithmetic. Integer-only:
              * the %u-after-doubles varargs artifact is still open.
              */
-            PIOS_SHMLOG_Printf("[hub-health] imu=%lu imu2=%lu baro=%lu hmc=%lu mag=%lu qmc=%lu "
+            PIOS_SHMLOG_Printf("[hub-health] imu=%lu imu2=%lu baro=%lu b2=%lu hmc=%lu mag=%lu qmc=%lu "
                                "fix2=%lu aux=%lu ierr=%lu berr=%lu gbad=%lu "
                                "i2c_pm=%lu can_pm=%lu",
                                (unsigned long)(hub.imu_count - prev.imu_count),
                                (unsigned long)(hub.imu2_count - prev.imu2_count),
                                (unsigned long)(hub.baro_count - prev.baro_count),
+                               (unsigned long)(hub.baro2_count - prev.baro2_count),
                                (unsigned long)(hub.mag2_count - prev.mag2_count),
                                (unsigned long)(hub.mag_count - prev.mag_count),
                                (unsigned long)(hub.qmc_count - prev.qmc_count),
@@ -1113,6 +1229,7 @@ int32_t PIOS_SENSORS_HUB_Init(const char *i2c_dev, const char *can_if)
     } else {
         have_mpu = mpu_init();
         have_bmp = bmp_init();
+        have_b280 = bmp280_init();
         have_hmc = hmc_init();
     }
     have_can = can_init(can_if);

@@ -38,6 +38,14 @@ struct pios_sensors_hub_data {
     uint32_t imu_count;
     uint32_t imu_errors;
 
+    /* Second barometer: BMP280 on the MP1's own I2C (0x76/0x77, chip 0x58).
+     * The CAN baro's local twin - BaroSensor failover source. */
+    float    baro2_press_pa;
+    float    baro2_temp_c;
+    double   baro2_time;
+    uint32_t baro2_count;
+    bool     have_baro2;
+
     /* Third magnetometer: the QMC5883P on the M9N-5883, via node 124's
      * MagneticFieldStrength. UNCALIBRATED (bench |B| reads ~76 uT vs the
      * RM3100's 51) - ingested for visibility, not yet published. */

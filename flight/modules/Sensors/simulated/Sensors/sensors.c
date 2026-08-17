@@ -222,7 +222,7 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
          * GyroSensor updates, and the estimator gates on MagSensor arriving.
          */
         {
-            static uint32_t last_imu, last_baro, last_mag, last_mag2, last_gps, last_imu2;
+            static uint32_t last_imu, last_baro, last_mag, last_mag2, last_gps, last_imu2, last_baro2;
             static bool telemetry_throttled = false;
 
             /*
@@ -320,6 +320,35 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                     } else if (failed_over) {
                         failed_over = false;
                         PIOS_SHMLOG_Printf("[sensors] local IMU back - CAN IMU stands down");
+                    }
+                }
+
+                /*
+                 * Baro failover, same policy as the IMU pair: the local
+                 * BMP280 publishes BaroSensor ONLY while the CAN baro has
+                 * been silent >1 s, and stands down when it returns. The
+                 * two units carry a ~131 Pa absolute offset (~11 m), so a
+                 * source switch steps the altitude - failover is for a
+                 * DEAD bus, never for blending.
+                 */
+                if (h.have_baro2 && h.baro2_count != last_baro2) {
+                    last_baro2 = h.baro2_count;
+                    static bool baro_failed_over = false;
+                    bool can_baro_dead = !h.have_baro
+                                         || (h.baro2_time - h.baro_time) > 1.0;
+                    if (can_baro_dead) {
+                        if (!baro_failed_over) {
+                            baro_failed_over = true;
+                            PIOS_SHMLOG_Printf("[sensors] CAN BARO SILENT - failing over to local BMP280");
+                        }
+                        BaroSensorData b2;
+                        b2.Temperature = h.baro2_temp_c;
+                        b2.Pressure    = h.baro2_press_pa / 1000.0f;
+                        b2.Altitude    = 44330.0f * (1.0f - powf(b2.Pressure / 101.325f, 0.190295f));
+                        BaroSensorSet(&b2);
+                    } else if (baro_failed_over) {
+                        baro_failed_over = false;
+                        PIOS_SHMLOG_Printf("[sensors] CAN baro back - local BMP280 stands down");
                     }
                 }
 

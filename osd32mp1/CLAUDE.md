@@ -1632,3 +1632,46 @@ IMU stream's practical floor is therefore ~55 Hz; harmless for flight
 
 Operating point saved: IMU 1000 (=397), baro native 50, mag default 25,
 GPS 10 Hz. Verified on the wire post-restore.
+
+## BMP280 is a first-class optional sensor now - local AND latent-CAN (2026-08-17)
+
+**Local half (the hub)**: pios_sensors_hub.c carries a full BMP280 driver
+beside the BMP388's - probe 0x76/0x77 for chip 0x58, 24-byte calib, Bosch
+float compensation, osrs x16 + IIR 4, polled at 25 Hz into new baro2_*
+snapshot fields. Absent is normal ("not present (optional)"). sensors.c
+gains baro failover mirroring the IMU pair: the local BMP280 publishes
+BaroSensor ONLY while the CAN baro has been silent >1 s, stands down on
+return, one-shot shmlog lines both ways. NOTE the ~131 Pa absolute offset
+between units (~11 m): failover is for a DEAD bus, never blending.
+Verified live: hub-health `baro=500 b2=250` (50 Hz CAN + 25 Hz local),
+zero errors, failover correctly silent.
+
+**CAN half (latent)**: the L431 hwdef now enables AP_BARO_BMP280 with a
+declared probe at 0x76. Nothing changes until a BMP280 lands on that bus -
+then it registers as a second AP_Baro instance, and with the BMP388 absent
+it becomes primary automatically: 1028/1029 continue and the hub never
+notices the substitution. Flashed and verified (suite unchanged).
+
+**HMC5883L hmc=0 during verification was NOT a code bug**: direct register
+read showed X and Y pinned at -4096 = magnetic SATURATION (>1.3 Ga needs
+~3x Earth field - something ferrous/magnetic moved next to it on the
+bench). The hub's reject-saturated-readings path worked as designed. Move
+the offender; the counter returns by itself.
+
+## The missing ~100 Hz on the CAN IMU: found, mostly reclaimed - 457.7 Hz (2026-08-17)
+
+User called it ("feels like the bridge code is lacking just a hair"): at
+cmd 1000 the proxy loop still slept a fixed 400 us every iteration - the
+static 600 us work reserve under-estimated the true per-iteration cost
+(ChibiOS transfer stack + broadcasts), so the leftover sleep fired even
+with no time to spare. Fix: measured-remainder pacing - timestamp each
+iteration, sleep only period-minus-actual-work, chunked at 50 ms (which
+also fixes the delay_microseconds 65 ms wrap floor for low rates).
+
+    397.9 Hz -> 457.7 Hz, suite untouched.
+
+Remaining gap to the MP1's paced 493: ~2.18 ms of true per-iteration work
+(wire 520 us + ChibiOS per-transfer overhead + bus sharing with the
+IST8310/BMP388 drivers + two broadcasts). That is the platform floor for
+I2C-attached parts on this node; parity beyond ~93 % wants SPI or a leaner
+I2C stack, not pacing tricks.

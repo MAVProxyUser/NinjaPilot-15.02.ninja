@@ -115,9 +115,9 @@ The edits are reproducible offline on macOS without sudo — `gpt.py` + `part.py
 | sensor | where | address / node | rate | state |
 |---|---|---|---|---|
 | MPU-9150 #1 gyro+accel | MP1 I2C `/dev/i2c-3` | 0x68 | **500 Hz** | live — the PRIMARY IMU |
-| MPU-9150 #2 gyro+accel | DroneCAN, L431 I2C | node 124, msg 20500/20501 | **~400 Hz** | live — RAW-count proxy (no cal/filter on the node); IMU-priority guardrail: NEVER throttled, aux streams degrade instead; realposix failover IMU |
+| MPU-9150 #2 gyro+accel | DroneCAN, L431 I2C | node 124, msg 20500/20501 | **~458 Hz** | live — RAW-count proxy (no cal/filter on the node); IMU-priority guardrail: NEVER throttled, aux streams degrade instead; realposix failover IMU |
 | BMP388 barometer | DroneCAN, L431 I2C | node 124, msg 1028/1029 | **50 Hz** | live, 98.1 kPa |
-| BMP280 barometer | MP1 I2C `/dev/i2c-3` | 0x76 (CHIP_ID 0x58) | ~23 Hz unique | live, bench-read (no hub driver yet) — the CAN baro's I2C twin |
+| BMP280 barometer | MP1 I2C `/dev/i2c-3` | 0x76 (CHIP_ID 0x58) | **25 Hz** | live in the hub (baro2_*) — BaroSensor failover if the CAN baro dies; latent CAN probe also declared on the L431 |
 | HMC5883L mag | MP1 I2C `/dev/i2c-3` | 0x1E (ID 'H43') | **50 Hz** | live → AuxMagSensor |
 | RM3100 mag | DroneCAN | node 125, msg 1001 | **25 Hz** | live, 51 uT — the FLIGHT mag (hub keys 1001 to node 125) |
 | IST8310 mag | DroneCAN, L431 I2C | node 124, msg 1001 | **25 Hz (97 max)** | live, 46.9 uT — Holybro Micro M9N; `MAG_MAX_RATE=100` unlocks ~97 Hz; hub ingests as qmc_* (aux) |
@@ -135,7 +135,7 @@ IST8310 probes, and `I2C_SCAN=1` identifies anything new in one sweep.
 | UAVObject | source | fallback |
 |---|---|---|
 | GyroSensor / AccelSensor | MPU-9150 #1 (MP1 I2C, 500 Hz) | MPU-9150 #2 over CAN if local silent >200 ms |
-| BaroSensor | BMP388 over CAN | — |
+| BaroSensor | BMP388 over CAN | local BMP280 if CAN baro silent >1 s |
 | MagSensor | RM3100 over CAN | — |
 | AuxMagSensor | HMC5883L (MP1 I2C) | — |
 | GPSPosition/VelocitySensor | M9N over CAN | — |
