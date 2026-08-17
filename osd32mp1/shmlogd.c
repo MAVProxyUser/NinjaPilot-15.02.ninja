@@ -16,7 +16,8 @@
 #define SLOTS 4096u
 #define MSG   176u
 struct slot { volatile uint32_t seq; uint16_t len, _p; uint64_t t_ns; char msg[MSG]; };
-struct ring { uint32_t magic, nslots; volatile uint64_t head, tail, dropped; uint32_t _pad[10]; struct slot s[SLOTS]; };
+struct ring { uint32_t magic, nslots; volatile uint64_t head, tail, dropped;
+              volatile uint32_t generation; uint32_t _pad[9]; struct slot s[SLOTS]; };
 
 int main(int argc, char **argv)
 {
@@ -28,16 +29,30 @@ int main(int argc, char **argv)
     if (r == MAP_FAILED || r->magic != MAGIC) { fprintf(stderr, "bad ring\n"); return 1; }
 
     /* This is a DROP-ON-FULL ring, not an overwrite ring: the writer never
-     * clobbers an unconsumed slot, it drops and counts. So the oldest valid
-     * record is ALWAYS at r->tail - "skip ahead" logic belongs to overwrite
-     * rings and here it lands on never-rewritten sequence numbers and reads
-     * nothing (found the hard way: head=12191, tail=0, 8095 drops, dump=0).
-     * Run the daemon CONCURRENTLY for long captures; a post-mortem dump only
-     * holds the first ring-full. */
-    uint64_t tail = r->tail;
+     * clobbers an unconsumed slot, so the oldest valid record is always at
+     * r->tail. The writer's claim loop guarantees head - tail <= SLOTS; if
+     * an attached ring violates that it was written by the pre-fix firmware
+     * (which advanced head on dropped writes) and is unrecoverable - say so
+     * loudly instead of silently printing nothing. */
+    if (r->head < r->tail || r->head - r->tail > SLOTS) {
+        fprintf(stderr, "!! ring wedged (head=%llu tail=%llu, pre-fix firmware?) - "
+                        "restart the firmware to reinitialize it\n",
+                (unsigned long long)r->head, (unsigned long long)r->tail);
+        return 1;
+    }
 
+    uint64_t tail = r->tail;
+    uint32_t gen  = r->generation;
     uint64_t last_drop = r->dropped;
     for (;;) {
+        /* Firmware restart reinitializes the ring and bumps generation;
+         * resync instead of spinning on stale sequence numbers. */
+        if (r->generation != gen) {
+            gen  = r->generation;
+            tail = r->tail;
+            last_drop = r->dropped;
+            printf("!! ring reinitialized (firmware restart), resyncing\n");
+        }
         int idle = 1;
         while (1) {
             struct slot *s = &r->s[tail & (SLOTS - 1u)];
@@ -51,7 +66,7 @@ int main(int argc, char **argv)
             idle = 0;
         }
         if (r->dropped != last_drop) {
-            printf("!! ring dropped %llu records (consumer too slow)\n",
+            printf("!! ring dropped %llu records (ring full while unconsumed)\n",
                    (unsigned long long)(r->dropped - last_drop));
             last_drop = r->dropped;
         }

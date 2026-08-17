@@ -67,6 +67,7 @@
 #include "homelocation.h"
 #include "flightbatterystate.h"
 #include "alarms.h"
+#include "revosettings.h"
 // #include "sensor.h"
 #include "ratedesired.h"
 #include "revocalibration.h"
@@ -444,6 +445,80 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                     m.z = h.mag_ga[2] * 1000.0f;
                     m.temperature = h.baro_temp_c;
                     MagSensorSet(&m);
+                }
+
+                /*
+                 * Transport health tiles, once per second. These report the
+                 * SENSOR TRANSPORT, not the fusion chain: the tiles read as
+                 * hardware health, and Basic(Complementary) fusion would
+                 * otherwise leave MAG greyed forever. Both alarms stay
+                 * Uninitialised (greyed) until the hardware is first seen,
+                 * which keeps "never detected" distinguishable from "died".
+                 */
+                {
+                    static uint32_t health_div = 0;
+                    if (++health_div >= 500) {   /* 500 x 2 ms = 1 s */
+                        health_div = 0;
+
+                        /* MAG: RM3100 over CAN, native 25 Hz. Only owned
+                         * here under Basic(Complementary); the mag fusion
+                         * chains hand this alarm to filtermag's deviation
+                         * check, which judges the DATA, not just delivery. */
+                        RevoSettingsData revo;
+                        RevoSettingsGet(&revo);
+                        if (revo.FusionAlgorithm == REVOSETTINGS_FUSIONALGORITHM_BASICCOMPLEMENTARY) {
+                            static uint32_t prev_mag_count = 0;
+                            static uint8_t mag_quiet_s = 0;
+                            if (h.mag_count > 0) {
+                                if (h.mag_count != prev_mag_count) {
+                                    uint32_t delta = h.mag_count - prev_mag_count;
+                                    prev_mag_count = h.mag_count;
+                                    mag_quiet_s    = 0;
+                                    if (delta >= 13) {   /* at least half the native rate */
+                                        AlarmsClear(SYSTEMALARMS_ALARM_MAGNETOMETER);
+                                    } else {
+                                        AlarmsSet(SYSTEMALARMS_ALARM_MAGNETOMETER, SYSTEMALARMS_ALARM_WARNING);
+                                    }
+                                } else {
+                                    if (mag_quiet_s < 255) {
+                                        mag_quiet_s++;
+                                    }
+                                    AlarmsSet(SYSTEMALARMS_ALARM_MAGNETOMETER,
+                                              mag_quiet_s >= 3 ? SYSTEMALARMS_ALARM_ERROR
+                                              : SYSTEMALARMS_ALARM_WARNING);
+                                }
+                            }
+                        }
+
+                        /* CAN0 bus load on the former I2C tile: green under
+                         * half the 1 Mbit wire, orange to 80 %, red above -
+                         * and red too if the bus dies after first contact. */
+                        /* PWR/BATT tile: green on the jack, orange on USB
+                         * VBUS (bench power - it cannot fly motors). Greyed
+                         * until the OTG registers are first readable. */
+                        if (h.have_pwr) {
+                            if (h.vbus_present) {
+                                AlarmsSet(SYSTEMALARMS_ALARM_BATTERY, SYSTEMALARMS_ALARM_WARNING);
+                            } else {
+                                AlarmsClear(SYSTEMALARMS_ALARM_BATTERY);
+                            }
+                        }
+
+                        static uint32_t prev_can_frames = 0;
+                        if (h.can_seen) {
+                            bool quiet = (h.can_frames == prev_can_frames);
+                            prev_can_frames = h.can_frames;
+                            if (quiet) {
+                                AlarmsSet(SYSTEMALARMS_ALARM_I2C, SYSTEMALARMS_ALARM_CRITICAL);
+                            } else if (h.can_load_pm > 800) {
+                                AlarmsSet(SYSTEMALARMS_ALARM_I2C, SYSTEMALARMS_ALARM_ERROR);
+                            } else if (h.can_load_pm > 500) {
+                                AlarmsSet(SYSTEMALARMS_ALARM_I2C, SYSTEMALARMS_ALARM_WARNING);
+                            } else {
+                                AlarmsClear(SYSTEMALARMS_ALARM_I2C);
+                            }
+                        }
+                    }
                 }
             }
             vTaskDelay(2 / portTICK_RATE_MS);

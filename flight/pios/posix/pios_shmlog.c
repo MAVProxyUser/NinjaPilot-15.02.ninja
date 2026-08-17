@@ -46,7 +46,8 @@ struct shmlog_ring {
     volatile uint64_t head;        /* producers claim here   */
     volatile uint64_t tail;        /* consumer-owned         */
     volatile uint64_t dropped;
-    uint32_t _pad[10];             /* keep slots cache-aligned */
+    volatile uint32_t generation;  /* bumped on every (re)init; readers resync on change */
+    uint32_t _pad[9];              /* keep slots cache-aligned */
     struct shmlog_slot slot[SHMLOG_SLOTS];
 };
 
@@ -70,10 +71,19 @@ void PIOS_SHMLOG_Init(const char *path)
         return;
     }
     struct shmlog_ring *r = m;
-    if (r->magic != SHMLOG_MAGIC || r->nslots != SHMLOG_SLOTS) {
-        /* fresh ring; a daemon attaching later replays whatever is here */
+    /* A valid ring within one lap of its consumer is kept, so a daemon
+     * attaching later can replay a crash's final seconds. Anything else -
+     * wrong magic, wrong geometry, or head/tail in an impossible state
+     * (the pre-fix firmware advanced head on every DROPPED write, wedging
+     * the ring beyond recovery) - is reinitialized here rather than left
+     * to poison every future session. */
+    uint64_t lag = r->head - r->tail;
+    if (r->magic != SHMLOG_MAGIC || r->nslots != SHMLOG_SLOTS ||
+        r->head < r->tail || lag > SHMLOG_SLOTS) {
+        uint32_t gen = (r->magic == SHMLOG_MAGIC) ? r->generation + 1u : 1u;
         memset(r, 0, sizeof(*r));
-        r->nslots = SHMLOG_SLOTS;
+        r->nslots     = SHMLOG_SLOTS;
+        r->generation = gen;
         for (uint32_t i = 0; i < SHMLOG_SLOTS; i++) {
             r->slot[i].seq = i;
         }
@@ -90,11 +100,31 @@ void PIOS_SHMLOG_Printf(const char *fmt, ...)
     if (!r) {
         return;
     }
-    uint64_t pos = __atomic_fetch_add(&r->head, 1, __ATOMIC_RELAXED);
-    struct shmlog_slot *s = &r->slot[pos & (SHMLOG_SLOTS - 1u)];
-    if (__atomic_load_n(&s->seq, __ATOMIC_ACQUIRE) != (uint32_t)pos) {
-        __atomic_fetch_add(&r->dropped, 1, __ATOMIC_RELAXED);
-        return;                    /* consumer a lap behind: drop, never wait */
+    /* Vyukov claim loop: only advance head once the slot is actually
+     * writable. The old unconditional fetch_add advanced head on DROPPED
+     * writes too, so any consumer-less period pushed head unboundedly far
+     * past tail and no later drain could ever line the sequence numbers up
+     * again - the ring wedged permanently (writers dropping, readers
+     * seeing empty). With the CAS claim, a full ring simply drops until
+     * the consumer frees a slot, then resumes. */
+    uint64_t pos = __atomic_load_n(&r->head, __ATOMIC_RELAXED);
+    struct shmlog_slot *s;
+    for (;;) {
+        s = &r->slot[pos & (SHMLOG_SLOTS - 1u)];
+        uint32_t seq  = __atomic_load_n(&s->seq, __ATOMIC_ACQUIRE);
+        int32_t  dif  = (int32_t)(seq - (uint32_t)pos);
+        if (dif == 0) {
+            if (__atomic_compare_exchange_n(&r->head, &pos, pos + 1, 1,
+                                            __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+                break;             /* slot claimed */
+            }
+            /* lost the race to another producer; pos was reloaded by CAS */
+        } else if (dif < 0) {
+            __atomic_fetch_add(&r->dropped, 1, __ATOMIC_RELAXED);
+            return;                /* ring full: drop, never wait */
+        } else {
+            pos = __atomic_load_n(&r->head, __ATOMIC_RELAXED);
+        }
     }
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);

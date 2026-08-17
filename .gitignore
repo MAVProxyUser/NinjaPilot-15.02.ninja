@@ -96,3 +96,5 @@ ground/openpilotgcs/**/mocs/
 ground/openpilotgcs/**/objs/
 ground/openpilotgcs/**/*.o
 ground/openpilotgcs/share/openpilotgcs/translations/phony_target*/
+ground/openpilotgcs/src/libs/qwt/examples/bin/
+ground/openpilotgcs/src/libs/qwt/playground/bin/

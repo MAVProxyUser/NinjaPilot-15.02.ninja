@@ -2216,3 +2216,47 @@ and abs overrun 6400 are storm-era residue - always judge by DELTA.
 - **Onboard DebugLog is now Always + persisted** on the bench board:
   233CDC slots accumulate in fcwd between sessions - purge before timed
   comparisons, and expect ~1 slot per few seconds from SystemStats 1s.
+
+## The health-tile flapping ROOT CAUSE + fixes (2026-08-17, night)
+
+The ATTI/STAB/EVENT oscillation was NOT the sensor rate (wire was already
+~490 Hz - the 958 Hz state died with the boot-storm reflash; INS_SAMPLE_RATE
+saved=500, delivered 490.8 Hz; nothing consumes more, ~1 kHz buys nothing).
+Three stacked causes, isolated by A/B (ring-only vs client-attached):
+
+1. **Telemetry at +7 preempted the estimator band whenever a GCS was
+   connected.** telemetry.c's SIMPOSIX elevation (telemetry IS the sensor
+   bus under external physics) leaked into realposix, where telemetry is
+   ordinary GCS chatter. Now +2 under PIOS_REALPOSIX. Flapping was
+   client-correlated: ring-only watch clean, client watch ATTI 54%/STAB 31%
+   warn -> after fix 95%/89% OK.
+2. **DebugLog "Always" self-excited**: alarm transition -> onchange log
+   write -> stall -> new transition; EVENT cb-error latched GyroSensor
+   (= innerloop dispatch drops). Keep OnlyWhenArmed for flights.
+3. **The IMU node itself was service-deaf** (canard pool starved) during
+   the original measurements - its clumped TX was the "1.2s windows every
+   1.8s" signature. A node power-cycle cleared it. dronecan-python on this
+   bus needs the PER-FRAME exception wrap (node._recv_frame monkeypatch,
+   see /home/root/set_ins_rate.py) - wrapping spin() drops whole batches
+   including service responses ("NO RESPONSE" while streaming).
+- **stateestimation TIMEOUT_MS 10 -> 50 under PIOS_REALPOSIX**: 10-20ms CAN
+  delivery jitter is endemic/harmless here; 10ms assumed DMA-local sensors.
+- **shmlog ring can no longer wedge**: the writer advanced head on DROPPED
+  writes, so any consumer-less period pushed head unrecoverably far past
+  tail (writers drop forever, readers see empty - "dump-empty corrupt ring").
+  Now a Vyukov CAS claim (head only advances into writable slots), init
+  self-heals insane rings (no more rm ritual), generation counter lets
+  shmlogd resync across firmware restarts. Also: two concurrent shmlogd
+  readers still corrupt each other - one reader at a time.
+- **New tiles** (all verified live): MAG = RM3100 delivery (sensors.c owns
+  it only under Basic fusion; filtermag owns it in mag chains); CAN tile
+  (SystemAlarms I2C slot; SVG tile added at the MAG column, CONFIG row):
+  greyed=never seen, green<50%, orange>50%, red>80% or bus-death; BATT =
+  power source via DWC2 GOTGCTL bit19 VBUS: green=jack/AC, orange=USB
+  (VBUS raised by any powered cable - caveat in pios_sensors_hub.h).
+- **TIME tile** = FlightTime alarm = the Battery module's estimated
+  remaining flight time from consumed mAh - NOT GPS time. Uninitialised
+  here because no battery module/sensor runs.
+- **Uploader board art**: this fork's qrc dropped gcs-board-revo.png with
+  the Revo purge, so any case pointing at it rendered BLANK silently.
+  realposix now ships its own drawn gcs-board-osd32mp1.png.

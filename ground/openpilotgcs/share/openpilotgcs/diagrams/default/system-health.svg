@@ -3084,4 +3084,80 @@
       </g>
     </g>
   </g>
+  <rect
+     style="fill:#4d4d4d;fill-opacity:1;stroke:none;display:inline"
+     id="rect-can-base"
+     width="23.824036"
+     height="10.135587"
+     x="86.323196"
+     y="51.900002"
+     ry="0.9934333" />
+  <text
+     xml:space="preserve"
+     style="font-size:6.00222254px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:none;display:inline;font-family:Arial;-inkscape-font-specification:Arial Bold"
+     x="106.30000"
+     y="49.551472"
+     id="textcan"
+     sodipodi:linespacing="125%"
+     transform="scale(0.83127393,1.2029729)"><tspan
+       sodipodi:role="line"
+       id="tspancan"
+       x="106.30000"
+       y="49.551472">CAN</tspan></text>
+  <g
+     inkscape:groupmode="layer"
+     id="layerI2COK"
+     inkscape:label="I2C-OK"
+     style="display:none">
+    <rect
+       style="fill:#008000;fill-opacity:1;stroke:none;display:inline"
+       id="I2C-OK"
+       width="23.824036"
+       height="10.135587"
+       x="86.323196"
+       y="51.900002"
+       ry="0.9934333" />
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layerI2CWarning"
+     inkscape:label="I2C-Warning"
+     style="display:none">
+    <rect
+       style="fill:#ffa500;fill-opacity:1;stroke:none;display:inline"
+       id="I2C-Warning"
+       width="23.824036"
+       height="10.135587"
+       x="86.323196"
+       y="51.900002"
+       ry="0.9934333" />
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layerI2CError"
+     inkscape:label="I2C-Error"
+     style="display:none">
+    <rect
+       style="fill:#ff0000;fill-opacity:1;stroke:none;display:inline"
+       id="I2C-Error"
+       width="23.824036"
+       height="10.135587"
+       x="86.323196"
+       y="51.900002"
+       ry="0.9934333" />
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layerI2CCritical"
+     inkscape:label="I2C-Critical"
+     style="display:none">
+    <rect
+       style="fill:#ff0000;fill-opacity:1;stroke:none;display:inline"
+       id="I2C-Critical"
+       width="23.824036"
+       height="10.135587"
+       x="86.323196"
+       y="51.900002"
+       ry="0.9934333" />
+  </g>
 </svg>

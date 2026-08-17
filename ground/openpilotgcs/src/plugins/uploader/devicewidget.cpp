@@ -106,8 +106,9 @@ void DeviceWidget::populate()
         devicePic.load(":/uploader/images/gcs-board-revo.png");
         break;
     case 0x1101:
-        // realposix borrows the Revolution artwork
-        devicePic.load(":/uploader/images/gcs-board-revo.png");
+        // NinjaPilot realposix on the Octavo OSD32MP1-RED (drawn in-tree:
+        // this fork's qrc no longer carries the Revolution artwork)
+        devicePic.load(":/uploader/images/gcs-board-osd32mp1.png");
         break;
     default:
         // Clear

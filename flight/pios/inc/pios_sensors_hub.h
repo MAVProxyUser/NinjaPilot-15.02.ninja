@@ -113,6 +113,20 @@ struct pios_sensors_hub_data {
     uint8_t  gps_sats_visible;
     uint32_t gps_aux_count;
 
+    /* CAN bus health, rolling 1 s window: utilisation in permille of the
+     * 1 Mbit wire (from measured frame sizes, same accounting as the 10 s
+     * hub-health print) and total frames ever seen. Drives the CAN tile. */
+    uint32_t can_load_pm;
+    uint32_t can_frames;
+    bool     can_seen;
+
+    /* Power source, from the DWC2 OTG controller's B-session-valid bit
+     * (VBUS present = USB power attached). CAVEAT: a data cable from a
+     * host also raises VBUS, so this reads "USB" whenever any powered
+     * cable is on the USB-C port, even if the jack is supplying too. */
+    bool     vbus_present;
+    bool     have_pwr;
+
     bool     have_imu;
     bool     have_imu2;
     bool     have_baro;

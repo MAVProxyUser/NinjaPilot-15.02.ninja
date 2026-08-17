@@ -72,8 +72,19 @@
 // sensor bytes move at ISR/DMA priority above every application task.
 // Real boards keep the stock priority: there, telemetry genuinely is
 // low-priority GCS chatter and sensors have their own drivers.
+//
+// REALPOSIX is exactly such a real board (sensors arrive via the hub
+// thread, not telemetry) but it also defines SIMPOSIX, so it inherited
+// this elevation - and at +7 every connected GCS preempted the whole
+// estimator band: measured ATTI/STAB/EVENT warning flapping that
+// appeared with a telemetry client attached and vanished without one.
+#if defined(PIOS_REALPOSIX)
+#define TASK_PRIORITY_RX          (tskIDLE_PRIORITY + 2)
+#define TASK_PRIORITY_TX          (tskIDLE_PRIORITY + 2)
+#else
 #define TASK_PRIORITY_RX          (tskIDLE_PRIORITY + 7)
 #define TASK_PRIORITY_TX          (tskIDLE_PRIORITY + 7)
+#endif
 #else
 #define TASK_PRIORITY_RX          (tskIDLE_PRIORITY + 2)
 #define TASK_PRIORITY_TX          (tskIDLE_PRIORITY + 2)

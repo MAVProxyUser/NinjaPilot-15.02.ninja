@@ -73,7 +73,18 @@
 // CALLBACK_PRIORITY_LOW there, below this module's REGULAR) so a fresh
 // state estimate is always available before altitude-hold consumes it.
 #define TASK_PRIORITY           CALLBACK_TASK_STATEESTIMATION
+#if defined(PIOS_REALPOSIX)
+/* Staleness threshold for the "no fresh sensor data" warning. The stock
+ * 10ms assumes a DMA-fed local sensor at 500 Hz, where 5 missed samples
+ * means real trouble. On this port the gyro rides CAN through non-RT
+ * Linux, where 10-20ms delivery jitter is endemic and harmless (the cf
+ * filter integrates straight through it) - at 10ms the Attitude alarm
+ * flapped ~50% duty on a healthy bench. 50ms still catches a genuinely
+ * dying feed (25 lost samples) fast enough for the estimator to coast. */
+#define TIMEOUT_MS              50
+#else
 #define TIMEOUT_MS              10
+#endif
 
 // Private filter init const
 #define FILTER_INIT_FORCE       -1

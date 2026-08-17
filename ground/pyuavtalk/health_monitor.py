@@ -43,7 +43,7 @@ TILE = {"SystemConfiguration": "CONFIG", "BootFault": "BOOT", "OutOfMemory": "ME
         "Actuator": "OUTPUT", "Attitude": "ATTI", "Sensors": "SENSOR",
         "Magnetometer": "MAG", "Airspeed": "AIRSPD", "Stabilization": "STAB",
         "Guidance": "PATH", "PathPlan": "PLAN", "Battery": "BATT",
-        "FlightTime": "TIME", "I2C": "I2C", "GPS": "GPS"}
+        "FlightTime": "TIME", "I2C": "CAN", "GPS": "GPS"}
 
 # Established causes on THIS bench (realposix on the OSD32MP1). Keep these in
 # step with osd32mp1/CLAUDE.md - they are diagnoses, not guesses.
@@ -65,13 +65,20 @@ WHY = {
     ("ManualControl", "Warning"): "manualcontrol running without valid input",
     ("CPUOverload", "Warning"): "CPULoad above CPULOAD_LIMIT_WARNING (80%)",
     ("CPUOverload", "Critical"): "CPULoad above CPULOAD_LIMIT_CRITICAL (95%)",
-    ("Magnetometer", "Uninitialised"): "no owner: Basic(Complementary) fusion never touches "
-                                       "this alarm (mag filters live in the Mag/INS13 chains)",
+    ("Magnetometer", "Uninitialised"): "RM3100 never seen on CAN (transport monitor waits for "
+                                       "first data)",
+    ("Magnetometer", "Warning"): "mag delivery below half its native 25 Hz",
+    ("Magnetometer", "Error"): "mag was streaming and has gone silent >3s",
     ("Guidance", "Uninitialised"): "PathFollower not active",
     ("Airspeed", "Uninitialised"): "Airspeed module not running",
-    ("Battery", "Uninitialised"): "Battery module not running",
+    ("Battery", "Uninitialised"): "power source not yet read (OTG registers unavailable)",
+    ("Battery", "Warning"): "running on USB VBUS power - fine for bench, cannot fly motors "
+                            "(NOTE: a data cable from a host also raises VBUS)",
     ("FlightTime", "Uninitialised"): "no flight-time limit configured",
-    ("I2C", "Uninitialised"): "no PIOS I2C alarm owner on this port",
+    ("I2C", "Uninitialised"): "CAN0 never delivered a frame",
+    ("I2C", "Warning"): "CAN0 over 50% of the 1 Mbit wire (kinda saturated)",
+    ("I2C", "Error"): "CAN0 over 80% of the 1 Mbit wire (oversaturated)",
+    ("I2C", "Critical"): "CAN0 died after first contact (no frames in the last second)",
 }
 
 COLOR = {"Uninitialised": "greyed/X", "OK": "green", "Warning": "ORANGE",

@@ -569,6 +569,7 @@ static bool hmc_read(float ga[3])
 
 static int can_fd = -1;
 static uint64_t can_bits;   /* hub thread only */
+static uint64_t can_frames; /* hub thread only */
 
 static bool can_init(const char *ifname)
 {
@@ -862,6 +863,7 @@ static void can_poll(void)
 
     while (can_fd >= 0 && read(can_fd, &f, sizeof(f)) == (ssize_t)sizeof(f)) {
         can_bits += 67u + 8u * f.can_dlc;   /* nominal ext-frame cost */
+        can_frames++;
         if (!(f.can_id & CAN_EFF_FLAG) || f.can_dlc < 1) {
             continue;
         }
@@ -1088,6 +1090,8 @@ static void *hub_main(void *arg)
     const double hmc_dt = 1.0 / 50.0;
     const double b280_dt = 1.0 / 25.0;
     double next_health = now_s() + 10.0;
+    double next_canload = now_s() + 1.0;
+    uint64_t canload_prev_bits = 0;
     struct pios_sensors_hub_data prev;
     memset(&prev, 0, sizeof(prev));
     uint64_t prev_i2c_ns = 0, prev_can_bits = 0;
@@ -1170,6 +1174,41 @@ static void *hub_main(void *arg)
 
         if (have_can) {
             can_poll();
+        }
+
+        if (t >= next_canload) {
+            /* rolling 1 s bus utilisation for the CAN health tile; permille
+             * of the 1 Mbit wire, same frame-size accounting as the 10 s
+             * hub-health print */
+            next_canload += 1.0;
+            if (next_canload < t) {
+                next_canload = t + 1.0;
+            }
+            bool vbus = false, pwr_ok = false;
+            {
+                /* DWC2 GOTGCTL bit 19 = B-session valid = VBUS present */
+                FILE *fp = fopen("/sys/kernel/debug/usb/49000000.usb-otg/regdump", "r");
+                if (fp) {
+                    char line[96];
+                    while (fgets(line, sizeof(line), fp)) {
+                        unsigned long v;
+                        if (sscanf(line, "GOTGCTL = %lx", &v) == 1) {
+                            vbus   = (v >> 19) & 1u;
+                            pwr_ok = true;
+                            break;
+                        }
+                    }
+                    fclose(fp);
+                }
+            }
+            hub_publish_begin();
+            hub.can_load_pm  = (uint32_t)((can_bits - canload_prev_bits) / 1000u);
+            hub.can_frames   = (uint32_t)can_frames;
+            hub.can_seen     = can_frames > 0;
+            hub.vbus_present = vbus;
+            hub.have_pwr     = pwr_ok;
+            hub_publish_end();
+            canload_prev_bits = can_bits;
         }
 
         if (t >= next_health) {
