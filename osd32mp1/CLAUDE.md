@@ -2184,3 +2184,11 @@ and abs overrun 6400 are storm-era residue - always judge by DELTA.
   UDP 192.168.0.90:9000, and connectionmanager.cpp now auto-selects the
   first "UDP:" entry in the connection dropdown when the GCS is idle
   (serial ports used to win by list order).
+- **OPEN: ATTI Warning = the estimator's 10ms staleness watchdog**
+  (stateestimation.c: callback woken by timeout with updatedSensors==0 and
+  >TIMEOUT_MS since the last real sample -> FILTERRESULT_WARNING). It
+  re-fires at least every ~100ms on the bench even though StateEstimationCb
+  totals ~1000 calls/s, so either the 959 Hz feed really has frequent >10ms
+  delivery gaps (hub aux work? Linux scheduling?) or PIOS_DELAY_DiffuS
+  misreports on this platform. Instrument the actual gap distribution
+  before touching TIMEOUT_MS - do not blind-relax the threshold.
