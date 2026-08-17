@@ -1749,3 +1749,32 @@ rate's safety FIRST, or clamp in code.
 Recovery: emergency 500-ceiling build + power-cycle ambush (re-Begins
 automatically if a transfer aborts). Storm-state wire also broke pair
 symmetry (accel << gyro) - partial-pair loss is a storm signature.
+
+## WHY DEGRADEDHZ NEVER FIRED IN THE STORM - and guardrail v3 (2026-08-17)
+
+The user called it: "the degradation checker didn't meet conditions to
+degrade itself." Correct, and it is TWO gaps compounding:
+
+1. **The detector was blind to this failure class.** Its trip condition
+   was canard_broadcast returning false - pool exhaustion at ENQUEUE. In
+   a wire-error storm the enqueue keeps succeeding and the frames die on
+   the wire: queued != transmitted (documented at the first ramp test,
+   walked straight through here). The 15 s boot grace also delayed arming
+   past the moment the boot-storm latched.
+2. **Even a firing detector would have spared the arsonist.** The
+   IMU-priority policy ("never throttle the IMU") taken literally exempts
+   the exact stream causing the storm. An IMU stream on a dead bus is
+   0 Hz - so "IMU priority" must mean LAST to degrade, never EXEMPT.
+
+**Guardrail v3** (in the flashed safe build, imu.cpp publish loop):
+- **Wire-health signal**: canard pool occupancy
+  (canardGetPoolAllocatorStatistics, current_usage_blocks), checked every
+  500 ms. Frames queued but not draining pile up in the pool - this sees
+  wire-level distress that enqueue-failure counting cannot.
+- **Tiered backoff**: >60 % occupancy -> aux streams cap at 5 Hz first
+  (unchanged policy), AND the IMU divides its rate 1/2 -> 1/4 -> 1/8 with
+  a hard floor of 100 Hz. Recovery is stepwise (halving the divider) only
+  after 5 s of <25 % occupancy. bit-15 telltale still latches.
+- **Soft-start**: effective rate ramps 100 -> 500 Hz over the first 10 s
+  of every boot regardless of the saved param - so no saved value can
+  ever storm a boot again, independent of the hard 500 ceiling.
