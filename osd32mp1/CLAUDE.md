@@ -1658,6 +1658,16 @@ read showed X and Y pinned at -4096 = magnetic SATURATION (>1.3 Ga needs
 bench). The hub's reject-saturated-readings path worked as designed. Move
 the offender; the counter returns by itself.
 
+**EPILOGUE (2026-08-17): the module was wired to 5 V the whole time.** The
+user found and fixed it (moved to 3.3 V); re-probed immediately after: ID
+'H43' correct, |B| = 49.5-49.7 uT stable across samples - agreeing with
+the RM3100 (51.1) and IST8310 (46.9), and the -4096 pinning is GONE with
+no bench cleanup. So the "saturation" may have been electrical (overdriven
+input levels reading as overflow), not magnetic - the ferrous-offender
+theory was never confirmed and should not be re-cited as settled. Both
+3.3 V busmates verified undamaged by the 5 V period: MPU-9150 WHO_AM_I
+0x68, BMP280 id 0x58, both ACKing normally.
+
 ## The missing ~100 Hz on the CAN IMU: found, mostly reclaimed - 457.7 Hz (2026-08-17)
 
 User called it ("feels like the bridge code is lacking just a hair"): at
