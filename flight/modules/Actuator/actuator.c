@@ -766,7 +766,9 @@ static inline bool buzzerState(buzzertype type)
 }
 
 
-#if defined(ARCH_POSIX) || defined(ARCH_WIN32)
+/* realposix has real PWM hardware behind PIOS_Servo (Linux pwm sysfs) -
+ * only the pure-simulation posix targets stub the channel writes out. */
+#if (defined(ARCH_POSIX) || defined(ARCH_WIN32)) && !defined(PIOS_REALPOSIX)
 static bool set_channel(uint8_t mixer_channel, uint16_t value)
 {
     return true;

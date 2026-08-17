@@ -1850,6 +1850,36 @@ TWO traps from the same hour:
   EMPTY output with exit 0 - if ssh output goes silent, check uptime
   before believing anything else.
 
+## REALPOSIX DRIVES THE PWM: the actuator chain is closed (2026-08-17)
+
+The missing output half of "realposix can fly" is in:
+
+- **pios_servo.c grew a real Linux-pwm backend** (PIOS_REALPOSIX-gated;
+  simposix keeps the stub): 7 outputs mapped motors-first (out0-2 =
+  TIM8 pins 12/38/35, out3-4 = TIM4 pin 32 + mikroBUS, out5 = TIM5
+  pin 31, out6 = TIM3 pin 33). Chips found BY ADDRESS at lazy init
+  (numbering shifts - TIM8 probed as pwmchip12 this boot). A bank IS a
+  timer, matching the shared-period hardware rule 1:1. Hot path is
+  snprintf+pwrite only - no stdio (shmlog lesson). Init logs each
+  mapping to the ring: "[servo] out6 -> TIM3_CH2/PB5/pin33 (...)".
+- **THE GATE THAT HID EVERYTHING: actuator.c's set_channel was stubbed
+  `#if defined(ARCH_POSIX)`** - every posix build silently discarded
+  channel writes (simulation-era leftover). Symptom worth remembering:
+  ActuatorCommand.Channel showed the right values over telemetry while
+  the pads stayed at zero - the UAVObject side is NOT proof the
+  hardware was touched. Now `&& !defined(PIOS_REALPOSIX)`.
+- **Mixer-driven motion PROVEN over UAVTalk from the Mac** (pyuavtalk
+  straight at 192.168.0.90:9000): set Mixer7Type=Servo +
+  ActuatorSettings ChannelNeutral[6] swept 1100/1900/1500 - the
+  disarmed failsafe path (setFailsafe writes ChannelNeutral to
+  Servo-type channels every ActuatorDesired timeout) drove pin 33,
+  sysfs duty tracked to 1500000, servo moved. ChannelAddr defaults are
+  the identity map 0..11, so flight channel N = driver out N.
+- Settings written live are NOT persisted - a firmware restart reverts
+  to defaults (the "servo moved" heard during a restart was a
+  transient, disproven by duty=0; re-config after every restart or
+  save via ObjectPersistence).
+
 ### FIRST ACTUATOR MOTION (2026-08-17): a real servo swept from PH11
 
 Signal on PH11 (RPi header), ground on pin 34, servo powered from its
