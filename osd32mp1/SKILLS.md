@@ -612,3 +612,20 @@ ground/build/ and REPO-ROOT/build/ (two symlinks). After every rebuild:
 Info.plist or macOS renders it blurry-upscaled. The firmware-vs-GCS
 "UAVO set mismatch" warning compares GIT STAMPS (board repo vs Mac
 repo), not objects - benign while both build from the same XML.
+
+
+## The GCS/firmware "UAVO set mismatch" warning - root cause and the rule
+
+The UAVO hash walks EVERY file in shared/uavobjectdefinition. The board's
+copy carried ten 163-byte `._*.xml` **AppleDouble files** (macOS resource
+forks shipped by `tar` from the Mac) - invisible to `ls *.xml` globs and
+sha1sum comparisons, but hashed by os.walk: board saw 116 files, GCS 106,
+hence mismatched hashes with BYTE-IDENTICAL real definitions. Fix:
+`rm shared/uavobjectdefinition/._*.xml` on the board + rebuild (the
+FWINFO rule re-stamps automatically). Verified: both sides now bdfe9256.
+
+RULES: (1) ship source to the board with `COPYFILE_DISABLE=1 tar ...`
+so AppleDouble junk never embarks; (2) when two "identical" directories
+hash differently, compare os.listdir() counts FIRST - dotfiles hide
+from globs; (3) the warning compares the UAVO hash, so with clean trees
+it only fires on REAL definition drift - treat it as meaningful again.
