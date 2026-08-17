@@ -1797,6 +1797,37 @@ Two errors above, both fixed by reading the actual sources:
   header also carries **PD13 = TIM4_CH2**; TIM4's pwm node is disabled
   in the stock DT.
 
+### PWM UNLOCK (2026-08-17): SIX hardware channels via one DT edit
+
+TIM4 + TIM8 pwm nodes enabled with fdtput on the live DTB (backup
+.pre-pwm; new pinctrl groups tim4-pwm-ninja-0 / tim8-pwm-ninja-0,
+phandles 0x75/0x76; +4 nodes, dtc warnings unchanged from stock):
+
+    pinmux 0x3d03 0x3e03           PD13/PD14 AF2 = TIM4_CH2/CH3
+    pinmux 0x8504 0x8604 0x8704    PI5/PI6/PI7 AF3 = TIM8_CH1/2/3
+
+Post-reboot map - NOTE THE RENUMBERING, old recipes said pwmchip0=TIM5:
+
+    pwmchip0 = TIM4 (40002000)  pwm1=PD13 (RPi hdr)  pwm2=PD14 (mikroBUS)
+    pwmchip4 = TIM5 (40003000)  pwm1=PH11 (RPi hdr, the servo)
+    pwmchip8 = TIM8 (44001000)  pwm0/1/2=PI5/PI6/PI7 (JP19 MC_UH/VH/WH)
+
+Total 6 channels; 5 verified enabled at 50 Hz immediately. The 6th
+(PD14) exposed the constraint worth knowing: **channels of one timer
+share a single period register** - "Device or resource busy" when
+setting a different period while a sibling channel runs. Per-channel
+duty, per-TIMER frame rate: group same-rate actuators on one timer
+(e.g. 4 motors at 400 Hz on one timer, servos at 50 Hz on another).
+
+TWO traps from the same hour:
+- **`ssh root@board reboot` silently did nothing once** - board pinged
+  on, uptime kept climbing, and a later "verification" was tautological.
+  ALWAYS verify a reboot by watching ping actually drop, then check
+  `uptime` after. `systemctl reboot` went down in ~20 s.
+- A wedged partial shutdown also made intermediate ssh commands return
+  EMPTY output with exit 0 - if ssh output goes silent, check uptime
+  before believing anything else.
+
 ### FIRST ACTUATOR MOTION (2026-08-17): a real servo swept from PH11
 
 Signal on PH11 (RPi header), ground on pin 34, servo powered from its
