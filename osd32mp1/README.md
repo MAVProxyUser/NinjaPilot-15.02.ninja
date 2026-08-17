@@ -115,7 +115,7 @@ The edits are reproducible offline on macOS without sudo — `gpt.py` + `part.py
 | sensor | where | address / node | rate | state |
 |---|---|---|---|---|
 | MPU-9150 #1 gyro+accel | MP1 I2C `/dev/i2c-3` | 0x68 | **500 Hz** | live — the PRIMARY IMU |
-| MPU-9150 #2 gyro+accel | DroneCAN, L431 I2C | node 124, msg 20500/20501 | **~458 Hz** | live — RAW-count proxy (no cal/filter on the node); IMU-priority guardrail: NEVER throttled, aux streams degrade instead; realposix failover IMU |
+| MPU-9150 #2 gyro+accel | DroneCAN, L431 I2C | node 124, msg 20500/20501 | **491.8 Hz** | live — RAW-count proxy (no cal/filter on the node), 400 kHz bus, hard-clamped 500 with guardrail v3 (pool-occupancy wire-health, tiered backoff to a 100 Hz floor, 10 s boot soft-start); realposix failover IMU |
 | BMP388 barometer | DroneCAN, L431 I2C | node 124, msg 1028/1029 | **50 Hz** | live, 98.1 kPa |
 | BMP280 barometer | MP1 I2C `/dev/i2c-3` | 0x76 (CHIP_ID 0x58) | **25 Hz** | live in the hub (baro2_*) — BaroSensor failover if the CAN baro dies; latent CAN probe also declared on the L431 |
 | HMC5883L mag | MP1 I2C `/dev/i2c-3` | 0x1E (ID 'H43') | **50 Hz** | live → AuxMagSensor |
@@ -129,6 +129,25 @@ has TWO mirrored JST-GH-6P connectors wired in parallel for pass-through) →
 Holybro Micro M9N (IST8310 at 0x0E). Whichever module is plugged in, its
 compass is found at boot: the custom firmware declares both QMC5883P and
 IST8310 probes, and `I2C_SCAN=1` identifies anything new in one sweep.
+
+**CAN vs I2C, sensor class by sensor class — all measured, same bench:**
+
+| class | MP1 I2C (local) | DroneCAN (L431 node 124/125) | verdict |
+|---|---|---|---|
+| IMU rate | MPU-9150 #1: **493 Hz** paced (1440 free-run) | MPU-9150 #2: **491.8 Hz** sustained | TRANSPORT PARITY — the wire costs ~1 Hz |
+| gyro bias | 1.184 dps (DLPF 44) | 0.640 dps TRUE (raw, DLPF off) | both raw die properties; PIOS calibrates |
+| gyro noise sd | 0.041–0.047 dps | 0.085–0.094 dps | 2x = bandwidth physics (42 vs 256 Hz BW), not transport |
+| gyro quantization | 0.0610 dps | **0.0610 dps IDENTICAL** | the proxy is bit-transparent |
+| accel scale | −1.5 % (0.9846 g) | +4.3 % (1.0430 g) | stable per-die, repeatable to 0.001 g; one-time cal holds |
+| accel noise | 0.014–0.022 m/s² | 0.030–0.046 m/s² | same bandwidth story |
+| baro | BMP280: **25 Hz**, sd 1.5 Pa (~12 cm) | BMP388: **50 Hz** | CAN wins; ~131 Pa absolute offset between units (~11 m) — failover only, never blend |
+| mag | HMC5883L: **69 Hz** true ODR | RM3100: **25 Hz**, 12.2 nT / IST8310: **25 Hz (97 max)** | RM3100 is the flight mag by quality (~25x finer than HMC) |
+| GPS | — (no local GNSS) | M9N: **10 Hz sustained, 20 Hz true max** | CAN only |
+| IMU latency | in-process read | 2 single frames, ~0.3 ms wire | both inside a 2 ms loop budget |
+
+Bus load with everything at max: ~1215 fr/s ≈ 18 % of 1 Mbit, zero RX
+overruns across full loaded windows. The wire is a bystander; the L431's
+I2C+CPU is the ceiling on every stream.
 
 **Which bus feeds which UAVObject (realposix source map):**
 

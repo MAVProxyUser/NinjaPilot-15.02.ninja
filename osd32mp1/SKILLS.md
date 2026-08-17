@@ -481,7 +481,17 @@ Symptom: the node heartbeats but answers NOTHING (params, restart, Begin all
 time out), sensor rates collapsed, multi-frame transfers never complete.
 Software cannot break in — the shared canard pool is exhausted.
 
-Arm the ambush on the board, then power-cycle the node:
+**THE SIMPLEST FIX FIRST — unplug the IMU.** The storm is the IMU stream;
+with the MPU off the I2C bus the proxy thread exits at probe and the node
+boots quiet on ANY saved param. Unplug, power-cycle, flash normally, replug,
+reboot. This recovered the 2026-08-17 boot-storm after every software
+recovery (RestartNode spam, boot-window barrages, ambush) had failed —
+"yanking the IMU makes flashing easier" is the recorded, proven recipe.
+NOTE the baro shares the IMU's cord on this bench: expect StaticPressure to
+vanish too and the baro-unhealthy I2C sweep to chatter until replug+reboot.
+
+If unplugging is not an option, arm the ambush on the board, then
+power-cycle the node:
 
 ```python
 # spam BeginFirmwareUpdate ~5/s; the app's ~1s init calm after power-on
@@ -522,15 +532,22 @@ All set over DroneCAN param GetSet on node 124, effective immediately:
 
 | param | range | what |
 |---|---|---|
-| `INS_SAMPLE_RATE` | 1-1000 | raw proxy pair rate; delivered tracks command up to the ~430 Hz I2C ceiling |
+| `INS_SAMPLE_RATE` | 1-1000, HARD-CLAMPED to 500 in code | raw proxy pair rate; delivered ~492 Hz at the clamp (400 kHz bus); saved values above 500 are harmless by construction |
 | `IMU_RAW_RATE` | (inert) | RawIMU stream REMOVED in the raw-proxy firmware - compact only; the 7-frame storm hazard is gone by construction |
-| `BARO_MAX_RATE` | 0-100 | 0 = native 50 Hz, else cap; forced to 5 Hz while DEGRADEDHZ aux-throttle is active |
+| `BARO_MAX_RATE` | 0-100 | 0 = native 50 Hz, else cap; forced to 5 Hz while the guardrail aux-throttle is active |
 | `MAG_MAX_RATE` | 0-100 | 0 = default 25 Hz; the IST8310 delivers ~97 Hz at 100 |
 | `GPS1_RATE_MS` | 50-200 | 100 = 10 Hz; 50 = TRUE 20 Hz on the M9N (allow ~30 s for the u-blox reconfigure to settle) |
 
-DEGRADEDHZ (NodeStatus vendor bit 15) latches if TX fails sustained; the
-throttle releases the moment a NEW rate is requested - only the flag stays
-until reboot.
+**Guardrail v3** (supersedes the enqueue-failure DEGRADEDHZ): the node
+checks canard pool occupancy every 500 ms. Over 60 % = wire distress: aux
+streams cap at 5 Hz AND the IMU rate divides /2 /4 /8 down to a 100 Hz
+floor, with `can_printf` telltales ("IMU wire distress (pool N%) - backoff
+/d"). It recovers stepwise by itself after 5 s below 25 % - no re-request
+needed (the old release-on-new-request gotcha is gone). NodeStatus vendor
+bit 15 still latches until reboot as the telltale. Every boot also
+SOFT-STARTS: 100 -> 500 Hz over the first 10 s regardless of the saved
+param, so expect low rates right after any reboot - that is the ramp, not
+a fault.
 
 ## Push to BOTH remotes
 
@@ -543,6 +560,16 @@ git fetch git@github.com:MAVProxyUser/OpenPilotAI.git Octavo:refs/remotes/opai/O
 NEW=$(git commit-tree 'HEAD^{tree}' -p refs/remotes/opai/Octavo -m "snapshot: <summary>")
 git push git@github.com:MAVProxyUser/OpenPilotAI.git $NEW:refs/heads/Octavo
 ```
+
+Two traps, both hit for real:
+- `origin`'s stored URL is HTTPS and the keychain is empty - pushes die
+  with "could not read Username". The push URL is now set to SSH
+  (`git remote set-url --push origin git@github.com:...`); always push
+  via SSH addresses.
+- The `git fetch` line is NOT optional and must run IMMEDIATELY before
+  `commit-tree`, even if you fetched earlier in the session: parenting a
+  snapshot on a stale `opai/Octavo` gets a non-fast-forward reject
+  because your own previous push moved the remote tip.
 
 
 ## Compare the two MPU-9150s across buses (bench recipe)
