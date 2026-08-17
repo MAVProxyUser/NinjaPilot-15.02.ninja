@@ -1658,6 +1658,31 @@ read showed X and Y pinned at -4096 = magnetic SATURATION (>1.3 Ga needs
 bench). The hub's reject-saturated-readings path worked as designed. Move
 the offender; the counter returns by itself.
 
+## VERIFIED: realposix flies on CAN sensors ALONE (2026-08-17)
+
+All local I2C sensors physically removed (MPU-9150 #1, BMP280, HMC5883L
+all no-ack); 90 s realposix soak on the CAN suite only, ring post-mortem:
+
+    [hub-health] imu=0 imu2=4915-4933 baro=500 b2=0 hmc=0 mag=250 qmc=248
+                 fix2=50 aux=50 ierr=0 berr=0 gbad=0 i2c_pm=0 can_pm=147
+
+- CAN IMU ~492 Hz feeding GyroSensor/AccelSensor via the failover path,
+  which announced once at boot ("LOCAL IMU SILENT - failing over") and
+  is effectively primary while the local bus is empty - no code change
+  needed for CAN-only operation.
+- filtercf completed its calibration ON CAN SENSORS and the outer loop
+  recovered (rateupdates -64 during the documented startup window, then
+  -1/-3 crit=0 steady) - the full attitude chain closes on CAN data.
+- Zero hub errors, i2c_pm=0 (local bus idle), can_pm ~14.7 %.
+- Flight envelope on this sensing: attitude / AxisLock / AltHold. GPS
+  publishes 5 Hz but indoors no-fix - GPS modes still gated on the first
+  outdoor fix. Actuation (PWM out) remains the open half of "flyable".
+
+Fallback inventory in this state: every fallback is inert by absence
+(b2=0, no local IMU to stand down for). NOTE if the local MPU is ever
+replugged mid-run the failover WILL stand down and hand back to local -
+by design; unplugged, CAN is the sole and steady source.
+
 **EPILOGUE (2026-08-17): the module was wired to 5 V the whole time.** The
 user found and fixed it (moved to 3.3 V); re-probed immediately after: ID
 'H43' correct, |B| = 49.5-49.7 uT stable across samples - agreeing with
