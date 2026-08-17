@@ -1675,3 +1675,36 @@ Remaining gap to the MP1's paced 493: ~2.18 ms of true per-iteration work
 IST8310/BMP388 drivers + two broadcasts). That is the platform floor for
 I2C-attached parts on this node; parity beyond ~93 % wants SPI or a leaner
 I2C stack, not pacing tricks.
+
+## IMUSTAT: the proxy's floor decomposed - it is the I2C STACK, not sharing (2026-08-17)
+
+Live instrumentation (IMUSTAT over LogMessage every 5 s, still in the
+flashed build) on the 458 Hz proxy:
+
+    rd_avg=2117 us   rd_max=4588 us   bc_avg=78 us
+
+The broadcasts are nearly FREE. The whole iteration lives in the read leg,
+and its average is 4x the 520 us wire time - a UNIFORM ~1.6 ms of ChibiOS
+per-transfer overhead (cross-thread semaphore handoff to the bus thread,
+per call). Contention with the IST/BMP388 drivers only explains the 4.5 ms
+TAIL, so quieting the aux sensors would trim spikes, not the average.
+
+**The real 2x**: AP drivers reach 1 kHz on I2C by registering a periodic
+callback that runs INSIDE the bus thread - no per-read handoff. Restructure
+the proxy the same way (callback samples into a buffer, the CAN thread
+consumes) and the read cost collapses toward wire time -> ~900+ Hz
+potential. Queued as the next proxy iteration.
+
+## PWM discovery: the MP1 has 4 hardware PWM channels live TODAY
+
+    /sys/class/pwm/pwmchip0  npwm=4  device=40003000.timer (TIM4)
+
+A quadcopter's worth of hardware PWM already exposed by the stock DT.
+Local actuator detection = enumerate /sys/class/pwm (trivial, runtime).
+Which pads/header TIM4 CH1-4 route to needs the schematic (sheet 11/12) -
+candidate: the motor-control header JP19. CAN ESC detection: passive =
+esc.Status (1034) from live ESCs; active = GetNodeInfo names on allocated
+nodes (the hub already tracks per-node NodeStatus - flagging ESC nodes is
+a small extension). And the L431 can BECOME a 5-channel CAN PWM node
+(PA8-PA11, PA15) via HAL_PERIPH_ENABLE_RC_OUT + esc.RawCommand - a CAN
+"ESC node" on this bench with zero new hardware.

@@ -295,10 +295,10 @@ index ad455b0..934c23a 100644
      compass.read();
  
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
-index 1ab2a2e..3c85727 100644
+index 1ab2a2e..973c2c9 100644
 --- a/Tools/AP_Periph/imu.cpp
 +++ b/Tools/AP_Periph/imu.cpp
-@@ -2,61 +2,116 @@
+@@ -2,61 +2,138 @@
  
  #if AP_PERIPH_IMU_ENABLED
  #include <dronecan_msgs.h>
@@ -365,10 +365,12 @@ index 1ab2a2e..3c85727 100644
 +
 +        uint8_t d[14];
 +        bool ok;
++        const uint32_t t_rd0 = AP_HAL::micros();
 +        {
 +            WITH_SEMAPHORE(dev->get_semaphore());
 +            ok = dev->read_registers(0x3B, d, 14);
 +        }
++        const uint32_t t_rd1 = AP_HAL::micros();
 +        if (!ok) {
 +            hal.scheduler->delay_microseconds(1000);
              continue;
@@ -417,6 +419,26 @@ index 1ab2a2e..3c85727 100644
 +        pkt6[2] = (int16_t)((d[4] << 8) | d[5]);
 +        tx_fail |= !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_ACCEL,
 +                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
++
++        const uint32_t t_bc1 = AP_HAL::micros();
++
++        // where does the iteration actually go? read leg vs broadcast leg,
++        // reported every 5 s so the bench can see the decomposition live
++        static uint32_t st_n, st_rd, st_rd_max, st_bc, st_last_ms;
++        st_n++;
++        st_rd += t_rd1 - t_rd0;
++        st_bc += t_bc1 - t_rd1;
++        if (t_rd1 - t_rd0 > st_rd_max) { st_rd_max = t_rd1 - t_rd0; }
++        {
++            const uint32_t nowst = AP_HAL::millis();
++            if (nowst - st_last_ms > 5000 && st_n > 0) {
++                can_printf("IMUSTAT n=%u rd_avg=%u rd_max=%u bc_avg=%u",
++                           (unsigned)st_n, (unsigned)(st_rd/st_n),
++                           (unsigned)st_rd_max, (unsigned)(st_bc/st_n));
++                st_n = 0; st_rd = 0; st_rd_max = 0; st_bc = 0;
++                st_last_ms = nowst;
++            }
++        }
 +
 +        // DEGRADEDHZ guardrail, IMU-priority policy: sustained TX failure
 +        // latches the flag and caps the AUX streams (baro/mag) at 5 Hz; the
