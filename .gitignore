@@ -88,3 +88,5 @@ ground/openpilotgcs-synthetics/
 ground/build/
 build/
 .qmake.stash
+ground/.qmake.stash
+ground/openpilotgcs/**/.qmake.stash
