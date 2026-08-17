@@ -1658,6 +1658,40 @@ read showed X and Y pinned at -4096 = magnetic SATURATION (>1.3 Ga needs
 bench). The hub's reject-saturated-readings path worked as designed. Move
 the offender; the counter returns by itself.
 
+## THE SERVO MELT, and why RC_OUT is now COMPILED OUT (2026-08-17)
+
+A servo powered from the L431's OWN 5 V rail (signal on OUT1/PA8) melted
+the node during its first commanded sweep: NodeStatus heartbeat GONE,
+gyro/accel pair symmetry broken 10:1 (998 vs 99 frames), every request
+eaten - the deaf pool-starvation signature - and NO recovery after the
+command stream stopped. Mechanism (electrical, not software): the sweep's
+current transients sagged the node's regulator, which also feeds the CAN
+TRANSCEIVER - TX errors back the queue into the shared canard pool and
+the node starves. The user's "feels like it needs distribution" instinct
+was exactly right, in advance.
+
+Two software facts learned on the way:
+- `rcout_init()` defaults every output to k_rcin1+i, so actuator_id N
+  drives OUTn with NO param changes - `SERVO1_FUNCTION=51` was already
+  the default. actuator.ArrayCommand (UNITLESS, -1..1) at >=20 Hz is the
+  drive recipe (a servo timeout releases outputs when the stream stops).
+- The sim actuator-status sender is AP_SIM_ENABLED-only; the hardware
+  command path is thin. The melt was the rail, not a message flood.
+
+**RC_OUT is now REMOVED per user directive** ("a single message can never
+tear down the CAN bus again"): hwdef drops the five PWM pin lines
+(PA8-PA11, PA15) and sets AP_PERIPH_RC_OUT_ENABLED 0 (plus
+HAL_SERIAL_ESC_COMM_ENABLED 0), compiling out rc_out.cpp and the
+esc.RawCommand / actuator.ArrayCommand handlers entirely. Regression
+PROVEN on the flashed build: 20 s of actuator+esc commands at 20 Hz each
+(the exact melt reproducer) - heartbeat 20/20 beats, uptime monotonic,
+GetNodeInfo answers instantly after. Re-enabling someday = restore the
+pin lines + the define, and power actuators from their OWN rail.
+
+NOTE the flasher's vcs verdict reads "unchanged" for our builds - both
+sides are the same uncommitted tree. Verify custom-build deliveries BY
+EFFECT (here: the node ignoring actuator commands proved the new image).
+
 ## VERIFIED: realposix flies on CAN sensors ALONE (2026-08-17)
 
 All local I2C sensors physically removed (MPU-9150 #1, BMP280, HMC5883L

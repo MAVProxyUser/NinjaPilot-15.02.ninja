@@ -517,10 +517,26 @@ index 1ab2a2e..480d21a 100644
  }
  #endif // AP_PERIPH_IMU_ENABLED
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
-index 067210f..662de15 100644
+index 067210f..5fea136 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 +++ b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
-@@ -45,9 +45,16 @@ define AP_PERIPH_BARO_ENABLED 1
+@@ -2,11 +2,10 @@ include ../MatekL431/hwdef.inc
+ 
+ 
+ # --------------------- PWM -----------------------
+-PA8   TIM1_CH1  TIM1 PWM(1) GPIO(50)
+-PA9   TIM1_CH2  TIM1 PWM(2) GPIO(51)
+-PA10  TIM1_CH3  TIM1 PWM(3) GPIO(52)
+-PA11  TIM1_CH4  TIM1 PWM(4) GPIO(53)
+-PA15  TIM2_CH1  TIM2 PWM(5) GPIO(54)
++# PWM outputs REMOVED (2026-08-17, user directive): the servo-melt
++# incident showed the RC_OUT surface can destabilize the node; no CAN
++# message may ever drive an output on this build. Re-enabling = restore
++# the five pin lines and AP_PERIPH_RC_OUT_ENABLED 1.
+ 
+ # Beeper
+ PA6   TIM16_CH1 TIM16 GPIO(32) ALARM
+@@ -45,9 +44,16 @@ define AP_PERIPH_BARO_ENABLED 1
  define HAL_BARO_ALLOW_INIT_NO_BARO
  
  BARO SPL06 I2C:0:0x76
@@ -538,7 +554,7 @@ index 067210f..662de15 100644
  
  # MS4525 sensor by default
  define HAL_AIRSPEED_TYPE_DEFAULT 1
-@@ -59,7 +66,7 @@ define HAL_MSP_ENABLED 1
+@@ -59,7 +65,7 @@ define HAL_MSP_ENABLED 1
  define AP_PERIPH_MSP_PORT_DEFAULT 1
  
  # ------------------ BATTERY Monitor -----------------------
@@ -547,9 +563,18 @@ index 067210f..662de15 100644
  
  define HAL_USE_ADC TRUE
  define STM32_ADC_USE_ADC1 TRUE
-@@ -85,3 +92,44 @@ define AP_SERIALLED_ENABLED 1
+@@ -78,10 +84,51 @@ PB0 BATT2_VOLTAGE_SENS ADC1 SCALE(1)
+ PB1 BATT2_CURRENT_SENS ADC1 SCALE(1)
  
- define HAL_SERIAL_ESC_COMM_ENABLED 1
+ # -------------------- Buzzer+NeoPixels --------------d------
+-define AP_PERIPH_RC_OUT_ENABLED 1
++define AP_PERIPH_RC_OUT_ENABLED 0
+ define AP_PERIPH_NOTIFY_ENABLED 1
+ define AP_SERIALLED_ENABLED 1
+ 
+ 
+-define HAL_SERIAL_ESC_COMM_ENABLED 1
++define HAL_SERIAL_ESC_COMM_ENABLED 0
  USE_BOOTLOADER_FROM_BOARD MatekL431
 +
 +# NinjaPilot: second MPU-9150 shares the I2C bus with the BMP388 (0x68 vs 0x77).
