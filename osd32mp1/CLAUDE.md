@@ -1708,3 +1708,44 @@ nodes (the hub already tracks per-node NodeStatus - flagging ESC nodes is
 a small extension). And the L431 can BECOME a 5-channel CAN PWM node
 (PA8-PA11, PA15) via HAL_PERIPH_ENABLE_RC_OUT + esc.RawCommand - a CAN
 "ESC node" on this bench with zero new hardware.
+
+## THE 100 kHz CLAMP, proxy v3, and the storm that killed journald (2026-08-17)
+
+**Root cause of the 458 Hz ceiling, three layers deep, each disproven
+honestly:**
+1. v2 theory "cross-thread handoff costs 1.6 ms" - DISPROVEN by v3: moving
+   the read into the bus thread via register_periodic_callback measured the
+   IDENTICAL 2.1 ms cadence. The transfer itself was slow.
+2. 2.1 ms for a 14-byte burst = the 100 kHz signature. Culprit found in
+   AP_HAL_ChibiOS/I2CDevice.cpp line 54: **`#define HAL_I2C_MAX_CLOCK
+   100000`** - the HAL silently clamps EVERY bus to 100 kHz regardless of
+   the bus_clock a device requests. Every "400 kHz" request all session was
+   theater. Fix: `define HAL_I2C_MAX_CLOCK 400000` in the hwdef (all parts
+   on this bus are 400k-capable).
+3. Unclamped, the proxy immediately produced ~600 Hz observed - and THE
+   PRODUCER OUT-RAN THE ECOSYSTEM.
+
+**Proxy v3 architecture** (imu.cpp): sampling runs inside the I2C bus
+thread via register_periodic_callback (1250 us - 1 kHz oversubscribed the
+bus thread and starved the baro/mag drivers to 14/7 Hz, measured); a
+seqlock hands samples to the publish loop, which only broadcasts.
+IMUSTAT telemetry stays in the build.
+
+**THE STORM CASCADE (the user's dmesg):** at saved INS_SAMPLE_RATE=1000
+the unclamped node emits ~1600+ fr/s -> wire/receiver destabilizes
+(>~1200 fr/s) -> MP1 m_can RX FIFO overruns at full rate -> the driver
+logs EVERY lost frame -> /dev/kmsg overruns -> systemd-journald CORE
+DUMPS. Three-stage cascade whose root cause is "the sender got faster".
+
+**THE BOOT-STORM TRAP (the durable lesson): saved params are calibrated to
+the OLD physics.** After the bus-clock change, the saved 1000 re-created
+the storm on EVERY boot before any command could land - RestartNode,
+param blasts, boot-window barrages all failed; the node was deaf within
+seconds of every reboot. Software recovery IMPOSSIBLE. Fix: the rate
+ceiling is now HARD-CLAMPED at 500 in code, so no saved value can poison
+a boot. Rule: when changing transport physics, re-derive every saved
+rate's safety FIRST, or clamp in code.
+
+Recovery: emergency 500-ceiling build + power-cycle ambush (re-Begins
+automatically if a transfer aborts). Storm-state wire also broke pair
+symmetry (accel << gyro) - partial-pair loss is a storm signature.

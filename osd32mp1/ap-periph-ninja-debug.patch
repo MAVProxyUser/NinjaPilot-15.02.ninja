@@ -114,10 +114,18 @@ index 04cc75e..d6e20c8 100644
          last_led_ms = now;
  #ifdef HAL_GPIO_PIN_LED
 diff --git a/Tools/AP_Periph/AP_Periph.h b/Tools/AP_Periph/AP_Periph.h
-index 0ab36ee..f3ebba8 100644
+index 0ab36ee..5812cf2 100644
 --- a/Tools/AP_Periph/AP_Periph.h
 +++ b/Tools/AP_Periph/AP_Periph.h
-@@ -494,6 +494,14 @@ public:
+@@ -186,6 +186,7 @@ public:
+     void can_airspeed_update();
+ #if AP_PERIPH_IMU_ENABLED
+     void can_imu_update();
++    void imu_sample_cb();
+ #endif
+ 
+ #if AP_PERIPH_RANGEFINDER_ENABLED
+@@ -494,6 +495,14 @@ public:
      uint32_t last_relposheading_ms;
  #if AP_PERIPH_BARO_ENABLED
      uint32_t last_baro_update_ms;
@@ -295,10 +303,10 @@ index ad455b0..934c23a 100644
      compass.read();
  
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
-index 1ab2a2e..973c2c9 100644
+index 1ab2a2e..480d21a 100644
 --- a/Tools/AP_Periph/imu.cpp
 +++ b/Tools/AP_Periph/imu.cpp
-@@ -2,61 +2,138 @@
+@@ -2,61 +2,167 @@
  
  #if AP_PERIPH_IMU_ENABLED
  #include <dronecan_msgs.h>
@@ -312,68 +320,132 @@ index 1ab2a2e..973c2c9 100644
 +// NinjaPilot compact IMU stream - RAW PROXY contract (v2):
 +//   20500  gyro  raw int16[3] little-endian counts, +/-2000 dps FS (16.4 LSB/dps)
 +//   20501  accel raw int16[3] little-endian counts, +/-2 g FS (16384 LSB/g)
-+// The node does NO calibration, NO filtering, NO unit conversion - it is a
-+// bare-metal handoff. PIOS/flight code owns all interpretation when it
-+// acquires the stream. DLPF is OFF (256 Hz BW, 8 kHz internal gyro ODR).
++// The node does NO calibration, NO filtering, NO unit conversion. DLPF is
++// OFF (256 Hz BW, 8 kHz internal ODR).
++//
++// v3 architecture: sampling runs INSIDE the I2C bus thread via a periodic
++// callback - the per-read cross-thread handoff of v2 measured 2117 us
++// average against 520 us of wire time and capped delivery at ~458 Hz. The
++// callback fills a seqlock-guarded buffer; this thread only consumes the
++// latest sample and broadcasts.
 +#define NINJA_MSG_GYRO       20500
 +#define NINJA_MSG_ACCEL      20501
 +#define NINJA_IMU_SIGNATURE  0x4E494E4A49505331ULL  // "NINJIPS1"
 +
++static AP_HAL::OwnPtr<AP_HAL::I2CDevice> s_imu_dev;
++static volatile uint32_t s_imu_seq;      // odd = write in progress
++static uint8_t s_imu_buf[14];
++
++void AP_Periph_FW::imu_sample_cb()
++{
++    // runs in the BUS THREAD: the bus semaphore is already held here,
++    // and there is no handoff cost - this is the whole point of v3
++    uint8_t d[14];
++    if (!s_imu_dev->read_registers(0x3B, d, 14)) {
++        return;
++    }
++    s_imu_seq++;
++    memcpy(s_imu_buf, d, 14);
++    s_imu_seq++;
++}
++
  void AP_Periph_FW::can_imu_update(void)
  {
--    while (true) {
++    s_imu_dev = hal.i2c_mgr->get_device(0, 0x68, 400000);
++    if (!s_imu_dev) {
++        return;
++    }
++    {
++        WITH_SEMAPHORE(s_imu_dev->get_semaphore());
++        s_imu_dev->set_retries(2);
++        uint8_t who = 0;
++        if (!s_imu_dev->read_registers(0x75, &who, 1) || who != 0x68) {
++            can_printf("IMU proxy: no MPU at 0x68 (who=%02x)", who);
++            return;             // absent sensor = quiet exit, never a panic
++        }
++        s_imu_dev->write_register(0x6B, 0x01);   // wake, PLL clock
++        hal.scheduler->delay(10);
++        s_imu_dev->write_register(0x19, 0x00);   // no sample-rate divider
++        s_imu_dev->write_register(0x1A, 0x00);   // DLPF OFF - raw 256 Hz BW
++        s_imu_dev->write_register(0x1B, 0x18);   // gyro +/-2000 dps
++        s_imu_dev->write_register(0x1C, 0x00);   // accel +/-2 g
++    }
++    can_printf("IMU proxy v3: MPU-9150 bus-thread sampling up");
++
++    // 800 Hz sampling in the bus thread: at 400 kHz a transfer costs
++    // ~0.9 ms, so 1 kHz would consume >90% of the bus thread and starve
++    // the baro/mag drivers (measured: baro 50->14 Hz when oversubscribed).
++    // 1250 us leaves them room. Publish rate is governed below.
++    s_imu_dev->register_periodic_callback(1250,
++        FUNCTOR_BIND_MEMBER(&AP_Periph_FW::imu_sample_cb, void));
++
++    uint32_t last_seq = 0;
++    uint16_t tx_fail_run = 0;
++
+     while (true) {
 -        // we need to delay by a ms value as hal->schedule->delay_microseconds_boost
 -        // used in wait_for_sample() takes uint16_t
 -        const uint32_t delay_ms = 1000U / g.imu_sample_rate;
 -        hal.scheduler->delay(delay_ms);
--
++        const uint32_t iter_start_us = AP_HAL::micros();
++        // HARD ceiling 500: at 400 kHz bus clock a higher saved value
++        // re-storms the wire on every boot before any command can land
++        // (lived experience, 2026-08-17). Raise only with a matching
++        // receiver-side fix on the MP1's m_can RX path.
++        const uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 500);
+ 
 -        if (delay_ms == 0) {
 -            // sleep for a bit to avoid flooding the CPU
--            hal.scheduler->delay_microseconds(100);
-+    // 400 kHz explicitly: at the default the 14-byte burst measured ~2 ms
-+    // (100 kHz signature), capping delivery at ~400 Hz. MPU-9150 max is 400k.
-+    auto dev = hal.i2c_mgr->get_device(0, 0x68, 400000);
-+    if (!dev) {
-+        return;
-+    }
-+    {
-+        WITH_SEMAPHORE(dev->get_semaphore());
-+        dev->set_retries(2);
-+        uint8_t who = 0;
-+        if (!dev->read_registers(0x75, &who, 1) || who != 0x68) {
-+            can_printf("IMU proxy: no MPU at 0x68 (who=%02x)", who);
-+            return;             // absent sensor = quiet exit, never a panic
++        // wait for a FRESH sample, then take a tear-safe copy
++        uint8_t d[14];
++        const uint32_t t_rd0 = AP_HAL::micros();
++        while (true) {
++            const uint32_t s1 = s_imu_seq;
++            if (!(s1 & 1) && s1 != last_seq) {
++                memcpy(d, s_imu_buf, 14);
++                if (s_imu_seq == s1) {
++                    last_seq = s1;
++                    break;
++                }
++            }
+             hal.scheduler->delay_microseconds(100);
          }
-+        dev->write_register(0x6B, 0x01);   // wake, PLL clock
-+        hal.scheduler->delay(10);
-+        dev->write_register(0x19, 0x00);   // no sample-rate divider
-+        dev->write_register(0x1A, 0x00);   // DLPF OFF - raw 256 Hz BW
-+        dev->write_register(0x1B, 0x18);   // gyro +/-2000 dps
-+        dev->write_register(0x1C, 0x00);   // accel +/-2 g
-+    }
-+    can_printf("IMU proxy: MPU-9150 raw handoff up");
++        const uint32_t t_rd1 = AP_HAL::micros();
++
++        int16_t pkt6[3];
++        // registers are big-endian; wire contract is little-endian raw counts
++        pkt6[0] = (int16_t)((d[8]  << 8) | d[9]);
++        pkt6[1] = (int16_t)((d[10] << 8) | d[11]);
++        pkt6[2] = (int16_t)((d[12] << 8) | d[13]);
++        bool tx_fail = !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_GYRO,
++                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
  
 -        imu.update();
-+    uint16_t tx_fail_run = 0;
++        pkt6[0] = (int16_t)((d[0] << 8) | d[1]);
++        pkt6[1] = (int16_t)((d[2] << 8) | d[3]);
++        pkt6[2] = (int16_t)((d[4] << 8) | d[5]);
++        tx_fail |= !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_ACCEL,
++                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
++        const uint32_t t_bc1 = AP_HAL::micros();
  
 -        if (!imu.healthy()) {
-+    while (true) {
-+        const uint32_t iter_start_us = AP_HAL::micros();
-+        // The IMU is the inner loop's heartbeat: it ALWAYS gets the
-+        // requested rate. Degradation throttles the aux streams instead.
-+        const uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 1000);
-+
-+        uint8_t d[14];
-+        bool ok;
-+        const uint32_t t_rd0 = AP_HAL::micros();
+-            continue;
++        // decomposition telemetry: rd = wait-for-fresh (sample cadence),
++        // bc = broadcast leg. Reported every 5 s.
++        static uint32_t st_n, st_rd, st_rd_max, st_bc, st_last_ms;
++        st_n++;
++        st_rd += t_rd1 - t_rd0;
++        st_bc += t_bc1 - t_rd1;
++        if (t_rd1 - t_rd0 > st_rd_max) { st_rd_max = t_rd1 - t_rd0; }
 +        {
-+            WITH_SEMAPHORE(dev->get_semaphore());
-+            ok = dev->read_registers(0x3B, d, 14);
-+        }
-+        const uint32_t t_rd1 = AP_HAL::micros();
-+        if (!ok) {
-+            hal.scheduler->delay_microseconds(1000);
-             continue;
++            const uint32_t nowst = AP_HAL::millis();
++            if (nowst - st_last_ms > 5000 && st_n > 0) {
++                can_printf("IMUSTAT n=%u rd_avg=%u rd_max=%u bc_avg=%u",
++                           (unsigned)st_n, (unsigned)(st_rd/st_n),
++                           (unsigned)st_rd_max, (unsigned)(st_bc/st_n));
++                st_n = 0; st_rd = 0; st_rd_max = 0; st_bc = 0;
++                st_last_ms = nowst;
++            }
          }
  
 -        uavcan_equipment_ahrs_RawIMU pkt {};
@@ -406,40 +478,6 @@ index 1ab2a2e..973c2c9 100644
 -                         CANARD_TRANSFER_PRIORITY_HIGH,
 -                         &buffer[0],
 -                         total_size);
-+        int16_t pkt6[3];
-+        // registers are big-endian; wire contract is little-endian raw counts
-+        pkt6[0] = (int16_t)((d[8]  << 8) | d[9]);
-+        pkt6[1] = (int16_t)((d[10] << 8) | d[11]);
-+        pkt6[2] = (int16_t)((d[12] << 8) | d[13]);
-+        bool tx_fail = !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_GYRO,
-+                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
-+
-+        pkt6[0] = (int16_t)((d[0] << 8) | d[1]);
-+        pkt6[1] = (int16_t)((d[2] << 8) | d[3]);
-+        pkt6[2] = (int16_t)((d[4] << 8) | d[5]);
-+        tx_fail |= !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_ACCEL,
-+                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
-+
-+        const uint32_t t_bc1 = AP_HAL::micros();
-+
-+        // where does the iteration actually go? read leg vs broadcast leg,
-+        // reported every 5 s so the bench can see the decomposition live
-+        static uint32_t st_n, st_rd, st_rd_max, st_bc, st_last_ms;
-+        st_n++;
-+        st_rd += t_rd1 - t_rd0;
-+        st_bc += t_bc1 - t_rd1;
-+        if (t_rd1 - t_rd0 > st_rd_max) { st_rd_max = t_rd1 - t_rd0; }
-+        {
-+            const uint32_t nowst = AP_HAL::millis();
-+            if (nowst - st_last_ms > 5000 && st_n > 0) {
-+                can_printf("IMUSTAT n=%u rd_avg=%u rd_max=%u bc_avg=%u",
-+                           (unsigned)st_n, (unsigned)(st_rd/st_n),
-+                           (unsigned)st_rd_max, (unsigned)(st_bc/st_n));
-+                st_n = 0; st_rd = 0; st_rd_max = 0; st_bc = 0;
-+                st_last_ms = nowst;
-+            }
-+        }
-+
 +        // DEGRADEDHZ guardrail, IMU-priority policy: sustained TX failure
 +        // latches the flag and caps the AUX streams (baro/mag) at 5 Hz; the
 +        // IMU stream is untouched. Aux restores 10 s after TX goes healthy.
@@ -461,11 +499,8 @@ index 1ab2a2e..973c2c9 100644
 +            can_printf("DEGRADEDHZ: TX healthy 10 s - aux streams restored");
 +        }
 +
-+        // Measured-remainder pacing: sleep only what is left of the period
-+        // after the real work (read + broadcasts + ChibiOS transfer stack),
-+        // in <=50 ms chunks because delay_microseconds wraps at 65,536 us.
-+        // A static reserve under-subtracted and wasted ~400 us/iteration at
-+        // max rate - this tracks the true cost every cycle.
++        // pace to the requested rate: sleep only the true remainder,
++        // chunked because delay_microseconds wraps at 65,536 us
 +        const uint32_t period_us = 1000000UL / rate;
 +        const uint32_t spent_us = AP_HAL::micros() - iter_start_us;
 +        if (period_us > spent_us) {
@@ -482,7 +517,7 @@ index 1ab2a2e..973c2c9 100644
  }
  #endif // AP_PERIPH_IMU_ENABLED
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
-index 067210f..9876a75 100644
+index 067210f..662de15 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 +++ b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 @@ -45,9 +45,16 @@ define AP_PERIPH_BARO_ENABLED 1
@@ -512,7 +547,7 @@ index 067210f..9876a75 100644
  
  define HAL_USE_ADC TRUE
  define STM32_ADC_USE_ADC1 TRUE
-@@ -85,3 +92,38 @@ define AP_SERIALLED_ENABLED 1
+@@ -85,3 +92,44 @@ define AP_SERIALLED_ENABLED 1
  
  define HAL_SERIAL_ESC_COMM_ENABLED 1
  USE_BOOTLOADER_FROM_BOARD MatekL431
@@ -551,6 +586,12 @@ index 067210f..9876a75 100644
 +# primary automatically and 1028/1029 continue - the hub never notices.
 +define AP_BARO_BMP280_ENABLED 1
 +BARO BMP280 I2C:0:0x76
++
++# THE 458 Hz mystery: AP's ChibiOS HAL clamps every I2C bus to 100 kHz by
++# default (HAL_I2C_MAX_CLOCK in I2CDevice.cpp) - a 14-byte MPU burst was
++# 1.7 ms of wire no matter what bus_clock the device requested. All parts
++# on this bus are 400 kHz capable (MPU-9150, BMP388, IST8310, QMC5883P).
++define HAL_I2C_MAX_CLOCK 400000
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h b/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h
 index f1cf94b..c55e218 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h
