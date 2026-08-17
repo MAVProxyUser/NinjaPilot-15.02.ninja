@@ -115,7 +115,7 @@ The edits are reproducible offline on macOS without sudo — `gpt.py` + `part.py
 | sensor | where | address / node | rate | state |
 |---|---|---|---|---|
 | MPU-9150 #1 gyro+accel | MP1 I2C `/dev/i2c-3` | 0x68 | **500 Hz** | live — the PRIMARY IMU |
-| MPU-9150 #2 gyro+accel | DroneCAN, L431 I2C | node 124, msg 20500/20501 | **589 Hz** | live — RAW-count proxy (no cal/filter on the node), 400 kHz bus, hard-clamped 500 with guardrail v3 (pool-occupancy wire-health, tiered backoff to a 100 Hz floor, 10 s boot soft-start); realposix failover IMU |
+| MPU-9150 #2 gyro+accel | DroneCAN, L431 I2C | node 124, msg 20500/20501 | **589 Hz** | live — RAW-count proxy (no cal/filter on the node), 400 kHz bus, hard-clamped 600 with guardrail v3 (pool-occupancy wire-health, tiered backoff to a 100 Hz floor, 10 s boot soft-start); realposix failover IMU |
 | BMP388 barometer | DroneCAN, L431 I2C | node 124, msg 1028/1029 | **50 Hz** | live, 98.1 kPa |
 | BMP280 barometer | MP1 I2C `/dev/i2c-3` | 0x76 (CHIP_ID 0x58) | **25 Hz** | live in the hub (baro2_*) — BaroSensor failover if the CAN baro dies; latent CAN probe also declared on the L431 |
 | HMC5883L mag | MP1 I2C `/dev/i2c-3` | 0x1E (ID 'H43') | **50 Hz** | live → AuxMagSensor |
