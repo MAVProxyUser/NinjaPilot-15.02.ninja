@@ -2532,3 +2532,14 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   (the deferred singleShot jump) left the container half-mapped and
   permanently blank. The jump now happens BEFORE show() so Welcome is
   simply never the startup tab and initializes on first click.
+- **THE systemhealth SVG RULE (two failures before it was learned): the
+  gadget renders ONLY the element with id="background"** (plus per-state
+  QGraphicsSvgItems it manages; systemhealthgadgetwidget.cpp line ~157
+  setElementId("background")). ANYTHING outside that group - appended at
+  document root or in its own top-level group - renders in
+  qlmanage/browsers but NEVER in the GCS. This ate the first AC/USB
+  base boxes AND two rounds of MISC-label fixes. All base art
+  (backdrops, outlines, labels) goes INSIDE the background group; end
+  of the group = top of the background z-order. State overlays are
+  separate hidden layers the gadget composites itself. When verifying,
+  simulate the app: whole-doc renders lie.

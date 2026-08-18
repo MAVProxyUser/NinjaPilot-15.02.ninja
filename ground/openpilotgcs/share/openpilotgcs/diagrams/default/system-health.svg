@@ -1056,6 +1056,18 @@
        width="13.544476"
        id="rect-2"
        style="fill:#28170b;fill-opacity:1;stroke:none;display:inline" />
+      <text
+       xml:space="preserve"
+       style="font-size:3.44706464px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#f4d7d7;fill-opacity:1;stroke:none;display:inline;font-family:Sans;-inkscape-font-specification:Sans Bold"
+       x="-472.0209"
+       y="483.00"
+       id="text-misc-lbl"
+       sodipodi:linespacing="125%"
+       transform="matrix(0,-0.85859914,1.1646879,0,0,0)"><tspan
+         sodipodi:role="line"
+         id="tspan-misc"
+         x="-472.0209"
+         y="483.00">MISC</tspan></text>
   </g>
   <g
      inkscape:groupmode="layer"
@@ -3045,18 +3057,4 @@
     </g>
   </g>
 
-  <g transform="translate(-497.66563,-344.28037)" id="misc-label-top">
-    <text
-       xml:space="preserve"
-       style="font-size:3.44706464px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#f4d7d7;fill-opacity:1;stroke:none;display:inline;font-family:Sans;-inkscape-font-specification:Sans Bold"
-       x="-472.0209"
-       y="483.00"
-       id="text-misc-lbl"
-       sodipodi:linespacing="125%"
-       transform="matrix(0,-0.85859914,1.1646879,0,0,0)"><tspan
-         sodipodi:role="line"
-         id="tspan-misc"
-         x="-472.0209"
-         y="483.00">MISC</tspan></text>
-  </g>
 </svg>
