@@ -38,6 +38,9 @@
 #endif
 #include <string.h>
 #include <accessorydesired.h>
+#if defined(PIOS_INCLUDE_UDPRCVR)
+#include <pios_udp_rcvr.h>
+#endif
 #include <manualcontrolsettings.h>
 #include <manualcontrolcommand.h>
 #include <receiveractivity.h>
@@ -429,7 +432,19 @@ static void receiverTask(__attribute__((unused)) void *parameters)
             if (settings.FailsafeFlightModeSwitchPosition >= 0 && settings.FailsafeFlightModeSwitchPosition < settings.FlightModeNumber) {
                 cmd.FlightModeSwitchPosition = (uint8_t)settings.FailsafeFlightModeSwitchPosition;
             }
+#if defined(PIOS_INCLUDE_UDPRCVR)
+            /* Link-health contract for the UDP stick stream: a link that
+             * was ALIVE and went fully silent is an ERROR (INPUT tile red),
+             * while never-configured/never-connected stays the stock
+             * Warning (orange) so an unconfigured bench isn't alarming. */
+            if (PIOS_UDPRCVR_EverActive() && PIOS_UDPRCVR_Quality() == 0) {
+                AlarmsSet(SYSTEMALARMS_ALARM_RECEIVER, SYSTEMALARMS_ALARM_ERROR);
+            } else {
+                AlarmsSet(SYSTEMALARMS_ALARM_RECEIVER, SYSTEMALARMS_ALARM_WARNING);
+            }
+#else
             AlarmsSet(SYSTEMALARMS_ALARM_RECEIVER, SYSTEMALARMS_ALARM_WARNING);
+#endif
 
             AccessoryDesiredData accessory;
             // Set Accessory 0
@@ -454,7 +469,19 @@ static void receiverTask(__attribute__((unused)) void *parameters)
                 }
             }
         } else if (valid_input_detected) {
+#if defined(PIOS_INCLUDE_UDPRCVR)
+            /* Sticks are flowing, but grade the LINK: heavy packet loss on
+             * the UDP stream (quality < 70%) shows as Warning (orange)
+             * even while control still works - the pilot should know the
+             * link is sick BEFORE it dies. */
+            if (PIOS_UDPRCVR_EverActive() && PIOS_UDPRCVR_Quality() < 70) {
+                AlarmsSet(SYSTEMALARMS_ALARM_RECEIVER, SYSTEMALARMS_ALARM_WARNING);
+            } else {
+                AlarmsClear(SYSTEMALARMS_ALARM_RECEIVER);
+            }
+#else
             AlarmsClear(SYSTEMALARMS_ALARM_RECEIVER);
+#endif
 
             // Scale channels to -1 -> +1 range
             cmd.Roll     = scaledChannel[MANUALCONTROLSETTINGS_CHANNELGROUPS_ROLL];

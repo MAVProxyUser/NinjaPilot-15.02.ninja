@@ -103,6 +103,9 @@ struct pios_sensors_hub_data {
     uint8_t  gps_sats;
     uint8_t  gps_fix;          /* 0 NO_FIX, 1 TIME_ONLY, 2 2D, 3 3D */
     double   gps_time;
+    uint64_t gps_utc_usec;     /* Fix2 gnss_timestamp: UTC usec since epoch,
+                                  0 until the receiver has time (needs sats,
+                                  not necessarily a position fix) */
     uint32_t gps_count;
     uint32_t gps_bad;          /* reassembly/decode rejects */
 

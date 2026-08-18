@@ -2743,3 +2743,38 @@ marginal; a better antenna position would calm the blips at the root.
   publishing it into GPSSatellites.SatsInView (arrays zeroed; DroneCAN
   carries no per-satellite data) is a small sensors.c addition if ever
   wanted.
+## FLY-OVER-UDP: PPM-format sticks on port 9003 + graded INPUT health (2026-08-18, overnight)
+
+- **New receiver: pios_udp_rcvr.c** (posix, PIOS_INCLUDE_UDPRCVR,
+  realposix only). Wire format "PPM1" + seq + count + uint16le
+  microseconds per channel, one frame per datagram, udp/9003 (9000
+  telem / 9001 gps / 9002 aux were taken). Registered as the **PPM
+  channel group** - the board has no hardware PPM and a literal new
+  "UDP" enum option would change ManualControlSettings' object id,
+  orphaning every persisted setting and forcing a GCS rebuild. So:
+  ChannelGroups=PPM means network sticks on this board.
+- **INPUT tile grading per spec** (receiver.c, UDPRCVR-gated): clean
+  stream -> OK/green; quality < 70% (seq-gap loss accounting over 1 s
+  windows) -> Warning/orange while still flying; >1 s silence on a
+  link that WAS alive -> Error/red (never-configured stays orange).
+  Channel reads fail safe at 500 ms staleness.
+- **Senders**: ground/pyuavtalk/udp_sticks.py (--center/--pattern/
+  --arm/--joystick via pygame for Xbox-class pads/--lossy N/--stop-
+  after S); ground/pyuavtalk/setup_udp_sticks.py configures (PPM
+  groups + Arming="Yaw Right", both persisted) and walks the whole
+  matrix. VERIFIED 8/8 live: baseline orange, green, orange at 60%
+  loss, red on dead stream, green restored, ARMED via UDP yaw-right,
+  DISARMED via yaw-left.
+- **GPS UAVObjects now truthfully populated** (sensors.c 1 Hz):
+  GPSSatellites.SatsInView from gnss.Auxiliary sats_visible
+  (per-satellite arrays zeroed - the DroneCAN suite carries no per-sat
+  data, and AP_GPS does not retain it either, so enriching the CAN
+  messages could not add it); GPSTime from Fix2's UTC gnss_timestamp
+  (hub now captures the previously skipped 56-bit field; sanity-gated
+  2020..2100) - PROVEN LIVE indoors: 2026-08-18 08:13:30 UTC with zero
+  sats visible, the receiver has TIME before it has position;
+  GPSExtendedStatus is semantically the GPSV9 self-description, so
+  Status stays NONE with FirmwareTag="DroneCAN AP_Periph M9N" and
+  BoardType[0]=124 as the honest identity.
+- Traps hit: eth0 was still unplugged (ship over .14); pios_config.h
+  touch = full ~13 min rebuild, as documented.

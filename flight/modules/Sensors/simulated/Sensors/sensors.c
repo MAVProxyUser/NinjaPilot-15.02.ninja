@@ -60,6 +60,10 @@
 #include "auxmagsensor.h"
 #include "gpspositionsensor.h"
 #include "gpsvelocitysensor.h"
+#include "gpssatellites.h"
+#include "gpstime.h"
+#include "gpsextendedstatus.h"
+#include <time.h>
 #include "gyrosensor.h"
 #include "flightstatus.h"
 #include "gpspositionsensor.h"
@@ -149,6 +153,23 @@ int32_t SensorsInitialize(void)
     // GyrosBiasInitialize();
     GPSPositionSensorInitialize();
     GPSVelocitySensorInitialize();
+    GPSSatellitesInitialize();
+    GPSTimeInitialize();
+    GPSExtendedStatusInitialize();
+    /* GPSExtendedStatus is semantically the OpenPilot GPSV9 module's
+     * self-description; there is no GPSV9 here, so Status stays NONE
+     * (honest) and the tag names the actual receiver chain once. */
+    {
+        GPSExtendedStatusData ext;
+        GPSExtendedStatusGet(&ext);
+        ext.Status = GPSEXTENDEDSTATUS_STATUS_NONE;
+        const char tag[] = "DroneCAN AP_Periph M9N";
+        memset(ext.FirmwareTag, 0, sizeof(ext.FirmwareTag));
+        memcpy(ext.FirmwareTag, tag, sizeof(tag) - 1);
+        ext.BoardType[0] = 124; /* the DroneCAN node id serving GNSS */
+        ext.BoardType[1] = 0;
+        GPSExtendedStatusSet(&ext);
+    }
     MagSensorInitialize();
     RevoCalibrationInitialize();
 
@@ -433,6 +454,42 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                         gv.East  = h.gps_ned_vel[1];
                         gv.Down  = h.gps_ned_vel[2];
                         GPSVelocitySensorSet(&gv);
+                    }
+
+                    /* 1 Hz enrichment - everything the DroneCAN suite
+                     * actually carries, published truthfully:
+                     *  - GPSSatellites.SatsInView from gnss.Auxiliary's
+                     *    sats_visible (per-satellite PRN/El/Az/SNR do not
+                     *    exist on this bus - zeroed, not invented)
+                     *  - GPSTime from Fix2's UTC timestamp (present once
+                     *    the receiver has time from the sky, before a
+                     *    position fix) */
+                    static uint32_t last_gps_enrich_ms = 0;
+                    uint32_t now_ms = xTaskGetTickCount() * portTICK_RATE_MS;
+                    if ((now_ms - last_gps_enrich_ms) >= 1000) {
+                        last_gps_enrich_ms = now_ms;
+
+                        if (h.gps_aux_count > 0) {
+                            GPSSatellitesData sat;
+                            memset(&sat, 0, sizeof(sat));
+                            sat.SatsInView = (int8_t)h.gps_sats_visible;
+                            GPSSatellitesSet(&sat);
+                        }
+
+                        if (h.gps_utc_usec != 0) {
+                            time_t utc_s = (time_t)(h.gps_utc_usec / 1000000ull);
+                            struct tm tm_utc;
+                            if (gmtime_r(&utc_s, &tm_utc) != NULL) {
+                                GPSTimeData gt;
+                                gt.Year   = (int16_t)(tm_utc.tm_year + 1900);
+                                gt.Month  = (int8_t)(tm_utc.tm_mon + 1);
+                                gt.Day    = (int8_t)tm_utc.tm_mday;
+                                gt.Hour   = (int8_t)tm_utc.tm_hour;
+                                gt.Minute = (int8_t)tm_utc.tm_min;
+                                gt.Second = (int8_t)tm_utc.tm_sec;
+                                GPSTimeSet(&gt);
+                            }
+                        }
                     }
                 }
 

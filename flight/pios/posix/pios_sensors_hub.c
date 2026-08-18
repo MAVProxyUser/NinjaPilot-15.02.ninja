@@ -758,7 +758,7 @@ static void fix2_decode(const uint8_t *p, uint8_t n)
     }
     uint32_t o = 0;
     o += 56;                                       /* timestamp.usec        */
-    o += 56;                                       /* gnss_timestamp.usec   */
+    uint64_t utc_usec = dc_bits(p, o, 56); o += 56; /* gnss_timestamp.usec  */
     uint8_t tstd = (uint8_t)dc_bits(p, o, 3); o += 3;
     o += 13;                                       /* void13                */
     uint8_t leap = (uint8_t)dc_bits(p, o, 8); o += 8;
@@ -804,6 +804,10 @@ static void fix2_decode(const uint8_t *p, uint8_t n)
     hub.gps_sats = sats;
     hub.gps_fix  = fix;
     hub.gps_time = now_s();
+    /* plausible UTC only: 2020-01-01..2100-01-01 in usec - the receiver
+     * reports 0 (or garbage-free zeros) until it has time from the sky */
+    hub.gps_utc_usec = (utc_usec > 1577836800000000ull
+                        && utc_usec < 4102444800000000ull) ? utc_usec : 0;
     hub.gps_count++;
     hub_publish_end();
 

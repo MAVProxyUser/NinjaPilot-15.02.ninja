@@ -81,3 +81,7 @@ const struct pios_udp_cfg pios_udp_aux_cfg = {
 #if defined(PIOS_INCLUDE_RCVR)
 #include "pios_rcvr_priv.h"
 #endif /* PIOS_INCLUDE_RCVR */
+
+#if defined(PIOS_INCLUDE_UDPRCVR)
+#include "pios_udp_rcvr.h"
+#endif /* PIOS_INCLUDE_UDPRCVR */

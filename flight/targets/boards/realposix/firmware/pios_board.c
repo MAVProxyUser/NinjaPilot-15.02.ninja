@@ -256,6 +256,26 @@ void PIOS_Board_Init(void)
     pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_GCS] = pios_gcsrcvr_rcvr_id;
 #endif /* PIOS_INCLUDE_GCSRCVR */
 
+#if defined(PIOS_INCLUDE_UDPRCVR)
+    /* PPM-format stick input over UDP, registered as the PPM channel group:
+     * this board has no hardware PPM input, and the wire format IS ppm
+     * semantics (channel microseconds), so ManualControlSettings
+     * ChannelGroups=PPM selects the network sticks without touching the
+     * UAVObject enum (a new literal "UDP" option would change the object id
+     * and orphan every persisted setting + require a GCS rebuild). Sender:
+     * ground/pyuavtalk/udp_sticks.py -> udp/9003. */
+    uint32_t pios_udprcvr_id;
+    if (PIOS_UDPRCVR_Init(&pios_udprcvr_id, PIOS_UDPRCVR_DEFAULT_PORT) == 0) {
+        uint32_t pios_udprcvr_rcvr_id;
+        if (PIOS_RCVR_Init(&pios_udprcvr_rcvr_id, &pios_udp_rcvr_driver, pios_udprcvr_id)) {
+            PIOS_Assert(0);
+        }
+        pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_PPM] = pios_udprcvr_rcvr_id;
+    } else {
+        printf("udp-ppm rcvr: init FAILED (port %u busy?)\n", PIOS_UDPRCVR_DEFAULT_PORT);
+    }
+#endif /* PIOS_INCLUDE_UDPRCVR */
+
     // BootFault ties to IAP backup-register boot-count tracking on real
     // hardware (coptercontrol/pios_board.c) - there's no bootloader/IAP
     // hardware to check here, and no code path anywhere sets this alarm
