@@ -2395,3 +2395,15 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   the true node-125 sensor -> visible swing. "Compass follows the IMU"
   reports are this, not a display wiring fault. Flight tune should
   revisit 0.2 (high gain couples mag noise into yaw).
+- **REVERSAL: node 125 was NEVER wedged - the magnet test proved both
+  mags live** (RM3100 4899 mGa / QMC 10994 mGa with a magnet against
+  them vs ~440/~647 baselines). The "frozen during rotation" captures
+  were TIMING artifacts (rotations outside the capture windows). The
+  services-dead behavior is the node's normal minimal firmware. AND the
+  reason a magnet never moves the HUD: filtermag's magnetic-anomaly
+  validation rejects any sample whose field deviates hugely from Be -
+  BY DESIGN (power lines/steel must not steer heading). Valid HUD demo:
+  magnet away, board still, rotate the mag <=90 deg - direction changes,
+  magnitude stays earthlike, sample accepted, MagKp 0.2 steers visibly.
+  RM3100 startup sequence (CMM init): node 125's firmware does it -
+  confirmed by the magnet response.
