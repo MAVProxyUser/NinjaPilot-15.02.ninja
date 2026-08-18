@@ -49,6 +49,10 @@ public:
     virtual void setBank(const QString &bank);
 
     virtual void setColor(const QColor &color);
+    /* re-derive the channel label from the CONNECTED board -
+     * the form is constructed at GCS startup, before any board
+     * is known, so pin names can only be applied later */
+    void updateChannelLabel();
 public slots:
     int min() const;
     void setMin(int minimum);

@@ -353,6 +353,9 @@ VehicleConfig *ConfigVehicleTypeWidget::getVehicleConfigWidget(int frameCategory
     }
     int index = m_vehicleIndexMap.value(frameCategory);
     vehiculeConfig = (VehicleConfig *)m_aircraft->airframesWidget->widget(index);
+    // the widget may predate the connection - re-derive board-aware
+    // channel names every time it is brought forward
+    vehiculeConfig->updateChannelNames();
     return vehiculeConfig;
 }
 

@@ -154,6 +154,11 @@ class VehicleConfig : public ConfigTaskWidget {
     Q_OBJECT
 
 public:
+    /* rebuild channelNames from the CONNECTED board and repopulate every
+     * ChannelBo* combo, preserving the selection - vehicle widgets are
+     * created (and cached) at GCS startup before any board is known */
+    void updateChannelNames();
+
 
     /* Enumeration options for ThrottleCurves */
     typedef enum {

@@ -2819,3 +2819,18 @@ marginal; a better antenna position would calm the blips at the root.
   whose zoom != current (bytes stay in the disk cache), and paint
   skips any mismatched tile that slips through. git add -f for
   opmapcontrol/src/core files (the .gitignore 'core' trap).
+- **The mixer/output pin labels needed a SECOND pass - two traps:**
+  (1) Config widgets are constructed (and the vehicle widget CACHED) at
+  GCS STARTUP, before any board connects - a constructor-time
+  getBoardModel() check reads 0 and generic labels stick forever. Pin
+  names now apply at CONNECT: VehicleConfig::updateChannelNames()
+  (rebuilds channelNames + repopulates ChannelBo* combos preserving
+  selection, called from getVehicleConfigWidget) and
+  OutputChannelForm::updateChannelLabel() (called from
+  ConfigOutputWidget::refreshWidgetsValues).
+  (2) The vehicle tab's motor dropdowns read "None" because the GUI's
+  source of truth is SystemSettings.GUIConfigData (packed bitfields
+  only the GUI normally writes), NOT MixerSettings - script-written
+  configs leave it zeroed. QuadX ch1-4 = 0x34210000 in word 0
+  (bitfields pack first-declared lowest: N,S,E,W,NW,NE,SW,SE x 4 bit;
+  NW=1 NE=2 SW=4 SE=3). Written + persisted on the bench board.

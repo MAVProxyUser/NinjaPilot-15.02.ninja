@@ -37,44 +37,14 @@
 
 VehicleConfig::VehicleConfig(QWidget *parent) : ConfigTaskWidget(parent)
 {
-    // Generate lists of mixerTypeNames, mixerVectorNames, channelNames
-    channelNames << "None";
-
-    /* On the NinjaPilot realposix board (OSD32MP1, board family 0x11xx) the
-     * output channels are Linux pwmchips routed to REAL header pins by the
-     * device-tree unlock (see osd32mp1/dt-pwm-unlock.sh) - name them by
-     * signal and pin so the mixer reflects the wiring, not an abstraction.
-     * Order matches pios_servo.c's motors-first map (flight channel N =
-     * driver out N, ChannelAddr identity). Channel 8 exists in silicon
-     * (TIM5_CH1/PH10 on JP19 as MC_EN_A) but is not DT-enabled yet. */
-    QStringList realposixPins;
-    realposixPins << "PI5 RPi-12 (TIM8_CH1)"
-                  << "PI6 RPi-38 (TIM8_CH2)"
-                  << "PI7 RPi-35 (TIM8_CH3)"
-                  << "PD13 RPi-32 (TIM4_CH2)"
-                  << "PD14 mikroBUS-16 (TIM4_CH3)"
-                  << "PH11 RPi-31 (TIM5_CH2)"
-                  << "PB5 RPi-33 (TIM3_CH2)"
-                  << "PH10 JP19 (TIM5_CH1, DT off)";
-    bool isRealposix = false;
-    ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
-    if (pm) {
-        UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
-        if (utilMngr && (utilMngr->getBoardModel() & 0xff00) == 0x1100) {
-            isRealposix = true;
-        }
-    }
+    // Generate lists of mixerTypeNames, mixerVectorNames, channelNames.
+    // Channel names are board-aware and re-derived on connect via
+    // updateChannelNames(); at construction no board is known yet.
     for (int i = 0; i < (int)VehicleConfig::CHANNEL_NUMELEM; i++) {
         mixerTypes << QString("Mixer%1Type").arg(i + 1);
         mixerVectors << QString("Mixer%1Vector").arg(i + 1);
-        if (isRealposix && i < realposixPins.count()) {
-            channelNames << QString("%1: %2").arg(i + 1).arg(realposixPins.at(i));
-        } else if (isRealposix) {
-            channelNames << QString("Channel%1 (unmapped)").arg(i + 1);
-        } else {
-            channelNames << QString("Channel%1").arg(i + 1);
-        }
     }
+    updateChannelNames();
 
     mixerTypeDescriptions << "Disabled" << "Motor" << "ReversableMotor" << "Servo" << "CameraRoll" << "CameraPitch" << "CameraYaw"
                           << "Accessory0" << "Accessory1" << "Accessory2" << "Accessory3" << "Accessory4" << "Accessory5";
@@ -175,6 +145,61 @@ void VehicleConfig::populateChannelComboBoxes()
     QList<QComboBox *> l = findChildren<QComboBox *>(QRegularExpression("\\S+ChannelBo\\S+"));
     foreach(QComboBox * combobox, l) {
         combobox->addItems(channelNames);
+    }
+}
+
+void VehicleConfig::updateChannelNames()
+{
+    /* On the NinjaPilot realposix board (OSD32MP1, family 0x11xx) the
+     * output channels are Linux pwmchips routed to REAL header pins by
+     * the device-tree unlock (osd32mp1/dt-pwm-unlock.sh) - name them by
+     * signal and pin so the mixer reflects the wiring. Order matches
+     * pios_servo.c's motors-first map (flight channel N = driver out N).
+     * Channel 8 exists in silicon (TIM5_CH1/PH10 on JP19 as MC_EN_A)
+     * but is not DT-enabled yet. */
+    QStringList realposixPins;
+
+    realposixPins << "PI5 RPi-12 (TIM8_CH1)"
+                  << "PI6 RPi-38 (TIM8_CH2)"
+                  << "PI7 RPi-35 (TIM8_CH3)"
+                  << "PD13 RPi-32 (TIM4_CH2)"
+                  << "PD14 mikroBUS-16 (TIM4_CH3)"
+                  << "PH11 RPi-31 (TIM5_CH2)"
+                  << "PB5 RPi-33 (TIM3_CH2)"
+                  << "PH10 JP19 (TIM5_CH1, DT off)";
+
+    bool isRealposix = false;
+    ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+    if (pm) {
+        UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
+        if (utilMngr && (utilMngr->getBoardModel() & 0xff00) == 0x1100) {
+            isRealposix = true;
+        }
+    }
+
+    channelNames.clear();
+    channelNames << "None";
+    for (int i = 0; i < (int)VehicleConfig::CHANNEL_NUMELEM; i++) {
+        if (isRealposix && i < realposixPins.count()) {
+            channelNames << QString("%1: %2").arg(i + 1).arg(realposixPins.at(i));
+        } else if (isRealposix) {
+            channelNames << QString("Channel%1 (unmapped)").arg(i + 1);
+        } else {
+            channelNames << QString("Channel%1").arg(i + 1);
+        }
+    }
+
+    /* repopulate live combos, preserving each selection by index */
+    QList<QComboBox *> combos = findChildren<QComboBox *>(QRegularExpression("\\S+ChannelBo\\S+"));
+    foreach(QComboBox * combobox, combos) {
+        int keep = combobox->currentIndex();
+        combobox->blockSignals(true);
+        combobox->clear();
+        combobox->addItems(channelNames);
+        if (keep >= 0 && keep < combobox->count()) {
+            combobox->setCurrentIndex(keep);
+        }
+        combobox->blockSignals(false);
     }
 }
 

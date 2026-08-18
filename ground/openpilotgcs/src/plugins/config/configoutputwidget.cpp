@@ -351,6 +351,12 @@ void ConfigOutputWidget::refreshWidgetsValues(UAVObject *obj)
     QStringList bankLabels;
     QList<int> channelBanks;
 
+    // board is known HERE (connect-time refresh) - apply pin-name labels
+    // the startup-time constructors could not
+    foreach(OutputChannelForm * outputChannelForm, findChildren<OutputChannelForm *>()) {
+        outputChannelForm->updateChannelLabel();
+    }
+
     if (utilMngr) {
         int board = utilMngr->getBoardModel();
         // Setup labels and combos for banks according to board type
