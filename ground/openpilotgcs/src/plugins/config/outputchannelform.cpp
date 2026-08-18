@@ -26,6 +26,8 @@
  */
 
 #include "outputchannelform.h"
+#include "extensionsystem/pluginmanager.h"
+#include "uavobjectutilmanager.h"
 
 #define MAXOUTPUT_VALUE 2500
 #define MINOUTPUT_VALUE 500
@@ -35,8 +37,27 @@ OutputChannelForm::OutputChannelForm(const int index, QWidget *parent) :
 {
     ui.setupUi(this);
 
-    // The convention for OP is Channel 1 to Channel 10.
-    ui.actuatorNumber->setText(QString("%1").arg(index + 1));
+    // The convention for OP is Channel 1 to Channel 10. On the NinjaPilot
+    // realposix board, name the REAL pin each channel drives (canonical map
+    // lives in vehicleconfig.cpp beside the mixer dropdown labels).
+    static const char *realposixPins[] = {
+        "PI5 RPi-12",  "PI6 RPi-38",  "PI7 RPi-35",  "PD13 RPi-32",
+        "PD14 mBUS-16", "PH11 RPi-31", "PB5 RPi-33",  "PH10 JP19 (off)"
+    };
+    bool isRealposix = false;
+    ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+    if (pm) {
+        UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
+        if (utilMngr && (utilMngr->getBoardModel() & 0xff00) == 0x1100) {
+            isRealposix = true;
+        }
+    }
+    if (isRealposix && index < 8) {
+        ui.actuatorNumber->setText(QString("%1 \u00B7 %2").arg(index + 1).arg(realposixPins[index]));
+        ui.actuatorNumber->setToolTip(tr("Output %1 drives %2").arg(index + 1).arg(realposixPins[index]));
+    } else {
+        ui.actuatorNumber->setText(QString("%1").arg(index + 1));
+    }
     setBank("-");
     // Register for ActuatorSettings changes:
     connect(ui.actuatorMin, SIGNAL(editingFinished()), this, SLOT(setChannelRange()));

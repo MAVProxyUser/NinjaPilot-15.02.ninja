@@ -5,6 +5,8 @@ Item {
     property variant sceneSize
 
     property real est_flight_time: Math.round(FlightBatteryState.EstimatedFlightTime)
+    // tethered sentinel: firmware reports 999999s time-left on USB power
+    property bool usb_powered: FlightBatteryState.EstimatedFlightTime >= 999999
     property real est_time_h: (est_flight_time > 0 ? Math.floor(est_flight_time / 3600) : 0 )
     property real est_time_m: (est_flight_time > 0 ? Math.floor((est_flight_time - est_time_h*3600)/60) : 0) 
     property real est_time_s: (est_flight_time > 0 ? Math.floor(est_flight_time - est_time_h*3600 - est_time_m*60) : 0)
@@ -481,7 +483,8 @@ Item {
             anchors.fill: parent
 
             // Alarm based on FlightBatteryState.EstimatedFlightTime < 120s orange, < 60s red
-            color: (FlightBatteryState.EstimatedFlightTime <= 120 && FlightBatteryState.EstimatedFlightTime > 60 ? "orange" :
+            color: panels.usb_powered ? "green" :
+                   (FlightBatteryState.EstimatedFlightTime <= 120 && FlightBatteryState.EstimatedFlightTime > 60 ? "orange" :
                    (FlightBatteryState.EstimatedFlightTime <= 60 ? "red": panels.batColors[SystemAlarms.Alarm_Battery]))
 
             border.color: "white"
@@ -489,7 +492,7 @@ Item {
             radius: border.width * 4
 
             Text {
-               text: FlightBatteryState.ConsumedEnergy.toFixed(0)
+               text: panels.usb_powered ? "\u221E" : FlightBatteryState.ConsumedEnergy.toFixed(0)
                anchors.centerIn: parent
                color: "white"
                font {
@@ -527,7 +530,8 @@ Item {
             //color: panels.batColors[SystemAlarms.Alarm_Battery]
 
             // Alarm based on FlightBatteryState.EstimatedFlightTime < 120s orange, < 60s red
-            color: (FlightBatteryState.EstimatedFlightTime <= 120 && FlightBatteryState.EstimatedFlightTime > 60 ? "orange" :
+            color: panels.usb_powered ? "green" :
+                   (FlightBatteryState.EstimatedFlightTime <= 120 && FlightBatteryState.EstimatedFlightTime > 60 ? "orange" :
                    (FlightBatteryState.EstimatedFlightTime <= 60 ? "red": panels.batColors[SystemAlarms.Alarm_Battery]))
 
             border.color: "white"
@@ -535,7 +539,7 @@ Item {
             radius: border.width * 4
 
             Text {
-               text: formatTime(est_time_h) + ":" + formatTime(est_time_m) + ":" + formatTime(est_time_s)
+               text: panels.usb_powered ? "\u221E" : (formatTime(est_time_h) + ":" + formatTime(est_time_m) + ":" + formatTime(est_time_s))
                anchors.centerIn: parent
                color: "white"
                font {
@@ -989,7 +993,7 @@ Item {
         } 
 
         Text {
-             text: ["None", "Basic (No Nav)", "CompMag", "Comp+Mag+GPS", "EKFIndoor"]
+             text: ["None", "Basic (Comp)", "Comp+Mag", "Comp+Mag+GPS", "INS13Indoor", "INS13"][RevoSettings.FusionAlgorithm]
              anchors.right: parent.right
              color: "white"
              font {
@@ -1051,7 +1055,7 @@ Item {
         } 
 
         Text {
-             text: ["Unknown", "NMEA", "UBX", "UBX7", "UBX8"][GPSPositionSensor.SensorType]
+             text: ["Unknown", "NMEA", "UBX", "UBX7", "UBX8", "CAN"][GPSPositionSensor.SensorType]
              anchors.right: parent.right
              color: "white"
              font {

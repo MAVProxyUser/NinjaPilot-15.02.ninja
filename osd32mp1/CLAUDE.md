@@ -2778,3 +2778,34 @@ marginal; a better antenna position would calm the blips at the root.
   BoardType[0]=124 as the honest identity.
 - Traps hit: eth0 was still unplugged (ship over .14); pios_config.h
   touch = full ~13 min rebuild, as documented.
+## GCS truth pass: slideouts, mixer pins, banks, HITL (2026-08-18, day)
+
+- **AttEstAlgo blank = STOCK UPSTREAM BUG**: Panels.qml assigned the
+  label ARRAY to Text.text without indexing it. Fixed with the full
+  six-option RevoSettings.FusionAlgorithm map.
+- **GPS type reads "CAN"**: SensorType gained a DroneCAN enum option
+  (gpspositionsensor.xml - a DATA object, objid change orphans nothing,
+  but GCS + firmware + synthetics MUST regenerate together; verified by
+  decoding the new objid over the wire). Regenerate with
+  `cd ground/uavobject-synthetics && ../uavobjgenerator/uavobjgenerator
+  ../../shared/uavobjectdefinition ../..` - the top Makefile chokes on
+  the SPACE in this repo's real path, and the synthetics Makefile
+  hardcodes a stale qmake; run the generator directly.
+- **Battery slideout on USB**: sensors.c publishes the TETHERED
+  SENTINEL (V=5.00 nominal - the OTG block has presence only, no VBUS
+  ADC; A=0.00 - no current-sense hardware exists;
+  EstimatedFlightTime=999999). Panels.qml keys `usb_powered` on the
+  sentinel: green boxes, infinity for time-left and mAh. On jack power
+  everything reverts to stock alarm-keyed behavior.
+- **Mixer dropdowns + Output tab name REAL pins** on board 0x11xx:
+  canonical map in vehicleconfig.cpp (1:PI5/RPi-12/TIM8_CH1,
+  2:PI6/RPi-38, 3:PI7/RPi-35, 4:PD13/RPi-32, 5:PD14/mikroBUS-16,
+  6:PH11/RPi-31, 7:PB5/RPi-33, 8:PH10/JP19 DT-off); Output tab banks =
+  timers (1 TIM8 1-3, 2 TIM4 4-5, 3 TIM5 6+8, 4 TIM3 7) - a bank's
+  rate IS that timer's shared PWM frame rate.
+- HITL's white void = the sim log console; placeholderText added.
+- Welcome header now "NinjaPilot Websites".
+- Octavo/OSD32MP1_RED_Rev1.2/ holds EAGLE CAD (.brd/.sch/.lbr) + the
+  schematic PDF - NO photo/render imagery. A board view could be made
+  by importing the .brd into KiCad (manual); the attitude-tab board art
+  swap is deferred until real art exists.

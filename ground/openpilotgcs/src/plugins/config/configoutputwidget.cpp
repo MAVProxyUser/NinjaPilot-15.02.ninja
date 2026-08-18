@@ -362,6 +362,14 @@ void ConfigOutputWidget::refreshWidgetsValues(UAVObject *obj)
             // Revolution family of boards 6 timer banks
             bankLabels << "1 (1-2)" << "2 (3)" << "3 (4)" << "4 (5-6)" << "5 (7-8)" << "6 (9-10)";
             channelBanks << 1 << 1 << 2 << 3 << 4 << 4 << 5 << 5 << 6 << 6;
+        } else if ((board & 0xff00) == 0x1100) {
+            // NinjaPilot realposix (OSD32MP1): a bank IS a hardware timer,
+            // and sibling channels share ONE period register - so the bank
+            // rate is the physical PWM frame rate of that whole timer.
+            // Bank 3 covers TIM5_CH2 (ch6) and the not-yet-DT-enabled
+            // TIM5_CH1 (ch8). See osd32mp1/dt-pwm-unlock.sh for the pins.
+            bankLabels << "1 TIM8 (1-3)" << "2 TIM4 (4-5)" << "3 TIM5 (6,8)" << "4 TIM3 (7)";
+            channelBanks << 1 << 1 << 1 << 2 << 2 << 3 << 4 << 3 << 4 << 4;
         }
     }
 

@@ -156,6 +156,7 @@ int32_t SensorsInitialize(void)
     GPSSatellitesInitialize();
     GPSTimeInitialize();
     GPSExtendedStatusInitialize();
+    FlightBatteryStateInitialize();
     /* GPSExtendedStatus is semantically the OpenPilot GPSV9 module's
      * self-description; there is no GPSV9 here, so Status stays NONE
      * (honest) and the tag names the actual receiver chain once. */
@@ -430,7 +431,7 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                      * arrived; PDOP stands in only until then */
                     gp.HDOP       = (h.gps_aux_count > 0) ? h.gps_hdop : h.gps_pdop;
                     gp.VDOP       = (h.gps_aux_count > 0) ? h.gps_vdop : h.gps_pdop;
-                    gp.SensorType = GPSPOSITIONSENSOR_SENSORTYPE_UNKNOWN;
+                    gp.SensorType = GPSPOSITIONSENSOR_SENSORTYPE_DRONECAN;
                     gp.Status     = (h.gps_fix == 3) ? GPSPOSITIONSENSOR_STATUS_FIX3D :
                                     (h.gps_fix == 2) ? GPSPOSITIONSENSOR_STATUS_FIX2D :
                                     GPSPOSITIONSENSOR_STATUS_NOFIX;
@@ -578,6 +579,22 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                                  * (no Battery module runs on this bench to
                                  * contest the alarm) */
                                 AlarmsClear(SYSTEMALARMS_ALARM_FLIGHTTIME);
+
+                                /* PFD battery slide-out on USB power:
+                                 * nominal VBUS 5.00 V (the OTG block gives
+                                 * presence only - there is no VBUS ADC or
+                                 * current-sense path on this board, so
+                                 * Current stays 0.00 until real hardware
+                                 * exists); EstimatedFlightTime = 999999 is
+                                 * the TETHERED SENTINEL the QML renders as
+                                 * a green infinity for time-left and mAh. */
+                                FlightBatteryStateData batt;
+                                FlightBatteryStateGet(&batt);
+                                batt.Voltage = 5.00f;
+                                batt.Current = 0.00f;
+                                batt.ConsumedEnergy = 0.0f;
+                                batt.EstimatedFlightTime = 999999.0f;
+                                FlightBatteryStateSet(&batt);
                             } else {
                                 AlarmsClear(SYSTEMALARMS_ALARM_BATTERY);
                             }
