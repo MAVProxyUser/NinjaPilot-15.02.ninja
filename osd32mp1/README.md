@@ -511,6 +511,64 @@ axes that can be inverted.
 input, failsafe wiring, an outdoor GPS fix to validate the lat/lon decode
 (and settle the antenna question), then HITL against Gazebo.
 
+## Slimming the demo image: which board daemons to disable, and which never to touch
+
+The Octavo/ST OpenSTLinux image is a Yocto *demo* build and ships an
+IoT-showcase payload that has no business running under a flight
+controller. On a 2-core Cortex-A7 running a SCHED_FIFO flight process,
+every one of these is pure overhead: CPU stolen from the estimator band,
+per-second collector wakeups adding scheduling jitter, RAM (~426 MB
+total), and open network listeners.
+
+The kill list — all reversible with `systemctl enable --now <unit>`:
+
+| unit | what it is | why it goes |
+|---|---|---|
+| `netdata` | full web monitoring dashboard on :19999, plus `python.d.plugin` and `apps.plugin` collectors | the single biggest CPU consumer on the box after the firmware; collectors wake every second |
+| `tcf-agent` | Eclipse Target Communication Framework debug agent | **unauthenticated network listener that can run commands** — a Yocto dev-image artifact, effectively a backdoor |
+| `avahi-daemon` (+ `.socket`) | mDNS, advertises `osd32mp1-red-v12.local` | only value is `.local` name resolution; costs CPU per query storm |
+| `bluetooth` | BlueZ for the Murata module's BT half | unused |
+| `pulseaudio` | a system-mode audio server | on a flight controller |
+| `iiod` | libiio network server (exposes industrial-I/O sensors over TCP) | our sensors ride CAN; nothing uses it |
+| `rpcbind` (+ `.socket`) | ONC RPC portmapper (NFS era) | nothing uses RPC |
+| `ninfod` | IPv6 node-information responder | diagnostic cruft |
+| `rdisc` | ICMP router discovery daemon | diagnostic cruft |
+
+One shot, on the board (unit-not-found errors are harmless):
+
+    for u in netdata avahi-daemon.socket avahi-daemon bluetooth pulseaudio \
+             tcf-agent iiod ninfod rdisc rpcbind.socket rpcbind; do
+        systemctl disable --now "$u"
+    done
+
+**NEVER disable these** — each one is the board's lifeline or a systemd
+dependency:
+
+- `dropbear` — the ONLY SSH server. Kill it and the board is serial-console
+  or reflash territory.
+- `systemd-networkd` / `systemd-resolved` — the Ethernet link itself.
+- `systemd-journald`, `systemd-udevd`, `systemd-logind`, `dbus` — systemd
+  plumbing; services (including ours) fail without them.
+- `systemd-timesyncd` — wall-clock sync; logs and TLS need it.
+- `rngd` — feeds kernel entropy from the hardware RNG; cheap and useful.
+
+Not services, leave alone: `galcore` threads are the Vivante GPU kernel
+driver (idle unless something renders); `sd-pam` + the per-login
+`dbus-daemon --session` swarm belong to login sessions and die with them.
+
+Beyond the CPU, disabling the list closes three network listeners
+(netdata :19999, tcf-agent, iiod) and removes the per-second wakeups that
+compete with the RT flight process for the two cores — same motivation as
+the journald log-storm rule: nothing on this board should be allowed to
+burn CPU that the estimator band needs. `ninjapilot.service` and
+`dronecan-allocator.service` are unaffected.
+
+State as applied on the bench board (2026-08-18): netdata, avahi-daemon,
+bluetooth, pulseaudio, tcf-agent, iiod and ninfod verified
+disabled/inactive; `rdisc` and `rpcbind` were still enabled+active on the
+verification pass and want one more `systemctl disable --now`. ninjapilot
+and dronecan-allocator confirmed active throughout.
+
 ## Files
 
 | file | what |

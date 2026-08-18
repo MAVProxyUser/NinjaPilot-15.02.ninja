@@ -2566,3 +2566,24 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   maps heading-without-position to None, so the heading toolbutton
   silently did nothing unless position-follow was already on. The
   toggles are now paired both ways and rotation snaps immediately.
+## Demo-image daemons: the kill list is applied and documented (2026-08-18)
+
+- The OpenSTLinux demo payload (netdata + its two collector plugins,
+  avahi, bluetoothd, pulseaudio, tcf-agent, iiod, ninfod, rdisc,
+  rpcbind) is DISABLED on the bench board - full table, rationale and
+  the one-shot disable loop live in README.md "Slimming the demo
+  image". netdata was the top CPU consumer after the firmware;
+  tcf-agent is an unauthenticated remote-debug listener (a genuine
+  backdoor on a dev image). Verified 2026-08-18: seven of nine down;
+  rdisc and rpcbind survived the first pass and need one more
+  `systemctl disable --now`.
+- **NEVER disable**: dropbear (the only SSH), systemd-networkd/
+  resolved (the link), journald/udevd/logind/dbus (systemd plumbing),
+  timesyncd, rngd. galcore threads are the GPU kernel driver, not a
+  service; the per-login `dbus-daemon --session` swarm dies with its
+  sessions.
+- **The board HAS WiFi**: Murata 1DX module (BCM43430/1 die) on SDIO
+  mmc0 - brcmfmac driver + firmware load cleanly at boot, `wlan0` and
+  `phy0` exist (verified 2026-08-18), unconfigured. The Bluetooth half
+  of the same module is what bluetoothd was for. A flight link or AP
+  mode over wlan0 is available hardware, zero new parts.
