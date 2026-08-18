@@ -666,7 +666,7 @@ struct dc_reasm {
     uint8_t toggle;
     bool    active;
 };
-static struct dc_reasm fix2_rx, aux_rx;
+static struct dc_reasm fix2_rx, aux_rx, sat_rx;
 
 static void fix2_decode(const uint8_t *p, uint8_t n);
 static void aux_decode(const uint8_t *p, uint8_t n);
@@ -718,6 +718,30 @@ static uint8_t dc_reasm_feed(struct dc_reasm *rx, const uint8_t *data, uint8_t d
         }
     }
     return 0;
+}
+
+/* NinjaPilot vendor 20502: count u8 + per-sat {svid u8, elev i8,
+ * azimuth/2 u8, cno u8} - the NAV-SAT table the node captures from the
+ * receiver, capped at 16 to match the GPSSatellites UAVObject. */
+static void satinfo_decode(const uint8_t *p, uint8_t n)
+{
+    if (n < 1) {
+        return;
+    }
+    uint8_t count = p[0];
+    if (count > 16 || n < (uint8_t)(1 + 4 * count)) {
+        return;
+    }
+    hub_publish_begin();
+    hub.gps_sat_count = count;
+    for (uint8_t i = 0; i < count; i++) {
+        hub.gps_sat_svid[i] = p[1 + 4 * i];
+        hub.gps_sat_elev[i] = (int8_t)p[2 + 4 * i];
+        hub.gps_sat_az2[i]  = p[3 + 4 * i];
+        hub.gps_sat_cno[i]  = p[4 + 4 * i];
+    }
+    hub.gps_sat_seq++;
+    hub_publish_end();
 }
 
 /* uavcan.equipment.gnss.Auxiliary: 7x float16 DOPs, then sats. Byte-aligned
@@ -884,15 +908,18 @@ static void can_poll(void)
          * so dispatch it BEFORE the start-of-transfer filter below. Feeding
          * it only start frames (the first version of this code) means
          * reassembly silently never completes. */
-        if (mt == DC_MSG_FIX2_REAL || mt == 1061) {
+        if (mt == DC_MSG_FIX2_REAL || mt == 1061 || mt == 20502) {
             const uint8_t *pl = NULL;
-            struct dc_reasm *rx = (mt == DC_MSG_FIX2_REAL) ? &fix2_rx : &aux_rx;
+            struct dc_reasm *rx = (mt == DC_MSG_FIX2_REAL) ? &fix2_rx :
+                                  (mt == 1061) ? &aux_rx : &sat_rx;
             uint8_t n = dc_reasm_feed(rx, f.data, f.can_dlc, &pl);
             if (n > 0) {
                 if (mt == DC_MSG_FIX2_REAL) {
                     fix2_decode(pl, n);
-                } else {
+                } else if (mt == 1061) {
                     aux_decode(pl, n);
+                } else {
+                    satinfo_decode(pl, n);
                 }
             }
             continue;

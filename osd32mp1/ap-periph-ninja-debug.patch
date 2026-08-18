@@ -302,6 +302,55 @@ index ad455b0..934c23a 100644
  
      compass.read();
  
+diff --git a/Tools/AP_Periph/gps.cpp b/Tools/AP_Periph/gps.cpp
+index 2d39645..955e6dc 100644
+--- a/Tools/AP_Periph/gps.cpp
++++ b/Tools/AP_Periph/gps.cpp
+@@ -1,5 +1,13 @@
+ #include "AP_Periph.h"
+ 
++/* NinjaPilot: satellite table captured by the ublox driver (NAV-SAT) -
++ * defined in AP_GPS_UBLOX.cpp, broadcast below as vendor msg 20502 */
++struct ninja_satinfo_t {
++    volatile uint8_t seq; uint8_t count;
++    uint8_t svid[16]; int8_t elev[16]; uint8_t az2[16]; uint8_t cno[16];
++};
++extern ninja_satinfo_t ninja_satinfo;
++
+ #if AP_PERIPH_GPS_ENABLED
+ 
+ /*
+@@ -220,6 +228,30 @@ void AP_Periph_FW::can_gps_update(void)
+ 
+     }
+ 
++    // NinjaPilot: per-satellite table captured from UBX-NAV-SAT by the
++    // ublox driver, broadcast as vendor msg 20502 at <=1 Hz.
++    // Payload: count u8, then per sat {svid u8, elev i8, az/2 u8, cno u8}.
++    {
++        static uint8_t ninja_last_seq;
++        static uint32_t ninja_last_ms;
++        const uint32_t now_sat = AP_HAL::millis();
++        if (ninja_satinfo.seq != ninja_last_seq && (now_sat - ninja_last_ms) >= 1000) {
++            ninja_last_seq = ninja_satinfo.seq;
++            ninja_last_ms  = now_sat;
++            uint8_t nsat = MIN(ninja_satinfo.count, (uint8_t)16);
++            uint8_t sbuf[1 + 16 * 4];
++            sbuf[0] = nsat;
++            for (uint8_t i = 0; i < nsat; i++) {
++                sbuf[1 + 4 * i] = ninja_satinfo.svid[i];
++                sbuf[2 + 4 * i] = (uint8_t)ninja_satinfo.elev[i];
++                sbuf[3 + 4 * i] = ninja_satinfo.az2[i];
++                sbuf[4 + 4 * i] = ninja_satinfo.cno[i];
++            }
++            canard_broadcast(0x4E494E4A53415400ULL, 20502,
++                             CANARD_TRANSFER_PRIORITY_LOW, sbuf, 1 + 4 * nsat);
++        }
++    }
++
+     // send Heading message if we are not sending RelPosHeading messages and have yaw
+     if (gps.have_gps_yaw() && last_relposheading_ms == 0) {
+         float yaw_deg, yaw_acc_deg;
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
 index 1ab2a2e..1843ae8 100644
 --- a/Tools/AP_Periph/imu.cpp
@@ -516,6 +565,137 @@ index 1ab2a2e..1843ae8 100644
      }
  }
  #endif // AP_PERIPH_IMU_ENABLED
+diff --git a/libraries/AP_GPS/AP_GPS_UBLOX.cpp b/libraries/AP_GPS/AP_GPS_UBLOX.cpp
+index 8ce4acf..64496af 100644
+--- a/libraries/AP_GPS/AP_GPS_UBLOX.cpp
++++ b/libraries/AP_GPS/AP_GPS_UBLOX.cpp
+@@ -35,6 +35,62 @@
+ 
+ #ifndef UBLOX_SPEED_CHANGE
+     #define UBLOX_SPEED_CHANGE 0
++
++/* ---- NinjaPilot NAV-SAT streaming capture ----------------------------
++ * UBX-NAV-SAT (0x01 0x35) carries 12 bytes per tracked satellite and can
++ * exceed the parse union with 30+ sats, where the size gate drops the
++ * whole message. So it is parsed as a BYTE STREAM (the same pattern the
++ * CFGv2 VALGET path uses), capped at 16 sats to match the GPSSatellites
++ * UAVObject, and committed only on a valid checksum. The table crosses
++ * to AP_Periph/gps.cpp through a plain global. */
++struct ninja_satinfo_t {
++    volatile uint8_t seq;
++    uint8_t count;
++    uint8_t svid[16];
++    int8_t  elev[16];
++    uint8_t az2[16];    /* azimuth / 2, degrees */
++    uint8_t cno[16];
++};
++ninja_satinfo_t ninja_satinfo;
++static struct {
++    uint8_t numsv;
++    uint8_t count;
++    uint8_t svid[16];
++    int8_t  elev[16];
++    uint8_t az2[16];
++    uint8_t cno[16];
++    int16_t az_lo;
++} ninja_navsat_tmp;
++
++static void ninja_navsat_byte(uint16_t idx, uint8_t b)
++{
++    /* header: iTOW u32, version u8, numSvs u8, rsvd u16; sats at 8,
++     * 12 bytes each: gnssId, svId, cno, elev(i8), azim(i16), prRes(i16),
++     * flags(u32) */
++    if (idx == 5) { ninja_navsat_tmp.numsv = b; ninja_navsat_tmp.count = 0; return; }
++    if (idx < 8) return;
++    uint16_t rel = idx - 8;
++    uint16_t blk = rel / 12;
++    uint16_t off = rel % 12;
++    if (blk >= 16 || blk >= ninja_navsat_tmp.numsv) return;
++    switch (off) {
++    case 1: ninja_navsat_tmp.svid[blk] = b; break;
++    case 2: ninja_navsat_tmp.cno[blk] = b; break;
++    case 3: ninja_navsat_tmp.elev[blk] = (int8_t)b; break;
++    case 4: ninja_navsat_tmp.az_lo = b; break;
++    case 5: {
++        int16_t az = (int16_t)(ninja_navsat_tmp.az_lo | ((uint16_t)b << 8));
++        while (az < 0) az += 360;
++        while (az >= 360) az -= 360;
++        ninja_navsat_tmp.az2[blk] = (uint8_t)(az / 2);
++        if ((uint8_t)(blk + 1) > ninja_navsat_tmp.count) {
++            ninja_navsat_tmp.count = blk + 1;
++        }
++        break;
++    }
++    default: break;
++    }
++}
+ #endif
+ 
+ 
+@@ -440,6 +496,15 @@ AP_GPS_UBLOX::_verify_rate(uint8_t msg_class, uint8_t msg_id, uint8_t rate) {
+             config_msg_id = CONFIG_RATE_SOL;
+             break;
+         case MSG_PVT:
++        {
++            /* one-shot: ask the receiver for NAV-SAT every 10th solution
++             * (10 Hz nav -> 1 Hz satellite table) */
++            static bool ninja_navsat_rate_sent;
++            if (!ninja_navsat_rate_sent) {
++                ninja_navsat_rate_sent = _configure_message_rate(CLASS_NAV, MSG_NAV_SAT, 10);
++            }
++        }
++
+             desired_rate = RATE_PVT;
+             config_msg_id = CONFIG_RATE_PVT;
+             break;
+@@ -667,6 +732,7 @@ AP_GPS_UBLOX::read(void)
+ 
+             _payload_length += (uint16_t)(data<<8);
+             if ((_payload_length > sizeof(_buffer))
++            && !(_class == CLASS_NAV && _msg_id == MSG_NAV_SAT)
+ #if AP_GPS_UBLOX_CFGV2_ENABLED
+             && !(_class == CLASS_CFG || _msg_id == MSG_CFG_VALGET)
+ #endif
+@@ -694,6 +760,9 @@ AP_GPS_UBLOX::read(void)
+                 _cfg_v2.process_valget_byte(data);
+             }
+ #endif
++            if (_class == CLASS_NAV && _msg_id == MSG_NAV_SAT) {
++                ninja_navsat_byte(_payload_counter, data);
++            }
+             if (_payload_counter < sizeof(_buffer)) {
+                 _buffer[_payload_counter] = data;
+             }
+@@ -1810,6 +1879,17 @@ AP_GPS_UBLOX::_parse_gps(void)
+ #endif
+         _new_speed = true;
+         break;
++    case MSG_NAV_SAT:
++        /* streamed capture (see ninja_navsat_byte) - the checksum passed,
++         * commit the staged table for AP_Periph to broadcast */
++        memcpy(ninja_satinfo.svid, ninja_navsat_tmp.svid, sizeof(ninja_satinfo.svid));
++        memcpy((void *)ninja_satinfo.elev, ninja_navsat_tmp.elev, sizeof(ninja_satinfo.elev));
++        memcpy(ninja_satinfo.az2, ninja_navsat_tmp.az2, sizeof(ninja_satinfo.az2));
++        memcpy(ninja_satinfo.cno, ninja_navsat_tmp.cno, sizeof(ninja_satinfo.cno));
++        ninja_satinfo.count = ninja_navsat_tmp.count;
++        ninja_satinfo.seq++;
++        return false;
++
+     case MSG_NAV_SVINFO:
+         {
+         Debug("MSG_NAV_SVINFO\n");
+diff --git a/libraries/AP_GPS/AP_GPS_UBLOX.h b/libraries/AP_GPS/AP_GPS_UBLOX.h
+index af50bfe..5cd5326 100644
+--- a/libraries/AP_GPS/AP_GPS_UBLOX.h
++++ b/libraries/AP_GPS/AP_GPS_UBLOX.h
+@@ -724,6 +724,7 @@ private:
+ #endif
+         MSG_MON_VER = 0x04,
+         MSG_NAV_SVINFO = 0x30,
++        MSG_NAV_SAT = 0x35,
+         MSG_RXM_RAW = 0x10,
+         MSG_RXM_RAWX = 0x15,
+         MSG_TIM_TM2 = 0x03
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 index 067210f..5fea136 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat

@@ -117,6 +117,14 @@ struct pios_sensors_hub_data {
     float    gps_hdop;
     float    gps_vdop;
     uint8_t  gps_sats_visible;
+    /* per-satellite table (vendor msg 20502: NAV-SAT captured on the
+     * node; az2 = azimuth/2 degrees) */
+    uint8_t  gps_sat_count;
+    uint8_t  gps_sat_svid[16];
+    int8_t   gps_sat_elev[16];
+    uint8_t  gps_sat_az2[16];
+    uint8_t  gps_sat_cno[16];
+    uint32_t gps_sat_seq;
     uint32_t gps_aux_count;
 
     /* CAN bus health, rolling 1 s window: utilisation in permille of the

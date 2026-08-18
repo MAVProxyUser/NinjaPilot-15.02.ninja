@@ -483,7 +483,18 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                             if (h.gps_sats > vis) {
                                 vis = h.gps_sats;
                             }
+                            if (h.gps_sat_count > vis) {
+                                vis = h.gps_sat_count;
+                            }
                             sat.SatsInView = (int8_t)vis;
+                            /* the real per-satellite table (NAV-SAT via
+                             * the node's vendor msg 20502) */
+                            for (uint8_t si = 0; si < h.gps_sat_count && si < 16; si++) {
+                                sat.PRN[si]       = h.gps_sat_svid[si];
+                                sat.Elevation[si] = h.gps_sat_elev[si];
+                                sat.Azimuth[si]   = (int16_t)h.gps_sat_az2[si] * 2;
+                                sat.SNR[si]       = (int8_t)h.gps_sat_cno[si];
+                            }
                             GPSSatellitesSet(&sat);
                         }
 
