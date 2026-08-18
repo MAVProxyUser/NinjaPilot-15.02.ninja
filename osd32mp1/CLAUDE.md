@@ -2387,3 +2387,11 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   discriminator: a magnet/steel tool held to the true node-125 sensor
   swings hundreds of mGa regardless of orientation. Candidates: whatever
   the RM3100 breakout actually wires to vs the unit in hand.
+- **Compass semantics + bench MagKp**: the heading gauge is fused yaw -
+  gyro moves it INSTANTLY, the mag only steers it back at MagKp. Stock
+  0.01 = tens-of-seconds correction (invisible on the rose); bench value
+  now 0.2 (persisted) so mag steering shows in seconds - which makes the
+  GCS compass itself the magnet-test instrument: board still + magnet on
+  the true node-125 sensor -> visible swing. "Compass follows the IMU"
+  reports are this, not a display wiring fault. Flight tune should
+  revisit 0.2 (high gain couples mag noise into yaw).
