@@ -395,9 +395,20 @@ void OutputChannelForm::updateChannelLabel()
 {
     // NinjaPilot realposix (OSD32MP1): name the REAL pin each output
     // drives (canonical map in vehicleconfig.cpp beside the mixer labels).
+    /* short form fits the "# - Bank" chip; the tooltip carries the rest */
     static const char *realposixPins[] = {
-        "PI5 RPi-12",   "PI6 RPi-38",  "PI7 RPi-35", "PD13 RPi-32",
-        "PD14 mBUS-16", "PH11 RPi-31", "PB5 RPi-33", "PH10 JP19 (off)"
+        "PI5",  "PI6",  "PI7",  "PD13",
+        "PD14", "PH11", "PB5",  "PH10"
+    };
+    static const char *realposixPinDetail[] = {
+        "PI5 = RPi header pin 12 (TIM8_CH1)",
+        "PI6 = RPi header pin 38 (TIM8_CH2)",
+        "PI7 = RPi header pin 35 (TIM8_CH3)",
+        "PD13 = RPi header pin 32 (TIM4_CH2)",
+        "PD14 = mikroBUS pin 16 / MCLICK_PWM (TIM4_CH3)",
+        "PH11 = RPi header pin 31 (TIM5_CH2)",
+        "PB5 = RPi header pin 33 (TIM3_CH2)",
+        "PH10 = JP19 / MC_EN_A (TIM5_CH1, not DT-enabled)"
     };
     bool isRealposix = false;
     ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
@@ -409,8 +420,8 @@ void OutputChannelForm::updateChannelLabel()
         }
     }
     if (isRealposix && index() < 8) {
-        ui.actuatorNumber->setText(QString("%1 \u00B7 %2").arg(index() + 1).arg(realposixPins[index()]));
-        ui.actuatorNumber->setToolTip(tr("Output %1 drives %2").arg(index() + 1).arg(realposixPins[index()]));
+        ui.actuatorNumber->setText(QString("%1 %2").arg(index() + 1).arg(realposixPins[index()]));
+        ui.actuatorNumber->setToolTip(tr("Output %1: %2").arg(index() + 1).arg(realposixPinDetail[index()]));
     } else {
         ui.actuatorNumber->setText(QString("%1").arg(index() + 1));
     }

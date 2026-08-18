@@ -399,7 +399,7 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            color: panels.batColors[SystemAlarms.Alarm_Battery]
+            color: panels.usb_powered ? "green" : panels.batColors[SystemAlarms.Alarm_Battery]
             border.color: "white"
             border.width: battery_volt.width * 0.01
             radius: border.width * 4
@@ -440,7 +440,7 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            color: panels.batColors[SystemAlarms.Alarm_Battery]
+            color: panels.usb_powered ? "green" : panels.batColors[SystemAlarms.Alarm_Battery]
             border.color: "white"
             border.width: battery_volt.width * 0.01
             radius: border.width * 4
