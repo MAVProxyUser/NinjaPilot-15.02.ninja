@@ -21,12 +21,12 @@ Item {
 
     ListModel {
         id: sitesModel
-        ListElement { link: "http://www.openpilot.org" }
-        ListElement { link: "http://wiki.openpilot.org" }
-        ListElement { link: "http://www.openpilot.org/hardware/get-hardware/" }
-        ListElement { link: "http://forums.openpilot.org" }
-        ListElement { link: "http://git.openpilot.org" }
-        ListElement { link: "http://progress.openpilot.org" }
+        ListElement { link: "https://github.com/MAVProxyUser/NinjaPilot-15.02.ninja/" }
+        ListElement { link: "https://github.com/MAVProxyUser/NinjaPilot-15.02.ninja/wiki" }
+        ListElement { link: "https://octavosystems.com/octavo_products/osd32mp15x/" }
+        ListElement { link: "https://x.com/d0tslash" }
+        ListElement { link: "https://github.com/MAVProxyUser/NinjaPilot-15.02.ninja/pulls" }
+        ListElement { link: "https://github.com/MAVProxyUser/NinjaPilot-15.02.ninja/compare/master...claude" }
         function title(index){
             if (title["text"] === undefined) {
             title.text = [

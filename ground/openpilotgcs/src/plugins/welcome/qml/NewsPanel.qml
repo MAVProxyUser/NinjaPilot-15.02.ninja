@@ -35,12 +35,15 @@ Item {
 
     XmlListModel {
         id: xmlModel
-        source: "http://www.openpilot.org/feed/"
-        query: "/rss/channel/item"
+        // Project news = this repo's own commit history (the old WordPress
+        // feed died with openpilot.org in 2015)
+        source: "https://github.com/MAVProxyUser/NinjaPilot-15.02.ninja/commits/claude.atom"
+        query: "/feed/entry"
+        namespaceDeclarations: "declare default element namespace 'http://www.w3.org/2005/Atom';"
 
         XmlRole { name: "title"; query: "title/string()" }
-        XmlRole { name: "description"; query: "description/string()" }
-        XmlRole { name: "link"; query: "link/string()" }
+        XmlRole { name: "description"; query: "author/name/string()" }
+        XmlRole { name: "link"; query: "link/@href/string()" }
     }
 
     Component {

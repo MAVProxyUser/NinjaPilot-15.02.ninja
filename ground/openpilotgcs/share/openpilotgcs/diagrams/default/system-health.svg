@@ -1056,7 +1056,8 @@
        width="13.544476"
        id="rect-2"
        style="fill:#28170b;fill-opacity:1;stroke:none;display:inline" />
-      <text
+      <rect id="pwr-misc-divider" x="557.17" y="394.70" width="1.40" height="13.21" style="fill:#918a6f;fill-opacity:1;stroke:none;display:inline" />
+    <text
        xml:space="preserve"
        style="font-size:3.44706464px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#f4d7d7;fill-opacity:1;stroke:none;display:inline;font-family:Sans;-inkscape-font-specification:Sans Bold"
        x="-472.0209"

@@ -2543,3 +2543,15 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   of the group = top of the background z-order. State overlays are
   separate hidden layers the gadget composites itself. When verifying,
   simulate the app: whole-doc renders lie.
+- **PWR/MISC divider drawn as an EXPLICIT khaki rect** inside the
+  background group (the panel-gap showthrough that draws the other row
+  separators rendered in WebKit but not in the app's QtSvg for this
+  gap; an explicit rect is renderer-proof).
+- **Welcome tab rewired to living endpoints** (user spec): Home/Wiki/
+  Code Reviews/Progress Tracker -> the NinjaPilot GitHub repo (root,
+  wiki, pulls, master...claude compare), Store -> Octavo OSD32MP15x
+  product page, Forums -> x.com/d0tslash. ActivityPanel rewritten as an
+  "Issue Tracker" portal (GitHub serves no Atom feed for issues);
+  NewsPanel now feeds from the repo's commits/claude.atom - project
+  news IS the commit history. Welcome QML is compiled qrc: edit
+  src/plugins/welcome/qml + rebuild the plugin.
