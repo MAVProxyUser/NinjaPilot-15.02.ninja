@@ -191,36 +191,20 @@ QString UrlFactory::MakeImageUrl(const MapType::Types &type, const Point &pos, c
     break;
     case MapType::GoogleSatellite:
     {
-        QString server  = "khm";
-        QString request = "kh";
-        QString sec1    = ""; // after &x=...
-        QString sec2    = ""; // after &zoom=...
-        GetSecGoogleWords(pos, sec1, sec2);
-        TryCorrectGoogleVersions();
-        return QString("http://%1%2.google.com/%3/v=%4&hl=%5&x=%6%7&y=%8&z=%9&s=%10").arg(server).arg(GetServerNum(pos, 4)).arg(request).arg(VersionGoogleSatellite).arg(language).arg(pos.X()).arg(sec1).arg(pos.Y()).arg(zoom).arg(sec2);
+        // dead 2015 endpoint; serve Esri World Imagery (real satellite)
+        return QString("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/%1/%2/%3").arg(zoom).arg(pos.Y()).arg(pos.X());
     }
     break;
     case MapType::GoogleLabels:
     {
-        QString server  = "mts";
-        QString request = "vt";
-        QString sec1    = ""; // after &x=...
-        QString sec2    = ""; // after &zoom=...
-        GetSecGoogleWords(pos, sec1, sec2);
-        TryCorrectGoogleVersions();
-
-        return QString("http://%1%2.google.com/%3/lyrs=%4&hl=%5&x=%6%7&y=%8&z=%9&s=%10").arg(server).arg(GetServerNum(pos, 4)).arg(request).arg(VersionGoogleLabels).arg(language).arg(pos.X()).arg(sec1).arg(pos.Y()).arg(zoom).arg(sec2);
+        // dead 2015 endpoint; serve OSM
+        return QString("https://tile.openstreetmap.org/%1/%2/%3.png").arg(zoom).arg(pos.X()).arg(pos.Y());
     }
     break;
     case MapType::GoogleTerrain:
     {
-        QString server  = "mts";
-        QString request = "vt";
-        QString sec1    = ""; // after &x=...
-        QString sec2    = ""; // after &zoom=...
-        GetSecGoogleWords(pos, sec1, sec2);
-        TryCorrectGoogleVersions();
-        return QString("http://%1%2.google.com/%3/v=%4&hl=%5&x=%6%7&y=%8&z=%9&s=%10").arg(server).arg(GetServerNum(pos, 4)).arg(request).arg(VersionGoogleTerrain).arg(language).arg(pos.X()).arg(sec1).arg(pos.Y()).arg(zoom).arg(sec2);
+        // dead 2015 endpoint; serve OSM
+        return QString("https://tile.openstreetmap.org/%1/%2/%3.png").arg(zoom).arg(pos.X()).arg(pos.Y());
     }
     break;
     case MapType::GoogleMapChina:

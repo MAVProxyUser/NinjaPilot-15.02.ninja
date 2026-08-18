@@ -2463,3 +2463,15 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   firmware restart wipes them, PLAN returns to orange.
 - **GCS opens on the Flight data workspace** (mainwindow
   extensionsInitialized deferred activateModeByWorkspaceName).
+- **Map fix round 2 - why the fantasy map survived round 1**: the factory
+  config itself ships one opmap gadget at mapProvider=GoogleSatellite
+  (was NOT aliased) and one at accessMode=CacheOnly (NEVER downloads).
+  Now: GoogleSatellite/-Labels/-Terrain aliased too (satellite -> Esri
+  World_Imagery XYZ, labels/terrain -> OSM; GoogleHybrid has no case of
+  its own), factory CacheOnly -> ServerAndCache. TRAP: .gitignore line
+  13 'core' (core-dump rule) silently swallows opmapcontrol/src/core/ -
+  git add -f required. TRAP: 'make in the plugin dir succeeded' proves
+  nothing - VERIFY with strings on the bundle dylib (a false positive
+  also lurks: other providers already reference arcgisonline). A user
+  config saved before this fix may retain CacheOnly - flip Access Mode
+  in the OP Map gadget options or reset the config.
