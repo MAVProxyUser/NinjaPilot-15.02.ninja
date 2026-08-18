@@ -2809,3 +2809,13 @@ marginal; a better antenna position would calm the blips at the root.
   schematic PDF - NO photo/render imagery. A board view could be made
   by importing the .brd into KiCad (manual); the attitude-tab board art
   swap is deferred until real art exists.
+- **Map "boxy wrong-scale patches" = the stale-zoom tile race, FIXED**:
+  a loader thread stamps each tile with the zoom captured at enqueue,
+  downloads for seconds, then inserted into the drawing matrix without
+  checking the zoom was still current - and SetZoom's Matrix.Clear()
+  cannot evict a tile that lands AFTER it. Tile positions overlap
+  between zoom levels, so the stale tile painted the wrong scale into
+  the current grid. Two guards (opmapcontrol): insertion refuses tiles
+  whose zoom != current (bytes stay in the disk cache), and paint
+  skips any mismatched tile that slips through. git add -f for
+  opmapcontrol/src/core files (the .gitignore 'core' trap).

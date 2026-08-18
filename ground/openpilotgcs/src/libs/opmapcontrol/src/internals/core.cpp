@@ -149,9 +149,20 @@ void Core::run()
                             } while (++retry < OPMaps::Instance()->RetryLoadTile);
                         }
 
-                        if (t->Overlays.count() > 0) {
+                        if (t->Overlays.count() > 0 && t->GetZoom() == Zoom()) {
                             Matrix.SetTileAt(task.Pos, t);
                             emit OnNeedInvalidation();
+                        } else if (t->Overlays.count() > 0) {
+                            /* Downloaded for a zoom the user has already left.
+                             * Tile positions OVERLAP between zoom levels, so
+                             * inserting this would paint imagery at the WRONG
+                             * SCALE into the current grid (the "boxy patches"
+                             * artifact) - SetZoom's Matrix.Clear() cannot
+                             * catch a tile that lands after it. Drop it; the
+                             * bytes are already in the disk cache for when
+                             * that zoom returns. */
+                            delete t;
+                            t = 0;
 
 #ifdef DEBUG_CORE
                             qDebug() << "Core::run add tile " << t->GetPos().ToString() << " to matrix index " << task.Pos.ToString() << " ID=" << debug;

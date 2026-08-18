@@ -326,6 +326,12 @@ void MapGraphicItem::DrawMap2D(QPainter *painter)
             core->SettilePoint(Point(core->GettilePoint().X() + i, core->GettilePoint().Y() + j));
             {
                 internals::Tile *t = core->Matrix.TileAt(core->GettilePoint());
+                if (t != 0 && t->GetZoom() != core->Zoom()) {
+                    /* stale-zoom tile - drawing it here would render the
+                     * wrong scale into this grid cell (see core.cpp's
+                     * insertion guard for the race that produces these) */
+                    t = 0;
+                }
                 if (true) {
                     core->tileRect.SetX(core->GettilePoint().X() * core->tileRect.Width());
                     core->tileRect.SetY(core->GettilePoint().Y() * core->tileRect.Height());
