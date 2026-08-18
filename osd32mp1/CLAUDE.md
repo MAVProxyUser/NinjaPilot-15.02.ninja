@@ -2666,3 +2666,13 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   `key_mgmt=NONE` (join any OPEN network). WiFi config goes ONLY in
   /etc/wpa_supplicant/wpa_supplicant-wlan0.conf consumed by
   wpa_supplicant@wlan0.service.
+- **WiFi is LIVE (2026-08-18)**: wlan0 (Murata 1DX, brcmfmac) joined
+  the bench 2.4 GHz AP via wpa_supplicant@wlan0 + the copied
+  51-wireless.network - DHCP 192.168.0.14 beside eth0's .90, both
+  permanent across reboots. Route metrics landed right by default:
+  eth0 metric 10, wlan0 1024 - wired preferred, WiFi automatic
+  fallback when the cable goes. Measured WiFi RTT 9-26 ms (vs sub-ms
+  wired): fine for ssh/telemetry, but keep timing-sensitive bench
+  measurements and the GCS link on Ethernet when both exist. mDNS
+  (avahi) announces on both links. First ssh to a NEW address needs
+  the usual ssh-rsa options plus the fresh known_hosts entry.
