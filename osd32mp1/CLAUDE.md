@@ -2358,3 +2358,32 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   to let filtermag use it.
 - Node identity crib: 124 = org.ardupilot.MatekL431-Periph (IMU, baro,
   GPS, QMC, IST8310); 125 = the RM3100 DroneCAN mag unit.
+
+## Boot chain + the compass identity mystery (2026-08-18, late)
+
+- **Full unattended boot recovery is in place** (user requirement: a
+  reboot mid-anything must come back flying-ready). /etc/systemd/system/
+  ninjapilot.service (reference copies in osd32mp1/systemd/): firmware
+  enabled at boot, CPUSchedulingPolicy=fifo prio 30 IN THE UNIT (works in
+  real unit files; only systemd-run transient units reject it),
+  StandardOutput=null, Restart=on-failure, ordered After=Wants=
+  dronecan-allocator.service (which was already enabled and brings can0
+  up itself in ExecStartPre). Verified: fresh boot -> allocator + firmware
+  up unaided, threads FF/RT, no chrt ritual needed anymore.
+- **DebugLogSettings persisted as OnlyWhenArmed** (was persisted Always -
+  would have resurrected the self-exciting log loop on every boot).
+- **GCS auto-connects the configured UDP device at launch** (one-shot in
+  connectionmanager.cpp updateConnectionDropdown; manual disconnects stay
+  disconnected).
+- **OPEN - the RM3100 mystery is now PHYSICAL-IDENTITY, not software.**
+  Node 125's stream: bit-level LSB noise flows (5 unique payloads/20s -
+  live sensor sampling), values changed across the bench power cycle
+  (fresh read), every software stage verified live... yet the user
+  rotating "the RM3100" produces ZERO swing in node 125's raw CAN frames
+  (three separate 40-45s captures). GetNodeInfo NO RESPONSE even fresh -
+  possibly this node's normal (minimal firmware), not a wedge.
+  ground/pyuavtalk/mag_live.py = self-serve dual-compass viewer (1 Hz,
+  flags >20 mGa movement with *); the MAGNET TEST is the decisive
+  discriminator: a magnet/steel tool held to the true node-125 sensor
+  swings hundreds of mGa regardless of orientation. Candidates: whatever
+  the RM3100 breakout actually wires to vs the unit in hand.

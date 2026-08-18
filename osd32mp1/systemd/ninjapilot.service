@@ -1,0 +1,17 @@
+[Unit]
+Description=NinjaPilot realposix flight firmware
+After=dronecan-allocator.service
+Wants=dronecan-allocator.service
+
+[Service]
+ExecStart=/usr/local/ninja/src/build/fw_realposix/fw_realposix.elf
+WorkingDirectory=/usr/local/ninja/fcwd
+StandardOutput=null
+StandardError=null
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=30
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -92,6 +92,7 @@ void ConnectionManager::init()
     QObject::connect(ExtensionSystem::PluginManager::instance(), SIGNAL(aboutToRemoveObject(QObject *)), this, SLOT(aboutToRemoveObject(QObject *)));
 
     NonccWarningClosed = true;
+    m_udpAutoConnectTried = false;
 }
 
 
@@ -507,6 +508,18 @@ void ConnectionManager::updateConnectionDropdown()
         for (int i = 0; i < m_availableDevList->count(); i++) {
             if (m_availableDevList->itemData(i, Qt::ToolTipRole).toString().startsWith("UDP")) {
                 m_availableDevList->setCurrentIndex(i);
+                // ... and connect to it by itself at launch, once. A manual
+                // disconnect afterwards stays disconnected.
+                if (!m_udpAutoConnectTried && polling) {
+                    QString devName = m_availableDevList->itemData(i, Qt::ToolTipRole).toString();
+                    foreach(DevListItem d, m_devList) {
+                        if (d.getConName() == devName) {
+                            m_udpAutoConnectTried = true;
+                            connectDevice(d);
+                            break;
+                        }
+                    }
+                }
                 break;
             }
         }

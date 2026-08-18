@@ -152,6 +152,8 @@ private:
     bool polling;
     bool NonccFound;
     bool NonccWarningClosed;
+    // NinjaPilot: one-shot auto-connect to a configured UDP device at launch
+    bool m_udpAutoConnectTried;
     QMessageBox *NonccWarningMessageBox;
 
     Internal::MainWindow *m_mainWindow;
