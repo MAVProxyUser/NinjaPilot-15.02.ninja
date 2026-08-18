@@ -2930,3 +2930,36 @@ marginal; a better antenna position would calm the blips at the root.
   hub code absent from the ELF (strings | grep typec = 0). VERIFY
   EFFECT: `strings` the ELF for a string your change introduces;
   remedy is touch + rebuild. Same lesson as the GCS bundle-dylib rule.
+## GPS wire census with a real fix + the sats_visible verdict (2026-08-18, evening)
+
+- **30 s transfer-level census (SO_TIMESTAMP), full suite live**: IMU
+  pair 247.6 Hz (sd 0.6 ms), baro 50 Hz x2, mag 49.9 Hz, GPS trio
+  (Fix2/Aux/Status) at 5.00 Hz sd 5.4-6.3 ms max-gap 1.06x nominal -
+  zero dropouts, 719 fr/s total. **The GPS was at 5 Hz - the saved
+  10 Hz operating point did NOT survive some node reflash** (params
+  usually survive; this one didn't). Restored: GPS1_RATE_MS=100 set +
+  save opcode sent (both NO RESPONSE while streaming, as always) and
+  VERIFIED BY WIRE: 10.00/10.00/10.00 Hz. Check it again after the
+  next node power cycle - the save ack was never seen.
+- **20 Hz not recommended for flights**: measured sustainable solo,
+  but the estimator gains little past 10 (AP/PX4 fly 5-10), and it
+  spends bus + L431 loop budget that competes with the 247 Hz IMU
+  stream. 10 Hz is the operating point.
+- **GPSSatellites SatsInView=0 was a FAITHFUL decode**: DSDL confirms
+  the hub's Auxiliary offsets (sats_visible u7 @112, sats_used u6
+  @119), and AP_Periph gps.cpp fills ONLY pkt.sats_used - AP_GPS holds
+  no visible count at all (would need NAV-SAT parsing). sensors.c now
+  publishes SatsInView = max(visible, used) - live: 17. Per-satellite
+  arrays stay zeroed forever on this bus.
+- **ground/pyuavtalk/upload_demo_plan.py**: standalone PLAN demo -
+  5-wp square @30 m, PLAN alarm verified GREEN (flight side recomputed
+  crc=128). Plans are RAM-ONLY: nothing on the filesystem, firmware
+  restart wipes them.
+- **The .elf's Linux footprint** (from /proc/PID/fd + fs): flashfs =
+  the CWD /usr/local/ninja/fcwd as plain files - 233CDC00.oNN are
+  DebugLog slots (1855 accumulated from the Always era - purge
+  233CDC* before timed log work, NEVER the objid-named files like
+  042F462A.o00: those are the PERSISTED SETTINGS), /dev/shm/
+  ninjapilot-log (shmlog ring), /run/ninjapilot-fw.pid (single-
+  instance flock), open fds to /dev/i2c-3 + six PWM duty_cycle sysfs
+  nodes + the UDP sockets, stdio on /dev/null.

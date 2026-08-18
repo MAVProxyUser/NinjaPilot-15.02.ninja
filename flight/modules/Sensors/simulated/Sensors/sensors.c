@@ -473,7 +473,17 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                         if (h.gps_aux_count > 0) {
                             GPSSatellitesData sat;
                             memset(&sat, 0, sizeof(sat));
-                            sat.SatsInView = (int8_t)h.gps_sats_visible;
+                            /* AP_Periph fills ONLY sats_used in
+                             * gnss.Auxiliary (gps.cpp: pkt.sats_used) -
+                             * sats_visible is never set and AP_GPS holds no
+                             * visible count at all, so the wire reads 0
+                             * forever. Publish the best truth available:
+                             * "in view" is at least "used". */
+                            uint8_t vis = h.gps_sats_visible;
+                            if (h.gps_sats > vis) {
+                                vis = h.gps_sats;
+                            }
+                            sat.SatsInView = (int8_t)vis;
                             GPSSatellitesSet(&sat);
                         }
 
