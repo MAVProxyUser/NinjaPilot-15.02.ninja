@@ -2407,3 +2407,11 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   magnitude stays earthlike, sample accepted, MagKp 0.2 steers visibly.
   RM3100 startup sequence (CMM init): node 125's firmware does it -
   confirmed by the magnet response.
+- **CLOSED: mag -> heading VERIFIED live** (75s adjudication trace):
+  magnet near = anomaly-rejected, yaw parked; magnet away = accepted
+  values track raw exactly; mag ROTATED (z-axis sign flip) = yaw
+  48.9 -> 74.25 deg within seconds, board untouched. 40.6 deg of yaw
+  moved purely by mag rotation. The three things that had to align:
+  a mag-consuming fusion mode, sane MagnetometerMaxDeviation, and
+  MagKp fast enough to see (0.2 bench vs 0.01 stock). Primary mag only
+  on the HUD; QMC = AuxMagSensor numbers.
