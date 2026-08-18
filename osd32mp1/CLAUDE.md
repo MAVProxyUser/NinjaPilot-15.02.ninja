@@ -2587,3 +2587,30 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   `phy0` exist (verified 2026-08-18), unconfigured. The Bluetooth half
   of the same module is what bluetoothd was for. A flight link or AP
   mode over wlan0 is available hardware, zero new parts.
+## allocatord: kernel CAN filters cut 30-40% CPU to ~2.5% (2026-08-18)
+
+- dronecan-python hands EVERY frame to the interpreter; at the sensor
+  firehose's ~1200 fr/s the eleven-line allocator burned 30-40% of a
+  core parsing traffic it discards. Fix is three SocketCAN
+  CAN_RAW_FILTERs (anonymous source-0 frames, NodeStatus 341, service
+  frames to node 127) so the kernel drops the rest: MEASURED 2.5%
+  steady state, 5 wakeups/s, ~1.5 fr/s reaching userspace
+  (/proc/net/can/rcvlist_fil match counters), GetNodeInfo still
+  answered through the filter. Porting to C was considered and is not
+  worth it - the CPU was frame volume, not Python.
+- **FOUND EN ROUTE: the allocator has been on a crash diet forever.**
+  dronecan-python has a DSDL type registered at 20500 and RAISES
+  decoding our vendor compact-gyro payload against it ("Not enough
+  bits") - and an exception out of an unwrapped node.spin() KILLS the
+  process. Restart=always was silently absorbing the deaths. allocatord
+  now carries the per-frame _recv_frame monkeypatch (the can_flash.py
+  trap, same fix) + a rate-limited log of undecodable CAN ids, plus a
+  guarded spin. If a vendor message ever needs a new type id, avoid
+  ids dronecan-python already knows.
+- Traps for anyone touching this: the socket buffers a PRE-FILTER
+  backlog between make_node's bind and the setsockopt (the guard eats
+  it, expect one "dropped undecodable" at startup); ps %cpu right
+  after restart is startup-polluted (DSDL compile burst) - measure a
+  utime+stime jiffies DELTA at steady state, and mind HZ=100 math;
+  /proc/net/can/rcvlist_all's match-everything entry belongs to the
+  firmware's sensor hub, not a bug.
