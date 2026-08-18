@@ -2614,3 +2614,30 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   utime+stime jiffies DELTA at steady state, and mind HZ=100 math;
   /proc/net/can/rcvlist_all's match-everything entry belongs to the
   firmware's sensor hub, not a bug.
+## DT peripheral trim + the SPI DMA finding (2026-08-18)
+
+- **Camera and audio are OUT of the device tree** (user directive):
+  dcmi@4c006000, the ov5640 node on i2c@40013000, audio-controller@
+  4000b000 (I2S2) and the root /sound card - all status=disabled via
+  fdtput on the live DTB (backup: .pre-trim; the pwm-unlock edits are
+  preserved - always edit the CURRENT dtb). Fresh boot verified: zero
+  ov5640/dcmi/audio probes, flight stack auto-recovered, suite
+  publishing.
+- **The dmamux "Run out of free DMA requests" exhaustion is NOT
+  camera/audio**: even with both trimmed, spi_stm32 44009000 still
+  fails to get its TX DMA channel and falls back to PIO. Harmless
+  today (spidev unused) but it matters the day the SPI IMU lands -
+  the next trim candidates are cryp/hash/spare UARTs.
+- **TRAP: a board reboot makes the CAN bus look dead for a while.**
+  Right after reboot a 5 s candump caught 6 frames (heartbeat-ish);
+  minutes later the full firehose was back. Two compounding causes:
+  nodes ride through the board's can0 outage in bus-off/recovery +
+  DEGRADEDHZ soft-start, and `timeout N candump | wc -l` LOSES
+  buffered lines when timeout kills candump (block-buffered pipe).
+  Judge the bus a minute after boot, from raw candump lines.
+- **WiFi bring-up is vendor-documented on the image itself**:
+  /lib/systemd/network/51-wireless.network.sample contains the whole
+  recipe, and wpa_supplicant@.service expects
+  /etc/wpa_supplicant/wpa_supplicant-wlan0.conf. Strip the #psk=
+  plaintext comment wpa_passphrase emits. Copy the .network sample to
+  /etc/systemd/network/ rather than renaming in /lib.
