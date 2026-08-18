@@ -2997,3 +2997,38 @@ known-good behaves identically) and matches the long-standing
 "bootloader boot-failure hold flag that a POWER CYCLE clears" suspect,
 which has never been tested. Next step: power-cycle node 124; the
 NAV-SAT image is already staged and fully written.
+## RESOLVED: per-satellite GPS data is live, and the flash lesson (2026-08-18, late night)
+
+**It works**: node 124 runs the NAV-SAT firmware, msg 20502 broadcasts at
+0.94 Hz, and GPSSatellites carries a real sky: PRN 16 at 80 deg
+elevation, PRN 31 SNR 30, WAAS birds 131/133/138 tracked at SNR 0,
+GLONASS alongside GPS, 16 in view against a 0.87 HDOP fix. The GCS's
+sky dome + SNR bars (telemetryparser.cpp) consume it with no GCS
+change.
+
+**THE REAL LESSON, and it cost two hours: the over-CAN flash is
+INTERMITTENTLY flaky, and I mis-diagnosed that as an image defect.**
+Same file, same procedure: 843 reads -> boots; 1700-2400 reads -> the
+bootloader rejects it. The KNOWN-GOOD image failed a run too, which is
+what finally disproved "the image is bad". Read count is the health
+signal (~840 reads for a 178 KB image = clean; 2x that = the BL
+re-requesting blocks). RULE: **retry the flash until the node reports
+mode 0** - osd32mp1/flash_until_boot.sh does exactly that (it booted on
+attempt 2). Do NOT theorise about the image until several attempts have
+failed.
+
+Dead ends burned along the way, all measured, none of them the cause:
+image size (42,948 B free; explicitly compiling out nine baro backends
++ RM3100 produced a BYTE-IDENTICAL binary - AP_Periph's feature gates
+had already excluded them), the app descriptor (signature at 0x1d0,
+board_id 1062, image_size exact - identical structure to the
+known-good), incremental vs clean builds (byte-identical), staged-file
+integrity, and txqueuelen.
+
+**Also mine, and worth remembering:** my first instrumented flasher
+registered a SECOND uavcan.protocol.file.Read handler alongside the
+FileServer's own, so every request drew two responses and corrupted the
+transfers I then reported as "complete, zero-error". Patch the
+FileServer._read CLASS method before instantiating (osd32mp1/
+can_flash_verbose.py) - never node.add_handler for a service the
+FileServer already owns.
