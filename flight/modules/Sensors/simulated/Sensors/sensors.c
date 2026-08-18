@@ -516,6 +516,11 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                         if (h.have_pwr) {
                             if (h.vbus_present) {
                                 AlarmsSet(SYSTEMALARMS_ALARM_BATTERY, SYSTEMALARMS_ALARM_WARNING);
+                                /* tethered USB power = effectively unlimited
+                                 * runtime, so the flight-time tile reads green
+                                 * (no Battery module runs on this bench to
+                                 * contest the alarm) */
+                                AlarmsClear(SYSTEMALARMS_ALARM_FLIGHTTIME);
                             } else {
                                 AlarmsClear(SYSTEMALARMS_ALARM_BATTERY);
                             }

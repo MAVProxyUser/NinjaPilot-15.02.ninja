@@ -2434,3 +2434,32 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   rect. TIME remains "estimated flight time REMAINING from battery
   consumption" - not a clock - and stays greyed without a battery
   sensor; the board's wall/GPS time is a different display entirely.
+
+## Map tiles revived, PWR row respaced, PATH/PLAN demo (2026-08-18)
+
+- **Map tiles pull again** (opmapcontrol): three stacked kills fixed -
+  http-> https 301s that the code never followed (redirect-follow
+  attribute now set on tile requests), deprecated subdomain OSM URL
+  (now https://tile.openstreetmap.org/z/x/y.png), and the fake 2009
+  Firefox User-Agent that OSM policy blocks (now an honest
+  "NinjaPilotGCS/1.0" UA). The dead GoogleMap provider is ALIASED to
+  OSM so every existing config's default selection shows real tiles.
+  Verified: curl with the new UA returns a real 256x256 PNG.
+- **The "?" box was the extended-status slot**: SystemConfiguration-
+  FlightMode/BadThrottle/UnsupportedConfig + BootFault-RebootRequired
+  red overlays rendered there. They now overlay the CONFIG tile itself.
+- **PWR/MISC row final layout**: BATT | AC | USB (14 wide, standard
+  2.3 gaps) | divider | CONFIG | TIME, panels + rotated MISC header
+  shifted right to match. Battery alarm drives BATT+source boxes via
+  group ids. TIME reads green whenever USB VBUS power is present
+  (sensors.c clears FLIGHTTIME - tethered = unlimited runtime).
+- **PLAN vs PATH, demonstrated live**: PLAN (PathPlan alarm) orange =
+  no valid plan; uploading a 5-waypoint square (bridge upload recipe:
+  multi-instance Waypoint/PathAction + PathPlan CRC-8 poly 0x07) took
+  it to GREEN in seconds - the flight side recomputed the CRC and
+  accepted. PATH (Guidance alarm) stays GREYED until a PathFollower
+  mode actually engages (PositionHold/PathPlanner while armed); green
+  = following fine, orange/red = following badly. Plans are RAM-only:
+  firmware restart wipes them, PLAN returns to orange.
+- **GCS opens on the Flight data workspace** (mainwindow
+  extensionsInitialized deferred activateModeByWorkspaceName).

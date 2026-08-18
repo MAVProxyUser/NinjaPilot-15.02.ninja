@@ -124,6 +124,9 @@ QByteArray OPMaps::GetImageFrom(const MapType::Types &type, const Point &pos, co
             qheader.setUrl(QUrl(url));
             qheader.setRawHeader("User-Agent", UserAgent);
             qheader.setRawHeader("Accept", "*/*");
+            // follow http->https redirects; without this every redirected
+            // provider silently returned the 301 page instead of a tile
+            qheader.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
             switch (type) {
             case MapType::GoogleMap:
             case MapType::GoogleSatellite:

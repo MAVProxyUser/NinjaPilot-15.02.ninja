@@ -43,7 +43,9 @@ UrlFactory::UrlFactory()
     /// <summary>
     /// Gets or sets the value of the User-agent HTTP header.
     /// </summary>
-    UserAgent = "Mozilla/5.0 (Windows; U; Windows NT 6.0; en-US; rv:1.9.1.7) Gecko/20091221 Firefox/3.5.7";
+    /* OSM tile policy wants an honest, identifying UA - the old fake 2009
+     * Firefox string gets blocked. */
+    UserAgent = "NinjaPilotGCS/1.0 (OpenPilot-fork ground station)";
 
     Timeout   = 5 * 1000;
     CorrectGoogleVersions     = true;
@@ -181,13 +183,10 @@ QString UrlFactory::MakeImageUrl(const MapType::Types &type, const Point &pos, c
     switch (type) {
     case MapType::GoogleMap:
     {
-        QString server  = "mts";
-        QString request = "vt";
-        QString sec1    = ""; // after &x=...
-        QString sec2    = ""; // after &zoom=...
-        GetSecGoogleWords(pos, sec1, sec2);
-        TryCorrectGoogleVersions();
-        return QString("http://%1%2.google.com/%3/lyrs=%4&hl=%5&x=%6%7&y=%8&z=%9&s=%10").arg(server).arg(GetServerNum(pos, 4)).arg(request).arg(VersionGoogleMap).arg(language).arg(pos.X()).arg(sec1).arg(pos.Y()).arg(zoom).arg(sec2);
+        // The 2015-era Google tile endpoints are long dead (and the version
+        // scraper with them). Serve OpenStreetMap instead so the default
+        // provider selection in every existing config shows real tiles.
+        return QString("https://tile.openstreetmap.org/%1/%2/%3.png").arg(zoom).arg(pos.X()).arg(pos.Y());
     }
     break;
     case MapType::GoogleSatellite:
@@ -337,7 +336,10 @@ QString UrlFactory::MakeImageUrl(const MapType::Types &type, const Point &pos, c
     case MapType::OpenStreetMap:
     {
         char letter = "abc"[GetServerNum(pos, 3)];
-        return QString("http://%1.tile.openstreetmap.org/%2/%3/%4.png").arg(letter).arg(zoom).arg(pos.X()).arg(pos.Y());
+        // 2026: https + no subdomain letters; the http:// form 301s and this
+        // code never followed redirects, which is why tiles stopped forever
+        Q_UNUSED(letter);
+        return QString("https://tile.openstreetmap.org/%1/%2/%3.png").arg(zoom).arg(pos.X()).arg(pos.Y());
     }
     break;
     case MapType::OpenStreetOsm:

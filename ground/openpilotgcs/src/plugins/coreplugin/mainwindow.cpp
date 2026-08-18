@@ -286,6 +286,13 @@ void MainWindow::extensionsInitialized()
     emit m_coreImpl->coreAboutToOpen();
     show();
     emit m_coreImpl->coreOpened();
+
+    // NinjaPilot: open on the Flight data workspace instead of Welcome.
+    // Deferred one event-loop turn so it lands after any state restore;
+    // no-ops harmlessly if no workspace carries that name.
+    QTimer::singleShot(0, this, [this]() {
+        ModeManager::instance()->activateModeByWorkspaceName("Flight data");
+    });
 }
 
 QString MainWindow::loadStyleSheet(QString fileName)
