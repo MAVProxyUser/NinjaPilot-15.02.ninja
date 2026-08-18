@@ -37,7 +37,67 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/time.h>
+#include <sys/uio.h>
 #include <pios_udp_priv.h>
+
+#if defined(__linux__)
+/* Receive one datagram AND record which local address it was sent to
+ * (IP_PKTINFO), so the reply can be sourced from that same address. On a
+ * dual-homed host (bench board: eth0 .90 + wlan0 .14, same subnet) a plain
+ * sendto() reply always routes out the PREFERRED interface with ITS source
+ * address - a client that addressed the other interface gets replies from
+ * an address it never spoke to and (if connect()ed, as the GCS is) drops
+ * every one: "the service is dead on WiFi while the cable is in". Proven
+ * on the bench with an unconnected probe: sent to .14 -> reply from .90. */
+static int udp_recv_with_dst(pios_udp_dev *udp_dev)
+{
+    struct iovec iov = { .iov_base = udp_dev->rx_buffer, .iov_len = PIOS_UDP_RX_BUFFER_SIZE };
+    union { struct cmsghdr align; uint8_t buf[CMSG_SPACE(sizeof(struct in_pktinfo))]; } ctrl;
+    struct msghdr msg;
+
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_name       = &udp_dev->client;
+    msg.msg_namelen    = sizeof(udp_dev->client);
+    msg.msg_iov        = &iov;
+    msg.msg_iovlen     = 1;
+    msg.msg_control    = ctrl.buf;
+    msg.msg_controllen = sizeof(ctrl.buf);
+
+    int received = recvmsg(udp_dev->socket, &msg, 0);
+    if (received > 0) {
+        udp_dev->clientLength = msg.msg_namelen;
+        for (struct cmsghdr *c = CMSG_FIRSTHDR(&msg); c; c = CMSG_NXTHDR(&msg, c)) {
+            if (c->cmsg_level == IPPROTO_IP && c->cmsg_type == IP_PKTINFO) {
+                struct in_pktinfo pi;
+                memcpy(&pi, CMSG_DATA(c), sizeof(pi));
+                /* Reply from the address the client ADDRESSED (the header
+                 * destination) - unless that was broadcast/multicast, in
+                 * which case the kernel's spec_dst is the receiving
+                 * interface's own unicast address (a legal source). */
+                uint32_t dst = pi.ipi_addr.s_addr;
+                if (dst == INADDR_BROADCAST || dst == 0 || IN_MULTICAST(ntohl(dst))) {
+                    udp_dev->reply_src = pi.ipi_spec_dst;
+                } else {
+                    udp_dev->reply_src = pi.ipi_addr;
+                }
+                udp_dev->reply_ifindex = pi.ipi_ifindex;
+            }
+        }
+    }
+    return received;
+}
+#else /* !__linux__ (macOS sim builds keep the stock path untouched) */
+static int udp_recv_with_dst(pios_udp_dev *udp_dev)
+{
+    udp_dev->clientLength = sizeof(udp_dev->client);
+    return recvfrom(udp_dev->socket,
+                    &udp_dev->rx_buffer,
+                    PIOS_UDP_RX_BUFFER_SIZE,
+                    0,
+                    (struct sockaddr *)&udp_dev->client,
+                    (socklen_t *)&udp_dev->clientLength);
+}
+#endif /* __linux__ */
 
 /* We need a list of UDP devices */
 
@@ -133,13 +193,7 @@ void *PIOS_UDP_RxThread(void *udp_dev_n)
             }
         }
         do {
-            udp_dev->clientLength = sizeof(udp_dev->client);
-            received = recvfrom(udp_dev->socket,
-                                &udp_dev->rx_buffer,
-                                PIOS_UDP_RX_BUFFER_SIZE,
-                                0,
-                                (struct sockaddr *)&udp_dev->client,
-                                (socklen_t *)&udp_dev->clientLength);
+            received = udp_recv_with_dst(udp_dev);
             if (received > 0) {
                 datagrams++;
                 bytes_total += (uint32_t)received;
@@ -203,13 +257,7 @@ void *PIOS_UDP_RxThread(void *udp_dev_n)
          * receive
          */
         int received;
-        udp_dev->clientLength = sizeof(udp_dev->client);
-        if ((received = recvfrom(udp_dev->socket,
-                                 &udp_dev->rx_buffer,
-                                 PIOS_UDP_RX_BUFFER_SIZE,
-                                 0,
-                                 (struct sockaddr *)&udp_dev->client,
-                                 (socklen_t *)&udp_dev->clientLength)) >= 0) {
+        if ((received = udp_recv_with_dst(udp_dev)) >= 0) {
             /* copy received data to buffer if possible */
             /* we do NOT buffer data locally. If the com buffer can't receive, data is discarded! */
             /* (thats what the USART driver does too!) */
@@ -266,6 +314,17 @@ int32_t PIOS_UDP_Init(uint32_t *udp_id, const struct pios_udp_cfg *cfg)
     if (setsockopt(udp_dev->socket, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0) {
         printf("udp dev %i - warning: SO_RCVBUF set failed\n", pios_udp_num_devices - 1);
     }
+
+    udp_dev->reply_src.s_addr = 0;
+    udp_dev->reply_ifindex    = 0;
+#if defined(__linux__)
+    /* Ask for per-datagram destination info so replies can be sourced from
+     * the address the client addressed - see udp_recv_with_dst(). */
+    int pktinfo = 1;
+    if (setsockopt(udp_dev->socket, IPPROTO_IP, IP_PKTINFO, &pktinfo, sizeof(pktinfo)) < 0) {
+        printf("udp dev %i - warning: IP_PKTINFO set failed\n", pios_udp_num_devices - 1);
+    }
+#endif
 
 #if defined(PIOS_INCLUDE_FREERTOS)
     /* Non-blocking is REQUIRED for the FreeRTOS drain-per-wakeup receive
@@ -344,9 +403,42 @@ static void PIOS_UDP_TxStart(uint32_t udp_id, uint16_t tx_bytes_avail)
             length = (udp_dev->tx_out_cb)(udp_dev->tx_out_context, udp_dev->tx_buffer, PIOS_UDP_RX_BUFFER_SIZE, NULL, &tx_need_yield);
             rem    = length;
             while (rem > 0) {
+#if defined(__linux__)
+                if (udp_dev->reply_src.s_addr != 0) {
+                    /* Reply FROM the address the request was sent to, out
+                     * the interface it arrived on - the dual-homed fix
+                     * (see udp_recv_with_dst). */
+                    struct iovec iov = { .iov_base = udp_dev->tx_buffer + length - rem, .iov_len = rem };
+                    union { struct cmsghdr align; uint8_t buf[CMSG_SPACE(sizeof(struct in_pktinfo))]; } ctrl;
+                    struct msghdr msg;
+                    struct in_pktinfo pi;
+                    memset(&ctrl, 0, sizeof(ctrl));
+                    memset(&msg, 0, sizeof(msg));
+                    memset(&pi, 0, sizeof(pi));
+                    msg.msg_name       = &udp_dev->client;
+                    msg.msg_namelen    = sizeof(udp_dev->client);
+                    msg.msg_iov        = &iov;
+                    msg.msg_iovlen     = 1;
+                    msg.msg_control    = ctrl.buf;
+                    msg.msg_controllen = CMSG_SPACE(sizeof(struct in_pktinfo));
+                    struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
+                    c->cmsg_level = IPPROTO_IP;
+                    c->cmsg_type  = IP_PKTINFO;
+                    c->cmsg_len   = CMSG_LEN(sizeof(struct in_pktinfo));
+                    pi.ipi_spec_dst = udp_dev->reply_src;
+                    pi.ipi_ifindex  = udp_dev->reply_ifindex;
+                    memcpy(CMSG_DATA(c), &pi, sizeof(pi));
+                    len = sendmsg(udp_dev->socket, &msg, 0);
+                } else {
+                    len = sendto(udp_dev->socket, udp_dev->tx_buffer + length - rem, rem, 0,
+                                 (struct sockaddr *)&udp_dev->client,
+                                 sizeof(udp_dev->client));
+                }
+#else
                 len = sendto(udp_dev->socket, udp_dev->tx_buffer + length - rem, rem, 0,
                              (struct sockaddr *)&udp_dev->client,
                              sizeof(udp_dev->client));
+#endif
                 if (len <= 0) {
                     rem = 0;
                 } else {

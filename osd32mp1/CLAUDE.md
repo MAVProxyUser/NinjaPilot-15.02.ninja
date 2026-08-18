@@ -2687,3 +2687,25 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   the arrival address). ALSO: never configure two UDP devices in the
   GCS (one for each address) - two sockets speaking to the
   last-speaker firmware steal each other and NEITHER connects.
+## FIXED: dual-homed UDP asymmetry (IP_PKTINFO) + the ECM WARN (2026-08-18)
+
+- **pios_udp now replies from the address the client addressed.** Linux
+  path (__linux__-guarded; macOS sim builds untouched): IP_PKTINFO on
+  the socket, recvmsg records each request's destination address +
+  arrival ifindex into the udp dev, sendmsg replies with a pktinfo
+  cmsg (ipi_spec_dst = that address, ipi_ifindex = that interface).
+  Broadcast/multicast destinations fall back to the kernel's spec_dst
+  (the receiving interface's own unicast). Verified live post-reboot:
+  probe to .90 answered FROM .90, probe to .14 answered FROM .14 -
+  both bench addresses now work simultaneously; the GCS can target
+  either. The trap entry above ("answers .14 requests FROM .90")
+  describes the PRE-fix behavior.
+- **The boot-time dwc2 WARN is gone: ECM is unlinked from the USB
+  gadget** (stm32_usbotg_eth_config.sh, both the board and the
+  image-edits reference copy). ECM's data endpoint could never enable
+  (FIFO exhaustion with ACM+ECM bound) so every host attempt fired the
+  dma_free_attrs WARN from the error path; the gadget is now
+  console-only (acm.0), which is its actual job - Ethernet and WiFi
+  carry the networking. Verified: 0 warnings on a fresh boot, ttyGS0
+  getty alive. To revive ECM: g-tx-fifo-size in the DTB first, then
+  restore the ln -s.

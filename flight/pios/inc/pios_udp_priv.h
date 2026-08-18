@@ -56,6 +56,17 @@ typedef struct {
     struct sockaddr_in client;
     uint32_t clientLength;
 
+    /* Dual-homed reply symmetry (used on Linux via IP_PKTINFO): the local
+     * address the last request was ADDRESSED to, and the interface it
+     * arrived on. Replies are sent FROM that address, out that interface -
+     * without this, a request to the WiFi address is answered from the
+     * wired address (the kernel routes the reply out the preferred link)
+     * and any connect()ed client silently discards it. Written by the RX
+     * thread, read by TX - same unlocked single-writer discipline as the
+     * `client` field above (4-byte aligned stores are atomic on armv7). */
+    struct in_addr reply_src;
+    int reply_ifindex;
+
     pthread_cond_t     cond;
     pthread_mutex_t    mutex;
 

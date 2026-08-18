@@ -117,8 +117,14 @@ do_start() {
     # Serial console function -> /dev/ttyGS0
     mkdir -p "${d}/functions/${func_acm}"
 
-    # Network function FIRST so it takes the low interface numbers, then ACM.
-    ln -s "${d}/functions/${func_eth}" "${d}/configs/${c}"
+    # ECM is DELIBERATELY NOT LINKED into the config (2026-08-18): the dwc2
+    # controller cannot allocate a 4th IN-endpoint FIFO with ACM+ECM both
+    # bound, so ECM's data interface has NEVER come up - every host attempt
+    # to select it just fired a kernel WARN out of dwc2_hsotg_ep_enable's
+    # error path. The board has Ethernet + WiFi; the gadget's job is the
+    # CONSOLE. To revive ECM someday: extend g-tx-fifo-size in the DTB
+    # first, then restore this link.
+    # ln -s "${d}/functions/${func_eth}" "${d}/configs/${c}"
     ln -s "${d}/functions/${func_acm}" "${d}/configs/${c}"
     case "${func_eth}" in
     rndis.*) ln -s "${d}/configs/${c}" "${d}/os_desc" ;;
