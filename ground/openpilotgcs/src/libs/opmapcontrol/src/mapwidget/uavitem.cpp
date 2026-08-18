@@ -308,6 +308,15 @@ void UAVItem::SetUAVPos(const internals::PointLatLng &position, const int &altit
             }
         }
     }
+    /* Follow must also work when the position is STATIC (bench, hover):
+     * the recenter above only runs inside the position-changed guard, so
+     * a parked UAV could never be followed - the map just sat wherever
+     * the user had panned it. */
+    if ((mapfollowtype == UAVMapFollowType::CenterAndRotateMap ||
+         mapfollowtype == UAVMapFollowType::CenterMap) &&
+        mapwidget->CurrentPosition() != coord) {
+        mapwidget->SetCurrentPosition(coord);
+    }
 }
 
 /**

@@ -2484,3 +2484,9 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   silently disable tile downloads again - downloads work with zero user
   setup. Verified live by the user: Esri World Imagery rendering,
   centered on the board's GPS coordinates.
+- **"Center over UAV" was a static-bench bug**: uavitem.cpp only
+  recentered inside the position-CHANGED guard, so a parked UAV could
+  never be followed (works fine airborne - that's why upstream never
+  saw it). Follow now also recenters when the position is static, and
+  the GCS toggle snaps to the UAV immediately on engage instead of
+  waiting for the next position change.

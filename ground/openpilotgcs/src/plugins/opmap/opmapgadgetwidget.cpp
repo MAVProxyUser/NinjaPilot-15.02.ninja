@@ -1809,6 +1809,12 @@ void OPMapGadgetWidget::onFollowUAVpositionAct_toggled(bool checked)
     }
 
     setMapFollowingMode();
+
+    // snap to the UAV immediately - engaging follow used to wait for the
+    // NEXT position change, which never comes on a parked vehicle
+    if (checked) {
+        onGoUAVAct_triggered();
+    }
 }
 
 void OPMapGadgetWidget::onFollowUAVheadingAct_toggled(bool checked)
