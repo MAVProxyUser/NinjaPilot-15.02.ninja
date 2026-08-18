@@ -2709,3 +2709,25 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   carry the networking. Verified: 0 warnings on a fresh boot, ttyGS0
   getty alive. To revive ECM: g-tx-fifo-size in the DTB first, then
   restore the ln -s.
+## WiFi hardened: the post-reboot no-address mystery, solved in three layers (2026-08-18)
+
+The supplicant was NEVER the problem - it associated 12 s into every
+boot and re-associated after every drop. The chain that actually lost
+the address:
+1. **brcmfmac power save** let the AP deauth the dozing radio (~3 min
+   after boot, -78 dBm bench signal). Fixed persistently:
+   wifi-powersave-off.service (reference copy in osd32mp1/systemd/).
+2. **networkd v244 drops the lease on carrier loss and then wedges** -
+   after re-association it sat "degraded (configuring)" indefinitely,
+   never completing a fresh DHCP. Fixed: IgnoreCarrierLoss=yes in
+   51-wireless.network (reference copy alongside) - the address+lease
+   now survive blips outright, which also sidesteps the wedge path.
+3. Verified live: a later 2 s carrier blip kept the address (no "lease
+   lost" logged), and with the Ethernet cable pulled the board ran
+   entirely on wlan0 - ssh AND UAVTalk telemetry (which, per the
+   IP_PKTINFO fix, answers .14 from .14). Replugging eth0 restores
+   wired preference by route metric automatically.
+Diagnosis crib for "wlan0 has no IPv4": iw dev wlan0 link (association
++ moving counters), arping -I wlan0 <router> (L2 proof), then blame
+DHCP/networkd - in that order. Signal here is -78 dBm: functional but
+marginal; a better antenna position would calm the blips at the root.

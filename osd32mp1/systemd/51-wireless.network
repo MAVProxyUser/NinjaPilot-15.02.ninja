@@ -1,0 +1,10 @@
+# wlan0 DHCP (NinjaPilot bench, from 51-wireless.network.sample).
+# IgnoreCarrierLoss: hold address+lease through WiFi blips - networkd
+# v244 otherwise drops the lease on carrier loss and gets stuck
+# "configuring" after the re-associate (seen 2026-08-18).
+[Match]
+Name=wlan*
+
+[Network]
+DHCP=ipv4
+IgnoreCarrierLoss=yes
