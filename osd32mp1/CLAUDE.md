@@ -2652,3 +2652,10 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   fixed IP FIRST. Note: bare `ping osd32mp1` never resolves regardless
   - that name is an ssh-config alias; mDNS publishes
   `osd32mp1-red-v12.local`.
+- **TRAP: /etc/wpa_supplicant.conf is a decoy.** Nothing on this image
+  reads it - the plain wpa_supplicant.service runs `-u` (D-Bus mode,
+  no config, no interface; waits for connman/NM which aren't
+  installed), and no unit references the file. Worse, its default
+  network block is `key_mgmt=NONE` (join any OPEN network). WiFi
+  config goes ONLY in /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+  consumed by wpa_supplicant@wlan0.service.
