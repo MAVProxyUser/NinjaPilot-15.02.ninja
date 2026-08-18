@@ -28,7 +28,21 @@ PfdQmlGadget::PfdQmlGadget(QString classId, PfdQmlGadgetWidget *widget, QWidget 
 
 PfdQmlGadget::~PfdQmlGadget()
 {
-    delete m_widget;
+    /* createWindowContainer() takes OWNERSHIP of the embedded QQuick view
+     * (a QWindow). Deleting the view directly leaves the container - still
+     * parented into the mode's QStackedLayout - holding a dangling window,
+     * and shutdown then walks it: QLayout::removeWidget ->
+     * QStackedLayout::takeAt -> setCurrentIndex -> QWidget::raise() ->
+     * QWindowContainer::parentWasRaised recursing onto the dead QWindow.
+     * That is the exit SIGSEGV (null deref in QWindow::parent()).
+     * Delete the CONTAINER; it takes the view with it. */
+    if (m_container) {
+        delete m_container;
+        m_container = 0;
+        m_widget    = 0;
+    } else {
+        delete m_widget;
+    }
 }
 
 /*

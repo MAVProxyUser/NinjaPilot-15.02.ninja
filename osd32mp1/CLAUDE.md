@@ -3032,3 +3032,16 @@ transfers I then reported as "complete, zero-error". Patch the
 FileServer._read CLASS method before instantiating (osd32mp1/
 can_flash_verbose.py) - never node.add_handler for a service the
 FileServer already owns.
+- **THE EXIT SIGSEGV, actually root-caused (my earlier Welcome fix was
+  the WRONG container)**: PfdQmlGadget and QmlViewGadget destructors did
+  `delete m_widget` on the QQuick view they had handed to
+  QWidget::createWindowContainer - which OWNS that QWindow. The freed
+  view left the container (still parented into the mode's
+  QStackedLayout) holding a dangling window, so shutdown's
+  QLayout::removeWidget -> QStackedLayout::takeAt -> setCurrentIndex ->
+  QWidget::raise() -> QWindowContainer::parentWasRaised recursed onto a
+  dead QWindow and null-dereferenced in QWindow::parent() (crash trace
+  x0=0). Both destructors now delete the CONTAINER (which takes the view
+  with it). RULE: anything handed to createWindowContainer belongs to
+  the container - never delete it directly. The PFD gadget is the one
+  users hit because Flight Data is the default workspace.
