@@ -2676,3 +2676,14 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   measurements and the GCS link on Ethernet when both exist. mDNS
   (avahi) announces on both links. First ssh to a NEW address needs
   the usual ssh-rsa options plus the fresh known_hosts entry.
+- **TRAP: UDP telemetry answers .14 requests FROM .90 (dual-homed
+  reply asymmetry).** pios_udp binds 0.0.0.0:9000 so it receives on
+  both addresses, but replies route via the preferred link (eth0,
+  metric 10) and carry eth0's source address. Proven with an
+  unconnected probe: sent to .14 -> reply from .90. A GCS connected
+  to .14 discards those replies = "service dead on WiFi" while the
+  cable is in. Unplug Ethernet and .14 works (only route). Real fix
+  if ever wanted: IP_PKTINFO recvmsg/sendmsg in pios_udp (reply from
+  the arrival address). ALSO: never configure two UDP devices in the
+  GCS (one for each address) - two sockets speaking to the
+  last-speaker firmware steal each other and NEITHER connects.
