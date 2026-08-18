@@ -2652,10 +2652,17 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   fixed IP FIRST. Note: bare `ping osd32mp1` never resolves regardless
   - that name is an ssh-config alias; mDNS publishes
   `osd32mp1-red-v12.local`.
-- **TRAP: /etc/wpa_supplicant.conf is a decoy.** Nothing on this image
-  reads it - the plain wpa_supplicant.service runs `-u` (D-Bus mode,
-  no config, no interface; waits for connman/NM which aren't
-  installed), and no unit references the file. Worse, its default
-  network block is `key_mgmt=NONE` (join any OPEN network). WiFi
-  config goes ONLY in /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
-  consumed by wpa_supplicant@wlan0.service.
+- **TRAP: /etc/wpa_supplicant.conf is a decoy - and the proof needed
+  TWO passes** (the user's grep caught the first pass incomplete).
+  Candidate consumers, each verified dead: (1) plain
+  wpa_supplicant.service runs `-u` - D-Bus mode, no config, no
+  interface, waits for connman/NM which aren't installed; (2) the
+  ifupdown hook /etc/network/if-pre-up.d/wpa-supplicant DOES pass
+  `-c $IF_WPA_CONF` - but that variable comes from a `wpa-conf` line
+  in /etc/network/interfaces, which DOES NOT EXIST on this image, and
+  no networking/ifupdown service is present either. Reviving that
+  path would put ifupdown and systemd-networkd on one interface - the
+  two-owners trap again. Also the file's default network block is
+  `key_mgmt=NONE` (join any OPEN network). WiFi config goes ONLY in
+  /etc/wpa_supplicant/wpa_supplicant-wlan0.conf consumed by
+  wpa_supplicant@wlan0.service.
