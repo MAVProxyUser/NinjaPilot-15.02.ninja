@@ -2415,3 +2415,11 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   a mag-consuming fusion mode, sane MagnetometerMaxDeviation, and
   MagKp fast enough to see (0.2 bench vs 0.01 stock). Primary mag only
   on the HUD; QMC = AuxMagSensor numbers.
+- **PFD dual raw-mag needles** (user-requested bench instrumentation):
+  Compass.qml now draws two mini N-up needles flanking the fused rose -
+  green "main" = raw RM3100 heading, blue "aux" = raw QMC heading, both
+  atan2(-my, mx) tilt-ignored (bench-flat convention). The center rose
+  stays the fused estimate; rotate IMU+mag together and all three agree.
+  MagSensor/AuxMagSensor added to pfdqml's QML export whitelist. NOTE
+  the needles read MAGNETIC heading of each sensor's own mount - they
+  will disagree with each other by their relative mounting yaw.

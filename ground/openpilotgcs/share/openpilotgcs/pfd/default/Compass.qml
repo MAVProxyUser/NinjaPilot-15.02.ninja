@@ -73,6 +73,70 @@ Item {
 
 
 
+    // NinjaPilot bench instrumentation: raw per-magnetometer heading needles
+    // flanking the fused compass. Each needle is a mini N-up dial: it points
+    // the way THAT mag alone says the sensor faces (tilt ignored - bench
+    // convention, level board). The big rose stays the fused estimate.
+    // heading = atan2(-my, mx): body x-forward / y-right, NED yaw sign.
+    Item {
+        id: mag_main_needle
+
+        property variant compassBounds: svgRenderer.scaledElementBounds("pfd.svg", "compass-fixed")
+        width: compassBounds.width * sceneItem.width * 0.22
+        height: width * 1.3
+        x: compassBounds.x * sceneItem.width - width * 1.15
+        y: (compassBounds.y + compassBounds.height * 0.35) * sceneItem.height
+
+        Text {
+            id: main_arrow
+            text: "➤"   // heavy arrow glyph, drawn pointing right
+            color: "#40ff40"
+            font.pixelSize: mag_main_needle.width * 0.9
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            // glyph points right, so subtract 90 to make "up = north"
+            rotation: -90 + 57.2957795 * Math.atan2(-MagSensor.y, MagSensor.x)
+            transformOrigin: Item.Center
+            smooth: true
+        }
+        Text {
+            text: "main"
+            color: "white"
+            font.pixelSize: mag_main_needle.width * 0.38
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+        }
+    }
+
+    Item {
+        id: mag_aux_needle
+
+        property variant compassBounds: svgRenderer.scaledElementBounds("pfd.svg", "compass-fixed")
+        width: compassBounds.width * sceneItem.width * 0.22
+        height: width * 1.3
+        x: (compassBounds.x + compassBounds.width) * sceneItem.width + width * 0.15
+        y: (compassBounds.y + compassBounds.height * 0.35) * sceneItem.height
+
+        Text {
+            id: aux_arrow
+            text: "➤"
+            color: "#40c0ff"
+            font.pixelSize: mag_aux_needle.width * 0.9
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            rotation: -90 + 57.2957795 * Math.atan2(-AuxMagSensor.y, AuxMagSensor.x)
+            transformOrigin: Item.Center
+            smooth: true
+        }
+        Text {
+            text: "aux"
+            color: "white"
+            font.pixelSize: mag_aux_needle.width * 0.38
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+        }
+    }
+
     Item {
         id: compass_text_box
 

@@ -77,6 +77,8 @@ PfdQmlGadgetWidget::PfdQmlGadgetWidget(QWindow *parent) :
         "SystemSettings" <<
         "RevoSettings" <<
         "MagState" <<
+        "MagSensor" <<
+        "AuxMagSensor" <<
         "FlightBatterySettings";
 
     ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
