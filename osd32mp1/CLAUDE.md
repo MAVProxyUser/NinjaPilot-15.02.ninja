@@ -2641,3 +2641,14 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   /etc/wpa_supplicant/wpa_supplicant-wlan0.conf. Strip the #psk=
   plaintext comment wpa_passphrase emits. Copy the .network sample to
   /etc/systemd/network/ rather than renaming in /lib.
+- **CORRECTION to the kill list: avahi-daemon is REQUIRED, re-enabled**
+  (2026-08-18, same evening). Disabling it silently broke every NEW ssh
+  connection - the ~/.ssh/config alias resolves the board via its mDNS
+  name, and the top-of-file rule "address by mDNS name, never a
+  remembered IP" exists because the DHCP lease moves. Existing sessions
+  survive (already connected), so the lockout appears only on the next
+  fresh connection - long after the disable. If avahi must ever go,
+  put a DHCP reservation in the router and key the ssh config to the
+  fixed IP FIRST. Note: bare `ping osd32mp1` never resolves regardless
+  - that name is an ssh-config alias; mDNS publishes
+  `osd32mp1-red-v12.local`.

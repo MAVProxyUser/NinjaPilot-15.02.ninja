@@ -526,7 +526,7 @@ The kill list — all reversible with `systemctl enable --now <unit>`:
 |---|---|---|
 | `netdata` | full web monitoring dashboard on :19999, plus `python.d.plugin` and `apps.plugin` collectors | the single biggest CPU consumer on the box after the firmware; collectors wake every second |
 | `tcf-agent` | Eclipse Target Communication Framework debug agent | **unauthenticated network listener that can run commands** — a Yocto dev-image artifact, effectively a backdoor |
-| `avahi-daemon` (+ `.socket`) | mDNS, advertises `osd32mp1-red-v12.local` | only value is `.local` name resolution; costs CPU per query storm |
+| ~~`avahi-daemon`~~ | mDNS, advertises `osd32mp1-red-v12.local` | **KEEP — disabling it locked us out.** The ssh alias and the "address by mDNS name, never a remembered IP" rule both depend on it; it was disabled for one evening (2026-08-18) and the next fresh `ssh osd32mp1` died on name resolution. Re-enabled. The daemon-free alternative is a router DHCP reservation + IP-keyed ssh config |
 | `bluetooth` | BlueZ for the Murata module's BT half | unused |
 | `pulseaudio` | a system-mode audio server | on a flight controller |
 | `iiod` | libiio network server (exposes industrial-I/O sensors over TCP) | our sensors ride CAN; nothing uses it |
