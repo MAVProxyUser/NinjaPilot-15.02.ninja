@@ -1223,15 +1223,7 @@
      id="layer15"
      inkscape:label="Battery-OK"
      style="display:none">
-    <rect
-       style="fill:#008000;fill-opacity:1;stroke:none;display:inline"
-       id="Battery-OK"
-       width="18.026833"
-       height="10.165371"
-       x="7.1983929"
-       y="51.953167"
-       ry="0.99021065"
-       inkscape:label="#rect4550-8-1-4-21-2-9-8" />
+    <g id="Battery-OK"><rect style="fill:#008000;fill-opacity:1;stroke:none;display:inline" x="7.1983929" y="51.953167" width="18.026833" height="10.165371" ry="1.0" /><rect style="fill:#008000;fill-opacity:1;stroke:none;display:inline" x="27.8700" y="52.2400" width="7.8500" height="9.6000" ry="1.0" /></g>
   </g>
   <g
      inkscape:groupmode="layer"
@@ -1258,7 +1250,7 @@
        id="FlightTime-OK"
        width="18.060331"
        height="10.265867"
-       x="27.518892"
+       x="82.318892"
        y="51.890926"
        ry="1"
        inkscape:label="#rect4550-8-1-4-21-2-9-8" />
@@ -1524,15 +1516,7 @@
      id="g5069"
      inkscape:label="Battery-Warning"
      style="display:none">
-    <rect
-       style="fill:#ff6600;fill-opacity:1;stroke:none;display:inline"
-       id="Battery-Warning"
-       width="17.993334"
-       height="10.165371"
-       x="7.2150578"
-       y="51.908169"
-       ry="0.99021065"
-       inkscape:label="#rect4550-8-1-4-21-2-9-8" />
+    <g id="Battery-Warning"><rect style="fill:#008000;fill-opacity:1;stroke:none;display:inline" x="7.1983929" y="51.953167" width="18.026833" height="10.165371" ry="1.0" /><rect style="fill:#008000;fill-opacity:1;stroke:none;display:inline" x="37.4500" y="52.2400" width="7.8500" height="9.6000" ry="1.0" /></g>
   </g>
   <g
      inkscape:groupmode="layer"
@@ -1559,7 +1543,7 @@
        id="FlightTime-Warning"
        width="18.060331"
        height="10.165371"
-       x="27.54425"
+       x="82.344250"
        y="51.941666"
        ry="0.99021065"
        inkscape:label="#rect4550-8-1-4-21-2-9-8" />
@@ -1923,7 +1907,7 @@
        id="FlightTime-Critical"
        width="17.993334"
        height="10.265867"
-       x="27.552391"
+       x="82.352391"
        y="51.85743"
        ry="1"
        inkscape:label="#rect4550-8-1-4-21-2-9-8" />
@@ -2731,7 +2715,7 @@
     <text
        xml:space="preserve"
        style="font-size:6.10169888px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:none;display:inline;font-family:Arial;-inkscape-font-specification:Arial Bold"
-       x="37.547398"
+       x="104.587691"
        y="48.797535"
        id="text5330-7-7-9-8-0"
        sodipodi:linespacing="125%"
@@ -2740,7 +2724,7 @@
        inkscape:transform-center-y="-0.9798839"><tspan
          sodipodi:role="line"
          id="tspan4305"
-         x="37.547398"
+         x="104.587691"
          y="48.797535">TIME</tspan></text>
     <rect
        inkscape:label="#rect4550-8"
@@ -2808,7 +2792,7 @@
        inkscape:label="#rect4550-8-1-4-21-2-9"
        ry="0.99532819"
        y="51.916786"
-       x="27.540998"
+       x="82.340998"
        height="10.217907"
        width="18.079369"
        id="rect4796-2-3"
@@ -3056,4 +3040,18 @@
       </g>
     </g>
   </g>
+    <rect
+       ry="1.0036905" y="51.89" x="27.52" height="10.3" width="8.55" id="rect-ac-base"
+       style="fill:none;stroke:#ffffff;stroke-width:0.70866144;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-opacity:1;stroke-dasharray:none;display:inline" />
+    <text xml:space="preserve"
+       style="font-size:4.4px;font-style:normal;font-weight:bold;line-height:125%;fill:#ffffff;fill-opacity:1;stroke:none;display:inline;font-family:Arial;-inkscape-font-specification:Arial Bold"
+       x="35.624330958059865" y="47.90" id="text-ac-lbl"
+       transform="scale(0.81741886,1.223363)"><tspan sodipodi:role="line" x="35.624330958059865" y="47.90">AC</tspan></text>
+    <rect
+       ry="1.0036905" y="51.89" x="37.1" height="10.3" width="8.55" id="rect-usb-base"
+       style="fill:none;stroke:#ffffff;stroke-width:0.70866144;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-opacity:1;stroke-dasharray:none;display:inline" />
+    <text xml:space="preserve"
+       style="font-size:4.4px;font-style:normal;font-weight:bold;line-height:125%;fill:#ffffff;fill-opacity:1;stroke:none;display:inline;font-family:Arial;-inkscape-font-specification:Arial Bold"
+       x="46.243121916712326" y="47.90" id="text-usb-lbl"
+       transform="scale(0.81741886,1.223363)"><tspan sodipodi:role="line" x="46.243121916712326" y="47.90">USB</tspan></text>
 </svg>

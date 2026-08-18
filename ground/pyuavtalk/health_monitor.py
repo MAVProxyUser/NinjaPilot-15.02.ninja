@@ -72,8 +72,9 @@ WHY = {
     ("Guidance", "Uninitialised"): "PathFollower not active",
     ("Airspeed", "Uninitialised"): "Airspeed module not running",
     ("Battery", "Uninitialised"): "power source not yet read (OTG registers unavailable)",
-    ("Battery", "Warning"): "running on USB VBUS power - fine for bench, cannot fly motors "
-                            "(NOTE: a data cable from a host also raises VBUS)",
+    ("Battery", "OK"): "power good, AC/jack source (GCS: BATT green + AC box lit)",
+    ("Battery", "Warning"): "power good, USB VBUS source (GCS: BATT green + USB box lit; "
+                            "USB cannot fly motors; a data cable also raises VBUS)",
     ("FlightTime", "Uninitialised"): "no flight-time limit configured",
     ("I2C", "Uninitialised"): "CAN0 never delivered a frame",
     ("I2C", "Warning"): "CAN0 over 50% of the 1 Mbit wire (kinda saturated)",

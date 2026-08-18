@@ -2423,3 +2423,14 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   MagSensor/AuxMagSensor added to pfdqml's QML export whitelist. NOTE
   the needles read MAGNETIC heading of each sensor's own mount - they
   will disagree with each other by their relative mounting yaw.
+- **PWR group redesigned in system-health.svg** (user spec): TIME
+  (FlightTime tile) moved into the MISC zone; its old slot now holds AC
+  and USB source boxes. One alarm drives all three via SVG GROUP ids:
+  Battery-OK = <g> lighting BATT green + AC green; Battery-Warning =
+  <g> lighting BATT green + USB green (severity Warning still means
+  "USB source" on the wire - the GCS just paints it as green source
+  selection now); Battery-Critical stays red on BATT alone. The
+  systemhealth gadget renders whatever element carries the id, group or
+  rect. TIME remains "estimated flight time REMAINING from battery
+  consumption" - not a clock - and stays greyed without a battery
+  sensor; the board's wall/GPS time is a different display entirely.
