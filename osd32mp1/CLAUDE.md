@@ -2834,3 +2834,34 @@ marginal; a better antenna position would calm the blips at the root.
   configs leave it zeroed. QuadX ch1-4 = 0x34210000 in word 0
   (bitfields pack first-declared lowest: N,S,E,W,NW,NE,SW,SE x 4 bit;
   NW=1 NE=2 SW=4 SE=3). Written + persisted on the bench board.
+## FIRST OUTDOOR GPS FIX + BRK migration facts (2026-08-18)
+
+- **The M9N delivered its first real fix: 16 sats, 3D, HDOP 0.91** -
+  lat/lon decode validated at last (40.1N -83.1W, sane altitude), GPS
+  UAVObjects live end to end. The bench was RF-dead, not the antennas.
+  GPS flight modes are no longer gated on decode validation.
+- **GPS Display gadget "pulsing" fixed**: value QLabels resized with
+  every numeric update and reflowed the layout. All value labels now
+  pinned at worst-case fontMetrics width + left-aligned; heading
+  zero-padded, speed space-padded (gpsdisplaywidget.cpp).
+- **BRK CAN verification, from the schematics themselves**: the RED
+  wires the TJA1441 to SiP pins PD0/PD1 (FDCAN1 RX/TX, the CAN1_RX/
+  CAN1_TX nets) with STBY on PG3 - and the BRK's BREAKOUTS.SchDoc
+  exposes PD0 (ball V11), PG3 (ball C9) and the PD bank on its
+  headers. So the RED's exact CAN topology reproduces on the BRK: one
+  3.3V-logic transceiver (TJA1441 needs its 5V rail like the RED's
+  BSTOUT; an SN65HVD230-class part runs on 3.3V alone - simpler) plus
+  CANH/CANL/GND to the bus. The RED DTB's m_can + pinmux block ports
+  near-verbatim.
+- **All 8 PWM pins are on the BRK headers** (PI5/PI6/PI7, PD13/PD14,
+  PH11/PH10, PB5 all present in BREAKOUTS.SchDoc): PWM needs NO added
+  hardware - 3.3V push-pull drives ESC/servo signal pins directly;
+  actuator POWER stays on its own rail (the servo-melt rule). The DT
+  timer unlocks must be re-applied to the BRK's own DTB.
+- **BRK bring-up facts** (Octavo getting-started): boots OpenSTLinux
+  v3.0 from SD, boot switches 101, power+data on ONE micro-USB, and
+  the stock gadget is RNDIS - useless to macOS, so the first BRK act
+  is the same ecm+acm gadget surgery as the RED. No Ethernet/WiFi at
+  all: gadget networking or a USB WiFi dongle are the only links.
+- The Octavo STP library models the SiP PACKAGE only (all five Octavo
+  parts) - no board-level models anywhere in it.

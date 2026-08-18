@@ -58,6 +58,30 @@ GpsDisplayWidget::GpsDisplayWidget(QWidget *parent) : QWidget(parent)
     fescene->addItem(marker);
     double scale = earthpix.width() / (marker->boundingRect().width() * 20);
     marker->setScale(scale);
+
+    /* Pin the value labels at their worst-case text width and left-align
+     * them: otherwise every numeric update resizes the label, the layout
+     * reflows around it, and the whole info block visibly pulses as
+     * heading/speed digits come and go. */
+    const struct { QLabel *label; const char *widest; } fixedWidths[] = {
+        { coord_value,   "88\u00B088.888' W  888\u00B088.888' W" },
+        { coord_value_2, "8888.88 m"      },
+        { coord_value_3, "8.88 / 8.88 / 8.88" },
+        { speed_value,   "888.88 m/s"     },
+        { bear_value,    "888.88 deg"     },
+        { dop_value,     "8.88 / 8.88 / 8.88" },
+        { status_value,  "88"             },
+        { fix_value,     "Fix not available" },
+        { time_value,    "8888.88.88    88:88:88 GMT" },
+    };
+    for (size_t i = 0; i < sizeof(fixedWidths) / sizeof(fixedWidths[0]); i++) {
+        QLabel *l = fixedWidths[i].label;
+        if (!l) {
+            continue;
+        }
+        l->setMinimumWidth(l->fontMetrics().horizontalAdvance(QString::fromUtf8(fixedWidths[i].widest)));
+        l->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    }
 }
 
 GpsDisplayWidget::~GpsDisplayWidget()
@@ -67,8 +91,8 @@ void GpsDisplayWidget::setSpeedHeading(double speed, double heading)
 {
     QString str;
 
-    speed_value->setText(QString("%1 m/s").arg(speed, 0, 'f', 2));
-    bear_value->setText(QString("%1 deg").arg(heading, 0, 'f', 2));
+    speed_value->setText(QString("%1 m/s").arg(speed, 6, 'f', 2, QChar(' ')));
+    bear_value->setText(QString("%1 deg").arg(heading, 6, 'f', 2, QChar('0')));
 }
 
 void GpsDisplayWidget::setDateTime(double date, double time)
