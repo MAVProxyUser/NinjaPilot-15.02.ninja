@@ -2490,3 +2490,15 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   saw it). Follow now also recenters when the position is static, and
   the GCS toggle snaps to the UAV immediately on engage instead of
   waiting for the next position change.
+- **Power tile popups rewritten** (systemhealth plugin html resources):
+  Battery-Warning now reads "Power: OK - USB connected" (VBUS, bench
+  power, cannot drive motors) and a new Battery-OK popup reads "Power:
+  OK - AC/jack supply" - the stock "voltage has fallen below threshold"
+  text was wrong for the power-source semantics. Popups are compiled
+  qrc resources: edit html/ + systemhealth.qrc + rebuild the plugin.
+- **Group separator anatomy** (learned by breaking it): each group's
+  dark panel carries its rotated label ~3.84 units inside its LEFT edge,
+  and the first tile starts ~5.25 units in (the label strip). Moving a
+  divider means moving panel edge + label + first-tile x TOGETHER with
+  those offsets, or the label lands in the inter-panel junction and
+  disappears under the dark panels.

@@ -806,14 +806,14 @@
        xml:space="preserve"
        style="font-size:3.38406372px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#f4d7d7;fill-opacity:1;stroke:none;display:inline;font-family:Sans;-inkscape-font-specification:Sans Bold"
        x="-463.67752"
-       y="487.66263"
+       y="491.88263"
        id="text4641-5-2-1"
        sodipodi:linespacing="125%"
        transform="matrix(0,-0.87458357,1.1434013,0,0,0)"><tspan
          sodipodi:role="line"
          id="tspan5383"
          x="-463.67752"
-         y="487.66263">MISC</tspan></text>
+         y="491.88263">MISC</tspan></text>
     <text
        xml:space="preserve"
        style="font-size:3.44706464px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#f4d7d7;fill-opacity:1;stroke:none;display:inline;font-family:Sans;-inkscape-font-specification:Sans Bold"
@@ -1199,7 +1199,7 @@
        id="SystemConfiguration-OK"
        width="23.259575"
        height="10.107105"
-       x="63.47906"
+       x="66.14906"
        y="51.943333"
        ry="0.98050147"
        inkscape:label="#rect4550-8-1-4-21-1" />
@@ -1250,7 +1250,7 @@
        id="FlightTime-OK"
        width="18.060331"
        height="10.265867"
-       x="89.11889"
+       x="91.81889"
        y="51.890926"
        ry="1"
        inkscape:label="#rect4550-8-1-4-21-2-9-8" />
@@ -1492,7 +1492,7 @@
        id="SystemConfiguration-Warning"
        width="23.326572"
        height="10.140604"
-       x="63.45981"
+       x="66.12981"
        y="51.958912"
        ry="0.98375124"
        inkscape:label="#rect4550-8-1-4-21-1" />
@@ -1543,7 +1543,7 @@
        id="FlightTime-Warning"
        width="18.060331"
        height="10.165371"
-       x="89.14425"
+       x="91.84425"
        y="51.941666"
        ry="0.99021065"
        inkscape:label="#rect4550-8-1-4-21-2-9-8" />
@@ -1664,7 +1664,7 @@
        id="BootFault-RebootRequired"
        width="13.110236"
        height="10.107105"
-       x="68.57000"
+       x="71.24000"
        y="51.972187"
        ry="0.98050147"
        inkscape:label="#rect4550-8-1-4-21-1" />
@@ -1678,7 +1678,7 @@
        id="SystemConfiguration-BadThrottleOrCollectiveInputRange"
        width="13.110236"
        height="10.107105"
-       x="68.57000"
+       x="71.24000"
        y="51.972187"
        ry="0.98050147"
        inkscape:label="#rect4550-8-1-4-21-1" />
@@ -1693,7 +1693,7 @@
        id="SystemConfiguration-FlightMode"
        width="13.110236"
        height="10.107105"
-       x="68.57000"
+       x="71.24000"
        y="51.972187"
        ry="0.98050147"
        inkscape:label="#rect4550-8-1-4-21-1" />
@@ -1708,7 +1708,7 @@
        id="SystemConfiguration-UnsupportedConfig_OneShot"
        width="13.110236"
        height="10.107105"
-       x="68.57000"
+       x="71.24000"
        y="51.938683"
        ry="0.98050147"
        inkscape:label="#rect4550-8-1-4-21-1" />
@@ -1844,7 +1844,7 @@
        id="SystemConfiguration-Critical"
        width="23.226076"
        height="10.107105"
-       x="63.51256"
+       x="66.18256"
        y="51.97683"
        ry="0.98050147"
        inkscape:label="#rect4550-8-1-4-21-1" />
@@ -1907,7 +1907,7 @@
        id="FlightTime-Critical"
        width="17.993334"
        height="10.265867"
-       x="89.15239"
+       x="91.85239"
        y="51.85743"
        ry="1"
        inkscape:label="#rect4550-8-1-4-21-2-9-8" />
@@ -2665,7 +2665,7 @@
     <text
        xml:space="preserve"
        style="font-size:6px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:none;display:inline;font-family:Arial;-inkscape-font-specification:Arial Bold"
-       x="78.75705"
+       x="81.96899"
        y="49.551472"
        id="textconf"
        sodipodi:linespacing="125%"
@@ -2673,7 +2673,7 @@
        inkscape:label="#text5330-7-7-9-1"><tspan
          sodipodi:role="line"
          id="tspan5978"
-         x="78.75705"
+         x="81.96899"
          y="49.551472">CONFIG</tspan></text>
     <text
        xml:space="preserve"
@@ -2715,16 +2715,16 @@
     <text
        xml:space="preserve"
        style="font-size:6.10169888px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:none;display:inline;font-family:Arial;-inkscape-font-specification:Arial Bold"
-       x="112.90656"
+       x="116.20964"
        y="48.797535"
        id="text5330-7-7-9-8-0"
        sodipodi:linespacing="125%"
        transform="scale(0.81741886,1.223363)"
-       inkscape:transform-center-x="5.28690"
+       inkscape:transform-center-x="8.58998"
        inkscape:transform-center-y="-0.9798839"><tspan
          sodipodi:role="line"
          id="tspan4305"
-         x="112.90656"
+         x="116.20964"
          y="48.797535">TIME</tspan></text>
     <rect
        inkscape:label="#rect4550-8"
@@ -2773,7 +2773,7 @@
        inkscape:label="#rect4550-8-1-4-21-2-9"
        ry="0.98703158"
        y="51.95937"
-       x="63.48461"
+       x="66.15461"
        height="10.132735"
        width="23.300135"
        id="rect4796-2-7"
@@ -2792,7 +2792,7 @@
        inkscape:label="#rect4550-8-1-4-21-2-9"
        ry="0.99532819"
        y="51.916786"
-       x="89.14100"
+       x="91.84100"
        height="10.217907"
        width="18.079369"
        id="rect4796-2-3"
