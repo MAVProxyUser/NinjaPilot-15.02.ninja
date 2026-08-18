@@ -26,6 +26,11 @@ Item {
 
     property bool show_panels: false
     property bool hide_display_rc: false
+    /* Which slide-out card is selected: 0 rc-input, 1 battery, 2 oplink,
+     * 3 system. The stock design stacked all four cards in one slot and
+     * juggled z to pick a winner - fragile enough that the wrong card
+     * could end up visible. Explicit visibility cannot be out-stacked. */
+    property int active_card: 2
     property bool hide_display_bat: false
     property bool hide_display_oplm: false
 
@@ -36,6 +41,7 @@ Item {
 
     function hide_display_rcinput(){
         show_panels = true;
+        active_card = 0;
         rc_input_bg.z = 10
         battery_bg.z = -1
         oplm_bg.z = -1
@@ -44,6 +50,7 @@ Item {
 
     function hide_display_battery(){
         show_panels = true;
+        active_card = 1;
         rc_input_bg.z = 10
         battery_bg.z = 20
         oplm_bg.z = -1
@@ -52,6 +59,7 @@ Item {
 
     function hide_display_oplink(){
         show_panels = true;
+        active_card = 2;
         rc_input_bg.z = 10
         battery_bg.z = 20
         oplm_bg.z = 30
@@ -60,6 +68,7 @@ Item {
 
     function hide_display_system(){
         show_panels = true;
+        active_card = 3;
         rc_input_bg.z = 10
         battery_bg.z = 20
         oplm_bg.z = 30
@@ -224,6 +233,7 @@ Item {
 
     SvgElementImage {
         id: rc_input_bg
+        visible: panels.active_card === 0
         elementName: "rc-input-bg"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -245,6 +255,7 @@ Item {
 
     SvgElementImage {
         id: rc_input_labels
+        visible: panels.active_card === 0
         elementName: "rc-input-labels"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -292,6 +303,7 @@ Item {
 
     SvgElementImage {
         id: rc_throttle
+        visible: panels.active_card === 0
         elementName: "rc-throttle"
         sceneSize: panels.sceneSize
         z: rc_input_bg.z+2
@@ -319,6 +331,7 @@ Item {
 
     SvgElementImage {
         id: rc_stick
+        visible: panels.active_card === 0
         elementName: "rc-stick"
         sceneSize: panels.sceneSize
         z: rc_input_bg.z+3
@@ -357,6 +370,7 @@ Item {
 
     SvgElementImage {
         id: battery_bg
+        visible: panels.active_card === 1
         elementName: "battery-bg"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -377,6 +391,7 @@ Item {
 
     SvgElementPositionItem {
         id: battery_volt
+        visible: panels.active_card === 1
         sceneSize: panels.sceneSize
         elementName: "battery-volt-text"
         z: battery_bg.z+1
@@ -418,6 +433,7 @@ Item {
 
     SvgElementPositionItem {
         id: battery_amp
+        visible: panels.active_card === 1
         sceneSize: panels.sceneSize
         elementName: "battery-amp-text"
         z: battery_bg.z+2
@@ -459,6 +475,7 @@ Item {
 
     SvgElementPositionItem {
         id: battery_milliamp
+        visible: panels.active_card === 1
         sceneSize: panels.sceneSize
         elementName: "battery-milliamp-text"
         z: battery_bg.z+3
@@ -505,6 +522,7 @@ Item {
 
     SvgElementPositionItem {
         id: battery_estimated_flight_time
+        visible: panels.active_card === 1
         sceneSize: panels.sceneSize
         elementName: "battery-estimated-flight-time"
         z: battery_bg.z+4
@@ -552,6 +570,7 @@ Item {
 
     SvgElementImage {
         id: battery_labels
+        visible: panels.active_card === 1
         elementName: "battery-labels"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -603,6 +622,7 @@ Item {
 
     SvgElementImage {
         id: oplm_bg
+        visible: panels.active_card === 2
         elementName: "oplm-bg"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -623,6 +643,7 @@ Item {
 
     SvgElementImage {
         id: smeter_bg
+        visible: panels.active_card === 2
         elementName: "smeter-bg"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -643,6 +664,7 @@ Item {
 
     SvgElementImage {
         id: smeter_scale
+        visible: panels.active_card === 2
         elementName: "smeter-scale"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -663,6 +685,7 @@ Item {
 
     SvgElementImage {
         id: smeter_needle
+        visible: panels.active_card === 2
         elementName: "smeter-needle"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -688,6 +711,7 @@ Item {
 
     SvgElementImage {
         id: smeter_mask
+        visible: panels.active_card === 2
         elementName: "smeter-mask"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -708,6 +732,7 @@ Item {
 
     SvgElementImage {
         id: oplm_button_bg
+        visible: panels.active_card === 2
         elementName: "oplm-button-bg"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -731,6 +756,7 @@ Item {
 
         SvgElementImage {
             z: oplm_bg.z+5
+            visible: panels.active_card === 2
             property variant idButton_oplm: "oplm_button_" + index
             property variant idButton_oplm_mousearea: "oplm_button_mousearea" + index
             property variant button_color: "button"+index+"_color"
@@ -772,6 +798,7 @@ Item {
 
     SvgElementImage {
         id: oplm_id_label
+        visible: panels.active_card === 2
         elementName: "oplm-id-label"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -791,6 +818,7 @@ Item {
 
     SvgElementPositionItem {
         id: oplm_id_text
+        visible: panels.active_card === 2
         sceneSize: panels.sceneSize
         elementName: "oplm-id-text"
         z: oplm_bg.z+7
@@ -857,6 +885,7 @@ Item {
 
     SvgElementImage {
         id: system_bg
+        visible: panels.active_card === 3
         elementName: "system-bg"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -878,6 +907,7 @@ Item {
 
     SvgElementPositionItem {
         id: system_frametype
+        visible: panels.active_card === 3
         elementName: "system-frame-type"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -911,6 +941,7 @@ Item {
 
     SvgElementPositionItem {
         id: system_cpuloadtemp
+        visible: panels.active_card === 3
         elementName: "system-cpu-load-temp"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -944,6 +975,7 @@ Item {
 
     SvgElementPositionItem {
         id: system_memfree
+        visible: panels.active_card === 3
         elementName: "system-mem-free"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -975,6 +1007,7 @@ Item {
 
     SvgElementPositionItem {
         id: system_fusion_algo
+        visible: panels.active_card === 3
         elementName: "system-attitude-estimation-algo"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -1006,6 +1039,7 @@ Item {
 
     SvgElementPositionItem {
         id: system_mag_used
+        visible: panels.active_card === 3
         elementName: "system-mag-used"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -1037,6 +1071,7 @@ Item {
 
     SvgElementPositionItem {
         id: system_gpstype
+        visible: panels.active_card === 3
         elementName: "system-gps-type"
         sceneSize: panels.sceneSize
         y: Math.floor(scaledBounds.y * sceneItem.height)
@@ -1092,4 +1127,88 @@ Item {
               }
         } 
     }
+    /* Icon strip - always visible regardless of which card is selected.
+     * The card bg groups carry their own tab art, but a hidden card must
+     * not lose its icon, so these standalone SVG icons sit on top. */
+
+    SvgElementImage {
+        id: rc_input_icon
+        elementName: "rc-input-icon"
+        sceneSize: panels.sceneSize
+        y: Math.floor(scaledBounds.y * sceneItem.height)
+        z: 100
+
+        states: State  {
+             name: "fading"
+             when: show_panels !== true
+             PropertyChanges  { target: rc_input_icon; x: Math.floor(scaledBounds.x * sceneItem.width) - (rc_input_bg.width * 0.85); }
+        }
+
+        transitions: Transition  {
+        SequentialAnimation  {
+              PropertyAnimation  { property: "x"; duration: 800 }
+              }
+        }
+    }
+
+    SvgElementImage {
+        id: battery_icon
+        elementName: "battery-icon"
+        sceneSize: panels.sceneSize
+        y: Math.floor(scaledBounds.y * sceneItem.height)
+        z: 100
+
+        states: State  {
+             name: "fading"
+             when: show_panels !== true
+             PropertyChanges  { target: battery_icon; x: Math.floor(scaledBounds.x * sceneItem.width) - (battery_bg.width * 0.85); }
+        }
+
+        transitions: Transition  {
+        SequentialAnimation  {
+              PropertyAnimation  { property: "x"; duration: 800 }
+              }
+        }
+    }
+
+    SvgElementImage {
+        id: oplm_icon
+        elementName: "oplm-icon"
+        sceneSize: panels.sceneSize
+        y: Math.floor(scaledBounds.y * sceneItem.height)
+        z: 100
+
+        states: State  {
+             name: "fading"
+             when: show_panels !== true
+             PropertyChanges  { target: oplm_icon; x: Math.floor(scaledBounds.x * sceneItem.width) - (oplm_bg.width * 0.85); }
+        }
+
+        transitions: Transition  {
+        SequentialAnimation  {
+              PropertyAnimation  { property: "x"; duration: 800 }
+              }
+        }
+    }
+
+    SvgElementImage {
+        id: system_icon
+        elementName: "system-logo"
+        sceneSize: panels.sceneSize
+        y: Math.floor(scaledBounds.y * sceneItem.height)
+        z: 100
+
+        states: State  {
+             name: "fading"
+             when: show_panels !== true
+             PropertyChanges  { target: system_icon; x: Math.floor(scaledBounds.x * sceneItem.width) - (system_bg.width * 0.85); }
+        }
+
+        transitions: Transition  {
+        SequentialAnimation  {
+              PropertyAnimation  { property: "x"; duration: 800 }
+              }
+        }
+    }
+
 }

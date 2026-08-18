@@ -354,6 +354,39 @@ void MapGraphicItem::DrawMap2D(QPainter *painter)
                             }
                         }
 
+                        if (!found) {
+                            /* Over-zoom fallback: no imagery at this zoom
+                             * (past the provider's coverage, or still
+                             * loading) - show the nearest CACHED ancestor
+                             * tile's quadrant scaled up, i.e. the previous
+                             * tile extent, instead of an empty cell. */
+                            core::Point tp = core->GettilePoint();
+                            for (int up = 1; up <= 4 && (core->Zoom() - up) >= 2 && !found; up++) {
+                                core::Point pp(tp.X() >> up, tp.Y() >> up);
+                                QByteArray pimg = OPMaps::Instance()->GetTileFromMemoryCache(
+                                    RawTile(core->GetMapType(), pp, core->Zoom() - up));
+                                if (pimg.isEmpty()) {
+                                    pimg = Cache::Instance()->ImageCache.GetImageFromCache(
+                                        core->GetMapType(), pp, core->Zoom() - up);
+                                }
+                                if (!pimg.isEmpty()) {
+                                    QPixmap ppx = PureImageProxy::FromStream(pimg);
+                                    if (!ppx.isNull()) {
+                                        int frac = 1 << up;
+                                        int sw = ppx.width() / frac;
+                                        int sh = ppx.height() / frac;
+                                        int sx = (tp.X() & (frac - 1)) * sw;
+                                        int sy = (tp.Y() & (frac - 1)) * sh;
+                                        painter->drawPixmap(
+                                            QRect(core->tileRect.X(), core->tileRect.Y(),
+                                                  core->tileRect.Width(), core->tileRect.Height()),
+                                            ppx, QRect(sx, sy, sw, sh));
+                                        found = true;
+                                    }
+                                }
+                            }
+                        }
+
                         if (showTileGridLines) {
                             painter->setPen(config->EmptyTileBorders);
                             painter->drawRect(core->tileRect.X(), core->tileRect.Y(), core->tileRect.Width(), core->tileRect.Height());

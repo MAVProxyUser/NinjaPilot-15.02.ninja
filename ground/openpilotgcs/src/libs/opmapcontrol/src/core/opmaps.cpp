@@ -25,6 +25,7 @@
  * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 #include "opmaps.h"
+#include <QCryptographicHash>
 
 
 namespace core {
@@ -216,6 +217,18 @@ QByteArray OPMaps::GetImageFrom(const MapType::Types &type, const Point &pos, co
             }
             ret = reply->readAll();
             reply->deleteLater(); // TODO can't this be global??
+
+            /* Esri World_Imagery serves a CONSTANT gray "Map data not yet
+             * available" JPEG (2521 bytes, byte-identical at every
+             * position/zoom - verified by md5 across tiles) where deep
+             * imagery does not exist. Treat it as a MISSING tile so the
+             * painter's over-zoom fallback can show real parent imagery
+             * instead of the gray apology. */
+            if (ret.size() == 2521
+                && QCryptographicHash::hash(ret, QCryptographicHash::Md5).toHex()
+                == "f27d9de7f80c13501f470595e327aa6d") {
+                ret = QByteArray();
+            }
             if (ret.isEmpty()) {
 #ifdef DEBUG_GMAPS
                 qDebug() << "Invalid Tile";

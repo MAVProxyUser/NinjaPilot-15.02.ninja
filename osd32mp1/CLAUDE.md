@@ -2865,3 +2865,38 @@ marginal; a better antenna position would calm the blips at the root.
   all: gadget networking or a USB WiFi dongle are the only links.
 - The Octavo STP library models the SiP PACKAGE only (all five Octavo
   parts) - no board-level models anywhere in it.
+## The PFD slide-out saga, solved structurally + map over-zoom (2026-08-18)
+
+- **PFD cards now select by VISIBILITY, not z-juggling** (Panels.qml
+  property active_card, set by the four hide_display_* functions). The
+  stock design stacked four different-SIZED cards in one slot and
+  juggled z - the taller RC dial poked out from behind the shorter
+  LINK METER, which is what "the OPLink slideout shows a roll/pitch/
+  throttle thing" was. TRAP found on the way: the icon TABS are baked
+  into each card's bg SVG group, so hiding a card hid its icon -
+  standalone icon elements exist in pfd.svg (rc-input-icon,
+  battery-icon, oplm-icon, system-logo) and now render as an
+  always-visible z:100 icon strip.
+- **Map: Esri serves a CONSTANT "Map data not yet available" JPEG**
+  (2521 bytes, md5 f27d9de7f80c13501f470595e327aa6d at EVERY position/
+  zoom - verified) where deep imagery does not exist. opmaps.cpp now
+  rejects it at download as a missing tile, and mapgraphicitem.cpp
+  paints an OVER-ZOOM FALLBACK for any missing tile: the nearest
+  cached ancestor tile's quadrant scaled up (up to 4 levels) - "the
+  previous tile extent" instead of gray apologies. Note the GCS's own
+  empty-tile message branch is if(false) dead code - the text the user
+  saw was Esri's, not ours.
+- **RULE: diagnostic GCS launches MUST use an isolated settings dir**
+  (or not exit via pkill): a `-noload IPconnection` instance rewrote
+  ~/.config/NinjaPilot/NinjaPilotGCS_config.xml on exit. This time the
+  IPconnection section SURVIVED (verified .14:9000 intact) - the
+  observed "lost UDP config" was transient two-instance interference -
+  but the hazard class is real.
+- **The occasional shutdown SEGV is Qt 5.15's QWindowContainer
+  recursion**: crash trace = QWindowContainer::parentWasRaised infinite
+  recursion during MainWindow teardown, triggered by ModeManager
+  removing modes while the Welcome tab's QQuickView-in-
+  createWindowContainer still lives; QStackedLayout::takeAt raises a
+  sibling, the container re-enters parentWasRaised, stack dies. Exit-
+  time only - no data loss. Mitigation if it annoys: destroy/reparent
+  the Welcome container BEFORE plugin shutdown (WelcomeMode dtor).
