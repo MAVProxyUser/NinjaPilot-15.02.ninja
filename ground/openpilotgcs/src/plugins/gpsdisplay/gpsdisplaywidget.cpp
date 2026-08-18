@@ -64,9 +64,14 @@ GpsDisplayWidget::GpsDisplayWidget(QWidget *parent) : QWidget(parent)
      * reflows around it, and the whole info block visibly pulses as
      * heading/speed digits come and go. */
     const struct { QLabel *label; const char *widest; } fixedWidths[] = {
-        { coord_value,   "88\u00B088.888' W  888\u00B088.888' W" },
-        { coord_value_2, "8888.88 m"      },
-        { coord_value_3, "8.88 / 8.88 / 8.88" },
+        /* one worst-case string per label, matching what setPosition()
+         * actually writes: coord_value = LATITUDE, coord_value_2 =
+         * LONGITUDE (three degree digits), coord_value_3 = ALTITUDE.
+         * Getting this mapping wrong stretches one field and truncates
+         * the next. */
+        { coord_value,   "88\u00B088.888' N"  },
+        { coord_value_2, "888\u00B088.888' W" },
+        { coord_value_3, "88888.88 m"     },
         { speed_value,   "888.88 m/s"     },
         { bear_value,    "888.88 deg"     },
         { dop_value,     "8.88 / 8.88 / 8.88" },
