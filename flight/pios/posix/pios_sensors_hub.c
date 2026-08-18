@@ -1214,6 +1214,30 @@ static void *hub_main(void *arg)
             hub.can_seen     = can_frames > 0;
             hub.vbus_present = vbus;
             hub.have_pwr     = pwr_ok;
+
+            /* USB-C negotiated current budget from the STUSB1600 port
+             * controller (typec class). The value is the SOURCE'S
+             * ADVERTISED limit - the honest "how many amps does this bus
+             * provide" - not an instantaneous draw measurement. Absent
+             * sysfs (e.g. the BRK's plain micro-USB) leaves 0. */
+            {
+                float amps = 0.0f;
+                FILE *tf = fopen("/sys/class/typec/port0/power_operation_mode", "r");
+                if (tf) {
+                    char mode[32] = { 0 };
+                    if (fgets(mode, sizeof(mode), tf)) {
+                        if (strncmp(mode, "3.0A", 4) == 0) {
+                            amps = 3.0f;
+                        } else if (strncmp(mode, "1.5A", 4) == 0) {
+                            amps = 1.5f;
+                        } else if (strncmp(mode, "default", 7) == 0) {
+                            amps = 0.5f; /* USB2 default budget */
+                        }
+                    }
+                    fclose(tf);
+                }
+                hub.usb_amps = amps;
+            }
             hub_publish_end();
             canload_prev_bits = can_bits;
         }

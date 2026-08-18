@@ -2900,3 +2900,33 @@ marginal; a better antenna position would calm the blips at the root.
   sibling, the container re-enters parentWasRaised, stack dies. Exit-
   time only - no data loss. Mitigation if it annoys: destroy/reparent
   the Welcome container BEFORE plugin shutdown (WelcomeMode dtor).
+## Session epilogue: the radio icon, the exit crash answered, real USB amps (2026-08-18)
+
+- **EPILOGUE to the slide-out saga: the user had been clicking the
+  BOTTOM icon** - it depicts an RC transmitter, and its card is the
+  stock RC INPUT MONITOR (throttle bar = ManualControlCommand.Throttle,
+  red dot = Roll/Pitch, crosshair twists with Yaw). The antenna card
+  was correct all along. The visibility rewrite STAYS: it makes card
+  selection deterministic and cures the real different-sized-cards
+  poke-through hazard.
+- **The occasional exit SEGV is FIXED at its root**: upstream's
+  WelcomePlugin destructor cleanup was commented out with "TODO: Fix a
+  real solution" (removing the mode during MainWindow teardown crashed
+  one way; leaving it leaked the QQuickView window container into the
+  teardown where QWindowContainer::parentWasRaised recurses to death -
+  the crash the user reported). The real solution: IPlugin::shutdown()
+  runs on every plugin BEFORE any destructor, with MainWindow fully
+  alive - the mode is removed + deleted there. Also: the container
+  OWNS the QQuickView (createWindowContainer semantics) - delete the
+  container, never both. The dead openpilot.org version phone-home
+  went too.
+- **Battery slideout Amps = the real USB-C budget**: the hub reads
+  /sys/class/typec/port0/power_operation_mode (STUSB1600) - "default"
+  0.5 / "1.5A" / "3.0A" - the SOURCE'S ADVERTISED limit, live per
+  charger. On the bench it reads 1.5A. BRK note: plain micro-USB has
+  no typec controller -> field stays 0.
+- **BUILD TRAP (cost one cycle): an scp'd source can land while make
+  resolves stale** - the usbamps build reported success with the new
+  hub code absent from the ELF (strings | grep typec = 0). VERIFY
+  EFFECT: `strings` the ELF for a string your change introduces;
+  remedy is touch + rebuild. Same lesson as the GCS bundle-dylib rule.

@@ -80,20 +80,21 @@ WelcomeMode::WelcomeMode() :
     m_d->quickView->setSource(QUrl("qrc:/welcome/qml/main.qml"));
     m_container = NULL;
 
-    QNetworkAccessManager *networkAccessManager = new QNetworkAccessManager;
-
-    // Only attempt to request our version info (network accessibility check removed for Qt5.15+)
-    connect(networkAccessManager, SIGNAL(finished(QNetworkReply *)), this, SLOT(networkResponseReady(QNetworkReply *)));
-
-    // This will delete the network access manager instance when we're done
-    connect(networkAccessManager, SIGNAL(finished(QNetworkReply *)), networkAccessManager, SLOT(deleteLater()));
-
-    networkAccessManager->get(QNetworkRequest(QUrl("http://www.openpilot.org/opver")));
+    /* the openpilot.org version phone-home died with the project (2015);
+     * request removed rather than left failing at every launch */
 }
 
 WelcomeMode::~WelcomeMode()
 {
-    delete m_d->quickView;
+    /* createWindowContainer() gives the container OWNERSHIP of the
+     * embedded window: deleting the container deletes the QQuickView.
+     * Deleting both would double-free. */
+    if (m_container) {
+        delete m_container;
+        m_d->quickView = NULL;
+    } else {
+        delete m_d->quickView;
+    }
     delete m_d;
 }
 

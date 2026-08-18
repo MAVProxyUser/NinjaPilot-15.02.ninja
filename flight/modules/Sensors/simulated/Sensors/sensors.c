@@ -591,7 +591,10 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                                 FlightBatteryStateData batt;
                                 FlightBatteryStateGet(&batt);
                                 batt.Voltage = 5.00f;
-                                batt.Current = 0.00f;
+                                /* the USB-C source's negotiated budget
+                                 * (STUSB1600) - the bus provision, static
+                                 * per charger, not measured draw */
+                                batt.Current = h.usb_amps;
                                 batt.ConsumedEnergy = 0.0f;
                                 batt.EstimatedFlightTime = 999999.0f;
                                 FlightBatteryStateSet(&batt);

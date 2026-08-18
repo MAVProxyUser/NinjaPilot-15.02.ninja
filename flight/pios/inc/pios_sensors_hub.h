@@ -103,7 +103,10 @@ struct pios_sensors_hub_data {
     uint8_t  gps_sats;
     uint8_t  gps_fix;          /* 0 NO_FIX, 1 TIME_ONLY, 2 2D, 3 3D */
     double   gps_time;
-    uint64_t gps_utc_usec;     /* Fix2 gnss_timestamp: UTC usec since epoch,
+    uint64_t gps_utc_usec;
+    float    usb_amps;         /* USB-C negotiated current budget from the
+                                  STUSB1600 (typec sysfs power_operation_mode):
+                                  0.5 default / 1.5 / 3.0; 0 = not readable */     /* Fix2 gnss_timestamp: UTC usec since epoch,
                                   0 until the receiver has time (needs sats,
                                   not necessarily a position fix) */
     uint32_t gps_count;

@@ -52,14 +52,27 @@ WelcomePlugin::WelcomePlugin()
 
 WelcomePlugin::~WelcomePlugin()
 {
-    // The below code is commented out to avoid having the application
-    // crash when it is terminated. TODO: Fix a real solution.
-    /*
-       if (m_welcomeMode) {
+    // Teardown happens in shutdown() - see the note there. By the time
+    // destructors run, MainWindow is already being demolished and pulling
+    // our QWindowContainer out of the mode stack from THERE recurses
+    // QWindowContainer::parentWasRaised to death (the occasional exit
+    // SEGV this fork inherited).
+}
+
+void WelcomePlugin::shutdown()
+{
+    /* The plugin system calls shutdown() on every plugin BEFORE any
+     * plugin destructor runs - MainWindow and the ModeManager's stacked
+     * layout are still fully alive, so removing the Welcome mode (and
+     * with it the QQuickView window container) is orderly here. Upstream
+     * commented this out of the DESTRUCTOR because doing it during
+     * MainWindow teardown crashes; doing it in shutdown() is the real
+     * solution that TODO asked for. */
+    if (m_welcomeMode) {
         removeObject(m_welcomeMode);
         delete m_welcomeMode;
-       }
-     */
+        m_welcomeMode = 0;
+    }
 }
 
 /*! Initializes the plugin. Returns true on success.
