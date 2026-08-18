@@ -2475,3 +2475,12 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   also lurks: other providers already reference arcgisonline). A user
   config saved before this fix may retain CacheOnly - flip Access Mode
   in the OP Map gadget options or reset the config.
+- **Map polish final**: the antique "here be dragons" chart (dragons1.jpg,
+  painted as the WHOLE map-item backdrop in mapgraphicitem.cpp before
+  tiles draw) is replaced by a flat dark fill - it only ever showed
+  through where tiles were missing, and at min zoom around the world's
+  edges. opmapgadgetconfiguration.cpp now COERCES a loaded
+  accessMode=CacheOnly to ServerAndCache, so no saved config can
+  silently disable tile downloads again - downloads work with zero user
+  setup. Verified live by the user: Esri World Imagery rendering,
+  centered on the board's GPS coordinates.

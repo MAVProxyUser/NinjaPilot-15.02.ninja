@@ -77,7 +77,10 @@ OPMapGadgetConfiguration::OPMapGadgetConfiguration(QString classId, QSettings *q
         }
 
         if (!accessMode.isEmpty()) {
-            m_accessMode = accessMode;
+            // NinjaPilot: CacheOnly in a saved config silently disables all
+            // tile downloads and reads as "the map is broken" - coerce it.
+            // Offline caching still works; this only re-enables fetching.
+            m_accessMode = (accessMode == "CacheOnly") ? QString("ServerAndCache") : accessMode;
         }
         m_useMemoryCache = useMemoryCache;
         if (!cacheLocation.isEmpty()) {

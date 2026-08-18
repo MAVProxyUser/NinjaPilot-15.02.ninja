@@ -296,7 +296,10 @@ void MapGraphicItem::wheelEvent(QGraphicsSceneWheelEvent *event)
 }
 void MapGraphicItem::DrawMap2D(QPainter *painter)
 {
-    painter->drawImage(this->boundingRect(), dragons.toImage());
+    // Flat dark fill for the space beyond the tile pyramid. The antique
+    // 'here be dragons' chart that used to live here reads as a broken
+    // map the moment real tiles work.
+    painter->fillRect(this->boundingRect(), QColor(28, 28, 28));
     if (!lastimage.isNull()) {
         painter->drawImage(core->GetrenderOffset().X() - lastimagepoint.X(), core->GetrenderOffset().Y() - lastimagepoint.Y(), lastimage);
     }
