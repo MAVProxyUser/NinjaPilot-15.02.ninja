@@ -41,8 +41,12 @@ Item {
         query: "/feed/entry"
         namespaceDeclarations: "declare default element namespace 'http://www.w3.org/2005/Atom';"
 
+        // GitHub wraps the commit subject in "\n        ...\n    " and often
+        // leaves author/name EMPTY (unlinked committer email) - trim the one
+        // and show the commit date instead of the other, or every entry
+        // renders with blank lines around it.
         XmlRole { name: "title"; query: "title/string()" }
-        XmlRole { name: "description"; query: "author/name/string()" }
+        XmlRole { name: "updated"; query: "updated/string()" }
         XmlRole { name: "link"; query: "link/@href/string()" }
     }
 
@@ -50,28 +54,24 @@ Item {
         id: listDelegate
         Item {
             width: view.width
-            height: column.height + 16
+            height: column.height + 8
 
             Column {
                 id: column
-                spacing: 4
+                spacing: 2
                 Text {
-                    text: title
+                    text: title.trim()
                     width: view.width - 4
-                    textFormat: text.indexOf("&") > 0 ? Text.StyledText : Text.PlainText
                     elide: Text.ElideRight
                     font.bold: true
                     color: mouseArea.containsMouse ? "#224d81" : "black"
                 }
 
                 Text {
-                    text: description
+                    text: Qt.formatDate(new Date(updated), "MMM d, yyyy")
                     width: view.width - 4
-                    textFormat: text.indexOf("&") > 0 ? Text.StyledText : Text.PlainText
-                    maximumLineCount: 3
-                    wrapMode: Text.WordWrap
-                    elide: Text.ElideRight
-                    color: mouseArea.containsMouse ? "#224d81" : "black"
+                    font.pointSize: 10
+                    color: mouseArea.containsMouse ? "#224d81" : "#6a737d"
                 }
             }
 

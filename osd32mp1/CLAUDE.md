@@ -2555,3 +2555,14 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   NewsPanel now feeds from the repo's commits/claude.atom - project
   news IS the commit history. Welcome QML is compiled qrc: edit
   src/plugins/welcome/qml + rebuild the plugin.
+- **ActivityPanel lists live issues** via the GitHub JSON API
+  (api.github.com /issues?state=all + XMLHttpRequest in QML; the
+  /issues endpoint also returns PRs - filtered on the pull_request
+  key). NewsPanel gotchas: GitHub Atom <title> is wrapped in
+  newline+indent (must .trim() or every entry renders with blank
+  lines) and <author><name> is EMPTY for unlinked committer emails -
+  show the <updated> date instead.
+- **Map heading-follow implies position-follow**: setMapFollowingMode
+  maps heading-without-position to None, so the heading toolbutton
+  silently did nothing unless position-follow was already on. The
+  toggles are now paired both ways and rotation snaps immediately.

@@ -1808,6 +1808,13 @@ void OPMapGadgetWidget::onFollowUAVpositionAct_toggled(bool checked)
         m_widget->toolButtonMapUAV->setChecked(checked);
     }
 
+    // heading-follow cannot survive without position-follow: with position
+    // unchecked setMapFollowingMode() maps ANY combination to None and the
+    // rotation resets, so drop the heading toggle along with this one
+    if (!checked && followUAVheadingAct->isChecked()) {
+        followUAVheadingAct->setChecked(false);
+    }
+
     setMapFollowingMode();
 
     // snap to the UAV immediately - engaging follow used to wait for the
@@ -1827,7 +1834,21 @@ void OPMapGadgetWidget::onFollowUAVheadingAct_toggled(bool checked)
         m_widget->toolButtonMapUAVheading->setChecked(checked);
     }
 
+    // rotation-follow implies centering: setMapFollowingMode() treats
+    // heading-checked-without-position-checked as None, so this button
+    // used to silently do NOTHING unless the user had also engaged
+    // position-follow. Engage it for them.
+    if (checked && !followUAVpositionAct->isChecked()) {
+        followUAVpositionAct->setChecked(true); // its slot runs setMapFollowingMode + snap
+    }
+
     setMapFollowingMode();
+
+    // rotate to the current heading immediately rather than waiting for
+    // the next updatePosition() tick
+    if (checked) {
+        m_map->UAV->SetUAVHeading(getUAV_Yaw());
+    }
 }
 
 void OPMapGadgetWidget::onUAVTrailTypeActGroup_triggered(QAction *action)
