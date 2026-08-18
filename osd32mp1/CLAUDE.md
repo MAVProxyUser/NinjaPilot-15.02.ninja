@@ -2260,3 +2260,36 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
 - **Uploader board art**: this fork's qrc dropped gcs-board-revo.png with
   the Revo purge, so any case pointing at it rendered BLANK silently.
   realposix now ships its own drawn gcs-board-osd32mp1.png.
+
+## RT scheduling, the real CPU picture, and the wizard-save wipe (2026-08-18)
+
+- **The remaining tile flicker was scheduling, and RT recovers most of it.**
+  With chrt -f -a -p 30 on the firmware: EVENT 100% / ATTI 98.2% / STAB
+  94.2% OK over 90s with a client attached (from 50/50 flapping at the
+  day's start). chrt does NOT survive a firmware restart - prior sessions'
+  RT state silently vanished on every systemd-run restart. This image's
+  systemd (v244) REJECTS CPUSchedulingPriority on transient units, so the
+  launch ritual is now: start fwrp unit, then
+  `chrt -f -a -p 30 $(pgrep -f fw_realposix.elf | head -1)`.
+  Proper fix queued: a real .service file.
+- **The box is NOT idle: the firmware itself burns ~118% of the 2 cores**
+  (54 us / 43 sy, 0 idle; loadavg ~6) while its own CPULoad UAVO says 50%.
+  The sy share points at the posix port's 1 kHz tick + context-switch
+  futex/signal traffic. This self-contention is the rest of the flicker -
+  profiling it is the path to 100% green (task #75).
+- **A momentary grey+X tile = telemetry link blip**, not firmware state:
+  on disconnect the GCS's object copies revert to defaults (Uninitialised)
+  until re-received. Two UAVTalk clients on port 9000 (GCS + health
+  monitor) steal each other's packets and cause exactly this - one client
+  at a time, always.
+- **TRAP: a firmware restart under an active wizard save wipes settings.**
+  The wizard hung at "Preparing mixer settings" when fwrp restarted
+  mid-save, the GCS crashed on reconnect churn, and MixerSettings was left
+  ALL-Disabled (OUTPUT Critical) - the QuadX motor mixers gone. Restored
+  from the documented baseline + persisted (verify: ObjectPersistence
+  Operation=Completed). GCS hardening queued (task #74). Never restart the
+  firmware while a GCS save/wizard is in flight.
+- **CPUSerial is real now**: pios_sys.c (posix) reads the STM32MP1 96-bit
+  UID from /sys/firmware/devicetree/base/serial-number (fallback
+  /proc/cpuinfo Serial); simposix hosts without either keep the FF..FF
+  placeholder. Verified over UAVTalk: 002e00463231510531333437.

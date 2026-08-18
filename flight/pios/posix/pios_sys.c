@@ -162,11 +162,60 @@ int32_t PIOS_SYS_Reset(void)
  * (12 bytes returned for STM32)
  * return < 0 if feature not supported
  */
+/* The host's real hardware serial where one exists. On the OSD32MP1 the
+ * STM32MP1's 96-bit UID surfaces as 24 hex digits in the device tree
+ * (u-boot copies it there) and in /proc/cpuinfo "Serial". A host with
+ * neither (simposix on macOS) keeps the old all-FF placeholder. */
+static const char *host_serial_hex(void)
+{
+    static char hex[PIOS_SYS_SERIAL_NUM_ASCII_LEN + 1];
+    static int probed = 0;
+
+    if (!probed) {
+        probed = 1;
+        hex[0] = '\0';
+        FILE *fp = fopen("/sys/firmware/devicetree/base/serial-number", "r");
+        if (fp) {
+            size_t n = fread(hex, 1, sizeof(hex) - 1, fp);
+            fclose(fp);
+            hex[n] = '\0';
+        }
+        if (!hex[0]) {
+            fp = fopen("/proc/cpuinfo", "r");
+            if (fp) {
+                char line[128];
+                while (fgets(line, sizeof(line), fp)) {
+                    if (sscanf(line, "Serial : %32s", hex) == 1 ||
+                        sscanf(line, "Serial\t\t: %32s", hex) == 1) {
+                        break;
+                    }
+                }
+                fclose(fp);
+            }
+        }
+        /* keep only leading hex digits (DT strings carry a trailing NUL
+         * that fread happily hands back inside the buffer) */
+        size_t k = 0;
+        while (k < sizeof(hex) - 1 && isxdigit((unsigned char)hex[k])) {
+            k++;
+        }
+        hex[k] = '\0';
+    }
+    return hex;
+}
+
 int32_t PIOS_SYS_SerialNumberGetBinary(uint8_t *array)
 {
-    /* Stored in the so called "electronic signature" */
+    const char *hex = host_serial_hex();
+
     for (int i = 0; i < PIOS_SYS_SERIAL_NUM_BINARY_LEN; ++i) {
-        array[i] = 0xff;
+        if (hex[2 * i] && hex[2 * i + 1]) {
+            unsigned v;
+            sscanf(&hex[2 * i], "%2x", &v);
+            array[i] = (uint8_t)v;
+        } else {
+            array[i] = 0xff;
+        }
     }
 
     /* No error */
@@ -181,13 +230,14 @@ int32_t PIOS_SYS_SerialNumberGetBinary(uint8_t *array)
  */
 int32_t PIOS_SYS_SerialNumberGet(char *str)
 {
-    /* Stored in the so called "electronic signature" */
+    const char *hex = host_serial_hex();
+    size_t len     = strlen(hex);
     int i;
 
     for (i = 0; i < PIOS_SYS_SERIAL_NUM_ASCII_LEN; ++i) {
-        str[i] = 'F';
+        str[i] = ((size_t)i < len) ? hex[i] : 'F';
     }
-    str[i] = '\0';
+    str[PIOS_SYS_SERIAL_NUM_ASCII_LEN] = '\0';
 
     /* No error */
     return 0;
