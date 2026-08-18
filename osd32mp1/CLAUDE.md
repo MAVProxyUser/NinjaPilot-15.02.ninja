@@ -2963,3 +2963,37 @@ marginal; a better antenna position would calm the blips at the root.
   ninjapilot-log (shmlog ring), /run/ninjapilot-fw.pid (single-
   instance flock), open fds to /dev/i2c-3 + six PWM duty_cycle sysfs
   nodes + the UDP sockets, stdio on /dev/null.
+## THE FLASH PATH WAS BROKEN THREE WAYS (2026-08-18, night) - and the node is now in a BL hold
+
+Chasing the NAV-SAT flash exposed why over-CAN flashing has ALWAYS been
+flaky in this project ("several mode-2 holds; one run took 4 attempts").
+Three independent bugs, all fixed:
+
+1. **Staging path**: can_flash.py's FileServer serves ONLY from
+   /home/root/fw. An image staged in /home/root (one level up) means the
+   node re-flashes whatever STALE file is in fw/ - and the flasher still
+   prints its verdict as if it worked. Verified: three "flashes" all
+   re-wrote an Aug-17 image.
+2. **python-dronecan treats a full TX queue as FATAL**: SocketCAN
+   send_frame() raises TxQueueFullError instead of applying backpressure,
+   killing the file server mid-transfer. NOT the wire (berr-counter tx 0
+   rx 0, zero TX errors/drops) and NOT txqueuelen (10 -> 1000 changed
+   nothing). Fixed by monkeypatching send_frame to BLOCK on a full queue
+   (the writer thread already retries ENOBUFS itself).
+3. **The 240 s deadline was too short**: an instrumented run
+   (can_flash_verbose.py, counts Read requests + max offset) measures a
+   COMPLETE transfer at ~222 s / 800 reads / 178 KB / zero errors. The
+   old deadline killed the server just before the end. Now 420 s.
+   RULE: judge a flash by MAX OFFSET REACHED, never by the vcs verdict -
+   "sw 2.0 vcs=00000000 mode=2" is the BOOTLOADER answering, and
+   can_flash's own "FLASH SUCCEEDED" line printed that as success.
+
+**REMAINING, and it needs hardware: node 124 is in a BOOTLOADER HOLD.**
+With all three bugs fixed, TWO complete zero-error transfers (our new
+NAV-SAT image AND a previously-good image) both leave the node in mode 2
+with uptime climbing and NO reset loop - the BL takes the image and
+never launches an app. That exonerates the firmware image (the
+known-good behaves identically) and matches the long-standing
+"bootloader boot-failure hold flag that a POWER CYCLE clears" suspect,
+which has never been tested. Next step: power-cycle node 124; the
+NAV-SAT image is already staged and fully written.

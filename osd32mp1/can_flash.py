@@ -1,4 +1,30 @@
 import dronecan, time
+
+# TRAP (root-caused 2026-08-18, after this flasher failed 3x in a row):
+# python-dronecan's SocketCAN driver treats a FULL internal TX queue as a
+# FATAL error - send_frame() raises TxQueueFullError instead of applying
+# backpressure. During a flash the bootloader's read requests outpace the
+# writer thread's drain and the transfer dies partway through (measured
+# 119-203 s in). It is NOT the wire (berr-counter tx 0 rx 0, zero TX
+# errors/drops) and NOT the interface txqueuelen (10 -> 1000 changed
+# nothing). Block until there is room instead of exploding; the writer
+# thread already retries ENOBUFS on its own.
+import queue as _queue
+from dronecan.driver.socketcan import SocketCAN as _SocketCAN
+
+
+def _blocking_send_frame(self, frame):
+    self._check_write_feedback()
+    while True:
+        try:
+            self._write_queue.put(frame, timeout=2.0)
+            return
+        except _queue.Full:
+            continue
+
+
+_SocketCAN.send_frame = _blocking_send_frame
+
 node = dronecan.make_node("can0", node_id=126, bitrate=1000000)
 NID = 124
 t0 = time.time()
@@ -41,6 +67,10 @@ def nodeinfo(label):
 # RECOVERY: is 124 sitting in the bootloader, the old app, or silent?
 pre = nodeinfo("STATE NOW:")
 
+# The image MUST be staged at /home/root/fw/AP_Periph.bin - this server
+# serves from that directory only. Staging it in /home/root (one level up)
+# silently serves a STALE file: the node dutifully re-flashes whatever old
+# image is there and the operator sees "flash succeeded, still broken".
 fs = dronecan.app.file_server.FileServer(node, lookup_paths=["/home/root/fw"])
 
 # (re)issue the update request - harmless if already in bootloader
@@ -57,7 +87,11 @@ while not resp and time.time()-t < 6:
     safe_spin(0.05)
 print("  BeginFirmwareUpdate:", resp[0].response.error if resp else "no ack (ok if already in bootloader)", flush=True)
 
-deadline = time.time() + 240
+# 240 s was TOO SHORT: a complete image transfer measured 222 s of pure
+# file serving (800 Read requests for 178 KB, ~800 B/s effective), so the
+# old deadline killed the file server just before the end and the node was
+# left parked in the bootloader. Instrumented proof in can_flash_verbose.py.
+deadline = time.time() + 420
 saw_update = False
 while time.time() < deadline:
     safe_spin(0.5)
