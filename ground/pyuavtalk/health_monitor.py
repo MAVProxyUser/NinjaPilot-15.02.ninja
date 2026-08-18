@@ -108,6 +108,9 @@ def snapshot_table(alarms, stats):
     for r in rows:
         out.append(f"{r[0]:8s} {r[1]:20s} {r[2]:13s} {r[3]:9s} {r[4]}")
     out.append(f"MASTER CAUTION: {'ON' if caution else 'off'}")
+    pwr = {"Warning": "USB (VBUS present)", "OK": "AC/jack (no VBUS)"}.get(
+        alarms.get("Battery"), "unknown (OTG regs unreadable)")
+    out.append(f"POWER SOURCE: {pwr}")
     if stats:
         out.append(f"CPULoad {stats.get('CPULoad')}%  heap {stats.get('HeapRemaining')}  "
                    f"EventWarnID 0x{int(stats.get('EventSystemWarningID', 0)):08X}  "

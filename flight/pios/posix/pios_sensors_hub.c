@@ -70,6 +70,8 @@
 #include <sched.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <poll.h>
+#include <sys/prctl.h>
 #include <linux/can.h>
 #include <linux/can/raw.h>
 #include <net/if.h>
@@ -1083,6 +1085,7 @@ static bool have_b280;
 static void *hub_main(void *arg)
 {
     (void)arg;
+    prctl(PR_SET_NAME, "sensorhub", 0, 0, 0);
     double next_imu = now_s();
     double next_baro = now_s();
     double next_hmc = now_s();
@@ -1242,17 +1245,43 @@ static void *hub_main(void *arg)
             prev_can_bits = can_bits;
         }
 
-        /* Sleep to the next due event rather than spinning - this thread has
-         * a whole core, but burning it would fight the FreeRTOS scheduler
-         * thread for the other one. */
-        double due = next_imu;
+        /* Sleep to the next due event rather than spinning - this thread
+         * shares two cores with the whole flight stack.
+         *
+         * TRAP (found burning 50% of a core): next_imu only advances inside
+         * the have_mpu branch, so with the local IMU absent it froze in the
+         * past, `due - now` went permanently negative, and this loop
+         * busy-polled the CAN socket at ~3200 read()/s (thread shows as
+         * "init" in ps - it inherits the spawning task's name).
+         *
+         * Now: the next due event is computed from ENABLED sources only,
+         * and when CAN is up we block in poll() on the socket - woken the
+         * moment a frame lands (same delivery latency as the spin, none of
+         * the burn), with the schedule as timeout. */
+        double due = now_s() + 0.01;                 /* 10ms housekeeping cap */
+        if (have_mpu && next_imu < due) {
+            due = next_imu;
+        }
         if (have_bmp && next_baro < due) {
             due = next_baro;
         }
+        if (have_b280 && next_b280 < due) {
+            due = next_b280;
+        }
+        if (have_hmc && next_hmc < due) {
+            due = next_hmc;
+        }
         double sl = due - now_s();
         if (sl > 0.0005) {
-            struct timespec ts = { 0, (long)((sl - 0.0002) * 1e9) };
-            nanosleep(&ts, NULL);
+            if (have_can && can_fd >= 0) {
+                struct pollfd pfd;
+                pfd.fd     = can_fd;
+                pfd.events = POLLIN;
+                poll(&pfd, 1, (int)(sl * 1000.0));
+            } else {
+                struct timespec ts = { 0, (long)((sl - 0.0002) * 1e9) };
+                nanosleep(&ts, NULL);
+            }
         }
     }
     return NULL;

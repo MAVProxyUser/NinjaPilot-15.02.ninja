@@ -2293,3 +2293,47 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   UID from /sys/firmware/devicetree/base/serial-number (fallback
   /proc/cpuinfo Serial); simposix hosts without either keep the FF..FF
   placeholder. Verified over UAVTalk: 002e00463231510531333437.
+
+## ZERO-transition health, the hub spin trap, and the bench mag setup (2026-08-18)
+
+- **FLICKER FULLY DEAD: 0 transitions in 121s** (ATTI/STAB/EVENT 100% OK,
+  client attached) with the full stack: telemetry at +2, RT via chrt,
+  hub poll() fix below, INS_SAMPLE_RATE=250 (bench value, saved on the
+  node; 500 restorable via /home/root/set_ins_rate.py - the node answers
+  services only in its fresh-boot window, so expect NO RESPONSE prints
+  while streaming; VERIFY BY MEASURING candump, the set usually landed).
+- **The 50%-CPU "init" thread was the sensor hub busy-spinning.** The
+  hub thread inherits its spawner's name (now prctl's "sensorhub"), and
+  its sleep was computed from next_imu, which only advances when the
+  LOCAL IMU is present - with the MPU unplugged it froze in the past and
+  the loop polled CAN at ~3200 read()/s. Now: due considers enabled
+  sources only, and the wait blocks in poll() on the CAN socket (woken
+  per frame - same latency, ~5% CPU). Firmware total 118% -> ~75-90%;
+  the freed core un-starved the estimator band (that was the residual
+  ATTI/STAB flicker).
+- **TRAP: pgrep -f 'fw_realposix.elf' can match a stray sh** - chrt'd
+  the wrong process once. Use `systemctl show fwrp-native -p MainPID
+  --value`.
+- **Whole-object-write trap RE-CONFIRMED, self-inflicted**: sending
+  RevoSettings with only FusionAlgorithm zeroed every other field
+  (MagnetometerMaxDeviation [0,0] -> filtermag rejected everything,
+  MAG Critical). ALWAYS read-modify-write settings objects. AND:
+  filtermag caches revoSettings AT CHAIN INIT - new thresholds need a
+  FusionAlgorithm flip (Basic and back) or reboot to load.
+- **Bench mag state (persisted)**: Complementary+Mag, HomeLocation.Be =
+  measured bench field [-171.9, 115.2, 385.9] mGauss (current orientation
+  == yaw 0 by construction), MagnetometerMaxDeviation [1.5, 2.5] to
+  accept the indoor field on the tilted board. Yaw now follows the
+  RM3100; MAG tile = filtermag's judgment, green. This is a BENCH
+  calibration - proper mag cal is the ConfigRevoWidget resurrection.
+- **The stock health SVG had a fully wired I2C tile all along** (I/O row,
+  x=57.9 - state rects order their attributes differently than the grid
+  scan expected). It is now labeled CAN and lights from our bus-health
+  alarm; the duplicate spare-box tile and both "?" placeholder boxes are
+  removed.
+- **BATT/voltage on this platform**: VBUS presence (USB vs jack) is the
+  only power signal identified; the two enabled ADC channels
+  (in_voltage0/1 on adc@48003000, raw 2311/432) have UNKNOWN nets without
+  the RED schematic - identify empirically by switching supplies while
+  watching raw values. STPMIC1 has no input-voltage telemetry.
+  health_monitor prints POWER SOURCE: USB/AC from the Battery alarm.
