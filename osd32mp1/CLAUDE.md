@@ -2731,3 +2731,15 @@ Diagnosis crib for "wlan0 has no IPv4": iw dev wlan0 link (association
 + moving counters), arping -I wlan0 <router> (L2 proof), then blame
 DHCP/networkd - in that order. Signal here is -78 dBm: functional but
 marginal; a better antenna position would calm the blips at the root.
+- **GPS UAVObject semantics on realposix - which fields are REAL:**
+  GPSPositionSensor is the truth (hub-fed from DroneCAN: Satellites =
+  Fix2 sats_used; HDOP/VDOP real once gnss.Auxiliary arrives).
+  GPSSatellites and GPSExtendedStatus are NEVER WRITTEN on this target
+  - their only writers are the serial protocol parsers (NMEA.c/UBX.c)
+  in the GPS module, which does not run here; whatever they display is
+  compile-time default filler, and a "conflict" with GPSPositionSensor
+  is expected. The honest sats-in-view count DOES exist unpublished:
+  hub.gps_sats_visible (gnss.Auxiliary decode, pios_sensors_hub.c) -
+  publishing it into GPSSatellites.SatsInView (arrays zeroed; DroneCAN
+  carries no per-satellite data) is a small sensors.c addition if ever
+  wanted.
