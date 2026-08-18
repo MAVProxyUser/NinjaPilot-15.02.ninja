@@ -2337,3 +2337,24 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   the RED schematic - identify empirically by switching supplies while
   watching raw values. STPMIC1 has no input-voltage telemetry.
   health_monitor prints POWER SOURCE: USB/AC from the Battery alarm.
+
+## The frozen compass: node 125 wedged, not the plumbing (2026-08-18, late)
+
+- User rotated the RM3100 and NOTHING moved. Verified the entire GCS
+  plumbing chain live (node 125 frames -> hub.mag_ga -> MagSensor ->
+  filtermag -> MagState -> yaw): values present at every stage - but
+  CONSTANT. Raw candump: node 125's MagneticFieldStrength spread over
+  40s of physical rotation = 1-2 mGauss (noise floor). The node is
+  HALF-WEDGED: broadcasts NodeStatus + its last mag reading at 25 Hz,
+  answers NO services (GetNodeInfo times out), uptime 8000s+ - it did
+  NOT share node 124's power cycle (separate supply). Remedy: power
+  cycle the RM3100 node itself. Verify revival: candump spread moves
+  when rotated, GetNodeInfo answers.
+- **Mag topology now as intended**: RM3100 (node 125) -> MagSensor =
+  PRIMARY fusion mag; QMC5883P on the M9N GPS module (node 124) ->
+  AuxMagSensor (sensors.c publishes from hub.qmc) = aux/display.
+  AuxMagSettings.Usage=OnboardOnly persisted so the uncalibrated QMC
+  (bench |B| ~76 uT vs RM3100 ~51) never fuses. Set Usage=Both/AuxOnly
+  to let filtermag use it.
+- Node identity crib: 124 = org.ardupilot.MatekL431-Periph (IMU, baro,
+  GPS, QMC, IST8310); 125 = the RM3100 DroneCAN mag unit.

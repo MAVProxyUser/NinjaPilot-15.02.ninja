@@ -447,6 +447,23 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                     MagSensorSet(&m);
                 }
 
+                /* Second compass, the QMC5883P riding the M9N GPS module
+                 * (node 124), published as the AUX mag: visible in the GCS
+                 * and available to filtermag per AuxMagSettings.Usage.
+                 * UNCALIBRATED - bench |B| reads ~76 uT vs the RM3100's
+                 * ~51 - so default Usage should keep the RM3100 primary. */
+                static uint32_t last_qmc = 0;
+                if (h.qmc_count != last_qmc) {
+                    last_qmc = h.qmc_count;
+
+                    AuxMagSensorData am;
+                    am.x = h.qmc_ga[0] * 1000.0f;           /* Ga -> mGa */
+                    am.y = h.qmc_ga[1] * 1000.0f;
+                    am.z = h.qmc_ga[2] * 1000.0f;
+                    am.Status = AUXMAGSENSOR_STATUS_OK;
+                    AuxMagSensorSet(&am);
+                }
+
                 /*
                  * Transport health tiles, once per second. These report the
                  * SENSOR TRANSPORT, not the fusion chain: the tiles read as
