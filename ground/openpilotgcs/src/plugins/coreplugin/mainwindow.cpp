@@ -283,16 +283,16 @@ void MainWindow::extensionsInitialized()
 
     updateContext();
 
+    // NinjaPilot: open on the Flight data workspace instead of Welcome.
+    // Selected BEFORE show() - yanking the mode away mid-show left the
+    // Welcome QQuickView's window container half-mapped and permanently
+    // blank. Never being the startup tab lets it initialize cleanly on
+    // first click instead. No-ops if no workspace carries the name.
+    ModeManager::instance()->activateModeByWorkspaceName("Flight data");
+
     emit m_coreImpl->coreAboutToOpen();
     show();
     emit m_coreImpl->coreOpened();
-
-    // NinjaPilot: open on the Flight data workspace instead of Welcome.
-    // Deferred one event-loop turn so it lands after any state restore;
-    // no-ops harmlessly if no workspace carries that name.
-    QTimer::singleShot(0, this, [this]() {
-        ModeManager::instance()->activateModeByWorkspaceName("Flight data");
-    });
 }
 
 QString MainWindow::loadStyleSheet(QString fileName)

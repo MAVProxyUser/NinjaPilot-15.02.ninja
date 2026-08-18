@@ -2519,3 +2519,16 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   zooming out past "world fills the window" (256*2^z >= widget side), so
   no dead margins - which previously showed the dragons chart, then
   black.
+- **SVG debugging workflow that finally worked**: render locally
+  (qlmanage -t -s 1200 -o /tmp file.svg), CROP with PIL and LOOK, fix,
+  re-render, verify BEFORE bundling - ends the screenshot ping-pong.
+  Z-ORDER TRAP: elements late in the document (state rects, the
+  full-canvas "opacity" tint) paint OVER the base-layer labels; the MISC
+  divider label was valid and correctly positioned through two fix
+  attempts but painted-over - relocated to document end (top of stack).
+  CAN label resized to fit its 11.3-wide tile.
+- **Welcome tab blank after the Flight-data jump**: WelcomeMode renders
+  via QQuickView in createWindowContainer; switching modes MID-show
+  (the deferred singleShot jump) left the container half-mapped and
+  permanently blank. The jump now happens BEFORE show() so Welcome is
+  simply never the startup tab and initializes on first click.

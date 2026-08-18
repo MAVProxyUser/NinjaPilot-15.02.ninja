@@ -804,18 +804,6 @@
          y="440.35474">AUTO</tspan></text>
     <text
        xml:space="preserve"
-       style="font-size:3.38406372px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#f4d7d7;fill-opacity:1;stroke:none;display:inline;font-family:Sans;-inkscape-font-specification:Sans Bold"
-       x="-463.67752"
-       y="491.88263"
-       id="text4641-5-2-1"
-       sodipodi:linespacing="125%"
-       transform="matrix(0,-0.87458357,1.1434013,0,0,0)"><tspan
-         sodipodi:role="line"
-         id="tspan5383"
-         x="-463.67752"
-         y="491.88263">MISC</tspan></text>
-    <text
-       xml:space="preserve"
        style="font-size:3.44706464px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#f4d7d7;fill-opacity:1;stroke:none;display:inline;font-family:Sans;-inkscape-font-specification:Sans Bold"
        x="-472.0209"
        y="432.35162"
@@ -2653,14 +2641,14 @@
     <text
        xml:space="preserve"
        style="font-size:5.90011835px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:none;display:inline;font-family:Arial;-inkscape-font-specification:Arial Bold"
-       x="73.139465"
+       x="72.03947"
        y="37.083118"
        id="text5330-0-00"
        sodipodi:linespacing="125%"
        transform="scale(0.81743571,1.2233378)"><tspan
          sodipodi:role="line"
          id="tspan5947"
-         x="73.139465"
+         x="72.03947"
          y="37.083118">CAN</tspan></text>
     <text
        xml:space="preserve"
@@ -3055,5 +3043,20 @@
            inkscape:connector-curvature="0" />
       </g>
     </g>
+  </g>
+
+  <g transform="translate(-497.66563,-344.28037)" id="misc-label-top">
+    <text
+       xml:space="preserve"
+       style="font-size:3.44706464px;font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#f4d7d7;fill-opacity:1;stroke:none;display:inline;font-family:Sans;-inkscape-font-specification:Sans Bold"
+       x="-472.0209"
+       y="483.00"
+       id="text-misc-lbl"
+       sodipodi:linespacing="125%"
+       transform="matrix(0,-0.85859914,1.1646879,0,0,0)"><tspan
+         sodipodi:role="line"
+         id="tspan-misc"
+         x="-472.0209"
+         y="483.00">MISC</tspan></text>
   </g>
 </svg>
