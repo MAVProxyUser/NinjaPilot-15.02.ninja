@@ -13,6 +13,8 @@ OTHER_FILES += \
     calibration/WizardStepIndicator.qml
 
 HEADERS += \
+    configrevowidget.h \
+    configrevohwwidget.h \
     configplugin.h \
     configgadgetwidget.h \
     configgadgetfactory.h \
@@ -46,9 +48,19 @@ HEADERS += \
     calibration/levelcalibrationmodel.h \
     calibration/gyrobiascalibrationmodel.h \
     calibration/calibrationuiutils.h \
+    calibration/sixpointcalibrationmodel.h \
+    calibration/thermal/thermalcalibration.h \
+    calibration/thermal/thermalcalibrationhelper.h \
+    calibration/thermal/thermalcalibrationmodel.h \
+    calibration/thermal/boardsetuptransition.h \
+    calibration/thermal/dataacquisitiontransition.h \
+    calibration/thermal/settingshandlingtransitions.h \
+    calibration/thermal/compensationcalculationtransition.h \
     configoplinkwidget.h
 
 SOURCES += \
+    configrevowidget.cpp \
+    configrevohwwidget.cpp \
     configplugin.cpp \
     configgadgetwidget.cpp \
     configgadgetfactory.cpp \
@@ -79,9 +91,15 @@ SOURCES += \
     calibration/wizardmodel.cpp \
     calibration/levelcalibrationmodel.cpp \
     calibration/gyrobiascalibrationmodel.cpp \
+    calibration/sixpointcalibrationmodel.cpp \
+    calibration/thermal/thermalcalibration.cpp \
+    calibration/thermal/thermalcalibrationhelper.cpp \
+    calibration/thermal/thermalcalibrationmodel.cpp \
     configoplinkwidget.cpp
 
 FORMS += \
+    revosensors.ui \
+    configrevohwwidget.ui \
     airframe.ui \
     airframe_ccpm.ui \
     airframe_fixedwing.ui \

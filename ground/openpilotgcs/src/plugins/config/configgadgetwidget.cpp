@@ -26,6 +26,8 @@
  */
 
 #include "configgadgetwidget.h"
+#include "configrevowidget.h"
+#include "configrevohwwidget.h"
 
 #include "configvehicletypewidget.h"
 #include "configccattitudewidget.h"
@@ -181,9 +183,15 @@ void ConfigGadgetWidget::onAutopilotConnect()
 
             qwd = new ConfigCCHWWidget(this);
             stackWidget->replaceTab(ConfigGadgetWidget::hardware, qwd);
-        } else if ((board & 0xff00) == 0x0900) {
-            // Revolution family
-            qDebug() << "Unsupported OpenPilot Revo family board " << board;
+        } else if (((board & 0xff00) == 0x0900) || ((board & 0xff00) == 0x1100)) {
+            // Revolution family + NinjaPilot realposix (0x11): the Revo
+            // config widgets were purged from this fork and are restored
+            // from pre-7f571cf87 history.
+            QWidget *qwd = new ConfigRevoWidget(this);
+            stackWidget->replaceTab(ConfigGadgetWidget::sensors, qwd);
+
+            qwd = new ConfigRevoHWWidget(this);
+            stackWidget->replaceTab(ConfigGadgetWidget::hardware, qwd);
         } else {
             // Unknown board
             qDebug() << "Unknown board " << board;

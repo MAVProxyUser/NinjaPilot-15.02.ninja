@@ -92,8 +92,8 @@ class ThermalCalibrationHelper : public QObject {
     Q_OBJECT
 
 public:
-    const static float TargetGradient = 0.20f;
-    const static float TargetTempDelta = 10.0f;
+    static constexpr float TargetGradient = 0.20f;
+    static constexpr float TargetTempDelta = 10.0f;
 
     explicit ThermalCalibrationHelper(QObject *parent = 0);
 

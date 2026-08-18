@@ -66,6 +66,22 @@ void MapGraphicItem::resize(const QRectF &rect)
 
     core->OnMapSizeChanged(maprect.width(), maprect.height());
     core->SetCurrentRegion(internals::Rectangle(0, 0, maprect.width(), maprect.height()));
+
+    /* Never allow zooming out beyond "the world fills the window": the tile
+     * pyramid is only 256*2^z px wide, so a large widget at a small zoom
+     * otherwise surrounds the map with dead margins. */
+    {
+        int side = qMax(maprect.width(), maprect.height());
+        int need = 2;
+        while ((256 << need) < side && need < maxZoom) {
+            need++;
+        }
+        minZoom = need;
+        if (core->Zoom() < minZoom) {
+            SetZoom(minZoom);
+        }
+    }
+
     if (isVisible()) {
         core->GoToCurrentPosition();
     }

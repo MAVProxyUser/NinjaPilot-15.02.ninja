@@ -2502,3 +2502,20 @@ Three stacked causes, isolated by A/B (ring-only vs client-attached):
   divider means moving panel edge + label + first-tile x TOGETHER with
   those offsets, or the label lands in the inter-panel junction and
   disappears under the dark panels.
+
+## ConfigRevoWidget RESURRECTED + map extent clamp (2026-08-18)
+
+- **The Configuration workspace placeholders are gone**: configrevowidget
+  (attitude/mag calibration) and configrevohwwidget (hardware ports) +
+  revosensors.ui + revolution_top.png restored from pre-7f571cf87
+  history and wired for board families 0x09 AND 0x11 in
+  configgadgetwidget.cpp. Restoration fallout fixed: the calibration
+  model sources (sixpoint + thermal/*) existed on disk but were UNLISTED
+  from config.pro (nothing referenced them since the purge), and
+  static const float/double in-class initializers needed constexpr
+  under current clang. The wizard is NOT required for these panels -
+  they are board-family UI, unrelated to the (persisted) QuadX config.
+- **Map min-zoom is now dynamic** (mapgraphicitem resize): never allows
+  zooming out past "world fills the window" (256*2^z >= widget side), so
+  no dead margins - which previously showed the dragons chart, then
+  black.
