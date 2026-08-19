@@ -3237,3 +3237,21 @@ pre-check) now lives in SKILLS.md "Change or add a UAVObject".
   the GCS CLOSED (two UDP clients steal each other's packets and fake
   FAILs; a 3/8 with config-readback PASSing is the stolen-packet
   signature, not a broken receiver).
+- **Zero-rate gyro trim (disarmed only) + the two-gyro observability
+  answer (2026-08-19)**: no number of gyros can distinguish "still" from
+  "slowly rotating" - every gyro reports rate+bias, so redundancy
+  averages noise and catches faults but cannot observe the common bias
+  mode; absolute yaw needs mag/GPS/vision. STILLNESS is observable from
+  variance though: sensors.c now measures 512-sample windows while
+  DISARMED and trims the published gyro by the window mean when sd <
+  0.35 dps (freezes on arm/motion; low-passed engagement; one-shot ring
+  line). Verified: published gyro z -0.005 dps against -0.11 raw.
+  Bench yaw walk history: +0.33 (mag rejected, stale Be) -> -0.49 (Be
+  spliced BODY-frame on a 77-deg-rolled board = permanent mag residual,
+  constant MagKp*error rotation) -> -0.22 dps after writing Be
+  ATTITUDE-CONSISTENTLY (rotate measured body field into NED through
+  current attitude). RULE: never write Be as the raw body vector unless
+  the board is LEVEL; rotate through attitude, or capture level. The
+  remaining -0.22 is uncalibrated bench geometry (accel scale +4.3%,
+  loose modules, no six-point cal) - the durable fix is a real
+  calibration session with the board level, not more Be splices.

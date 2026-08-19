@@ -116,6 +116,74 @@
 static xTaskHandle sensorsTaskHandle;
 
 // Private functions
+
+/*
+ * ZERO-RATE TRIM (disarmed only). A gyro reports rate + its own bias, and
+ * no number of additional gyros can separate the two - every witness
+ * carries a bias, so redundancy averages noise and catches faults but
+ * cannot observe "are we actually rotating". STILLNESS can: while the
+ * craft is DISARMED and the gyro's own variance says nothing is moving,
+ * the window mean IS the bias. Trim it continuously so yaw does not creep
+ * on the bench (and every arming starts from a bias measured seconds ago
+ * at the current temperature, not at boot). The trim FREEZES the moment
+ * the craft arms or motion is detected; in-flight learning stays the
+ * complementary filter's job against its absolute references.
+ */
+#define ZRT_WINDOW_SAMPLES 512          /* ~1-2 s at CAN/local rates */
+#define ZRT_STILL_SD_DPS   0.35f        /* measured noise sd is ~0.09  */
+#define ZRT_SANE_BIAS_DPS  3.0f         /* a turntable is not "still"  */
+static float zrt_trim[3];
+static bool  zrt_active;
+
+static void zeroRateTrimFeed(float gx, float gy, float gz)
+{
+    static float sum[3], sumsq[3];
+    static uint32_t n;
+    static bool disarmed;
+    static uint8_t fsPoll;
+
+    if ((fsPoll++ & 0x3F) == 0) {       /* ~8 Hz at the 490 Hz feed */
+        FlightStatusData fs;
+        FlightStatusGet(&fs);
+        disarmed = (fs.Armed == FLIGHTSTATUS_ARMED_DISARMED);
+    }
+    if (!disarmed) {
+        n = 0; sum[0] = sum[1] = sum[2] = 0; sumsq[0] = sumsq[1] = sumsq[2] = 0;
+        return;                         /* trim frozen at last-learned value */
+    }
+    const float v[3] = { gx, gy, gz };
+    for (int i = 0; i < 3; i++) {
+        sum[i]   += v[i];
+        sumsq[i] += v[i] * v[i];
+    }
+    if (++n < ZRT_WINDOW_SAMPLES) {
+        return;
+    }
+    bool still = true;
+    float mean[3];
+    for (int i = 0; i < 3; i++) {
+        mean[i] = sum[i] / (float)n;
+        float var = sumsq[i] / (float)n - mean[i] * mean[i];
+        if (var > ZRT_STILL_SD_DPS * ZRT_STILL_SD_DPS
+            || fabsf(mean[i]) > ZRT_SANE_BIAS_DPS) {
+            still = false;
+        }
+    }
+    if (still) {
+        for (int i = 0; i < 3; i++) {
+            /* low-pass into the trim so one window never jumps it */
+            zrt_trim[i] = zrt_active ? (0.7f * zrt_trim[i] + 0.3f * mean[i]) : mean[i];
+        }
+        if (!zrt_active) {
+            zrt_active = true;
+            PIOS_SHMLOG_Printf("[sensors] zero-rate trim engaged: [%d %d %d] mdps",
+                               (int)(zrt_trim[0] * 1000), (int)(zrt_trim[1] * 1000),
+                               (int)(zrt_trim[2] * 1000));
+        }
+    }
+    n = 0; sum[0] = sum[1] = sum[2] = 0; sumsq[0] = sumsq[1] = sumsq[2] = 0;
+}
+
 static void SensorsTask(void *parameters);
 static void simulateConstant();
 static void simulateModelAgnostic();
@@ -299,9 +367,10 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                      * what dispatches the inner loop, so the accel it will
                      * read is already in place when it runs. */
                     GyroSensorData g;
-                    g.x = h.gyro_dps[0];
-                    g.y = h.gyro_dps[1];
-                    g.z = h.gyro_dps[2];
+                    zeroRateTrimFeed(h.gyro_dps[0], h.gyro_dps[1], h.gyro_dps[2]);
+                    g.x = h.gyro_dps[0] - zrt_trim[0];
+                    g.y = h.gyro_dps[1] - zrt_trim[1];
+                    g.z = h.gyro_dps[2] - zrt_trim[2];
                     g.temperature = h.imu_temp_c;
                     GyroSensorSet(&g);
                 }
@@ -335,9 +404,10 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                         AccelSensorSet(&a2);
 
                         GyroSensorData g2;
-                        g2.x = h.imu2_gyro_dps[0];
-                        g2.y = h.imu2_gyro_dps[1];
-                        g2.z = h.imu2_gyro_dps[2];
+                        zeroRateTrimFeed(h.imu2_gyro_dps[0], h.imu2_gyro_dps[1], h.imu2_gyro_dps[2]);
+                        g2.x = h.imu2_gyro_dps[0] - zrt_trim[0];
+                        g2.y = h.imu2_gyro_dps[1] - zrt_trim[1];
+                        g2.z = h.imu2_gyro_dps[2] - zrt_trim[2];
                         g2.temperature = h.imu_temp_c;
                         GyroSensorSet(&g2);
                     } else if (failed_over) {
