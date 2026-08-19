@@ -6,14 +6,10 @@ Item {
     /* At load the cards' base x is the SHOWN position and the hidden
      * state applies a beat later, so the boot briefly played the whole
      * 800 ms slide-out - a phantom OPLink card popping out and retreating.
-     * Gate every transition until the scene has settled; after that the
-     * animations behave exactly as before. */
+     * Animations stay OFF until the user first invokes a card (not a
+     * settle timer - a slow load would outlive any guess). The first
+     * click flips this and animates normally. */
     property bool bootSettled: false
-    Timer {
-        interval: 1200
-        running: true
-        onTriggered: panels.bootSettled = true
-    }
     property variant sceneSize
 
     property real est_flight_time: Math.round(FlightBatteryState.EstimatedFlightTime)
@@ -52,6 +48,7 @@ Item {
     }
 
     function hide_display_rcinput(){
+        panels.bootSettled = true;
         show_panels = true;
         active_card = 0;
         rc_input_bg.z = 10
@@ -61,6 +58,7 @@ Item {
     }
 
     function hide_display_battery(){
+        panels.bootSettled = true;
         show_panels = true;
         active_card = 1;
         rc_input_bg.z = 10
@@ -70,6 +68,7 @@ Item {
     }
 
     function hide_display_oplink(){
+        panels.bootSettled = true;
         show_panels = true;
         active_card = 2;
         rc_input_bg.z = 10
@@ -79,6 +78,7 @@ Item {
     }
 
     function hide_display_system(){
+        panels.bootSettled = true;
         show_panels = true;
         active_card = 3;
         rc_input_bg.z = 10
