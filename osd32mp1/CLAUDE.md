@@ -3045,3 +3045,31 @@ FileServer already owns.
   with it). RULE: anything handed to createWindowContainer belongs to
   the container - never delete it directly. The PFD gadget is the one
   users hit because Flight Data is the default workspace.
+## Missions now survive a reboot (2026-08-19)
+
+Waypoint/PathAction/PathPlan are DATA objects (settings="false"), so a
+reboot silently lost the whole mission - the aircraft came back holding
+no plan with PLAN orange. pathplanner.c now mirrors a VALIDATED plan
+into the same flashfs the settings use, restores it in
+PathPlannerStart() before the callbacks hook up, and lets the existing
+checkPathPlan() CRC re-validate it (a corrupt store cannot arm a bogus
+mission - it just leaves PLAN orange). VERIFIED: upload -> restart
+firmware -> PLAN green with 5 wp / 1 action / crc 128 intact, no
+re-upload. Waypoint instances land as D23852DC.oNN in fcwd.
+
+Write policy is deliberately conservative because this file is shared
+with the STM32 targets, where a flash erase blocks for milliseconds:
+the plan is written ONLY when its CRC changes AND the craft is
+DISARMED (i.e. at upload), and progress (WaypointActive) is written per
+waypoint transition and only under PIOS_REALPOSIX where storage is
+files.
+
+**Resume is deliberately NOT automatic, and the reason is physics:** on
+a multirotor a reboot stops the motors, so the aircraft is falling long
+before any resume logic could run (a fw_realposix restart is ~10 s).
+Persisted progress therefore buys (a) no re-upload after any reboot,
+(b) resume-from-waypoint-N after a GROUND reboot mid-mission, and (c)
+forensics - which leg was active when it died. True in-air resume is
+only meaningful for a fixed-wing with a sub-second MCU reset, and would
+need gates: valid 3D fix, position within a sane radius of the recorded
+leg, and an explicit pilot/settings opt-in.

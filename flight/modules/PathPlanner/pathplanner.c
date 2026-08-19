@@ -70,6 +70,9 @@ static void updatePathDesired();
 static void setWaypoint(uint16_t num);
 
 static uint8_t checkPathPlan();
+static void savePathPlan();
+static void savePathProgress();
+static void restorePathPlan();
 static uint8_t pathConditionCheck();
 static uint8_t conditionNone();
 static uint8_t conditionTimeOut();
@@ -97,12 +100,103 @@ static bool mode3D;
 
 extern FrameType_t GetCurrentFrameType();
 
+
+/**
+ * MISSION PERSISTENCE (NinjaPilot)
+ * ---------------------------------------------------------------------
+ * Waypoint / PathAction / PathPlan are DATA objects (settings="false"),
+ * so nothing ever wrote them to storage: a reboot lost the whole plan
+ * and PLAN went back to orange with the aircraft holding no mission.
+ * These helpers mirror the RAM plan into the same flashfs the settings
+ * use, and restore it at boot.
+ *
+ * Write policy - deliberately conservative, because this file is shared
+ * with the STM32 targets where a flash erase blocks the bus for
+ * milliseconds:
+ *   - the PLAN is written only when it changes AND the craft is
+ *     DISARMED (i.e. at upload time), never in flight;
+ *   - PROGRESS (WaypointActive) is written per waypoint transition, and
+ *     only where storage is cheap (PIOS_REALPOSIX = files on Linux).
+ * Nothing here ever re-engages a mission by itself - see the note on
+ * resume in savePathProgress().
+ */
+static void savePathPlan()
+{
+    PathPlanData pathPlan;
+
+    PathPlanGet(&pathPlan);
+
+    for (uint16_t i = 0; i < pathPlan.WaypointCount; i++) {
+        UAVObjSave(WaypointHandle(), i);
+    }
+    for (uint16_t i = 0; i < pathPlan.PathActionCount; i++) {
+        UAVObjSave(PathActionHandle(), i);
+    }
+    UAVObjSave(PathPlanHandle(), 0);
+}
+
+static void savePathProgress()
+{
+    /* Records WHERE the mission was, so a reboot can be resumed from the
+     * last completed waypoint instead of the start - and so a post-crash
+     * teardown can say which leg was flying. It does NOT resume by
+     * itself: on a multirotor a reboot stops the motors, so "continue
+     * the mission" is a decision for a pilot on the ground (or a
+     * fixed-wing with a sub-second MCU reset), never an automatic
+     * action by code that just woke up not knowing where it is. */
+#if defined(PIOS_REALPOSIX)
+    UAVObjSave(WaypointActiveHandle(), 0);
+#endif
+}
+
+static void restorePathPlan()
+{
+    PathPlanData pathPlan;
+
+    if (UAVObjLoad(PathPlanHandle(), 0) != 0) {
+        return;                       /* nothing stored - normal first boot */
+    }
+    PathPlanGet(&pathPlan);
+    if (pathPlan.WaypointCount == 0
+        || pathPlan.WaypointCount > 255 || pathPlan.PathActionCount > 255) {
+        return;                       /* implausible - ignore the store */
+    }
+    for (uint16_t i = 0; i < pathPlan.WaypointCount; i++) {
+        if (UAVObjGetNumInstances(WaypointHandle()) <= i) {
+            UAVObjCreateInstance(WaypointHandle(), NULL);
+        }
+        if (UAVObjLoad(WaypointHandle(), i) != 0) {
+            return;                   /* partial store - checkPathPlan will reject */
+        }
+    }
+    for (uint16_t i = 0; i < pathPlan.PathActionCount; i++) {
+        if (UAVObjGetNumInstances(PathActionHandle()) <= i) {
+            UAVObjCreateInstance(PathActionHandle(), NULL);
+        }
+        if (UAVObjLoad(PathActionHandle(), i) != 0) {
+            return;
+        }
+    }
+    /* progress, if it was recorded - published for the GCS/pilot to see;
+     * the plan is NOT engaged here */
+    UAVObjLoad(WaypointActiveHandle(), 0);
+
+    /* the flight side re-validates the CRC in checkPathPlan() exactly as
+     * it does for an uploaded plan, so a corrupted store cannot arm a
+     * bogus mission - it just leaves PLAN orange */
+}
+
 /**
  * Module initialization
  */
 int32_t PathPlannerStart()
 {
     plan_initialize();
+
+    /* bring any stored mission back into RAM before the callbacks
+     * fire, so a reboot comes up with its plan intact */
+    restorePathPlan();
+
     // when the active waypoint changes, update pathDesired
     WaypointConnectCallback(commandUpdated);
     WaypointActiveConnectCallback(commandUpdated);
@@ -189,6 +283,21 @@ static void pathPlannerTask()
 
     FlightStatusData flightStatus;
     FlightStatusGet(&flightStatus);
+
+    /* mirror a freshly validated plan to storage - disarmed only, so the
+     * write never lands in flight */
+    static uint8_t lastSavedCrc;
+    static bool    haveSavedCrc;
+    if (validPathPlan && flightStatus.Armed == FLIGHTSTATUS_ARMED_DISARMED) {
+        PathPlanData pp;
+        PathPlanGet(&pp);
+        if (!haveSavedCrc || pp.Crc != lastSavedCrc) {
+            savePathPlan();
+            lastSavedCrc = pp.Crc;
+            haveSavedCrc = true;
+        }
+    }
+
     if (flightStatus.ControlChain.PathPlanner != FLIGHTSTATUS_CONTROLCHAIN_TRUE) {
         pathplanner_active = false;
         if (!validPathPlan) {
@@ -479,6 +588,7 @@ static void setWaypoint(uint16_t num)
 
     waypointActive.Index = num;
     WaypointActiveSet(&waypointActive);
+    savePathProgress();
 }
 
 // execute the appropriate condition and report result
