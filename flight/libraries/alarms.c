@@ -28,6 +28,7 @@
  */
 
 #include <openpilot.h>
+#include "pios_shmlog.h"
 #include "inc/alarms.h"
 
 // Private constants
@@ -87,6 +88,11 @@ int32_t AlarmsSet(SystemAlarmsAlarmElem alarm, SystemAlarmsAlarmOptions severity
         SystemAlarmsAlarmToArray(alarms)[alarm] = severity;
         lastAlarmChange[alarm] = flightTime;
         SystemAlarmsAlarmSet(&alarms);
+        /* every alarm TRANSITION into the ring (self-stubbed on hard
+         * targets) - tiles flash faster than any poller can sample, and
+         * polling over UDP steals the GCS link; this is the honest
+         * instrument for "why did X flash" */
+        PIOS_SHMLOG_Printf("[alarm] idx=%d -> %d", (int)alarm, (int)severity);
     }
 
     // Release lock

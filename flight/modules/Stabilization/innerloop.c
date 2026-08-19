@@ -215,6 +215,24 @@ static void stabilizationInnerloopTask()
         if (stabSettings.monitor.rateupdates > -64) {
             stabSettings.monitor.rateupdates--;
         }
+#if defined(PIOS_REALPOSIX)
+        /* This counter decrements PER INNER-LOOP PASS, so the tolerance it
+         * grants the outer loop is measured in passes, not time - raising
+         * the sensor rate mechanically shrinks it (at ~300 passes/s the
+         * stock -8 is ~25 ms, inside ordinary Linux scheduling hiccups
+         * that self-heal; measured: 40 one-shot trips in 180 s at 500 Hz
+         * IMU, zero at 250 Hz, control output healthy throughout). Same
+         * adaptation as the gyroupdates thresholds above: alarm when the
+         * outer loop is genuinely slow, not when the yardstick shrank.
+         * -24 ~= 80 ms stall, -48 ~= 160 ms at the 500 Hz operating
+         * point. -64 stays the never-ran floor. */
+        if (stabSettings.monitor.rateupdates < -24) {
+            warn = true;
+        }
+        if (stabSettings.monitor.rateupdates < -48) {
+            crit = true;
+        }
+#else
         if (stabSettings.monitor.rateupdates < -(2 * OUTERLOOP_SKIPCOUNT)) {
             // warning if rate loop skipped more than 2 execution
             warn = true;
@@ -223,23 +241,41 @@ static void stabilizationInnerloopTask()
             // critical if rate loop skipped more than 4 executions
             crit = true;
         }
+#endif
         // check if gyro keeps updating
         if (stabSettings.monitor.gyroupdates < 1) {
             // error if gyro didn't update at all!
             error = true;
         }
 #if defined(PIOS_REALPOSIX)
-        /* The Linux port runs the sensor transport (959 Hz wire) faster than
-         * this core can close the inner loop; the callback scheduler
-         * coalesces intermediate samples and the loop always consumes the
-         * LATEST gyro data, so 2-6 samples per pass is the designed steady
-         * state, not a missed deadline. Alarm only when the loop itself
-         * slows: >8 samples/pass ~= below 120 Hz, >16 ~= below 60 Hz. */
-        if (stabSettings.monitor.gyroupdates > 8) {
-            warn = true;
-        }
-        if (stabSettings.monitor.gyroupdates > 16) {
-            crit = true;
+        /* TIME-based latency watchdog. Counting SAMPLES per pass makes the
+         * tolerance a function of the sensor rate (8 samples = 8 ms at the
+         * 959 Hz era it was calibrated in, but 16 ms at 490 Hz and 32 ms
+         * at 250) - so raising or lowering the IMU rate silently
+         * re-tightens or re-loosens the alarm. Measured: the identical
+         * bench tripped 0 times at 250 Hz and ~20/min at 490 Hz on
+         * ordinary 16-32 ms Linux scheduler hiccups that self-heal and
+         * that the latest-sample-consuming loop rides through. Judge the
+         * loop by WALL-CLOCK pass gap instead: warn past 48 ms, critical
+         * past 96 ms (the estimator's own staleness watchdog sits at
+         * 50 ms for the same reason). */
+        {
+            static uint32_t lastPassMs = 0;
+            static bool     wdArmed    = false;
+            uint32_t nowMs = xTaskGetTickCount() * portTICK_RATE_MS;
+            if (!wdArmed) {
+                wdArmed = true;
+                PIOS_SHMLOG_Printf("[innerloop] time-based latency watchdog v2 armed");
+            } else {
+                uint32_t gapMs = nowMs - lastPassMs;
+                if (gapMs > 48) {
+                    warn = true;
+                }
+                if (gapMs > 96) {
+                    crit = true;
+                }
+            }
+            lastPassMs = nowMs;
         }
 #else
         if (stabSettings.monitor.gyroupdates > 1) {

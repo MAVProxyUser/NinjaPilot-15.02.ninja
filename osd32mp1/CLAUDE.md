@@ -3113,3 +3113,51 @@ leg, and an explicit pilot/settings opt-in.
   error naming the new class's constructor. Object IDs hash name+fields
   only, so editing a description does not change the id and does not
   require a firmware rebuild.
+## The STAB flicker returned WITH the 500 Hz restore - and both watchdogs were rate-relative (2026-08-19)
+
+Restoring INS_SAMPLE_RATE 250 -> 500 brought the STAB orange flashes
+back (the zero-transition state had been measured AT 250). Root cause,
+proven with the new alarm-transition logger: BOTH innerloop watchdog
+dimensions measure in COUNTS, so their wall-clock tolerance is a
+function of the sensor rate - raising the rate silently re-tightens
+the alarm:
+- gyroupdates > 8 was ~8 ms of pass latency in the 959 Hz era it was
+  calibrated in, but 16 ms at 490 Hz - inside ordinary self-healing
+  Linux scheduler hiccups. 40-57 one-shot trips per 3 min, each held
+  ~1.07 s by the alarm GRACETIME = the visible flashing.
+- rateupdates < -8 shrank identically (~20 ms at 490 Hz).
+Fix: the realposix innerloop watchdog is now TIME-based - wall-clock
+pass gap, warn > 48 ms / crit > 96 ms (the estimator's own staleness
+watchdog sits at 50 ms for the same reason). Sample-count thresholds
+remain for the STM32 targets, where samples ARE time.
+
+**Instrumentation that settled it, both durable:**
+- alarms.c logs EVERY alarm transition to the ring: "[alarm] idx=N -> S"
+  (transitions only; self-stubbed on hard targets). Tiles flash faster
+  than any poller can sample, and polling SystemAlarms over UDP steals
+  the GCS link - read the ring instead. Alarm index crib: 5=EVENT,
+  10=ATTI, 14=STAB (SystemAlarms element order).
+- The 0.5 s-throttled watchdog PRINT lines hide sub-window spikes: the
+  printed max was 8/-4 while the alarm tripped on unprinted 9-16/-9+
+  excursions between prints. Judge alarms by the transition log, never
+  by the throttled telemetry prints.
+- shmlogd had vanished from the board (rebuilt from osd32mp1/shmlogd.c:
+  gcc -O2 -o /home/root/shmlogd shmlogd.c).
+
+**The AppleDouble tar trap struck a SECOND time** - the documented
+COPYFILE_DISABLE=1 rule existed and was violated by a plain `tar czf`
+in this very session, planting 13 `._*` files that broke the UAVO hash
+AGAIN. The complete both-sides UAVObject recipe (with junk-free
+shipping, the version_info hash-library step, and the tree-hash
+pre-check) now lives in SKILLS.md "Change or add a UAVObject".
+- **VERDICT (clean live window, backlog drained): STAB = 0 transitions
+  in 180 s at 500 Hz** with the time-based watchdog (was 40-57 per
+  window). Residual: EVENT ~2/min one-shot blips (AttitudeState
+  callback queue under the doubled rate - task #75 territory) and one
+  Receiver blip. TRAP that voided one whole verification round:
+  shmlogd drains the RING BACKLOG first, so a capture started after a
+  restart replays the PREVIOUS firmware's lines with old timestamps -
+  drain with --dump before any live measurement, and check the
+  process start time against the capture window. Also: a board build
+  can take past the moment you think it finished - the ELF mtime and
+  the service start time tell the real story.
