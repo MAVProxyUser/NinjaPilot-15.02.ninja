@@ -3172,3 +3172,32 @@ pre-check) now lives in SKILLS.md "Change or add a UAVObject".
   transitions of ANY kind in a clean 180 s window** - STAB 0, EVENT 0,
   Receiver 0 - GCS attached, IMU at 500 Hz. Both defines live in
   realposix pios_board.h / pios_config.h = full ~13 min board rebuild.
+## Attitude truth-pass + the wizard blockers, root-located (2026-08-19)
+
+- **"Yaw spin / accel drift" forensics**: the MPU startup sequence is
+  CORRECT on the node (PWR_MGMT_1=0x01 = wake + PLL-on-X-gyro - the
+  clock whose omission causes classic drift; verified in imu.cpp).
+  Wire bias measured healthy (X+0.03 Y-0.59 Z-0.11 dps raw). The spin
+  was FUSION: HomeLocation.Be was captured for an earlier bench
+  geometry, the reattached hardware changed it (deviation 740 mGa vs a
+  372 mGa field - Y and Z sign-flipped), filtermag rejected every
+  sample, and yaw free-integrated. A clean-restart calibration fixed
+  roll/pitch (stable to 0.01 deg); Be re-captured+persisted for the
+  current pose. CAVEAT: the "Be := measured field = yaw 0" bench
+  recipe assumes a LEVEL board - at roll -77 deg it redefines the
+  reference crookedly and yaw slews to converge. The DURABLE fix is a
+  real calibration pass (wizard/ConfigRevoWidget), not another Be
+  splice.
+- **Wizard blockers for realposix, root-located**: (1) the summary
+  page's Next runs SummaryPage::validatePage ->
+  VehicleConfigurationHelper::setupVehicle(false) - acked-write wait
+  loops tuned for Revo hardware stall or fail on this board = "can't
+  click Next" (same class as task #74). (2) PAGE_INPUT rebooted the
+  board on input change - needed on STM32 to re-init receiver ports,
+  pointless on realposix (receiver set is compile-time) and it has
+  wedged saves; now SKIPPED for CONTROLLER_REALPOSIX. (3) the GPS page
+  offers no "u-blox on CAN/DroneCAN" option - wants a new enum +
+  helper case that writes nothing (the CAN GPS is always-on). (2) is
+  FIXED; (1) and (3) are the next wizard session, and (1) is the
+  gate: instrument setupVehicle's apply loop to log which object write
+  fails to ack on realposix, then fix or skip those writes.

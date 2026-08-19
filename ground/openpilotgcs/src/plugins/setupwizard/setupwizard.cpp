@@ -140,7 +140,14 @@ int SetupWizard::nextId() const
     case PAGE_INPUT:
         if (isRestartNeeded()) {
             saveHardwareSettings();
-            reboot();
+            /* The reboot exists so an STM32 re-inits its receiver port
+             * hardware. On realposix the receiver set is compile-time
+             * (the UDP-PPM receiver is always present), and restarting
+             * the process mid-wizard wipes RAM state and has wedged
+             * saves before - skip it. */
+            if (getControllerType() != CONTROLLER_REALPOSIX) {
+                reboot();
+            }
         }
         return PAGE_VEHICLES;
 
