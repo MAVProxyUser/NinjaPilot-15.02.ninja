@@ -450,6 +450,48 @@ Output: `build/MatekL431-Periph/bin/AP_Periph.bin`. The exact flashed binary
 is committed as `fw/AP_Periph-ninja-gcc10.bin` (md5-verify against it after a
 rebuild if you expect no change). Parameters survive app updates.
 
+## Change or add a UAVObject: ALWAYS run uavo_sync.sh (never hand-do it)
+
+The "GCS and firmware versions of the UAV objects set do not match" warning
+comes from the GCS comparing its compiled-in hash against the firmware's
+self-reported hash. Both are hashes of shared/uavobjectdefinition computed
+at each side's BUILD time, so they drift the instant one side is rebuilt
+and the other is not - or, most often, when the GCS binary is rebuilt but
+the RUNNING gcs process is never relaunched (it still holds the old hash in
+memory).
+
+**After ANY edit under shared/uavobjectdefinition/, run ONE command:**
+
+```bash
+osd32mp1/uavo_sync.sh 192.168.0.14
+```
+
+It regenerates the synthetics on the Mac, rebuilds the GCS object library
+AND libVersionInfo (the hash), ships junk-free XML + generated sources to
+the board, rebuilds and restarts fw_realposix, then verifies the Mac /
+board-XML / GCS / running-ELF hashes are ALL identical and refuses (exit 1)
+if they are not. It ends by telling you to RELAUNCH THE GCS.
+
+**Then RELAUNCH THE GCS.** This is not optional and it is the #1 cause of
+the warning: the rebuilt binary carries the new hash, but a gcs process
+started before the rebuild still runs the old one. If the warning appears
+and uavo_sync.sh says all hashes match, the running gcs is simply stale -
+quit and reopen it.
+
+Rules the script encodes so you never hit them by hand again:
+- XML descriptions must be ONE line (the generator emits them into a C++
+  literal; a newline breaks the GCS build).
+- Ship XML with COPYFILE_DISABLE=1 + rm ._* - macOS AppleDouble dotfiles
+  hash as real files and have caused this warning TWICE.
+- The board's uavobjgenerator is a 75-byte stub; generate only on the Mac.
+- A NEW object still needs manual adds BEFORE running the script:
+  flight/targets/boards/realposix/firmware/UAVObjects.inc (UAVOBJSRCFILENAMES)
+  and BOTH the HEADERS and SOURCES lists in
+  ground/openpilotgcs/src/plugins/uavobjects/uavobjects.pro.
+
+The detailed by-hand steps are kept below for reference, but prefer the
+script - it exists precisely so no step is ever skipped.
+
 ## Change or add a UAVObject: the COMPLETE both-sides recipe
 
 Every step below is load-bearing; skipping any one produces a symptom

@@ -3402,3 +3402,18 @@ The user's directive: "no specific sensor should have to exist anywhere"
 - All three new/expanded objects (SensorHubSettings, I2CBusScan,
   AK8975Sensor) went through the full both-sides recipe; tree hash
   b8eb084b verified equal on Mac, board, and GCS version_info.
+## RULE: the UAVObject hash-mismatch warning has ONE fix path (2026-08-19)
+
+The "GCS and firmware versions of the UAV objects set do not match" warning
+recurred repeatedly because the sync is multi-step and one step (usually
+relaunching the running GCS) was skipped. It is now a SINGLE command:
+
+    osd32mp1/uavo_sync.sh <board-ip>
+
+Never hand-do the regenerate/rebuild/ship/verify steps again - run the
+script, which fails loudly if the Mac/board/GCS/ELF hashes are not all
+equal. After it passes, ALWAYS tell the user to RELAUNCH THE GCS: the
+warning is almost always a stale RUNNING gcs process, not a real mismatch
+(its hash is compiled in and only refreshes on relaunch). When the warning
+appears, FIRST verify the four hashes with the script's step 5 logic; if
+they match, the fix is "quit and reopen the GCS", not another rebuild.
