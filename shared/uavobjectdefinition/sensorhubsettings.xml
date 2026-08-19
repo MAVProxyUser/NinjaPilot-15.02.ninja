@@ -3,6 +3,8 @@
         <description>Commanded rates for the CAN sensor node's gated streams. The hub broadcasts these at 1 Hz as a deadman heartbeat: the node streams only while they arrive, so a rebooted or firmware-stopped board always leaves a flash-quiet bus.</description>
         <field name="CanImuRateHz" units="Hz" type="uint16" elements="1" defaultvalue="500"/>
         <field name="CanAk8975RateHz" units="Hz" type="uint8" elements="1" defaultvalue="10"/>
+        <field name="CanBaroRateHz" units="Hz" type="uint8" elements="1" defaultvalue="50"/>
+        <field name="CanMagRateHz" units="Hz" type="uint8" elements="1" defaultvalue="25"/>
         <access gcs="readwrite" flight="readwrite"/>
         <telemetrygcs acked="true" updatemode="onchange" period="0"/>
         <telemetryflight acked="true" updatemode="onchange" period="0"/>

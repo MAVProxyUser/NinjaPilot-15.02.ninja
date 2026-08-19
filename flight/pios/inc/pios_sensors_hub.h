@@ -125,6 +125,10 @@ struct pios_sensors_hub_data {
     uint8_t  gps_sat_az2[16];
     uint8_t  gps_sat_cno[16];
     uint32_t gps_sat_seq;
+    /* I2C presence bitmap of node 124's own bus (msg 20505): bit(addr)
+     * set = a device ACKs there. Lets the GCS flag UNKNOWN addresses. */
+    uint8_t  i2c_present[16];
+    uint32_t i2c_present_seq;
     /* CAN IMU die temperature (vendor 20503, 1 Hz): degC = raw/340 + 35 */
     float    imu2_temp_c;
     bool     have_imu2_temp;
@@ -172,6 +176,7 @@ extern void PIOS_SENSORS_HUB_Stop(void);
 /* Commanded rates for the node's deadman-gated streams; broadcast at 1 Hz
  * as vendor msg 20510. Until this is called the hub sends nothing and the
  * node stays silent - a freshly booted bus is always flash-quiet. */
-extern void PIOS_SENSORS_HUB_SetCanStreamRates(uint16_t imu_hz, uint8_t ak_hz);
+extern void PIOS_SENSORS_HUB_SetCanStreamRates(uint16_t imu_hz, uint8_t ak_hz,
+                                               uint8_t baro_hz, uint8_t mag_hz);
 
 #endif /* PIOS_SENSORS_HUB_H */

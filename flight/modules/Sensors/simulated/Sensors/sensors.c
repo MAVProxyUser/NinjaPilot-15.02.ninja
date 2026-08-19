@@ -78,6 +78,7 @@
 #include "accelgyrosettings.h"
 #include "sensorhubsettings.h"
 #include "ak8975sensor.h"
+#include "i2cbusscan.h"
 #include "systemsettings.h"
 #include "taskinfo.h"
 #if defined(PIOS_INCLUDE_GCSRCVR)
@@ -217,9 +218,11 @@ static void sensorHubSettingsUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
     SensorHubSettingsData shs;
 
     SensorHubSettingsGet(&shs);
-    PIOS_SENSORS_HUB_SetCanStreamRates(shs.CanImuRateHz, shs.CanAk8975RateHz);
-    PIOS_SHMLOG_Printf("[sensors] CAN stream command: imu=%u Hz ak=%u Hz",
-                       (unsigned)shs.CanImuRateHz, (unsigned)shs.CanAk8975RateHz);
+    PIOS_SENSORS_HUB_SetCanStreamRates(shs.CanImuRateHz, shs.CanAk8975RateHz,
+                                       shs.CanBaroRateHz, shs.CanMagRateHz);
+    PIOS_SHMLOG_Printf("[sensors] CAN stream command: imu=%u ak=%u baro=%u mag=%u Hz",
+                       (unsigned)shs.CanImuRateHz, (unsigned)shs.CanAk8975RateHz,
+                       (unsigned)shs.CanBaroRateHz, (unsigned)shs.CanMagRateHz);
 }
 
 static void sensorCalUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
@@ -381,6 +384,7 @@ int32_t SensorsInitialize(void)
     RevoCalibrationInitialize();
     SensorHubSettingsInitialize();
     AK8975SensorInitialize();
+    I2CBusScanInitialize();
     AccelGyroSettingsInitialize();
     AttitudeSettingsInitialize();
     RevoSettingsInitialize();
@@ -577,6 +581,36 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                     } else if (failed_over) {
                         failed_over = false;
                         PIOS_SHMLOG_Printf("[sensors] local IMU back - CAN IMU stands down");
+                    }
+                }
+
+                {
+                    static uint32_t last_i2cscan = 0;
+                    if (h.i2c_present_seq != last_i2cscan) {
+                        last_i2cscan = h.i2c_present_seq;
+                        /* known devices on the node's bus: 0x68 MPU-9150,
+                         * 0x77 BMP388, 0x0E IST8310, 0x2C QMC5883P */
+                        static const uint8_t known[] = { 0x68, 0x77, 0x0E, 0x2C, 0x0C }; /* 0x0C = AK8975 via MPU bypass */
+                        I2CBusScanData sc;
+                        memset(&sc, 0, sizeof(sc));
+                        uint8_t n = 0, unk = 0;
+                        for (uint8_t a = 0; a < 128; a++) {
+                            if (!(h.i2c_present[a >> 3] & (1u << (a & 7)))) {
+                                continue;
+                            }
+                            if (n < 16) {
+                                sc.Addresses[n] = a;
+                            }
+                            n++;
+                            bool is_known = false;
+                            for (uint8_t k = 0; k < sizeof(known); k++) {
+                                if (known[k] == a) { is_known = true; break; }
+                            }
+                            if (!is_known) { unk++; }
+                        }
+                        sc.Count = n;
+                        sc.UnknownCount = unk;
+                        I2CBusScanSet(&sc);
                     }
                 }
 

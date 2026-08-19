@@ -3374,3 +3374,31 @@ first failed flash. The hard lessons, now permanent:
   9.9 Hz, die TEMPS 1 Hz, deadman heartbeat n100/20510 driving the gated
   streams, baro/GPS/mags all nominal, node mode OPERATIONAL. The deadman +
   AK8975 + die-temp + breathing work is all proven on hardware at last.
+## Generic sensor handling: per-stream rates, I2C presence reporter, die-temp fix (2026-08-19)
+
+The user's directive: "no specific sensor should have to exist anywhere"
+- stop hardcoding parts, track whatever is connected. Done:
+- **Die temp is now generic**: the node DETECTS the aux mag (IST8310 WIA
+  0x10 @0x0E, or QMC5883P chipid 0x80 @0x2C) and reads a die temp ONLY
+  from a chip that has one (IST reg 0x1C; QMC has none per AP + datasheet,
+  so it honestly reports the 0x7FFF sentinel). No assumed part. MPU +
+  BMP388 temps (the two that matter for thermal cal) were already live.
+- **SensorHubSettings is a per-stream rate table**: CanImuRateHz(u16) +
+  CanAk8975/Baro/MagRateHz(u8). The hub's 1 Hz deadman heartbeat (20510)
+  now carries imu(2)+ak(1)+baro(1)+mag(1); the node applies baro/mag via
+  their rate caps and IMU/AK via the gated streams. Old 3-byte frames
+  still parse (fields absent = leave native). Backward compatible.
+- **I2C presence reporter (msg 20505 -> I2CBusScan UAVObject)**: the node
+  scans its own I2C bus once at boot (non-destructive 1-byte probe of
+  0x08-0x77) and rebroadcasts a 16-byte presence bitmap at 0.2 Hz
+  (3-frame transfer, dispatched PRE-tail-filter like the other multiframe
+  msgs). sensors.c decodes it to an address list + Count + UnknownCount,
+  flagging anything not in the known set {0x68 MPU, 0x77 BMP388, 0x0E
+  IST, 0x2C QMC, 0x0C AK8975-via-bypass}. VERIFIED LIVE: found
+  0x0C/0x2C/0x68/0x77, and correctly flagged 0x0C as unknown until it was
+  added to the known set (it is the AK8975 exposed by the MPU bypass).
+- **500 Hz SPOT CHECK after all this: 490.3 Hz gyro+accel** (the clamp
+  binding) - the generic-sensor work cost the IMU stream nothing.
+- All three new/expanded objects (SensorHubSettings, I2CBusScan,
+  AK8975Sensor) went through the full both-sides recipe; tree hash
+  b8eb084b verified equal on Mac, board, and GCS version_info.

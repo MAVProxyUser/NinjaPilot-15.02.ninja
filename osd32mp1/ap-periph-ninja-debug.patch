@@ -275,10 +275,10 @@ index a4f089d..704f866 100644
      const float temp = baro.get_temperature();
  
 diff --git a/Tools/AP_Periph/can.cpp b/Tools/AP_Periph/can.cpp
-index ec0e76a..977472a 100644
+index ec0e76a..520925c 100644
 --- a/Tools/AP_Periph/can.cpp
 +++ b/Tools/AP_Periph/can.cpp
-@@ -811,6 +811,23 @@ void AP_Periph_FW::onTransferReceived(CanardInstance* canard_instance,
+@@ -811,6 +811,34 @@ void AP_Periph_FW::onTransferReceived(CanardInstance* canard_instance,
      }
  
      switch (transfer->data_type_id) {
@@ -289,12 +289,23 @@ index ec0e76a..977472a 100644
 +        extern volatile uint32_t ninja_streamctl_ms;
 +        extern volatile uint16_t ninja_imu_rate_cmd;
 +        extern volatile uint8_t  ninja_ak_rate_cmd;
++        extern volatile uint8_t  ninja_baro_rate_cmd;
++        extern volatile uint8_t  ninja_mag_rate_cmd;
 +        uint16_t r = 0;
-+        uint8_t akr = 0;
++        uint8_t akr = 0, baror = 0, magr = 0;
 +        canardDecodeScalar(transfer, 0, 16, false, &r);
 +        canardDecodeScalar(transfer, 16, 8, false, &akr);
-+        ninja_imu_rate_cmd = r;
-+        ninja_ak_rate_cmd  = akr;
++        /* older MP1 firmware sends only imu+ak (3 bytes); newer adds
++         * baro+mag (5). Fields absent from a short frame stay 0 = leave
++         * that stream at its own param/native rate. */
++        if (transfer->payload_len >= 4) { canardDecodeScalar(transfer, 24, 8, false, &baror); }
++        if (transfer->payload_len >= 5) { canardDecodeScalar(transfer, 32, 8, false, &magr); }
++        ninja_imu_rate_cmd  = r;
++        ninja_ak_rate_cmd   = akr;
++        ninja_baro_rate_cmd = baror;
++        ninja_mag_rate_cmd  = magr;
++        if (baror && g.baro_max_rate != baror) { g.baro_max_rate.set(baror); }
++        if (magr && g.mag_max_rate != magr)    { g.mag_max_rate.set(magr); }
 +        ninja_streamctl_ms = AP_HAL::millis();
 +        break;
 +    }
@@ -302,7 +313,7 @@ index ec0e76a..977472a 100644
      case UAVCAN_PROTOCOL_GETNODEINFO_ID:
          handle_get_node_info(canard_instance, transfer);
          break;
-@@ -957,6 +974,9 @@ bool AP_Periph_FW::shouldAcceptTransfer(const CanardInstance* canard_instance,
+@@ -957,6 +985,9 @@ bool AP_Periph_FW::shouldAcceptTransfer(const CanardInstance* canard_instance,
      }
  
      switch (data_type_id) {
@@ -312,7 +323,7 @@ index ec0e76a..977472a 100644
      case UAVCAN_PROTOCOL_GETNODEINFO_ID:
          *out_data_type_signature = UAVCAN_PROTOCOL_GETNODEINFO_SIGNATURE;
          return true;
-@@ -1417,7 +1437,12 @@ void AP_Periph_FW::node_status_send(void)
+@@ -1417,7 +1448,12 @@ void AP_Periph_FW::node_status_send(void)
          uint8_t buffer[UAVCAN_PROTOCOL_NODESTATUS_MAX_SIZE];
          node_status.uptime_sec = AP_HAL::millis() / 1000U;
  
@@ -406,10 +417,10 @@ index 2d39645..955e6dc 100644
      if (gps.have_gps_yaw() && last_relposheading_ms == 0) {
          float yaw_deg, yaw_acc_deg;
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
-index 1ab2a2e..c4d20ba 100644
+index 1ab2a2e..964519b 100644
 --- a/Tools/AP_Periph/imu.cpp
 +++ b/Tools/AP_Periph/imu.cpp
-@@ -2,61 +2,306 @@
+@@ -2,61 +2,382 @@
  
  #if AP_PERIPH_IMU_ENABLED
  #include <dronecan_msgs.h>
@@ -437,6 +448,11 @@ index 1ab2a2e..c4d20ba 100644
 +#define NINJA_MSG_GYRO       20500
 +#define NINJA_MSG_IMUTEMP    20503
 +#define NINJA_MSG_AKMAG      20504
++#define NINJA_MSG_I2CSCAN    20505
++//   20505  I2C presence bitmap of the node's own I2C bus: 16 bytes,
++//          bit(addr) set = a device ACKs at that 7-bit address. Lets the
++//          MP1 flag UNKNOWN addresses (not our MPU/baro/mag) worth adding
++//          support for. Scanned once at boot, rebroadcast at 0.2 Hz.
 +//   20504  AK8975 mag (the 9150's own compass, via I2C bypass at 0x0C):
 +//          int16[3] LE, ASA-adjusted counts (0.3 uT/LSB) + ST2 byte
 +//          (bit3 = overflow). Device frame - MP1 owns interpretation.
@@ -449,7 +465,8 @@ index 1ab2a2e..c4d20ba 100644
 +#define NINJA_IMU_SIGNATURE  0x4E494E4A49505331ULL  // "NINJIPS1"
 +
 +static AP_HAL::OwnPtr<AP_HAL::I2CDevice> s_imu_dev;
-+static AP_HAL::OwnPtr<AP_HAL::I2CDevice> s_ist_dev;   // IST8310 die temp
++static AP_HAL::OwnPtr<AP_HAL::I2CDevice> s_auxmag_dev;  // GPS-module compass, whatever it is
++static uint8_t s_auxmag_temp_reg;                      // 0 = this chip has no die-temp register
 +static AP_HAL::OwnPtr<AP_HAL::I2CDevice> s_ak_dev;    // AK8975 behind bypass
 +static float s_ak_adj[3] = { 1.0f, 1.0f, 1.0f };      // fuse-ROM sensitivity
 +static bool  s_ak_ok;
@@ -457,6 +474,8 @@ index 1ab2a2e..c4d20ba 100644
 +volatile uint32_t ninja_streamctl_ms;
 +volatile uint16_t ninja_imu_rate_cmd;
 +volatile uint8_t  ninja_ak_rate_cmd;
++volatile uint8_t  ninja_baro_rate_cmd;   // 0 = leave at param/native
++volatile uint8_t  ninja_mag_rate_cmd;
 +static volatile uint32_t s_imu_seq;      // odd = write in progress
 +static uint8_t s_imu_buf[14];
 +
@@ -473,10 +492,63 @@ index 1ab2a2e..c4d20ba 100644
 +    s_imu_seq++;
 +}
 +
++static uint8_t s_i2c_present[16];     // bitmap of ACKing 7-bit addresses
++
++static void ninja_i2c_scan(void)
++{
++    uint8_t found[16] = {};
++    for (uint8_t a = 0x08; a <= 0x77; a++) {
++        auto dev = hal.i2c_mgr->get_device(0, a, 100000);
++        if (!dev) {
++            continue;
++        }
++        uint8_t v = 0;
++        bool ack;
++        {
++            WITH_SEMAPHORE(dev->get_semaphore());
++            dev->set_retries(1);
++            ack = dev->read_registers(0x00, &v, 1);
++        }
++        if (ack) {
++            found[a >> 3] |= (uint8_t)(1u << (a & 7));
++        }
++    }
++    memcpy(s_i2c_present, found, sizeof(s_i2c_present));
++}
++
  void AP_Periph_FW::can_imu_update(void)
  {
 +    bool mpu_present = false;
-+    s_ist_dev = hal.i2c_mgr->get_device(0, 0x0E, 400000);
++    /* Aux mag = the GPS module's compass, and it is NOT a fixed part: an
++     * IST8310 (0x0E) exposes a die temperature (reg 0x1C), a QMC5883P
++     * (0x2C) does not. Detect whichever is actually on the bus and only
++     * read a temperature if that chip has one - never assume a part. */
++    {
++        s_auxmag_temp_reg = 0;
++        auto ist = hal.i2c_mgr->get_device(0, 0x0E, 400000);
++        uint8_t id = 0;
++        bool is_ist = false;
++        if (ist) {
++            WITH_SEMAPHORE(ist->get_semaphore());
++            is_ist = ist->read_registers(0x00, &id, 1) && id == 0x10;
++        }
++        if (is_ist) {
++            s_auxmag_dev = std::move(ist);
++            s_auxmag_temp_reg = 0x1C;
++            can_printf("aux mag: IST8310 @0x0E (die temp)");
++        } else {
++            auto qmc = hal.i2c_mgr->get_device(0, 0x2C, 400000);
++            uint8_t cid = 0;
++            bool is_qmc = false;
++            if (qmc) {
++                WITH_SEMAPHORE(qmc->get_semaphore());
++                is_qmc = qmc->read_registers(0x00, &cid, 1) && cid == 0x80;
++            }
++            if (is_qmc) {
++                can_printf("aux mag: QMC5883P @0x2C (no die temp)");
++            }
++        }
++    }
 +    s_imu_dev = hal.i2c_mgr->get_device(0, 0x68, 400000);
 +    if (s_imu_dev) {
 +        WITH_SEMAPHORE(s_imu_dev->get_semaphore());
@@ -525,6 +597,10 @@ index 1ab2a2e..c4d20ba 100644
 +    // ~0.9 ms, so 1 kHz would consume >90% of the bus thread and starve
 +    // the baro/mag drivers (measured: baro 50->14 Hz when oversubscribed).
 +    // 1250 us leaves them room. Publish rate is governed below.
++    /* one non-destructive presence scan of our I2C bus - the result is
++     * rebroadcast as msg 20505 so the MP1 can spot unknown devices. */
++    ninja_i2c_scan();
++
 +    if (mpu_present) {
 +        s_imu_dev->register_periodic_callback(1000,
 +            FUNCTOR_BIND_MEMBER(&AP_Periph_FW::imu_sample_cb, void));
@@ -559,9 +635,8 @@ index 1ab2a2e..c4d20ba 100644
 +                           stream_on ? (unsigned)ninja_imu_rate_cmd : (unsigned)(ctl_ms != 0),
 +                           (unsigned)ninja_ak_rate_cmd);
 +            }
-         }
- 
--        imu.update();
++        }
++
 +        // die temperatures ride regardless - 1-2 frames/s, flash-harmless
 +        {
 +            static uint32_t temp_last_ms2;
@@ -575,19 +650,31 @@ index 1ab2a2e..c4d20ba 100644
 +                        pay[0] = (int16_t)((s_imu_buf[6] << 8) | s_imu_buf[7]);
 +                    }
 +                }
-+                if (s_ist_dev) {
++                if (s_auxmag_dev && s_auxmag_temp_reg) {
 +                    uint8_t tb[2];
 +                    bool ok;
 +                    {
-+                        WITH_SEMAPHORE(s_ist_dev->get_semaphore());
-+                        ok = s_ist_dev->read_registers(0x1C, tb, 2);
++                        WITH_SEMAPHORE(s_auxmag_dev->get_semaphore());
++                        ok = s_auxmag_dev->read_registers(s_auxmag_temp_reg, tb, 2);
 +                    }
 +                    if (ok) {
 +                        pay[1] = (int16_t)(tb[0] | (tb[1] << 8));
 +                    }
-+                }
++                }   /* else pay[1] stays 0x7FFF: this mag has no die temp */
 +                canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_IMUTEMP,
 +                                 CANARD_TRANSFER_PRIORITY_LOW, pay, 4);
++            }
+         }
+ 
+-        imu.update();
++        // I2C presence bitmap at 0.2 Hz (msg 20505)
++        {
++            static uint32_t scan_last_ms;
++            const uint32_t now_sc = AP_HAL::millis();
++            if (now_sc - scan_last_ms >= 5000) {
++                scan_last_ms = now_sc;
++                canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_I2CSCAN,
++                                 CANARD_TRANSFER_PRIORITY_LOW, s_i2c_present, sizeof(s_i2c_present));
 +            }
 +        }
  

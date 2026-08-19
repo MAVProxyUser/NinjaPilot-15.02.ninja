@@ -574,13 +574,18 @@ static int can_fd = -1;
 /* deadman heartbeat state (vendor 20510). Zero rates = never sent. */
 static volatile uint16_t streamctl_imu_hz;
 static volatile uint8_t  streamctl_ak_hz;
+static volatile uint8_t  streamctl_baro_hz;
+static volatile uint8_t  streamctl_mag_hz;
 static uint8_t streamctl_tid;
 static double  streamctl_last_tx;
 
-void PIOS_SENSORS_HUB_SetCanStreamRates(uint16_t imu_hz, uint8_t ak_hz)
+void PIOS_SENSORS_HUB_SetCanStreamRates(uint16_t imu_hz, uint8_t ak_hz,
+                                        uint8_t baro_hz, uint8_t mag_hz)
 {
-    streamctl_imu_hz = imu_hz;
-    streamctl_ak_hz  = ak_hz;
+    streamctl_imu_hz  = imu_hz;
+    streamctl_ak_hz   = ak_hz;
+    streamctl_baro_hz = baro_hz;
+    streamctl_mag_hz  = mag_hz;
     streamctl_last_tx = 0;      /* send immediately on next poll */
 }
 
@@ -590,7 +595,8 @@ void PIOS_SENSORS_HUB_SetCanStreamRates(uint16_t imu_hz, uint8_t ak_hz)
  * + tail, priority 16. Its ARRIVAL is the node's deadman feed. */
 static void streamctl_tx(void)
 {
-    if (streamctl_imu_hz == 0 && streamctl_ak_hz == 0) {
+    if (streamctl_imu_hz == 0 && streamctl_ak_hz == 0
+        && streamctl_baro_hz == 0 && streamctl_mag_hz == 0) {
         return;
     }
     struct can_frame f;
@@ -599,8 +605,10 @@ static void streamctl_tx(void)
     f.data[0] = (uint8_t)(streamctl_imu_hz & 0xFF);
     f.data[1] = (uint8_t)(streamctl_imu_hz >> 8);
     f.data[2] = streamctl_ak_hz;
-    f.data[3] = (uint8_t)(0xC0 | (streamctl_tid++ & 0x1F));
-    f.can_dlc = 4;
+    f.data[3] = streamctl_baro_hz;
+    f.data[4] = streamctl_mag_hz;
+    f.data[5] = (uint8_t)(0xC0 | (streamctl_tid++ & 0x1F));
+    f.can_dlc = 6;
     if (write(can_fd, &f, sizeof(f)) != (ssize_t)sizeof(f)) {
         /* full TX queue at this instant - the next second's beat covers it */
     }
@@ -701,7 +709,7 @@ struct dc_reasm {
     uint8_t toggle;
     bool    active;
 };
-static struct dc_reasm fix2_rx, aux_rx, sat_rx;
+static struct dc_reasm fix2_rx, aux_rx, sat_rx, i2cscan_rx;
 
 static void fix2_decode(const uint8_t *p, uint8_t n);
 static void aux_decode(const uint8_t *p, uint8_t n);
@@ -951,18 +959,24 @@ static void can_poll(void)
          * so dispatch it BEFORE the start-of-transfer filter below. Feeding
          * it only start frames (the first version of this code) means
          * reassembly silently never completes. */
-        if (mt == DC_MSG_FIX2_REAL || mt == 1061 || mt == 20502) {
+        if (mt == DC_MSG_FIX2_REAL || mt == 1061 || mt == 20502 || mt == 20505) {
             const uint8_t *pl = NULL;
             struct dc_reasm *rx = (mt == DC_MSG_FIX2_REAL) ? &fix2_rx :
-                                  (mt == 1061) ? &aux_rx : &sat_rx;
+                                  (mt == 1061) ? &aux_rx :
+                                  (mt == 20502) ? &sat_rx : &i2cscan_rx;
             uint8_t n = dc_reasm_feed(rx, f.data, f.can_dlc, &pl);
             if (n > 0) {
                 if (mt == DC_MSG_FIX2_REAL) {
                     fix2_decode(pl, n);
                 } else if (mt == 1061) {
                     aux_decode(pl, n);
-                } else {
+                } else if (mt == 20502) {
                     satinfo_decode(pl, n);
+                } else if (n >= 16) {
+                    hub_publish_begin();
+                    memcpy(hub.i2c_present, pl, 16);
+                    hub.i2c_present_seq++;
+                    hub_publish_end();
                 }
             }
             continue;
