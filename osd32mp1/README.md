@@ -575,6 +575,9 @@ and dronecan-allocator confirmed active throughout.
 |---|---|
 | `ap-periph-ninja-debug.patch` | **the custom AP_Periph diff** for node 124: declared BMP388 probe, I2C debug scanner (SDA/SCL-swap detection over `debug.LogMessage`), airspeed+battery trimmed. Apply to ArduPilot master, build with **gcc 10.2.1 only** |
 | `fw/AP_Periph-ninja-gcc10.bin` | the known-good binary built from that patch (195,244 B) — exactly what is flashed on node 124 |
+| `flash_until_boot.sh` | retry an over-CAN node flash until the node reports OPERATIONAL - the transfer is intermittently flaky (~840 reads = clean, 2x that = failing) |
+| `can_flash_verbose.py` | instrumented flasher: counts Read requests and max offset, the only trustworthy progress signal |
+| `fw/AP_Periph-ninja-navsat.bin` | node firmware with UBX-NAV-SAT capture + vendor msg 20502 (per-satellite table) |
 | `can_flash.py` | **flash an L431 node over CAN** (BeginFirmwareUpdate + FileServer); embeds the three dronecan-python traps |
 | `allocatord.py` | DroneCAN node-ID allocator **daemon** (runs on the board under `dronecan-allocator.service`; brings can0 up itself). Kernel CAN_RAW_FILTERs drop the sensor firehose before userspace (30-40% CPU -> ~2.5%); per-frame decode guard logs undecodable transfers instead of dying |
 | `dronecan_allocator.py` | the older session tool — allocates, prints a report, then **exits by design**; useful for its report only |

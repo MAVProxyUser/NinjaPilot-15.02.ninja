@@ -1,8 +1,6 @@
 <xml>
     <object name="MissionRecoverySettings" singleinstance="true" settings="true" category="Navigation">
-        <description>Policy for recovering a mission after a reboot. The plan itself is
-        always restored from storage; this decides whether the aircraft resumes at the
-        waypoint it had reached, and under what sanity limits.</description>
+        <description>Policy for recovering a mission after a reboot: whether to resume at the waypoint reached, and the sanity limits.</description>
         <field name="AutoResume" units="" type="enum" elements="1"
                options="Disabled,ResumeAtWaypoint" defaultvalue="Disabled"/>
         <field name="MaxDistance" units="m" type="float" elements="1" defaultvalue="50"/>

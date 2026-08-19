@@ -3103,3 +3103,13 @@ leg, and an explicit pilot/settings opt-in.
   planner-driven mission (poking WaypointActive over telemetry does not
   call setWaypoint), so resume-after-reboot wants a flown or simulated
   mission to confirm.
+- **Adding a UAVObject: the two traps.** (1) uavobjgenerator emits the
+  XML <description> VERBATIM into a C++ string literal, so a multi-line
+  description produces "error: expected expression" in the GCS build -
+  keep descriptions on ONE line. (2) The GCS's
+  plugins/uavobjects/uavobjects.pro carries a STATIC synthetics
+  inventory (HEADERS and SOURCES lists); a regenerated object is not
+  compiled until it is added to BOTH lists, and the symptom is a link
+  error naming the new class's constructor. Object IDs hash name+fields
+  only, so editing a description does not change the id and does not
+  require a firmware rebuild.

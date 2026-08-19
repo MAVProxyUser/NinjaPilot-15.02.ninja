@@ -90,6 +90,8 @@ HEADERS += \
     $$UAVOBJECT_SYNTHETICS/magstate.h \
     $$UAVOBJECT_SYNTHETICS/manualcontrolcommand.h \
     $$UAVOBJECT_SYNTHETICS/manualcontrolsettings.h \
+    $$UAVOBJECT_SYNTHETICS/missionprogress.h \
+    $$UAVOBJECT_SYNTHETICS/missionrecoverysettings.h \
     $$UAVOBJECT_SYNTHETICS/mixersettings.h \
     $$UAVOBJECT_SYNTHETICS/mixerstatus.h \
     $$UAVOBJECT_SYNTHETICS/mpu6000settings.h \
@@ -197,6 +199,8 @@ SOURCES += \
     $$UAVOBJECT_SYNTHETICS/magstate.cpp \
     $$UAVOBJECT_SYNTHETICS/manualcontrolcommand.cpp \
     $$UAVOBJECT_SYNTHETICS/manualcontrolsettings.cpp \
+    $$UAVOBJECT_SYNTHETICS/missionprogress.cpp \
+    $$UAVOBJECT_SYNTHETICS/missionrecoverysettings.cpp \
     $$UAVOBJECT_SYNTHETICS/mixersettings.cpp \
     $$UAVOBJECT_SYNTHETICS/mixerstatus.cpp \
     $$UAVOBJECT_SYNTHETICS/mpu6000settings.cpp \
