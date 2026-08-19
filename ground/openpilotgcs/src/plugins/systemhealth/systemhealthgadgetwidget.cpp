@@ -62,6 +62,9 @@ SystemHealthGadgetWidget::SystemHealthGadgetWidget(QWidget *parent) : QGraphicsV
 
     // Listen to autopilot connection events
     TelemetryManager *telMngr = pm->getObject<TelemetryManager>();
+    // The banner is a LINK indicator: clear it when the wire comes up,
+    // not minutes of object-retrieval later.
+    connect(telMngr, SIGNAL(linkEstablished()), this, SLOT(onAutopilotConnect()));
     connect(telMngr, SIGNAL(connected()), this, SLOT(onAutopilotConnect()));
     connect(telMngr, SIGNAL(disconnected()), this, SLOT(onAutopilotDisconnect()));
 

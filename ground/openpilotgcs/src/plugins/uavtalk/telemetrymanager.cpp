@@ -99,6 +99,7 @@ void TelemetryManager::onStart()
     m_telemetry = new Telemetry(m_uavTalk, m_uavobjectManager);
     m_telemetryMonitor = new TelemetryMonitor(m_uavobjectManager, m_telemetry);
 
+    connect(m_telemetryMonitor, SIGNAL(linkEstablished()), this, SIGNAL(linkEstablished()));
     connect(m_telemetryMonitor, SIGNAL(connected()), this, SLOT(onConnect()));
     connect(m_telemetryMonitor, SIGNAL(disconnected()), this, SLOT(onDisconnect()));
     connect(m_telemetryMonitor, SIGNAL(telemetryUpdated(double, double)), this, SLOT(onTelemetryUpdate(double, double)));

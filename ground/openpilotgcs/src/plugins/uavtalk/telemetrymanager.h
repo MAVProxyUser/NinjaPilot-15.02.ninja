@@ -57,6 +57,7 @@ public:
     ConnectionState connectionState() const;
 
 signals:
+    void linkEstablished();
     void connecting();
     void connected();
     void disconnecting();

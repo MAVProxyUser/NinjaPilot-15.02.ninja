@@ -259,6 +259,7 @@ void TelemetryMonitor::processStatsUpdates()
     if (gcsStats.Status == GCSTelemetryStats::STATUS_CONNECTED && gcsStats.Status != oldStatus) {
         statsTimer->setInterval(STATS_UPDATE_PERIOD_MS);
         qDebug("Connection with the autopilot established");
+        emit linkEstablished();
         startRetrievingObjects();
     }
     if (gcsStats.Status == GCSTelemetryStats::STATUS_DISCONNECTED && gcsStats.Status != oldStatus) {

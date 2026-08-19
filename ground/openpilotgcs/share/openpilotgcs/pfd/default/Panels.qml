@@ -2,6 +2,18 @@ import QtQuick 2.0
 
 Item {
     id: panels
+
+    /* At load the cards' base x is the SHOWN position and the hidden
+     * state applies a beat later, so the boot briefly played the whole
+     * 800 ms slide-out - a phantom OPLink card popping out and retreating.
+     * Gate every transition until the scene has settled; after that the
+     * animations behave exactly as before. */
+    property bool bootSettled: false
+    Timer {
+        interval: 1200
+        running: true
+        onTriggered: panels.bootSettled = true
+    }
     property variant sceneSize
 
     property real est_flight_time: Math.round(FlightBatteryState.EstimatedFlightTime)
@@ -194,6 +206,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               id: close_anim
               PropertyAnimation  { property: "x"; duration: 800 }
@@ -221,6 +234,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -246,6 +260,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               id: rc_input_anim
               PropertyAnimation  { property: "x"; duration: 800 }
@@ -268,6 +283,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -295,6 +311,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -323,6 +340,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -358,6 +376,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -383,6 +402,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -407,6 +427,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -449,6 +470,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -491,6 +513,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -538,6 +561,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -583,6 +607,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -610,6 +635,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -635,6 +661,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -656,6 +683,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -677,6 +705,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -698,6 +727,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -724,6 +754,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -745,6 +776,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -789,6 +821,7 @@ Item {
             }
  
             transitions: Transition  {
+        enabled: panels.bootSettled
             SequentialAnimation  {
                  PropertyAnimation  { property: "x"; duration: 800 }
                  }
@@ -810,6 +843,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -834,6 +868,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -873,6 +908,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -898,6 +934,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               id: system_anim
               PropertyAnimation  { property: "x"; duration: 800 }
@@ -920,6 +957,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -954,6 +992,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -988,6 +1027,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -1020,6 +1060,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -1052,6 +1093,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -1084,6 +1126,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -1122,6 +1165,7 @@ Item {
         }
  
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -1145,6 +1189,7 @@ Item {
         }
 
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -1165,6 +1210,7 @@ Item {
         }
 
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -1185,6 +1231,7 @@ Item {
         }
 
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }
@@ -1205,6 +1252,7 @@ Item {
         }
 
         transitions: Transition  {
+        enabled: panels.bootSettled
         SequentialAnimation  {
               PropertyAnimation  { property: "x"; duration: 800 }
               }

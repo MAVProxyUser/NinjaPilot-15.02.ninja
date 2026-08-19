@@ -49,6 +49,11 @@ public:
     ~TelemetryMonitor();
 
 signals:
+    /* fires the moment the handshake completes - the wire is up and
+     * objects are flowing. connected() still fires only after the
+     * settings retrieval finishes, because config consumers rely on
+     * retrieved data; link INDICATORS should use this one. */
+    void linkEstablished();
     void connected();
     void disconnected();
     void telemetryUpdated(double txRate, double rxRate);
