@@ -3328,3 +3328,49 @@ pre-check) now lives in SKILLS.md "Change or add a UAVObject".
 - New objects AK8975Sensor + SensorHubSettings + the AuxMagSensor field
   went through the FULL both-sides recipe (SKILLS.md); tree hash
   afea8b55 verified equal on Mac and board. GCS relaunch required.
+## THE BRICK, THE SWD RESCUE, AND THE BREATHING LED (2026-08-19, the long night)
+
+A flash of the unproven deadman image left node 124 unbootable, and I
+burned HOURS blaming wiring/termination while the fault was mine from the
+first failed flash. The hard lessons, now permanent:
+
+- **A CRC-valid but broken app locks the CAN door from inside.** The
+  bootloader (incorruptible, as designed) jumps IMMEDIATELY to a valid
+  app with ZERO CAN listen window - so if that app hangs before CAN init,
+  no bootloader-race recovery is possible. Proven decisively: reset the
+  node with a 666 req/s BeginFirmwareUpdate sweep at ALL 125 ids running,
+  and it emitted zero frames across the boot. The blue LED "flashing
+  erratically" was just the transceiver RX-blinking at our spam - the node
+  HEARD us (RX works) but never transmitted (app hung pre-TX-init). Stop
+  spamming -> blue goes dark. That RX/TX asymmetry is the signature of
+  hung-before-CAN-TX; do not mistake it for a wiring fault.
+- **RULE, in bold: never flash an image whose boot path has not been
+  tested, and keep an SWD probe wired on the bench.** The deadman image's
+  no-IMU branch had never been exercised.
+- **SWD recovery WORKS and is now the documented floor** (see SKILLS.md).
+  Matek L431 SWD pads: SWD/SWC/G/3V3 on the bottom. Wire ST-Link STM32
+  header pin7=SWDIO->SWD, pin9=SWCLK->SWC, pin8=GND->G, and CRITICALLY
+  pin1=VAPP->the board 3V3 pad (a genuine ST-Link refuses with "target
+  voltage 0.003V" if VAPP floats - this cost an hour; the L431 SWD pins
+  are NOT 5V tolerant so never feed VAPP from the 5V pad). openocd:
+  init/reset halt/flash write_image erase <app.bin> 0x0800A000 (app base
+  = FLASH_RESERVE_START_KB 40 = 0x0800A000; the bootloader below is left
+  untouched). Diagnose a hang by halting and reading PC: a fixed PC in
+  thread mode at a `b .` (e7fe) instruction is a panic/lockup; a changing
+  PC means it is running.
+- **The panic itself: AP_INERTIALSENSOR_ALLOW_NO_SENSORS.** When
+  AP_PERIPH_IMU_ENABLED=1 the INS init calls AP_HAL::panic("INS needs at
+  least 1 gyro and 1 accel") on zero gyros = the e7fe lockup. The current
+  hwdef already sets it to 0 (no panic); the OLD df1c441c79db predated
+  that and locked up when its MPU was not detected.
+- **BREATHING LED (user request), implemented in AP_Periph.cpp**: while
+  the node is powered but has NOT yet joined the CAN network
+  (no_iface_finished_dna), the status LED breathes - software PWM, ~1 kHz
+  carrier, ~3 s triangle envelope, runs every loop pass. Once it gets a
+  node ID it reverts to the stock 1 Hz heartbeat. "Breathe until
+  connection occurs", exactly.
+- **VERDICT: the full current firmware BOOTS AND RUNS** (SWD-flashed
+  16b1365, PC verified advancing, not stuck). Live: IMU 490 Hz, AK8975
+  9.9 Hz, die TEMPS 1 Hz, deadman heartbeat n100/20510 driving the gated
+  streams, baro/GPS/mags all nominal, node mode OPERATIONAL. The deadman +
+  AK8975 + die-temp + breathing work is all proven on hardware at last.

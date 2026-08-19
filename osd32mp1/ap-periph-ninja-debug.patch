@@ -1,5 +1,5 @@
 diff --git a/Tools/AP_Periph/AP_Periph.cpp b/Tools/AP_Periph/AP_Periph.cpp
-index 04cc75e..d6e20c8 100644
+index 04cc75e..4910998 100644
 --- a/Tools/AP_Periph/AP_Periph.cpp
 +++ b/Tools/AP_Periph/AP_Periph.cpp
 @@ -177,10 +177,10 @@ void AP_Periph_FW::init()
@@ -17,7 +17,7 @@ index 04cc75e..d6e20c8 100644
      }
  #endif
  
-@@ -426,6 +426,95 @@ void AP_Periph_FW::update()
+@@ -426,6 +426,115 @@ void AP_Periph_FW::update()
  
      static uint32_t last_led_ms;
      uint32_t now = AP_HAL::millis();
@@ -109,6 +109,26 @@ index 04cc75e..d6e20c8 100644
 +        }
 +    }
 +#endif /* NINJA_I2C_DEBUG */
++
++#ifdef HAL_GPIO_PIN_LED
++    // NinjaPilot: while powered but not yet joined to the CAN network (no
++    // node ID), BREATHE the status LED slowly instead of sitting dark - a
++    // bench node that is alive and waiting should look alive. Runs every
++    // loop pass (the 1 Hz heartbeat below only applies once connected).
++    // Software PWM: ~1 kHz carrier, ~3 s triangle brightness envelope.
++    if (no_iface_finished_dna) {
++        const uint32_t us = AP_HAL::micros();
++        const uint32_t breath_us = 3000000;
++        const uint32_t ph = us % breath_us;
++        int32_t level = (ph < breath_us / 2)
++                        ? (int32_t)(ph / (breath_us / 512))
++                        : (int32_t)(255 - (ph - breath_us / 2) / (breath_us / 512));
++        if (level < 0) { level = 0; }
++        if (level > 255) { level = 255; }
++        const uint32_t duty = (us % 1000) * 256 / 1000;
++        palWriteLine(HAL_GPIO_PIN_LED, (duty < (uint32_t)level) ? 1 : 0);
++    }
++#endif
 +
      if (now - last_led_ms > 1000) {
          last_led_ms = now;
@@ -255,10 +275,44 @@ index a4f089d..704f866 100644
      const float temp = baro.get_temperature();
  
 diff --git a/Tools/AP_Periph/can.cpp b/Tools/AP_Periph/can.cpp
-index ec0e76a..0813508 100644
+index ec0e76a..977472a 100644
 --- a/Tools/AP_Periph/can.cpp
 +++ b/Tools/AP_Periph/can.cpp
-@@ -1417,7 +1417,12 @@ void AP_Periph_FW::node_status_send(void)
+@@ -811,6 +811,23 @@ void AP_Periph_FW::onTransferReceived(CanardInstance* canard_instance,
+     }
+ 
+     switch (transfer->data_type_id) {
++    case 20510: {
++        // NinjaPilot stream control: u16 imu Hz + u8 AK8975 Hz. Arrival
++        // time IS the deadman heartbeat - the IMU/AK streams stop 5 s
++        // after these stop coming (see imu.cpp).
++        extern volatile uint32_t ninja_streamctl_ms;
++        extern volatile uint16_t ninja_imu_rate_cmd;
++        extern volatile uint8_t  ninja_ak_rate_cmd;
++        uint16_t r = 0;
++        uint8_t akr = 0;
++        canardDecodeScalar(transfer, 0, 16, false, &r);
++        canardDecodeScalar(transfer, 16, 8, false, &akr);
++        ninja_imu_rate_cmd = r;
++        ninja_ak_rate_cmd  = akr;
++        ninja_streamctl_ms = AP_HAL::millis();
++        break;
++    }
++
+     case UAVCAN_PROTOCOL_GETNODEINFO_ID:
+         handle_get_node_info(canard_instance, transfer);
+         break;
+@@ -957,6 +974,9 @@ bool AP_Periph_FW::shouldAcceptTransfer(const CanardInstance* canard_instance,
+     }
+ 
+     switch (data_type_id) {
++    case 20510: // NinjaPilot stream control (see imu.cpp): deadman heartbeat
++        *out_data_type_signature = 0x4E494E4A49505331ULL;
++        return true;
+     case UAVCAN_PROTOCOL_GETNODEINFO_ID:
+         *out_data_type_signature = UAVCAN_PROTOCOL_GETNODEINFO_SIGNATURE;
+         return true;
+@@ -1417,7 +1437,12 @@ void AP_Periph_FW::node_status_send(void)
          uint8_t buffer[UAVCAN_PROTOCOL_NODESTATUS_MAX_SIZE];
          node_status.uptime_sec = AP_HAL::millis() / 1000U;
  
@@ -352,10 +406,10 @@ index 2d39645..955e6dc 100644
      if (gps.have_gps_yaw() && last_relposheading_ms == 0) {
          float yaw_deg, yaw_acc_deg;
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
-index 1ab2a2e..7810702 100644
+index 1ab2a2e..c4d20ba 100644
 --- a/Tools/AP_Periph/imu.cpp
 +++ b/Tools/AP_Periph/imu.cpp
-@@ -2,61 +2,182 @@
+@@ -2,61 +2,306 @@
  
  #if AP_PERIPH_IMU_ENABLED
  #include <dronecan_msgs.h>
@@ -382,10 +436,27 @@ index 1ab2a2e..7810702 100644
 +// latest sample and broadcasts.
 +#define NINJA_MSG_GYRO       20500
 +#define NINJA_MSG_IMUTEMP    20503
++#define NINJA_MSG_AKMAG      20504
++//   20504  AK8975 mag (the 9150's own compass, via I2C bypass at 0x0C):
++//          int16[3] LE, ASA-adjusted counts (0.3 uT/LSB) + ST2 byte
++//          (bit3 = overflow). Device frame - MP1 owns interpretation.
++//   20510  STREAM CONTROL (MP1 -> node): u16 imu rate Hz + u8 AK rate Hz.
++//          DEADMAN: the IMU and AK streams run ONLY while these arrive
++//          fresh (<5 s old). A rebooted node is silent until the MP1
++//          firmware asks - so a reboot ALWAYS leaves a flash-quiet bus.
++#define NINJA_STREAMCTL_TIMEOUT_MS 5000
 +#define NINJA_MSG_ACCEL      20501
 +#define NINJA_IMU_SIGNATURE  0x4E494E4A49505331ULL  // "NINJIPS1"
 +
 +static AP_HAL::OwnPtr<AP_HAL::I2CDevice> s_imu_dev;
++static AP_HAL::OwnPtr<AP_HAL::I2CDevice> s_ist_dev;   // IST8310 die temp
++static AP_HAL::OwnPtr<AP_HAL::I2CDevice> s_ak_dev;    // AK8975 behind bypass
++static float s_ak_adj[3] = { 1.0f, 1.0f, 1.0f };      // fuse-ROM sensitivity
++static bool  s_ak_ok;
++// written by the 20510 handler in can.cpp
++volatile uint32_t ninja_streamctl_ms;
++volatile uint16_t ninja_imu_rate_cmd;
++volatile uint8_t  ninja_ak_rate_cmd;
 +static volatile uint32_t s_imu_seq;      // odd = write in progress
 +static uint8_t s_imu_buf[14];
 +
@@ -404,36 +475,65 @@ index 1ab2a2e..7810702 100644
 +
  void AP_Periph_FW::can_imu_update(void)
  {
++    bool mpu_present = false;
++    s_ist_dev = hal.i2c_mgr->get_device(0, 0x0E, 400000);
 +    s_imu_dev = hal.i2c_mgr->get_device(0, 0x68, 400000);
-+    if (!s_imu_dev) {
-+        return;
-+    }
-+    {
++    if (s_imu_dev) {
 +        WITH_SEMAPHORE(s_imu_dev->get_semaphore());
 +        s_imu_dev->set_retries(2);
 +        uint8_t who = 0;
-+        if (!s_imu_dev->read_registers(0x75, &who, 1) || who != 0x68) {
-+            can_printf("IMU proxy: no MPU at 0x68 (who=%02x)", who);
-+            return;             // absent sensor = quiet exit, never a panic
++        if (s_imu_dev->read_registers(0x75, &who, 1) && who == 0x68) {
++            mpu_present = true;
++            s_imu_dev->write_register(0x6B, 0x01);   // wake, PLL clock
++            hal.scheduler->delay(10);
++            s_imu_dev->write_register(0x19, 0x00);   // no sample-rate divider
++            s_imu_dev->write_register(0x1A, 0x00);   // DLPF OFF - raw 256 Hz BW
++            s_imu_dev->write_register(0x1B, 0x18);   // gyro +/-2000 dps
++            s_imu_dev->write_register(0x1C, 0x00);   // accel +/-2 g
++            s_imu_dev->write_register(0x37, 0x02);   // I2C bypass: AK8975 -> main bus
++        } else {
++            can_printf("IMU proxy: no MPU at 0x68 (who=%02x) - temp/deadman duty only", who);
 +        }
-+        s_imu_dev->write_register(0x6B, 0x01);   // wake, PLL clock
-+        hal.scheduler->delay(10);
-+        s_imu_dev->write_register(0x19, 0x00);   // no sample-rate divider
-+        s_imu_dev->write_register(0x1A, 0x00);   // DLPF OFF - raw 256 Hz BW
-+        s_imu_dev->write_register(0x1B, 0x18);   // gyro +/-2000 dps
-+        s_imu_dev->write_register(0x1C, 0x00);   // accel +/-2 g
 +    }
-+    can_printf("IMU proxy v3: MPU-9150 bus-thread sampling up");
++
++    if (mpu_present) {
++        // AK8975: read the factory sensitivity fuses once
++        s_ak_dev = hal.i2c_mgr->get_device(0, 0x0C, 400000);
++        if (s_ak_dev) {
++            WITH_SEMAPHORE(s_ak_dev->get_semaphore());
++            s_ak_dev->set_retries(2);
++            uint8_t wia = 0;
++            if (s_ak_dev->read_registers(0x00, &wia, 1) && wia == 0x48) {
++                uint8_t asa[3] = { 128, 128, 128 };
++                s_ak_dev->write_register(0x0A, 0x0F);      // fuse ROM access
++                hal.scheduler->delay(1);
++                s_ak_dev->read_registers(0x10, asa, 3);
++                s_ak_dev->write_register(0x0A, 0x00);      // power-down
++                for (int i = 0; i < 3; i++) {
++                    s_ak_adj[i] = ((float)((int)asa[i] - 128)) * 0.5f / 128.0f + 1.0f;
++                }
++                s_ak_ok = true;
++                can_printf("AK8975 up via bypass: asa=%u/%u/%u", asa[0], asa[1], asa[2]);
++            } else {
++                can_printf("AK8975: no WIA ack (0x%02x)", wia);
++            }
++        }
++        can_printf("IMU proxy v3: MPU-9150 bus-thread sampling up (deadman-gated)");
++    }
 +
 +    // 800 Hz sampling in the bus thread: at 400 kHz a transfer costs
 +    // ~0.9 ms, so 1 kHz would consume >90% of the bus thread and starve
 +    // the baro/mag drivers (measured: baro 50->14 Hz when oversubscribed).
 +    // 1250 us leaves them room. Publish rate is governed below.
-+    s_imu_dev->register_periodic_callback(1000,
-+        FUNCTOR_BIND_MEMBER(&AP_Periph_FW::imu_sample_cb, void));
++    if (mpu_present) {
++        s_imu_dev->register_periodic_callback(1000,
++            FUNCTOR_BIND_MEMBER(&AP_Periph_FW::imu_sample_cb, void));
++    }
 +
 +    uint32_t last_seq = 0;
 +    uint16_t tx_fail_run = 0;
++    uint32_t ak_last_ms = 0;
++    bool ak_pending = false;
 +
      while (true) {
 -        // we need to delay by a ms value as hal->schedule->delay_microseconds_boost
@@ -441,75 +541,60 @@ index 1ab2a2e..7810702 100644
 -        const uint32_t delay_ms = 1000U / g.imu_sample_rate;
 -        hal.scheduler->delay(delay_ms);
 +        const uint32_t iter_start_us = AP_HAL::micros();
-+        // HARD ceiling 500: at 400 kHz bus clock a higher saved value
-+        // re-storms the wire on every boot before any command can land
-+        // (lived experience, 2026-08-17). Raise only with a matching
-+        // receiver-side fix on the MP1's m_can RX path.
-+        const uint16_t rate = constrain_int16(g.imu_sample_rate.get(), 1, 1000);
  
 -        if (delay_ms == 0) {
 -            // sleep for a bit to avoid flooding the CPU
-+        // wait for a FRESH sample, then take a tear-safe copy
-+        uint8_t d[14];
-+        const uint32_t t_rd0 = AP_HAL::micros();
-+        while (true) {
-+            const uint32_t s1 = s_imu_seq;
-+            if (!(s1 & 1) && s1 != last_seq) {
-+                memcpy(d, s_imu_buf, 14);
-+                if (s_imu_seq == s1) {
-+                    last_seq = s1;
-+                    break;
-+                }
+-            hal.scheduler->delay_microseconds(100);
++        // DEADMAN: sensor streams run only while the MP1 asks, freshly.
++        const uint32_t ctl_ms  = ninja_streamctl_ms;
++        const bool ctl_fresh   = ctl_ms != 0
++                                 && (AP_HAL::millis() - ctl_ms) < NINJA_STREAMCTL_TIMEOUT_MS;
++        const bool stream_on   = mpu_present && ctl_fresh && ninja_imu_rate_cmd > 0;
++        {
++            static bool was_on;
++            if (stream_on != was_on) {
++                was_on = stream_on;
++                can_printf(stream_on ? "STREAM ON: imu=%u Hz ak=%u Hz"
++                                     : "STREAM OFF (deadman %u)",
++                           stream_on ? (unsigned)ninja_imu_rate_cmd : (unsigned)(ctl_ms != 0),
++                           (unsigned)ninja_ak_rate_cmd);
 +            }
-             hal.scheduler->delay_microseconds(100);
          }
-+        const uint32_t t_rd1 = AP_HAL::micros();
  
 -        imu.update();
-+        int16_t pkt6[3];
-+        // registers are big-endian; wire contract is little-endian raw counts
-+        pkt6[0] = (int16_t)((d[8]  << 8) | d[9]);
-+        pkt6[1] = (int16_t)((d[10] << 8) | d[11]);
-+        pkt6[2] = (int16_t)((d[12] << 8) | d[13]);
-+        bool tx_fail = !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_GYRO,
-+                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
-+
-+        pkt6[0] = (int16_t)((d[0] << 8) | d[1]);
-+        pkt6[1] = (int16_t)((d[2] << 8) | d[3]);
-+        pkt6[2] = (int16_t)((d[4] << 8) | d[5]);
-+        tx_fail |= !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_ACCEL,
-+                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
-+        // die temperature at 1 Hz - the register bytes ride the same burst
++        // die temperatures ride regardless - 1-2 frames/s, flash-harmless
 +        {
-+            static uint32_t temp_last_ms;
-+            const uint32_t now_t = AP_HAL::millis();
-+            if (now_t - temp_last_ms >= 1000) {
-+                temp_last_ms = now_t;
-+                int16_t traw = (int16_t)((d[6] << 8) | d[7]);
++            static uint32_t temp_last_ms2;
++            const uint32_t now_t2 = AP_HAL::millis();
++            if (now_t2 - temp_last_ms2 >= 1000) {
++                temp_last_ms2 = now_t2;
++                int16_t pay[2] = { 0x7FFF, 0x7FFF };   // sentinel = absent
++                if (mpu_present) {
++                    const uint32_t s1 = s_imu_seq;
++                    if (!(s1 & 1)) {
++                        pay[0] = (int16_t)((s_imu_buf[6] << 8) | s_imu_buf[7]);
++                    }
++                }
++                if (s_ist_dev) {
++                    uint8_t tb[2];
++                    bool ok;
++                    {
++                        WITH_SEMAPHORE(s_ist_dev->get_semaphore());
++                        ok = s_ist_dev->read_registers(0x1C, tb, 2);
++                    }
++                    if (ok) {
++                        pay[1] = (int16_t)(tb[0] | (tb[1] << 8));
++                    }
++                }
 +                canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_IMUTEMP,
-+                                 CANARD_TRANSFER_PRIORITY_LOW, &traw, 2);
++                                 CANARD_TRANSFER_PRIORITY_LOW, pay, 4);
 +            }
 +        }
-+        const uint32_t t_bc1 = AP_HAL::micros();
  
 -        if (!imu.healthy()) {
--            continue;
-+        // decomposition telemetry: rd = wait-for-fresh (sample cadence),
-+        // bc = broadcast leg. Reported every 5 s.
-+        static uint32_t st_n, st_rd, st_rd_max, st_bc, st_last_ms;
-+        st_n++;
-+        st_rd += t_rd1 - t_rd0;
-+        st_bc += t_bc1 - t_rd1;
-+        if (t_rd1 - t_rd0 > st_rd_max) { st_rd_max = t_rd1 - t_rd0; }
-+        {
-+            const uint32_t nowst = AP_HAL::millis();
-+            if (nowst - st_last_ms > 5000 && st_n > 0) {
-+                can_printf("IMUSTAT n=%u rd_avg=%u rd_max=%u bc_avg=%u",
-+                           (unsigned)st_n, (unsigned)(st_rd/st_n),
-+                           (unsigned)st_rd_max, (unsigned)(st_bc/st_n));
-+                st_n = 0; st_rd = 0; st_rd_max = 0; st_bc = 0;
-+                st_last_ms = nowst;
-+            }
++        if (!stream_on) {
++            hal.scheduler->delay(100);
+             continue;
          }
  
 -        uavcan_equipment_ahrs_RawIMU pkt {};
@@ -542,6 +627,99 @@ index 1ab2a2e..7810702 100644
 -                         CANARD_TRANSFER_PRIORITY_HIGH,
 -                         &buffer[0],
 -                         total_size);
++        // AK8975 single-shot cycle at the commanded rate
++        if (s_ak_ok && ninja_ak_rate_cmd > 0) {
++            const uint32_t now_ak = AP_HAL::millis();
++            const uint32_t ak_period = 1000UL / constrain_int16(ninja_ak_rate_cmd, 1, 50);
++            if (ak_pending && now_ak - ak_last_ms >= 10) {
++                uint8_t st[8];
++                bool ok;
++                {
++                    WITH_SEMAPHORE(s_ak_dev->get_semaphore());
++                    ok = s_ak_dev->read_registers(0x02, st, 8);
++                }
++                ak_pending = false;
++                if (ok && (st[0] & 0x01)) {
++                    int16_t h[3] = { (int16_t)(st[1] | (st[2] << 8)),
++                                     (int16_t)(st[3] | (st[4] << 8)),
++                                     (int16_t)(st[5] | (st[6] << 8)) };
++                    struct { int16_t h[3]; uint8_t st2; } __attribute__((packed)) pkt;
++                    for (int i = 0; i < 3; i++) {
++                        pkt.h[i] = (int16_t)((float)h[i] * s_ak_adj[i]);
++                    }
++                    pkt.st2 = st[7];
++                    canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_AKMAG,
++                                     CANARD_TRANSFER_PRIORITY_LOW, &pkt, 7);
++                }
++            }
++            if (!ak_pending && now_ak - ak_last_ms >= ak_period) {
++                ak_last_ms = now_ak;
++                WITH_SEMAPHORE(s_ak_dev->get_semaphore());
++                s_ak_dev->write_register(0x0A, 0x01);   // single measurement
++                ak_pending = true;
++            }
++        }
++
++        // HARD ceiling 500: at 400 kHz bus clock a higher saved value
++        // re-storms the wire on every boot before any command can land
++        // (lived experience, 2026-08-17). Raise only with a matching
++        // receiver-side fix on the MP1's m_can RX path. The commanded
++        // rate is clamped by the same param ceiling.
++        uint16_t rate = ninja_imu_rate_cmd;
++        const uint16_t clamp = constrain_int16(g.imu_sample_rate.get(), 1, 1000);
++        if (rate > clamp) {
++            rate = clamp;
++        }
++
++        // wait for a FRESH sample, then take a tear-safe copy
++        uint8_t d[14];
++        const uint32_t t_rd0 = AP_HAL::micros();
++        while (true) {
++            const uint32_t s1 = s_imu_seq;
++            if (!(s1 & 1) && s1 != last_seq) {
++                memcpy(d, s_imu_buf, 14);
++                if (s_imu_seq == s1) {
++                    last_seq = s1;
++                    break;
++                }
++            }
++            hal.scheduler->delay_microseconds(100);
++        }
++        const uint32_t t_rd1 = AP_HAL::micros();
++
++        int16_t pkt6[3];
++        // registers are big-endian; wire contract is little-endian raw counts
++        pkt6[0] = (int16_t)((d[8]  << 8) | d[9]);
++        pkt6[1] = (int16_t)((d[10] << 8) | d[11]);
++        pkt6[2] = (int16_t)((d[12] << 8) | d[13]);
++        bool tx_fail = !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_GYRO,
++                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
++
++        pkt6[0] = (int16_t)((d[0] << 8) | d[1]);
++        pkt6[1] = (int16_t)((d[2] << 8) | d[3]);
++        pkt6[2] = (int16_t)((d[4] << 8) | d[5]);
++        tx_fail |= !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_ACCEL,
++                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
++        const uint32_t t_bc1 = AP_HAL::micros();
++
++        // decomposition telemetry: rd = wait-for-fresh (sample cadence),
++        // bc = broadcast leg. Reported every 5 s.
++        static uint32_t st_n, st_rd, st_rd_max, st_bc, st_last_ms;
++        st_n++;
++        st_rd += t_rd1 - t_rd0;
++        st_bc += t_bc1 - t_rd1;
++        if (t_rd1 - t_rd0 > st_rd_max) { st_rd_max = t_rd1 - t_rd0; }
++        {
++            const uint32_t nowst = AP_HAL::millis();
++            if (nowst - st_last_ms > 5000 && st_n > 0) {
++                can_printf("IMUSTAT n=%u rd_avg=%u rd_max=%u bc_avg=%u",
++                           (unsigned)st_n, (unsigned)(st_rd/st_n),
++                           (unsigned)st_rd_max, (unsigned)(st_bc/st_n));
++                st_n = 0; st_rd = 0; st_rd_max = 0; st_bc = 0;
++                st_last_ms = nowst;
++            }
++        }
++
 +        // DEGRADEDHZ guardrail, IMU-priority policy: sustained TX failure
 +        // latches the flag and caps the AUX streams (baro/mag) at 5 Hz; the
 +        // IMU stream is untouched. Aux restores 10 s after TX goes healthy.
