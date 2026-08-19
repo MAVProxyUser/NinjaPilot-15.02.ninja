@@ -76,6 +76,8 @@
 #include "ratedesired.h"
 #include "revocalibration.h"
 #include "accelgyrosettings.h"
+#include "sensorhubsettings.h"
+#include "ak8975sensor.h"
 #include "systemsettings.h"
 #include "taskinfo.h"
 #if defined(PIOS_INCLUDE_GCSRCVR)
@@ -209,6 +211,16 @@ static struct {
     float baroExtMin, baroExtMax;
     bool  baroTempEnabled;
 } scal;
+
+static void sensorHubSettingsUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
+{
+    SensorHubSettingsData shs;
+
+    SensorHubSettingsGet(&shs);
+    PIOS_SENSORS_HUB_SetCanStreamRates(shs.CanImuRateHz, shs.CanAk8975RateHz);
+    PIOS_SHMLOG_Printf("[sensors] CAN stream command: imu=%u Hz ak=%u Hz",
+                       (unsigned)shs.CanImuRateHz, (unsigned)shs.CanAk8975RateHz);
+}
 
 static void sensorCalUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
 {
@@ -367,6 +379,8 @@ int32_t SensorsInitialize(void)
     }
     MagSensorInitialize();
     RevoCalibrationInitialize();
+    SensorHubSettingsInitialize();
+    AK8975SensorInitialize();
     AccelGyroSettingsInitialize();
     AttitudeSettingsInitialize();
     RevoSettingsInitialize();
@@ -374,6 +388,8 @@ int32_t SensorsInitialize(void)
     RevoCalibrationConnectCallback(&sensorCalUpdatedCb);
     AttitudeSettingsConnectCallback(&sensorCalUpdatedCb);
     RevoSettingsConnectCallback(&sensorCalUpdatedCb);
+    SensorHubSettingsConnectCallback(&sensorHubSettingsUpdatedCb);
+    sensorHubSettingsUpdatedCb(NULL);
 
     return 0;
 }
@@ -546,7 +562,7 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                         a2.x = av2[0];
                         a2.y = av2[1];
                         a2.z = av2[2];
-                        a2.temperature = h.imu_temp_c;
+                        a2.temperature = h.have_imu2_temp ? h.imu2_temp_c : h.imu_temp_c;
                         AccelSensorSet(&a2);
 
                         float gv2[3] = { h.imu2_gyro_dps[0], h.imu2_gyro_dps[1], h.imu2_gyro_dps[2] };
@@ -556,11 +572,25 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                         g2.x = gv2[0] - zrt_trim[0];
                         g2.y = gv2[1] - zrt_trim[1];
                         g2.z = gv2[2] - zrt_trim[2];
-                        g2.temperature = h.imu_temp_c;
+                        g2.temperature = h.have_imu2_temp ? h.imu2_temp_c : h.imu_temp_c;
                         GyroSensorSet(&g2);
                     } else if (failed_over) {
                         failed_over = false;
                         PIOS_SHMLOG_Printf("[sensors] local IMU back - CAN IMU stands down");
+                    }
+                }
+
+                {
+                    static uint32_t last_ak = 0;
+                    if (h.ak_count != last_ak) {
+                        last_ak = h.ak_count;
+                        AK8975SensorData ak;
+                        ak.x = h.ak_mga[0];
+                        ak.y = h.ak_mga[1];
+                        ak.z = h.ak_mga[2];
+                        ak.Overflow = h.ak_overflow ? AK8975SENSOR_OVERFLOW_TRUE
+                                                    : AK8975SENSOR_OVERFLOW_FALSE;
+                        AK8975SensorSet(&ak);
                     }
                 }
 
@@ -628,6 +658,7 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                     am.y = h.mag2_ga[1] * 1000.0f;
                     am.z = h.mag2_ga[2] * 1000.0f;
                     am.Status = AUXMAGSENSOR_STATUS_OK;
+                    am.Temperature = h.have_auxmag_temp ? h.auxmag_temp_raw : 0;
                     AuxMagSensorSet(&am);
                 }
 
@@ -761,6 +792,9 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                     am.x = h.qmc_ga[0] * 1000.0f;           /* Ga -> mGa */
                     am.y = h.qmc_ga[1] * 1000.0f;
                     am.z = h.qmc_ga[2] * 1000.0f;
+                    /* IST8310 die temp: RAW counts - iSentek publishes no
+                     * conversion, so no false degrees here */
+                    am.Temperature = h.have_auxmag_temp ? h.auxmag_temp_raw : 0;
                     am.Status = AUXMAGSENSOR_STATUS_OK;
                     AuxMagSensorSet(&am);
                 }

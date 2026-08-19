@@ -352,10 +352,10 @@ index 2d39645..955e6dc 100644
      if (gps.have_gps_yaw() && last_relposheading_ms == 0) {
          float yaw_deg, yaw_acc_deg;
 diff --git a/Tools/AP_Periph/imu.cpp b/Tools/AP_Periph/imu.cpp
-index 1ab2a2e..1843ae8 100644
+index 1ab2a2e..7810702 100644
 --- a/Tools/AP_Periph/imu.cpp
 +++ b/Tools/AP_Periph/imu.cpp
-@@ -2,61 +2,167 @@
+@@ -2,61 +2,182 @@
  
  #if AP_PERIPH_IMU_ENABLED
  #include <dronecan_msgs.h>
@@ -369,6 +369,9 @@ index 1ab2a2e..1843ae8 100644
 +// NinjaPilot compact IMU stream - RAW PROXY contract (v2):
 +//   20500  gyro  raw int16[3] little-endian counts, +/-2000 dps FS (16.4 LSB/dps)
 +//   20501  accel raw int16[3] little-endian counts, +/-2 g FS (16384 LSB/g)
++//   20503  die temperature, raw int16 LE, 1 Hz - degC = raw/340 + 35.
++//          Bytes 6-7 of the same burst read; they were always in hand and
++//          simply never packed. Single frame, so no storm surface.
 +// The node does NO calibration, NO filtering, NO unit conversion. DLPF is
 +// OFF (256 Hz BW, 8 kHz internal ODR).
 +//
@@ -378,6 +381,7 @@ index 1ab2a2e..1843ae8 100644
 +// callback fills a seqlock-guarded buffer; this thread only consumes the
 +// latest sample and broadcasts.
 +#define NINJA_MSG_GYRO       20500
++#define NINJA_MSG_IMUTEMP    20503
 +#define NINJA_MSG_ACCEL      20501
 +#define NINJA_IMU_SIGNATURE  0x4E494E4A49505331ULL  // "NINJIPS1"
 +
@@ -460,7 +464,8 @@ index 1ab2a2e..1843ae8 100644
              hal.scheduler->delay_microseconds(100);
          }
 +        const uint32_t t_rd1 = AP_HAL::micros();
-+
+ 
+-        imu.update();
 +        int16_t pkt6[3];
 +        // registers are big-endian; wire contract is little-endian raw counts
 +        pkt6[0] = (int16_t)((d[8]  << 8) | d[9]);
@@ -468,13 +473,23 @@ index 1ab2a2e..1843ae8 100644
 +        pkt6[2] = (int16_t)((d[12] << 8) | d[13]);
 +        bool tx_fail = !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_GYRO,
 +                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
- 
--        imu.update();
++
 +        pkt6[0] = (int16_t)((d[0] << 8) | d[1]);
 +        pkt6[1] = (int16_t)((d[2] << 8) | d[3]);
 +        pkt6[2] = (int16_t)((d[4] << 8) | d[5]);
 +        tx_fail |= !canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_ACCEL,
 +                         CANARD_TRANSFER_PRIORITY_HIGH, pkt6, 6);
++        // die temperature at 1 Hz - the register bytes ride the same burst
++        {
++            static uint32_t temp_last_ms;
++            const uint32_t now_t = AP_HAL::millis();
++            if (now_t - temp_last_ms >= 1000) {
++                temp_last_ms = now_t;
++                int16_t traw = (int16_t)((d[6] << 8) | d[7]);
++                canard_broadcast(NINJA_IMU_SIGNATURE, NINJA_MSG_IMUTEMP,
++                                 CANARD_TRANSFER_PRIORITY_LOW, &traw, 2);
++            }
++        }
 +        const uint32_t t_bc1 = AP_HAL::micros();
  
 -        if (!imu.healthy()) {
@@ -697,7 +712,7 @@ index af50bfe..5cd5326 100644
          MSG_RXM_RAWX = 0x15,
          MSG_TIM_TM2 = 0x03
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
-index 067210f..5fea136 100644
+index 067210f..0158eff 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 +++ b/libraries/AP_HAL_ChibiOS/hwdef/MatekL431-Periph/hwdef.dat
 @@ -2,11 +2,10 @@ include ../MatekL431/hwdef.inc
@@ -743,7 +758,7 @@ index 067210f..5fea136 100644
  
  define HAL_USE_ADC TRUE
  define STM32_ADC_USE_ADC1 TRUE
-@@ -78,10 +84,51 @@ PB0 BATT2_VOLTAGE_SENS ADC1 SCALE(1)
+@@ -78,10 +84,52 @@ PB0 BATT2_VOLTAGE_SENS ADC1 SCALE(1)
  PB1 BATT2_CURRENT_SENS ADC1 SCALE(1)
  
  # -------------------- Buzzer+NeoPixels --------------d------
@@ -797,6 +812,7 @@ index 067210f..5fea136 100644
 +# 1.7 ms of wire no matter what bus_clock the device requested. All parts
 +# on this bus are 400 kHz capable (MPU-9150, BMP388, IST8310, QMC5883P).
 +define HAL_I2C_MAX_CLOCK 400000
++
 diff --git a/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h b/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h
 index f1cf94b..c55e218 100644
 --- a/libraries/AP_HAL_ChibiOS/hwdef/scripts/defaults_periph.h

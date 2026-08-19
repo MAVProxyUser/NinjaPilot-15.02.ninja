@@ -125,6 +125,16 @@ struct pios_sensors_hub_data {
     uint8_t  gps_sat_az2[16];
     uint8_t  gps_sat_cno[16];
     uint32_t gps_sat_seq;
+    /* CAN IMU die temperature (vendor 20503, 1 Hz): degC = raw/340 + 35 */
+    float    imu2_temp_c;
+    bool     have_imu2_temp;
+    /* IST8310 die temp, RAW counts (iSentek publishes no conversion) */
+    int16_t  auxmag_temp_raw;
+    bool     have_auxmag_temp;
+    /* AK8975 (the 9150's own compass) via vendor 20504: mGa, device frame */
+    float    ak_mga[3];
+    bool     ak_overflow;
+    uint32_t ak_count;
     uint32_t gps_aux_count;
 
     /* CAN bus health, rolling 1 s window: utilisation in permille of the
@@ -159,5 +169,9 @@ extern int32_t PIOS_SENSORS_HUB_Init(const char *i2c_dev, const char *can_if);
 extern bool PIOS_SENSORS_HUB_Get(struct pios_sensors_hub_data *out);
 
 extern void PIOS_SENSORS_HUB_Stop(void);
+/* Commanded rates for the node's deadman-gated streams; broadcast at 1 Hz
+ * as vendor msg 20510. Until this is called the hub sends nothing and the
+ * node stays silent - a freshly booted bus is always flash-quiet. */
+extern void PIOS_SENSORS_HUB_SetCanStreamRates(uint16_t imu_hz, uint8_t ak_hz);
 
 #endif /* PIOS_SENSORS_HUB_H */

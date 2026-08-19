@@ -34,6 +34,8 @@ SOURCES += \
 # Auto-regenerated synthetics inventory (ground/uavobject-synthetics/gcs)
 HEADERS += \
     $$UAVOBJECT_SYNTHETICS/accelgyrosettings.h \
+    $$UAVOBJECT_SYNTHETICS/ak8975sensor.h \
+    $$UAVOBJECT_SYNTHETICS/sensorhubsettings.h \
     $$UAVOBJECT_SYNTHETICS/accelsensor.h \
     $$UAVOBJECT_SYNTHETICS/accelstate.h \
     $$UAVOBJECT_SYNTHETICS/accessorydesired.h \
@@ -143,6 +145,8 @@ HEADERS += \
     $$UAVOBJECT_SYNTHETICS/waypointactive.h
 SOURCES += \
     $$UAVOBJECT_SYNTHETICS/accelgyrosettings.cpp \
+    $$UAVOBJECT_SYNTHETICS/ak8975sensor.cpp \
+    $$UAVOBJECT_SYNTHETICS/sensorhubsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/accelsensor.cpp \
     $$UAVOBJECT_SYNTHETICS/accelstate.cpp \
     $$UAVOBJECT_SYNTHETICS/accessorydesired.cpp \

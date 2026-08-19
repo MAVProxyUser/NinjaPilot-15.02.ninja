@@ -570,6 +570,41 @@ static bool hmc_read(float ga[3])
 #define DC_MSG_GNSS_STATUS   20003  /* ardupilot.gnss.Status */
 
 static int can_fd = -1;
+
+/* deadman heartbeat state (vendor 20510). Zero rates = never sent. */
+static volatile uint16_t streamctl_imu_hz;
+static volatile uint8_t  streamctl_ak_hz;
+static uint8_t streamctl_tid;
+static double  streamctl_last_tx;
+
+void PIOS_SENSORS_HUB_SetCanStreamRates(uint16_t imu_hz, uint8_t ak_hz)
+{
+    streamctl_imu_hz = imu_hz;
+    streamctl_ak_hz  = ak_hz;
+    streamctl_last_tx = 0;      /* send immediately on next poll */
+}
+
+/* Broadcast the stream-control heartbeat. The MP1 is not an allocated
+ * DroneCAN node; it transmits as static source id 100 (the allocator
+ * never assigns it, nothing else uses it). Single frame: 3-byte payload
+ * + tail, priority 16. Its ARRIVAL is the node's deadman feed. */
+static void streamctl_tx(void)
+{
+    if (streamctl_imu_hz == 0 && streamctl_ak_hz == 0) {
+        return;
+    }
+    struct can_frame f;
+    memset(&f, 0, sizeof(f));
+    f.can_id  = CAN_EFF_FLAG | (16u << 24) | ((uint32_t)20510 << 8) | 100u;
+    f.data[0] = (uint8_t)(streamctl_imu_hz & 0xFF);
+    f.data[1] = (uint8_t)(streamctl_imu_hz >> 8);
+    f.data[2] = streamctl_ak_hz;
+    f.data[3] = (uint8_t)(0xC0 | (streamctl_tid++ & 0x1F));
+    f.can_dlc = 4;
+    if (write(can_fd, &f, sizeof(f)) != (ssize_t)sizeof(f)) {
+        /* full TX queue at this instant - the next second's beat covers it */
+    }
+}
 static uint64_t can_bits;   /* hub thread only */
 static uint64_t can_frames; /* hub thread only */
 
@@ -891,6 +926,14 @@ static void can_poll(void)
 {
     struct can_frame f;
 
+    {
+        double now = now_s();
+        if (now - streamctl_last_tx >= 1.0) {
+            streamctl_last_tx = now;
+            streamctl_tx();
+        }
+    }
+
     while (can_fd >= 0 && read(can_fd, &f, sizeof(f)) == (ssize_t)sizeof(f)) {
         can_bits += 67u + 8u * f.can_dlc;   /* nominal ext-frame cost */
         can_frames++;
@@ -928,6 +971,45 @@ static void can_poll(void)
         uint8_t tail = f.data[f.can_dlc - 1];
         if (!(tail & 0x80)) {
             continue;         /* not the start of a transfer */
+        }
+
+        if (mt == 20504 && f.can_dlc >= 8) {
+            /* AK8975: int16[3] ASA-adjusted counts + ST2. 0.3 uT/LSB
+             * = 3 mGa/LSB. Device frame - interpretation stays here. */
+            int16_t hx[3];
+            memcpy(hx, f.data, 6);
+            hub_publish_begin();
+            hub.ak_mga[0]   = (float)hx[0] * 3.0f;
+            hub.ak_mga[1]   = (float)hx[1] * 3.0f;
+            hub.ak_mga[2]   = (float)hx[2] * 3.0f;
+            hub.ak_overflow = (f.data[6] & 0x08) != 0;
+            hub.ak_count++;
+            hub_publish_end();
+            continue;
+        }
+
+        if (mt == 20503 && f.can_dlc >= 3) {
+            /* CAN IMU die temperature - the register bytes always rode the
+             * burst read; the node now ships them at 1 Hz. MPU-9150:
+             * degC = raw/340 + 35. Makes GyroSensor/AccelSensor.temperature
+             * REAL on the CAN path (and IMU thermal work possible). */
+            int16_t traw;
+            memcpy(&traw, f.data, 2);
+            hub_publish_begin();
+            if (traw != 0x7FFF) {           /* sentinel = MPU absent */
+                hub.imu2_temp_c    = (float)traw / 340.0f + 35.0f;
+                hub.have_imu2_temp = true;
+            }
+            if (f.can_dlc >= 5) {           /* v2 payload carries IST8310 */
+                int16_t ist;
+                memcpy(&ist, f.data + 2, 2);
+                if (ist != 0x7FFF) {
+                    hub.auxmag_temp_raw  = ist;
+                    hub.have_auxmag_temp = true;
+                }
+            }
+            hub_publish_end();
+            continue;
         }
 
         if (mt == DC_MSG_NINJA_GYRO && f.can_dlc >= 7) {

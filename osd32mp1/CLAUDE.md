@@ -3291,3 +3291,40 @@ pre-check) now lives in SKILLS.md "Change or add a UAVObject".
   BARO thermal cal IS wired (RevoSettings polynomial now applied) -
   legitimate for sub-meter alt-hold work; note the poly is per-SENSOR
   and the CAN/local baro failover swaps sensors under it.
+## The sensor bus grows a DEADMAN, die temps, and the AK8975 (2026-08-19)
+
+- **STREAM CONTROL / DEADMAN (vendor 20510, MP1 -> node)**: the node's
+  IMU + AK8975 streams now run ONLY while a 1 Hz heartbeat arrives
+  carrying the commanded rates (u16 imu Hz + u8 AK Hz, from the new
+  persisted SensorHubSettings UAVObject via sensors.c ->
+  PIOS_SENSORS_HUB_SetCanStreamRates -> raw single-frame broadcast as
+  static src id 100 - the MP1 is not an allocated node; 100 is
+  reserved-by-convention). 5 s without a beat = streams stop. So: a
+  rebooted node is SILENT until the realposix ELF asks, and stopping
+  ninjapilot quiets the bus in 5 s - FLASHING ALWAYS HAS A QUIET BUS,
+  by construction, no ritual. Die temps (2 fr/s) stay on regardless:
+  flash-harmless and useful boot telemetry. The GNSS/baro/mag stock
+  streams are unchanged (bounded rates; the storm surface was always
+  the IMU firehose). Node boot default: everything gated OFF.
+- **Die temperatures on the wire (20503 v2, 4 bytes)**: MPU-9150 raw
+  (degC = raw/340+35, bytes ALWAYS read in the burst - they were
+  simply never packed) + IST8310 raw counts (iSentek publishes no
+  conversion - shipped and displayed as RAW, no false degrees).
+  0x7FFF = sensor absent. GyroSensor/AccelSensor.temperature is now
+  REAL on the CAN path -> IMU thermal work is possible over CAN after
+  all (retracting the earlier "structurally impossible").
+  AuxMagSensor gained a Temperature field (raw counts).
+- **AK8975 (the 9150's own compass) published**: never supported by
+  OpenPilot (upstream had only pios_mpu6000 - Revolution used MPU-6000
+  + external HMC5883L), never used internally by the MPU (no on-chip
+  fusion; it idled behind the aux bus). Brought up via I2C bypass
+  (INT_PIN_CFG=0x02 -> visible at 0x0C), fuse-ROM ASA sensitivity
+  applied on the node, single-shot cycle at the commanded rate,
+  vendor 20504 (int16[3] + ST2, 3 mGa/LSB, DEVICE frame - axes differ
+  from the accel/gyro frame per the 9150 datasheet; MP1 owns
+  interpretation). Published as the new AK8975Sensor UAVObject
+  (x/y/z/Overflow). Third mag on the bench: RM3100 (flight), IST8310
+  (aux), AK8975 (observational).
+- New objects AK8975Sensor + SensorHubSettings + the AuxMagSensor field
+  went through the FULL both-sides recipe (SKILLS.md); tree hash
+  afea8b55 verified equal on Mac and board. GCS relaunch required.
