@@ -3073,3 +3073,33 @@ forensics - which leg was active when it died. True in-air resume is
 only meaningful for a fixed-wing with a sub-second MCU reset, and would
 need gates: valid 3D fix, position within a sane radius of the recorded
 leg, and an explicit pilot/settings opt-in.
+## Mission recovery: progress record + opt-in resume flag (2026-08-19)
+
+- **MissionRecoverySettings** (settings, persists): AutoResume
+  Disabled|ResumeAtWaypoint, MaxDistance 50 m, MaxAge 300 s. VERIFIED
+  live: readback, set to ResumeAtWaypoint, ObjectPersistence-saved.
+- **MissionProgress** (data, persisted by the planner): WaypointIndex,
+  PlanCrc, Position NED, Lat/Lon, Timestamp, WasArmed, Valid. Written
+  by savePathProgress() at every PLANNER-DRIVEN waypoint transition,
+  alongside a DebugLog line ("MISSION wp=.. crc=.. N/E/D.. armed=..")
+  as the forensic trail the user asked for.
+- **Resume semantics**: on boot the planner restores the plan, loads the
+  record, and accepts it only if Valid AND PlanCrc matches the restored
+  plan AND the index is in range - a record from a DIFFERENT mission is
+  marked invalid rather than resumed. With AutoResume enabled it sets
+  WaypointActive to that index, so engaging PathPlanner continues from
+  that leg instead of waypoint 0. It NEVER arms, engages a mode or moves
+  the aircraft.
+- **Corrupt plan is now RED**: checkPathPlan returns PLAN_EMPTY /
+  PLAN_VALID / PLAN_CORRUPT. Empty (nothing uploaded) stays Warning;
+  counts or CRC failing = Error, because that means the aircraft is
+  holding a DAMAGED mission, not merely no mission.
+- **BUILD NOTE**: the board's build/uavobjgenerator is a 75-byte STUB
+  (the no-Qt dance) - new UAVObjects must be generated on the Mac
+  (ground/uavobject-synthetics && ../uavobjgenerator/uavobjgenerator
+  ../../shared/uavobjectdefinition ../..) and the .c/.h copied to the
+  board's build/uavobject-synthetics/flight/.
+- **NOT yet verified end to end**: the record only fills during a real
+  planner-driven mission (poking WaypointActive over telemetry does not
+  call setWaypoint), so resume-after-reboot wants a flown or simulated
+  mission to confirm.

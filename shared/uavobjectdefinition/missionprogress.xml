@@ -1,0 +1,20 @@
+<xml>
+    <object name="MissionProgress" singleinstance="true" settings="false" category="Navigation">
+        <description>Where the mission had got to, recorded at every waypoint transition and
+        persisted so a reboot can resume (or a post-incident teardown can say which leg was
+        flying). PlanCrc ties the record to a specific plan - a record from a different
+        mission is rejected rather than resumed.</description>
+        <field name="WaypointIndex" units="" type="uint16" elements="1" defaultvalue="0"/>
+        <field name="PlanCrc" units="" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="Position" units="m" type="float" elementnames="North,East,Down"/>
+        <field name="Latitude" units="deg*10e-7" type="int32" elements="1" defaultvalue="0"/>
+        <field name="Longitude" units="deg*10e-7" type="int32" elements="1" defaultvalue="0"/>
+        <field name="Timestamp" units="ms" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="WasArmed" units="" type="enum" elements="1" options="False,True" defaultvalue="False"/>
+        <field name="Valid" units="" type="enum" elements="1" options="False,True" defaultvalue="False"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="false" updatemode="manual" period="0"/>
+        <telemetryflight acked="false" updatemode="onchange" period="0"/>
+        <logging updatemode="onchange" period="0"/>
+    </object>
+</xml>

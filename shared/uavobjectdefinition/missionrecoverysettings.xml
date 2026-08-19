@@ -1,0 +1,15 @@
+<xml>
+    <object name="MissionRecoverySettings" singleinstance="true" settings="true" category="Navigation">
+        <description>Policy for recovering a mission after a reboot. The plan itself is
+        always restored from storage; this decides whether the aircraft resumes at the
+        waypoint it had reached, and under what sanity limits.</description>
+        <field name="AutoResume" units="" type="enum" elements="1"
+               options="Disabled,ResumeAtWaypoint" defaultvalue="Disabled"/>
+        <field name="MaxDistance" units="m" type="float" elements="1" defaultvalue="50"/>
+        <field name="MaxAge" units="s" type="uint32" elements="1" defaultvalue="300"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="true" updatemode="onchange" period="0"/>
+        <telemetryflight acked="true" updatemode="onchange" period="0"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>

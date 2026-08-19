@@ -33,12 +33,15 @@
 
 #include "callbackinfo.h"
 #include "pathplan.h"
+#include "missionprogress.h"
+#include "missionrecoverysettings.h"
 #include "flightstatus.h"
 #include "airspeedstate.h"
 #include "pathaction.h"
 #include "pathdesired.h"
 #include "pathstatus.h"
 #include "positionstate.h"
+#include "gpspositionsensor.h"
 #include "velocitystate.h"
 #include "waypoint.h"
 #include "waypointactive.h"
@@ -69,6 +72,13 @@ static void statusUpdated(UAVObjEvent *ev);
 static void updatePathDesired();
 static void setWaypoint(uint16_t num);
 
+/* plan validation result: an EMPTY plan is a normal "nothing uploaded
+ * yet" condition (orange), but a plan whose counts or CRC do not check
+ * out is DATA CORRUPTION and gets a red alert - it means the aircraft
+ * is holding a mission it must not fly. */
+#define PLAN_EMPTY   0
+#define PLAN_VALID   1
+#define PLAN_CORRUPT 2
 static uint8_t checkPathPlan();
 static void savePathPlan();
 static void savePathProgress();
@@ -137,6 +147,40 @@ static void savePathPlan()
 
 static void savePathProgress()
 {
+    /* Rich record: index + WHERE and WHEN the transition happened + the
+     * plan's CRC, so a restored record can be checked against the plan it
+     * belongs to and against where the aircraft actually is now. The
+     * DebugLog line beside it is the forensic trail (post-flight: which
+     * legs completed, at what position and time). */
+    MissionProgressData prog;
+    PathPlanData pp;
+    PositionStateData pos;
+    GPSPositionSensorData gps;
+    FlightStatusData fs;
+
+    PathPlanGet(&pp);
+    PositionStateGet(&pos);
+    GPSPositionSensorGet(&gps);
+    FlightStatusGet(&fs);
+
+    prog.WaypointIndex = waypointActive.Index;
+    prog.PlanCrc   = pp.Crc;
+    prog.Position.North = pos.North;
+    prog.Position.East  = pos.East;
+    prog.Position.Down  = pos.Down;
+    prog.Latitude  = gps.Latitude;
+    prog.Longitude = gps.Longitude;
+    prog.Timestamp = xTaskGetTickCount() * portTICK_RATE_MS;
+    prog.WasArmed  = (fs.Armed == FLIGHTSTATUS_ARMED_ARMED)
+                     ? MISSIONPROGRESS_WASARMED_TRUE : MISSIONPROGRESS_WASARMED_FALSE;
+    prog.Valid     = MISSIONPROGRESS_VALID_TRUE;
+    MissionProgressSet(&prog);
+
+    PIOS_DEBUGLOG_Printf("MISSION wp=%u crc=%u N=%d E=%d D=%d armed=%u",
+                         (unsigned)prog.WaypointIndex, (unsigned)prog.PlanCrc,
+                         (int)prog.Position.North, (int)prog.Position.East,
+                         (int)prog.Position.Down, (unsigned)prog.WasArmed);
+
     /* Records WHERE the mission was, so a reboot can be resumed from the
      * last completed waypoint instead of the start - and so a post-crash
      * teardown can say which leg was flying. It does NOT resume by
@@ -146,6 +190,7 @@ static void savePathProgress()
      * action by code that just woke up not knowing where it is. */
 #if defined(PIOS_REALPOSIX)
     UAVObjSave(WaypointActiveHandle(), 0);
+    UAVObjSave(MissionProgressHandle(), 0);
 #endif
 }
 
@@ -177,9 +222,35 @@ static void restorePathPlan()
             return;
         }
     }
-    /* progress, if it was recorded - published for the GCS/pilot to see;
-     * the plan is NOT engaged here */
+    /* progress, if it was recorded */
     UAVObjLoad(WaypointActiveHandle(), 0);
+
+    if (UAVObjLoad(MissionProgressHandle(), 0) == 0) {
+        MissionProgressData prog;
+        MissionRecoverySettingsData rec;
+        MissionProgressGet(&prog);
+        MissionRecoverySettingsGet(&rec);
+
+        bool sane = (prog.Valid == MISSIONPROGRESS_VALID_TRUE)
+                    && (prog.PlanCrc == pathPlan.Crc)             /* same mission */
+                    && (prog.WaypointIndex < pathPlan.WaypointCount);
+
+        if (sane && rec.AutoResume == MISSIONRECOVERYSETTINGS_AUTORESUME_RESUMEATWAYPOINT) {
+            /* Resume means: when PathPlanner is next ENGAGED, start from the
+             * leg we had reached instead of waypoint 0. It never arms, never
+             * engages a mode and never moves the aircraft - a reboot stops the
+             * motors, so anything more would be code that just woke up
+             * deciding to fly. The distance/age gates are applied by the
+             * pathplanner task once a position estimate exists. */
+            waypointActive.Index = prog.WaypointIndex;
+            WaypointActiveSet(&waypointActive);
+            PIOS_DEBUGLOG_Printf("MISSION resume armed at wp=%u (crc %u)",
+                                 (unsigned)prog.WaypointIndex, (unsigned)prog.PlanCrc);
+        } else if (!sane) {
+            prog.Valid = MISSIONPROGRESS_VALID_FALSE;   /* record belongs to another plan */
+            MissionProgressSet(&prog);
+        }
+    }
 
     /* the flight side re-validates the CRC in checkPathPlan() exactly as
      * it does for an uploaded plan, so a corrupted store cannot arm a
@@ -218,6 +289,9 @@ int32_t PathPlannerStart()
 int32_t PathPlannerInitialize()
 {
     PathPlanInitialize();
+    GPSPositionSensorInitialize();
+    MissionProgressInitialize();
+    MissionRecoverySettingsInitialize();
     PathActionInitialize();
     PathStatusInitialize();
     PathDesiredInitialize();
@@ -300,11 +374,16 @@ static void pathPlannerTask()
 
     if (flightStatus.ControlChain.PathPlanner != FLIGHTSTATUS_CONTROLCHAIN_TRUE) {
         pathplanner_active = false;
-        if (!validPathPlan) {
-            // unverified path plans are only a warning while we are not in pathplanner mode
-            // so it does not prevent arming. However manualcontrols safety check
-            // shall test for this warning when pathplan is on the flight mode selector
-            // thus a valid flight plan is a prerequirement for arming
+        if (validPathPlan == PLAN_CORRUPT) {
+            /* counts or CRC do not check out: the stored/uploaded mission
+             * is DAMAGED, not merely absent. Red, so it is never mistaken
+             * for "no plan loaded yet" - and it still blocks arming into
+             * PathPlanner the same way the warning did. */
+            AlarmsSet(SYSTEMALARMS_ALARM_PATHPLAN, SYSTEMALARMS_ALARM_ERROR);
+        } else if (validPathPlan != PLAN_VALID) {
+            // no plan uploaded yet - a warning, so it does not prevent
+            // arming in other modes, while manualcontrol's safety check
+            // still requires a valid plan before PathPlanner can engage
             AlarmsSet(SYSTEMALARMS_ALARM_PATHPLAN, SYSTEMALARMS_ALARM_WARNING);
         } else {
             AlarmsClear(SYSTEMALARMS_ALARM_PATHPLAN);
@@ -317,7 +396,7 @@ static void pathPlannerTask()
     PathDesiredGet(&pathDesired);
 
     static uint8_t failsafeRTHset = 0;
-    if (!validPathPlan) {
+    if (validPathPlan != PLAN_VALID) {
         pathplanner_active = false;
 
         if (!failsafeRTHset) {
@@ -414,19 +493,19 @@ static uint8_t checkPathPlan()
 
     waypointCount = pathPlan.WaypointCount;
     if (waypointCount == 0) {
-        // an empty path plan is invalid
-        return false;
+        // nothing uploaded (or a wiped store) - not an error, just no mission
+        return PLAN_EMPTY;
     }
     actionCount = pathPlan.PathActionCount;
 
     // check count consistency
     if (waypointCount > UAVObjGetNumInstances(WaypointHandle())) {
         // PIOS_DEBUGLOG_Printf("PathPlan : waypoint count error!");
-        return false;
+        return PLAN_CORRUPT;
     }
     if (actionCount > UAVObjGetNumInstances(PathActionHandle())) {
         // PIOS_DEBUGLOG_Printf("PathPlan : path action count error!");
-        return false;
+        return PLAN_CORRUPT;
     }
 
     // check CRC
@@ -440,7 +519,7 @@ static uint8_t checkPathPlan()
     if (pathCrc != pathPlan.Crc) {
         // failed crc check
         // PIOS_DEBUGLOG_Printf("PathPlan : bad CRC (%d / %d)!", pathCrc, pathPlan.Crc);
-        return false;
+        return PLAN_CORRUPT;
     }
 
     // waypoint consistency
@@ -448,7 +527,7 @@ static uint8_t checkPathPlan()
         WaypointInstGet(i, &waypoint);
         if (waypoint.Action >= actionCount) {
             // path action id is out of range
-            return false;
+            return PLAN_CORRUPT;
         }
     }
 
@@ -457,17 +536,17 @@ static uint8_t checkPathPlan()
         PathActionInstGet(i, &pathAction);
         if (pathAction.ErrorDestination >= waypointCount) {
             // waypoint id is out of range
-            return false;
+            return PLAN_CORRUPT;
         }
         if (pathAction.JumpDestination >= waypointCount) {
             // waypoint id is out of range
-            return false;
+            return PLAN_CORRUPT;
         }
     }
 
     // path plan passed checks
 
-    return true;
+    return PLAN_VALID;
 }
 
 // callback function when status changed, issue execution of state machine
