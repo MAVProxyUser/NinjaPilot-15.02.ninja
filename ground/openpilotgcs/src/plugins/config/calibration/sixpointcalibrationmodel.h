@@ -75,6 +75,7 @@ public slots:
 private slots:
     void getSample(UAVObject *obj);
     void continouslyGetMagSamples(UAVObject *obj);
+    void continuouslyGetAccelSamples(UAVObject *obj);
 
 private:
     class CalibrationStep {
@@ -129,6 +130,10 @@ public:
     QList<double> mag_accum_x;
     QList<double> mag_accum_y;
     QList<double> mag_accum_z;
+    QList<float> accel_fit_x;
+    QList<float> accel_fit_y;
+    QList<float> accel_fit_z;
+    void finishFreeform();
     QList<float> mag_fit_x;
     QList<float> mag_fit_y;
     QList<float> mag_fit_z;

@@ -75,6 +75,7 @@
 // #include "sensor.h"
 #include "ratedesired.h"
 #include "revocalibration.h"
+#include "accelgyrosettings.h"
 #include "systemsettings.h"
 #include "taskinfo.h"
 #if defined(PIOS_INCLUDE_GCSRCVR)
@@ -184,6 +185,131 @@ static void zeroRateTrimFeed(float gx, float gy, float gz)
     n = 0; sum[0] = sum[1] = sum[2] = 0; sumsq[0] = sumsq[1] = sumsq[2] = 0;
 }
 
+/*
+ * CALIBRATION APPLICATION (2026-08-19). Until now the GCS calibration tab
+ * wrote AccelGyroSettings / RevoCalibration / AttitudeSettings that this
+ * path never read - every calibration was a successful write into a void.
+ * Formulas mirror the real Revolution sensors module exactly:
+ *   accel: R * ((raw - bias) * scale)
+ *   gyro:  R * (raw * scale - bias)
+ *   mag:   (mag_transform x R) * raw - bias'   (bias rotated with transform)
+ *   baro:  pressure - (a + b*t + c*t^2 + d*t^3), t clamped to the extent
+ * R = BoardRotation quaternion x BoardLevelTrim quaternion. IMU thermal
+ * coefficients are deliberately NOT applied: the CAN compact stream ships
+ * no die temperature, so a fit against it would be fiction.
+ */
+static volatile bool sensorCalDirty = true;
+static struct {
+    AccelGyroSettingsData ag;
+    bool  rotate;
+    float R[3][3];
+    float magT[3][3];
+    float magBias[3];
+    float baroPoly[4];
+    float baroExtMin, baroExtMax;
+    bool  baroTempEnabled;
+} scal;
+
+static void sensorCalUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
+{
+    sensorCalDirty = true;
+    /* a new static calibration changes the residual the zero-rate trim
+     * should learn - drop the old trim and let the next still window
+     * relearn against the calibrated stream */
+    zrt_trim[0] = zrt_trim[1] = zrt_trim[2] = 0;
+    zrt_active  = false;
+}
+
+static void sensorCalLoad(void)
+{
+    sensorCalDirty = false;
+    AccelGyroSettingsGet(&scal.ag);
+
+    AttitudeSettingsData att;
+    AttitudeSettingsGet(&att);
+    const float rpy[3] = { att.BoardRotation.Roll, att.BoardRotation.Pitch, att.BoardRotation.Yaw };
+    float q[4];
+    RPY2Quaternion(rpy, q);
+    if (fabsf(att.BoardLevelTrim.Roll) > 1e-3f || fabsf(att.BoardLevelTrim.Pitch) > 1e-3f) {
+        const float trimRpy[3] = { att.BoardLevelTrim.Roll, att.BoardLevelTrim.Pitch, 0.0f };
+        float tq[4], sq[4];
+        RPY2Quaternion(trimRpy, tq);
+        quat_mult(q, tq, sq);
+        Quaternion2R(sq, scal.R);
+    } else {
+        Quaternion2R(q, scal.R);
+    }
+    scal.rotate = (fabsf(rpy[0]) > 1e-3f || fabsf(rpy[1]) > 1e-3f || fabsf(rpy[2]) > 1e-3f
+                   || fabsf(att.BoardLevelTrim.Roll) > 1e-3f || fabsf(att.BoardLevelTrim.Pitch) > 1e-3f);
+
+    RevoCalibrationData cal;
+    RevoCalibrationGet(&cal);
+    matrix_mult_3x3f((float(*)[3])RevoCalibrationmag_transformToArray(cal.mag_transform), scal.R, scal.magT);
+    /* bias is measured in raw sensor frame: transform it the same way the
+     * samples are, so corrected = magT*raw - magT*bias == magT*(raw-bias) */
+    float rawBias[3] = { cal.mag_bias.X, cal.mag_bias.Y, cal.mag_bias.Z };
+    rot_mult(scal.magT, rawBias, scal.magBias);
+
+    RevoSettingsData rs;
+    RevoSettingsGet(&rs);
+    scal.baroPoly[0] = rs.BaroTempCorrectionPolynomial.a;
+    scal.baroPoly[1] = rs.BaroTempCorrectionPolynomial.b;
+    scal.baroPoly[2] = rs.BaroTempCorrectionPolynomial.c;
+    scal.baroPoly[3] = rs.BaroTempCorrectionPolynomial.d;
+    scal.baroExtMin  = rs.BaroTempCorrectionExtent.min;
+    scal.baroExtMax  = rs.BaroTempCorrectionExtent.max;
+    scal.baroTempEnabled = (scal.baroExtMax - scal.baroExtMin > 0.1f)
+                           && (fabsf(scal.baroPoly[0]) > 1e-9f || fabsf(scal.baroPoly[1]) > 1e-9f
+                               || fabsf(scal.baroPoly[2]) > 1e-9f || fabsf(scal.baroPoly[3]) > 1e-9f);
+    PIOS_SHMLOG_Printf("[sensors] calibration (re)loaded: rotate=%d baroTemp=%d",
+                       (int)scal.rotate, (int)scal.baroTempEnabled);
+}
+
+static inline void applyAccelCal(float v[3])
+{
+    float t[3] = { (v[0] - scal.ag.accel_bias.X) * scal.ag.accel_scale.X,
+                   (v[1] - scal.ag.accel_bias.Y) * scal.ag.accel_scale.Y,
+                   (v[2] - scal.ag.accel_bias.Z) * scal.ag.accel_scale.Z };
+    if (scal.rotate) {
+        rot_mult(scal.R, t, v);
+    } else {
+        v[0] = t[0]; v[1] = t[1]; v[2] = t[2];
+    }
+}
+
+static inline void applyGyroCal(float v[3])
+{
+    float t[3] = { v[0] * scal.ag.gyro_scale.X - scal.ag.gyro_bias.X,
+                   v[1] * scal.ag.gyro_scale.Y - scal.ag.gyro_bias.Y,
+                   v[2] * scal.ag.gyro_scale.Z - scal.ag.gyro_bias.Z };
+    if (scal.rotate) {
+        rot_mult(scal.R, t, v);
+    } else {
+        v[0] = t[0]; v[1] = t[1]; v[2] = t[2];
+    }
+}
+
+static inline void applyMagCal(float v[3])
+{
+    float t[3];
+    rot_mult(scal.magT, v, t);
+    v[0] = t[0] - scal.magBias[0];
+    v[1] = t[1] - scal.magBias[1];
+    v[2] = t[2] - scal.magBias[2];
+}
+
+static inline float baroTempCorrectedKpa(float kpa, float temp_c)
+{
+    if (!scal.baroTempEnabled) {
+        return kpa;
+    }
+    float t = temp_c;
+    if (t < scal.baroExtMin) { t = scal.baroExtMin; }
+    if (t > scal.baroExtMax) { t = scal.baroExtMax; }
+    return kpa - (scal.baroPoly[0] + ((scal.baroPoly[3] * t + scal.baroPoly[2]) * t + scal.baroPoly[1]) * t);
+}
+
+
 static void SensorsTask(void *parameters);
 static void simulateConstant();
 static void simulateModelAgnostic();
@@ -241,6 +367,13 @@ int32_t SensorsInitialize(void)
     }
     MagSensorInitialize();
     RevoCalibrationInitialize();
+    AccelGyroSettingsInitialize();
+    AttitudeSettingsInitialize();
+    RevoSettingsInitialize();
+    AccelGyroSettingsConnectCallback(&sensorCalUpdatedCb);
+    RevoCalibrationConnectCallback(&sensorCalUpdatedCb);
+    AttitudeSettingsConnectCallback(&sensorCalUpdatedCb);
+    RevoSettingsConnectCallback(&sensorCalUpdatedCb);
 
     return 0;
 }
@@ -356,21 +489,29 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                 if (h.have_imu && h.imu_count != last_imu) {
                     last_imu = h.imu_count;
 
+                    if (sensorCalDirty) {
+                        sensorCalLoad();
+                    }
+                    float av[3] = { h.accel_mss[0], h.accel_mss[1], h.accel_mss[2] };
+                    applyAccelCal(av);
                     AccelSensorData a;
-                    a.x = h.accel_mss[0];
-                    a.y = h.accel_mss[1];
-                    a.z = h.accel_mss[2];
+                    a.x = av[0];
+                    a.y = av[1];
+                    a.z = av[2];
                     a.temperature = h.imu_temp_c;
                     AccelSensorSet(&a);
 
                     /* Published LAST of the pair on purpose: GyroSensor is
                      * what dispatches the inner loop, so the accel it will
                      * read is already in place when it runs. */
+                    float gv[3] = { h.gyro_dps[0], h.gyro_dps[1], h.gyro_dps[2] };
+                    applyGyroCal(gv);
+                    /* trim learns the residual AFTER static calibration */
+                    zeroRateTrimFeed(gv[0], gv[1], gv[2]);
                     GyroSensorData g;
-                    zeroRateTrimFeed(h.gyro_dps[0], h.gyro_dps[1], h.gyro_dps[2]);
-                    g.x = h.gyro_dps[0] - zrt_trim[0];
-                    g.y = h.gyro_dps[1] - zrt_trim[1];
-                    g.z = h.gyro_dps[2] - zrt_trim[2];
+                    g.x = gv[0] - zrt_trim[0];
+                    g.y = gv[1] - zrt_trim[1];
+                    g.z = gv[2] - zrt_trim[2];
                     g.temperature = h.imu_temp_c;
                     GyroSensorSet(&g);
                 }
@@ -396,18 +537,25 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                             failed_over = true;
                             PIOS_SHMLOG_Printf("[sensors] LOCAL IMU SILENT - failing over to CAN IMU stream");
                         }
+                        if (sensorCalDirty) {
+                            sensorCalLoad();
+                        }
+                        float av2[3] = { h.imu2_accel_mss[0], h.imu2_accel_mss[1], h.imu2_accel_mss[2] };
+                        applyAccelCal(av2);
                         AccelSensorData a2;
-                        a2.x = h.imu2_accel_mss[0];
-                        a2.y = h.imu2_accel_mss[1];
-                        a2.z = h.imu2_accel_mss[2];
+                        a2.x = av2[0];
+                        a2.y = av2[1];
+                        a2.z = av2[2];
                         a2.temperature = h.imu_temp_c;
                         AccelSensorSet(&a2);
 
+                        float gv2[3] = { h.imu2_gyro_dps[0], h.imu2_gyro_dps[1], h.imu2_gyro_dps[2] };
+                        applyGyroCal(gv2);
+                        zeroRateTrimFeed(gv2[0], gv2[1], gv2[2]);
                         GyroSensorData g2;
-                        zeroRateTrimFeed(h.imu2_gyro_dps[0], h.imu2_gyro_dps[1], h.imu2_gyro_dps[2]);
-                        g2.x = h.imu2_gyro_dps[0] - zrt_trim[0];
-                        g2.y = h.imu2_gyro_dps[1] - zrt_trim[1];
-                        g2.z = h.imu2_gyro_dps[2] - zrt_trim[2];
+                        g2.x = gv2[0] - zrt_trim[0];
+                        g2.y = gv2[1] - zrt_trim[1];
+                        g2.z = gv2[2] - zrt_trim[2];
                         g2.temperature = h.imu_temp_c;
                         GyroSensorSet(&g2);
                     } else if (failed_over) {
@@ -450,7 +598,7 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
 
                     BaroSensorData b;
                     b.Temperature = h.baro_temp_c;
-                    b.Pressure    = h.press_pa / 1000.0f;   /* Pa -> kPa */
+                    b.Pressure    = baroTempCorrectedKpa(h.press_pa / 1000.0f, h.baro_temp_c);
                     /* International Standard Atmosphere, the same relation
                      * pios_ms5611.c uses. 101.325 kPa / 288.15 K sea level. */
                     b.Altitude    = 44330.0f *
@@ -589,9 +737,13 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                     last_mag = h.mag_count;
 
                     MagSensorData m;
-                    m.x = h.mag_ga[0] * 1000.0f;            /* Ga -> mGa */
-                    m.y = h.mag_ga[1] * 1000.0f;
-                    m.z = h.mag_ga[2] * 1000.0f;
+                    float mv[3] = { h.mag_ga[0] * 1000.0f,  /* Ga -> mGa */
+                                    h.mag_ga[1] * 1000.0f,
+                                    h.mag_ga[2] * 1000.0f };
+                    applyMagCal(mv);
+                    m.x = mv[0];
+                    m.y = mv[1];
+                    m.z = mv[2];
                     m.temperature = h.baro_temp_c;
                     MagSensorSet(&m);
                 }

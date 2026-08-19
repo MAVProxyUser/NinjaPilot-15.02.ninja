@@ -3255,3 +3255,39 @@ pre-check) now lives in SKILLS.md "Change or add a UAVObject".
   remaining -0.22 is uncalibrated bench geometry (accel scale +4.3%,
   loose modules, no six-point cal) - the durable fix is a real
   calibration session with the board level, not more Be splices.
+## Calibration made REAL end to end (2026-08-19, late night)
+
+- **The calibration tab was a placebo on realposix**: sensors.c never
+  applied AccelGyroSettings / RevoCalibration / board rotation - every
+  cal was a successful write into the void. Now applied at every publish
+  site with the STOCK Revolution formulas: accel R*((raw-bias)*scale),
+  gyro R*(raw*scale-bias), mag (mag_transform x R)*raw - rotated bias,
+  baro pressure minus the RevoSettings temp polynomial (extent-clamped).
+  Zero-rate trim learns the residual AFTER static cal and resets
+  whenever any calibration object changes.
+- **LANDMINE this immediately found: stale BoardLevelTrim [-131.3, -4.0]**
+  from a write-only-era level cal attempt - the moment application went
+  live, attitude rotated by it. Zeroed + persisted. Audit rule: when
+  making formerly-inert settings live, AUDIT EVERY STORED VALUE first
+  (mag identity, scales 1, gyro_bias plausible - only the trim was
+  poison).
+- **Accel + mag calibration is now a FREEFORM TUMBLE**: upstream had
+  the continuous-acquisition path half-built behind
+  FITTING_USING_CONTINOUS_ACQUISITION; it is now enabled and drives the
+  whole flow - Start begins collection, the user slowly tumbles through
+  arbitrary orientations, a quasi-static gate (|a|-g < 2 m/s2) drops
+  mid-swing accel samples, and at 450 samples/sensor it auto-computes:
+  ONE generic ellipsoid solver (calibrationutils.cpp), fitted per
+  sensor - accel against g, primary mag AND aux mag each against |Be|.
+  Scale = nominal/radius, Bias = centre; fitAlongXYZ=true keeps it
+  diagonal to match AccelGyroSettings. Six-position machinery remains
+  in the file but nothing drives it. Save button still applies/persists
+  (compute stages into result, m_dirty gates save - stock semantics).
+- **Gyro tab**: now real too (gyro_bias applied) and self-consistent
+  with the zero-rate trim, which relearns the residual after any write.
+- **IMU thermal cal: structurally impossible over CAN** (compact stream
+  carries no die temperature) and deliberately not applied; the
+  zero-rate trim covers slow thermal drift at every disarmed stillness.
+  BARO thermal cal IS wired (RevoSettings polynomial now applied) -
+  legitimate for sub-meter alt-hold work; note the poly is per-SENSOR
+  and the CAN/local baro failover swaps sensors under it.

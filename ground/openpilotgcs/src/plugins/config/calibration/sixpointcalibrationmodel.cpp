@@ -34,6 +34,15 @@
 #include "QDebug"
 
 #define POINT_SAMPLE_SIZE 50
+/* FREEFORM TUMBLE (2026-08-19): instead of six guided orientations, both
+ * sensors collect a continuous point cloud while the user slowly tumbles
+ * the vehicle, and the SAME generic ellipsoid solver fits each cloud -
+ * the mag against the local field magnitude, the accel against g. The
+ * six-point machinery below is kept for reference but no longer drives
+ * the flow. */
+#define FITTING_USING_CONTINOUS_ACQUISITION
+#define FREEFORM_TARGET_SAMPLES 450
+#define FREEFORM_ACCEL_GATE_MSS 2.0f
 #define GRAVITY           9.81f
 #define sign(x)   ((x < 0) ? -1 : 1)
 
@@ -246,19 +255,30 @@ void SixPointCalibrationModel::start(bool calibrateAccel, bool calibrateMag)
     // reset dirty state to forget previous unsaved runs
     m_dirty = false;
 
-    if (calibrateMag) {
-        currentSteps = &calibrationStepsMag;
-    } else {
-        currentSteps = &calibrationStepsAccelOnly;
-    }
+    accel_fit_x.clear();
+    accel_fit_y.clear();
+    accel_fit_z.clear();
 
     position = 0;
+    collectingData = true;
 
-    // Show instructions and enable controls
+    if (calibrateMag) {
+        connect(magSensor, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(continouslyGetMagSamples(UAVObject *)));
+        connect(auxMagSensor, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(continouslyGetMagSamples(UAVObject *)));
+    }
+    if (calibrateAccel) {
+        connect(accelState, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(continuouslyGetAccelSamples(UAVObject *)));
+    }
+
     progressChanged(0);
-    displayInstructions((*currentSteps)[0].instructions, WizardModel::Prompt);
-    showHelp((*currentSteps)[0].visualHelp);
-    savePositionEnabledChanged(true);
+    displayInstructions(tr("FREEFORM TUMBLE: pick the vehicle up and slowly rotate it "
+                           "through as many different orientations as you can - rolled, "
+                           "pitched, inverted, nose up, nose down. Move gently and pause "
+                           "briefly in each orientation; fast swings are rejected. The "
+                           "bar fills as coverage accumulates and the calibration "
+                           "finishes by itself."), WizardModel::Prompt);
+    showHelp(CALIBRATION_HELPER_IMAGE_EMPTY);
+    savePositionEnabledChanged(false);
 }
 
 /**
@@ -428,6 +448,68 @@ void SixPointCalibrationModel::continouslyGetMagSamples(UAVObject *obj)
             calibratingAuxMag = true;
         }
     }
+    if (collectingData && !calibratingAccel) {
+        float p = 100.0f * (float)mag_fit_x.size() / (float)FREEFORM_TARGET_SAMPLES;
+        progressChanged(p > 100 ? 100 : p);
+        if (mag_fit_x.size() >= FREEFORM_TARGET_SAMPLES) {
+            finishFreeform();
+        }
+    }
+}
+
+void SixPointCalibrationModel::continuouslyGetAccelSamples(UAVObject *obj)
+{
+    QMutexLocker lock(&sensorsUpdateLock);
+
+    if (!collectingData || obj->getObjID() != AccelState::OBJID) {
+        return;
+    }
+    AccelState::DataFields a = accelState->getData();
+    /* quasi-static gate: an ellipsoid fit assumes each sample measures
+     * gravity alone, so drop samples taken mid-swing */
+    float mag = sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+    if (fabsf(mag - 9.81f) > FREEFORM_ACCEL_GATE_MSS) {
+        return;
+    }
+    accel_fit_x.append(a.x);
+    accel_fit_y.append(a.y);
+    accel_fit_z.append(a.z);
+
+    float p = 100.0f * (float)accel_fit_x.size() / (float)FREEFORM_TARGET_SAMPLES;
+    if (calibratingMag) {
+        float pm = 100.0f * (float)mag_fit_x.size() / (float)FREEFORM_TARGET_SAMPLES;
+        p = p < pm ? p : pm;
+    }
+    progressChanged(p > 100 ? 100 : p);
+    if (accel_fit_x.size() >= FREEFORM_TARGET_SAMPLES
+        && (!calibratingMag || mag_fit_x.size() >= FREEFORM_TARGET_SAMPLES)) {
+        finishFreeform();
+    }
+}
+
+void SixPointCalibrationModel::finishFreeform()
+{
+    if (!collectingData) {
+        return;
+    }
+    collectingData = false;
+    disconnect(accelState, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(continuouslyGetAccelSamples(UAVObject *)));
+    disconnect(magSensor, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(continouslyGetMagSamples(UAVObject *)));
+    disconnect(auxMagSensor, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(continouslyGetMagSamples(UAVObject *)));
+
+    compute();
+
+    accelState->setMetadata(memento.accelStateMetadata);
+    magSensor->setMetadata(memento.magSensorMetadata);
+    auxMagSensor->setMetadata(memento.auxMagSensorMetadata);
+    revoCalibration->setData(memento.revoCalibrationData);
+    accelGyroSettings->setData(memento.accelGyroSettingsData);
+    auxMagSettings->setData(memento.auxMagSettings);
+    recallBoardRotation();
+
+    stopped();
+    showHelp(CALIBRATION_HELPER_IMAGE_EMPTY);
+    savePositionEnabledChanged(false);
 }
 
 /**
@@ -447,14 +529,27 @@ void SixPointCalibrationModel::compute()
 
     // Calibration accel
     if (calibratingAccel) {
-        OpenPilot::CalibrationUtils::SixPointInConstFieldCal(homeLocationData.g_e, accel_data_x, accel_data_y, accel_data_z, S, b);
-        accelGyroSettingsData.accel_scale[AccelGyroSettings::ACCEL_SCALE_X] = fabs(S[0]);
-        accelGyroSettingsData.accel_scale[AccelGyroSettings::ACCEL_SCALE_Y] = fabs(S[1]);
-        accelGyroSettingsData.accel_scale[AccelGyroSettings::ACCEL_SCALE_Z] = fabs(S[2]);
+        /* same generic ellipsoid solver as the mag, fitted against g:
+         * Scale = g/radius per axis, Bias = ellipsoid centre - exactly the
+         * (raw - bias) * scale form the firmware applies */
+        int n = accel_fit_x.count();
+        Eigen::VectorXf ax(n), ay(n), az(n);
+        for (int i = 0; i < n; i++) {
+            ax(i) = accel_fit_x[i];
+            ay(i) = accel_fit_y[i];
+            az(i) = accel_fit_z[i];
+        }
+        OpenPilot::CalibrationUtils::EllipsoidCalibrationResult eres;
+        OpenPilot::CalibrationUtils::EllipsoidCalibration(&ax, &ay, &az, homeLocationData.g_e, &eres, true);
+        qDebug() << "Accel ellipsoid: scale(" << eres.Scale.coeff(0) << eres.Scale.coeff(1) << eres.Scale.coeff(2)
+                 << ") bias(" << eres.Bias.coeff(0) << eres.Bias.coeff(1) << eres.Bias.coeff(2) << ")";
+        accelGyroSettingsData.accel_scale[AccelGyroSettings::ACCEL_SCALE_X] = fabs(eres.Scale.coeff(0));
+        accelGyroSettingsData.accel_scale[AccelGyroSettings::ACCEL_SCALE_Y] = fabs(eres.Scale.coeff(1));
+        accelGyroSettingsData.accel_scale[AccelGyroSettings::ACCEL_SCALE_Z] = fabs(eres.Scale.coeff(2));
 
-        accelGyroSettingsData.accel_bias[AccelGyroSettings::ACCEL_BIAS_X]   = -sign(S[0]) * b[0];
-        accelGyroSettingsData.accel_bias[AccelGyroSettings::ACCEL_BIAS_Y]   = -sign(S[1]) * b[1];
-        accelGyroSettingsData.accel_bias[AccelGyroSettings::ACCEL_BIAS_Z]   = -sign(S[2]) * b[2];
+        accelGyroSettingsData.accel_bias[AccelGyroSettings::ACCEL_BIAS_X]   = eres.Bias.coeff(0);
+        accelGyroSettingsData.accel_bias[AccelGyroSettings::ACCEL_BIAS_Y]   = eres.Bias.coeff(1);
+        accelGyroSettingsData.accel_bias[AccelGyroSettings::ACCEL_BIAS_Z]   = eres.Bias.coeff(2);
     }
 
     // Calibration mag
