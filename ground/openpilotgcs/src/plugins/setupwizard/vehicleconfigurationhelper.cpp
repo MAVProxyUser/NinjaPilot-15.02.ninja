@@ -840,6 +840,17 @@ void VehicleConfigurationHelper::applyManualControlDefaults()
     ManualControlSettings::DataFields cData = mcSettings->getData();
 
     ManualControlSettings::ChannelGroupsOptions channelType = ManualControlSettings::CHANNELGROUPS_PWM;
+
+    if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REALPOSIX) {
+        /* Every receiver on this board arrives through the PPM channel
+         * group - the UDP network receiver registers there by design
+         * (and a future hardware PPM driver would too). Mapping the
+         * wizard's input choice to PWM/SBUS/DSM groups severs the live
+         * receiver: this exact line once turned a working UDP-sticks
+         * setup into a dead INPUT tile. The choice is still recorded in
+         * HwSettings for whatever hardware the future brings. */
+        channelType = ManualControlSettings::CHANNELGROUPS_PPM;
+    } else
     switch (m_configSource->getInputType()) {
     case VehicleConfigurationSource::INPUT_PWM:
         channelType = ManualControlSettings::CHANNELGROUPS_PWM;

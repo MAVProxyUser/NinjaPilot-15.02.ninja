@@ -3225,3 +3225,15 @@ pre-check) now lives in SKILLS.md "Change or add a UAVObject".
   protocol config. If the summary-page Next still stalls, get the
   culprit from the GCS console ("Transaction timed out when trying to
   save: <object>") and fix THAT write - do not amputate the wizard.
+- **The wizard SEVERED the UDP receiver on its first real run**: its
+  input page maps the selection into ManualControlSettings.ChannelGroups
+  (applyManualControlDefaults), and PWM/SBUS/DSM groups have no driver
+  on this board - the UDP receiver lives in the PPM group BY DESIGN.
+  Result: working sticks -> dead INPUT tile, no error anywhere. Fixed:
+  on CONTROLLER_REALPOSIX the wizard binds ChannelGroups to PPM for
+  EVERY input choice (the choice itself is still recorded in HwSettings
+  for future hardware). Restore ritual if it ever recurs:
+  ground/pyuavtalk/setup_udp_sticks.py - and run its verification with
+  the GCS CLOSED (two UDP clients steal each other's packets and fake
+  FAILs; a 3/8 with config-readback PASSing is the stolen-packet
+  signature, not a broken receiver).
