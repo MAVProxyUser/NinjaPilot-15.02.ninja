@@ -58,6 +58,12 @@ s=importlib.util.spec_from_file_location(\"v\",\"make/scripts/version-info.py\")
 m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
 print(m.get_hash_of_dirs(\"shared/uavobjectdefinition\", verbose=0, raw=1, n=8))"')
 GCSH=$(grep -o '0x[0-9a-f][0-9a-f]' "$REPO/ground/openpilotgcs-synthetics/version_info.cpp" | head -4 | sed 's/0x//' | tr -d '\n')
+# the RUNTIME artifact is the compiled dylib, not the .cpp - verify the
+# actual bundle libVersionInfo carries the hash STRING (stored as ASCII,
+# not raw bytes; searching raw bytes gives a false "absent").
+DYLIB=$(find "$GCS/bin/NinjaPilotGCS.app" -name "libVersionInfo.1.0.0.dylib" | head -1)
+DYLOK=no
+if [ -n "$DYLIB" ] && strings "$DYLIB" | grep -q "^$MAC"; then DYLOK=yes; fi
 ELFOK=$($SSH "python3 -c \"
 d=open('/usr/local/ninja/src/build/fw_realposix/fw_realposix.elf','rb').read()
 b=bytes.fromhex('$MAC')
@@ -66,7 +72,7 @@ echo "  Mac XML     : $MAC"
 echo "  Board XML   : $BRDH"
 echo "  GCS lib     : $GCSH"
 echo "  running ELF embeds Mac hash: $ELFOK"
-if [ "$MAC" = "$BRDH" ] && [ "$MAC" = "$GCSH" ] && [ "$ELFOK" = "yes" ]; then
+if [ "$MAC" = "$BRDH" ] && [ "$MAC" = "$GCSH" ] && [ "$ELFOK" = "yes" ] && [ "$DYLOK" = "yes" ]; then
   echo "== 6/6 ALL HASHES MATCH ($MAC) =="
   echo ">>> NOW RELAUNCH THE GCS. The mismatch warning is a stale RUNNING gcs;"
   echo ">>> the rebuilt binary carries the new hash but the process in memory does not."

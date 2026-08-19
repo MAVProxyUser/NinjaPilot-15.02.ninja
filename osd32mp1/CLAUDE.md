@@ -3417,3 +3417,17 @@ warning is almost always a stale RUNNING gcs process, not a real mismatch
 (its hash is compiled in and only refreshes on relaunch). When the warning
 appears, FIRST verify the four hashes with the script's step 5 logic; if
 they match, the fix is "quit and reopen the GCS", not another rebuild.
+## The hash-mismatch diagnosis MUST include the bundle dylib (2026-08-19)
+
+When checking the five hashes, the load-bearing one is the compiled
+GCS bundle **libVersionInfo.1.0.0.dylib** - NOT version_info.cpp. The
+running GCS loads the dylib; a correct .cpp with a stale/unrebuilt dylib
+still warns. TWO gotchas verifying it:
+- the hash is stored as an ASCII STRING ("b8eb084b02399ac4..."), so
+  search the dylib with `strings | grep`, never a raw-byte search (raw
+  bytes give a FALSE "absent").
+- the dylib also carries the GCS git revision as a separate 40-hex - do
+  not confuse it with the UAVO hash.
+uavo_sync.sh step 5 now verifies the dylib too. Confirmed 2026-08-19: all
+five (Mac XML, board XML, ELF, version_info.cpp, bundle dylib) = b8eb084b,
+so the warning was purely a stale RUNNING gcs - relaunch fixes it.

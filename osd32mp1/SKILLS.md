@@ -468,9 +468,10 @@ osd32mp1/uavo_sync.sh 192.168.0.14
 
 It regenerates the synthetics on the Mac, rebuilds the GCS object library
 AND libVersionInfo (the hash), ships junk-free XML + generated sources to
-the board, rebuilds and restarts fw_realposix, then verifies the Mac /
-board-XML / GCS / running-ELF hashes are ALL identical and refuses (exit 1)
-if they are not. It ends by telling you to RELAUNCH THE GCS.
+the board, rebuilds and restarts fw_realposix, then verifies FIVE hashes
+are ALL identical - Mac XML, board XML, running-ELF, the GCS version_info
+source, AND the compiled bundle libVersionInfo.1.0.0.dylib (the artifact
+the GCS actually loads) - refusing (exit 1) if any differ. It ends by telling you to RELAUNCH THE GCS.
 
 **Then RELAUNCH THE GCS.** This is not optional and it is the #1 cause of
 the warning: the rebuilt binary carries the new hash, but a gcs process
