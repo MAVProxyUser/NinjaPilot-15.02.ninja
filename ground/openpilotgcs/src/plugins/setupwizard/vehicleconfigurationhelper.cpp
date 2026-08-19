@@ -126,16 +126,16 @@ void VehicleConfigurationHelper::clearModifiedObjects()
 
 void VehicleConfigurationHelper::applyHardwareConfiguration()
 {
-    if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REALPOSIX) {
-        /* No serial receiver ports, no serial GPS, no port speeds - the
-         * OSD32MP1's receiver is the compile-time UDP-PPM driver and the
-         * GPS arrives over CAN through the sensor hub. Every HwSettings/
-         * GPSSettings write here would be meaningless, and each write is
-         * one more acked transaction for the summary page's blocking
-         * apply loop to stall on. Write nothing. */
-        return;
-    }
-
+    /* realposix note: this board takes the standard Revo-family path ON
+     * PURPOSE. The port fields (RM_RcvrPort et al) drive no hardware
+     * TODAY - the receiver is the UDP-PPM driver - but they RECORD the
+     * user's choice, and a future hardware receiver driver on the MP1's
+     * timer pins reads exactly these. The GPS module is real here too
+     * (UDP port 9001, UBX/NMEA parsers), so OptionalModules[GPS] and
+     * GPSSettings.DataProtocol are live configuration, not relics. The
+     * wizard's job is to be able to OVERRIDE defaults - never no-op it
+     * wholesale for this board. The one legitimate skip is DroneCAN GPS,
+     * which needs no serial protocol config (see the GPS_DRONECAN case). */
     HwSettings *hwSettings = HwSettings::GetInstance(m_uavoManager);
 
     Q_ASSERT(hwSettings);

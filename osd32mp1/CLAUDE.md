@@ -3211,3 +3211,17 @@ pre-check) now lives in SKILLS.md "Change or add a UAVObject".
   stalls, the GCS console names the culprit: "Transaction timed out
   when trying to save: <object>" - fix or skip THAT write, do not
   raise the timeouts.
+- **CORRECTION (user called it, same night): the wizard hardware no-op
+  was an over-reach and is REVERTED.** "Every HwSettings/GPSSettings
+  write is meaningless on realposix" was false on two counts: the GPS
+  module is REAL here (UDP port 9001, UBX/NMEA parsers - the GPS
+  thread in the RT listing), so OptionalModules[GPS] and
+  GPSSettings.DataProtocol are live config; and the port fields RECORD
+  the user's input choice, which a future hardware receiver driver on
+  the MP1 timer pins will read. The wizard must retain the power to
+  override every default (QuadX today, plane tomorrow; UDP sticks
+  today, hardware PPM tomorrow). realposix now takes the standard
+  Revo-family apply path; the ONLY skip is GPS_DRONECAN's serial
+  protocol config. If the summary-page Next still stalls, get the
+  culprit from the GCS console ("Transaction timed out when trying to
+  save: <object>") and fix THAT write - do not amputate the wizard.
