@@ -138,16 +138,17 @@ int SetupWizard::nextId() const
         }
 
     case PAGE_INPUT:
-        if (isRestartNeeded()) {
+        /* On realposix: write NOTHING here. saveHardwareSettings() persists
+         * HwSettings+ManualControlSettings to flash mid-wizard (its save
+         * arg defaults true), and the reboot re-inits an STM32's receiver
+         * port - both are wrong for this board. Persisting mid-wizard is
+         * exactly the "stomp known-good before completion" hazard: the
+         * user's choice is carried forward in RAM and re-applied+saved
+         * atomically at the final Save page. STM32 targets keep the
+         * original persist+reboot (their receiver hardware needs it). */
+        if (getControllerType() != CONTROLLER_REALPOSIX && isRestartNeeded()) {
             saveHardwareSettings();
-            /* The reboot exists so an STM32 re-inits its receiver port
-             * hardware. On realposix the receiver set is compile-time
-             * (the UDP-PPM receiver is always present), and restarting
-             * the process mid-wizard wipes RAM state and has wedged
-             * saves before - skip it. */
-            if (getControllerType() != CONTROLLER_REALPOSIX) {
-                reboot();
-            }
+            reboot();
         }
         return PAGE_VEHICLES;
 
