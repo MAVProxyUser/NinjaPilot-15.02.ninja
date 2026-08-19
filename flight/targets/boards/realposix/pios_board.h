@@ -133,7 +133,12 @@ extern uint32_t pios_com_vcp_id;
 // ------------------------
 // TELEMETRY
 // ------------------------
-#define TELEM_QUEUE_SIZE        20
+/* MP1 sizing: 20 entries is an STM32-era number - at the 490 Hz event
+ * rate it is 40 ms of buffering, and any longer telemetry stall makes
+ * the event dispatcher drop periodic events (eventErrors -> the EVENT
+ * tile blip). 512 entries ~= 1 s of slack for ~8 KB of the MP1's
+ * 426 MB. */
+#define TELEM_QUEUE_SIZE        512
 #define PIOS_TELEM_STACK_SIZE   624
 
 #define PIOS_COM_BUFFER_SIZE    1024

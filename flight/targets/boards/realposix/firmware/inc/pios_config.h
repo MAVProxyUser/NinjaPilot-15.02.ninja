@@ -57,7 +57,11 @@
  * ConnectCallback notifications in the firmware funnel through it; config
  * bursts overflow it and drop notifications silently (EVENT alarm orange).
  * 64 gives bursts room. (Macro name carries upstream's typo.) */
-#define PIOS_EVENTDISAPTCHER_QUEUE 64
+/* MP1 sizing (was 64): the central event queue must ride out dispatcher
+ * stalls at full producer rate - 1024 entries ~= 2 s at 490 Hz for
+ * ~24 KB. The EVENT tile must not blip on self-healing scheduling
+ * hiccups this box shrugs off. */
+#define PIOS_EVENTDISAPTCHER_QUEUE 1024
 
 /*
  * Which devices the sensor hub opens. Named here rather than buried in the

@@ -3161,3 +3161,14 @@ pre-check) now lives in SKILLS.md "Change or add a UAVObject".
   process start time against the capture window. Also: a board build
   can take past the moment you think it finished - the ELF mtime and
   the service start time tell the real story.
+- **EVENT blips killed the same night - STM32-era queue depths were the
+  contention**: the dispatcher's eventErrors (the ONE term of systemmod's
+  EVENT check not shown in the printed stats line) counts drops at two
+  queues still sized for a microcontroller: TELEM_QUEUE_SIZE 20 (40 ms
+  of buffering at the 490 Hz event rate, behind a telemetry task that
+  deliberately runs at the BOTTOM of the RT band) and
+  PIOS_EVENTDISAPTCHER_QUEUE 64 (~130 ms). MP1 sizing: 512 (~1 s) and
+  1024 (~2 s) for ~32 KB total of the 426 MB. VERDICT: **ZERO alarm
+  transitions of ANY kind in a clean 180 s window** - STAB 0, EVENT 0,
+  Receiver 0 - GCS attached, IMU at 500 Hz. Both defines live in
+  realposix pios_board.h / pios_config.h = full ~13 min board rebuild.
