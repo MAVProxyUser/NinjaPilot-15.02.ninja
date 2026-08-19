@@ -61,7 +61,10 @@ public slots:
 
 private:
     static const int STATS_UPDATE_PERIOD_MS  = 4000;
-    static const int STATS_CONNECT_PERIOD_MS = 2000;
+    /* retry cadence while unconnected: 500 ms - a lost UDP handshake
+     * costs half a second instead of two (this is idle-link traffic
+     * only; the 4 s stats period takes over once connected) */
+    static const int STATS_CONNECT_PERIOD_MS = 500;
     static const int CONNECTION_TIMEOUT_MS   = 8000;
 
     UAVObjectManager *objMngr;

@@ -49,6 +49,12 @@ TelemetryMonitor::TelemetryMonitor(UAVObjectManager *objMngr, Telemetry *tel) :
     // Start update timer
     connect(statsTimer, SIGNAL(timeout()), this, SLOT(processStatsUpdates()));
     statsTimer->start(STATS_CONNECT_PERIOD_MS);
+    /* Qt timers first fire a full interval after start(), so the FIRST
+     * HandshakeReq used to leave 2 s of dead air after the link opened -
+     * during which the firmware's periodic objects already stream and
+     * the PFD visibly moves under a "NO LINK" banner. Open the
+     * conversation immediately; the flight side acks in milliseconds. */
+    QTimer::singleShot(0, this, SLOT(processStatsUpdates()));
 }
 
 TelemetryMonitor::~TelemetryMonitor()
