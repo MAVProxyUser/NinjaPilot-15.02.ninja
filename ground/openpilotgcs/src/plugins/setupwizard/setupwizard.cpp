@@ -436,6 +436,9 @@ QString SetupWizard::getSummaryText()
         case GPS_UBX:
             summary.append(tr("OpenPilot v8 or Generic UBLOX GPS"));
             break;
+        case GPS_DRONECAN:
+            summary.append(tr("U-Blox on CAN bus (DroneCAN)"));
+            break;
         case GPS_NMEA:
             summary.append(tr("Generic NMEA GPS"));
             break;

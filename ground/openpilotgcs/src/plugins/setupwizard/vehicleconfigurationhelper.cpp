@@ -126,6 +126,16 @@ void VehicleConfigurationHelper::clearModifiedObjects()
 
 void VehicleConfigurationHelper::applyHardwareConfiguration()
 {
+    if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REALPOSIX) {
+        /* No serial receiver ports, no serial GPS, no port speeds - the
+         * OSD32MP1's receiver is the compile-time UDP-PPM driver and the
+         * GPS arrives over CAN through the sensor hub. Every HwSettings/
+         * GPSSettings write here would be meaningless, and each write is
+         * one more acked transaction for the summary page's blocking
+         * apply loop to stall on. Write nothing. */
+        return;
+    }
+
     HwSettings *hwSettings = HwSettings::GetInstance(m_uavoManager);
 
     Q_ASSERT(hwSettings);
@@ -204,7 +214,11 @@ void VehicleConfigurationHelper::applyHardwareConfiguration()
             break;
         }
 
-        if (m_configSource->getGpsType() != VehicleConfigurationSource::GPS_DISABLED) {
+        if (m_configSource->getGpsType() == VehicleConfigurationSource::GPS_DRONECAN) {
+            /* The GPS lives on the CAN bus (DroneCAN node -> sensor hub ->
+             * GPSPositionSensor). No serial port, speed, protocol or GPS
+             * module option to configure - deliberately write nothing. */
+        } else if (m_configSource->getGpsType() != VehicleConfigurationSource::GPS_DISABLED) {
             data.OptionalModules[HwSettings::OPTIONALMODULES_GPS] = 1;
             data.GPSSpeed = HwSettings::GPSSPEED_57600;
 

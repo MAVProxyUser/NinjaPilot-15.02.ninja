@@ -3201,3 +3201,13 @@ pre-check) now lives in SKILLS.md "Change or add a UAVObject".
   FIXED; (1) and (3) are the next wizard session, and (1) is the
   gate: instrument setupVehicle's apply loop to log which object write
   fails to ack on realposix, then fix or skip those writes.
+- **Wizard follow-through (2026-08-19, late)**: GPS page now offers
+  "U-Blox on CAN bus (DroneCAN)" (GPS_DRONECAN enum appended LAST so
+  saved configs keep their meaning); the helper deliberately writes
+  NOTHING for it, and applyHardwareConfiguration is a complete NO-OP
+  for CONTROLLER_REALPOSIX - no serial ports/speeds exist here, and
+  every skipped write is one fewer acked transaction for the summary
+  page's blocking apply loop to stall on. If the summary Next still
+  stalls, the GCS console names the culprit: "Transaction timed out
+  when trying to save: <object>" - fix or skip THAT write, do not
+  raise the timeouts.

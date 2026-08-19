@@ -75,6 +75,14 @@ void GpsPage::setupSelection(Selection *selection)
                        "OPGPS-v8-ublox",
                        SetupWizard::GPS_UBX);
 
+    selection->addItem(tr("U-Blox on CAN bus (DroneCAN)"),
+                       "Any u-blox receiver attached to a DroneCAN node (the NinjaPilot "
+                       "RealPosix bench GPS). The flight controller reads it from the CAN "
+                       "bus - no serial port, wiring or protocol setup is needed, and the "
+                       "wizard changes nothing for it.",
+                       "generic-ublox-chip",
+                       SetupWizard::GPS_DRONECAN);
+
     selection->addItem(tr("NMEA Based"),
                        tr("Select this option for a generic NMEA based GPS."),
                        "generic-nmea",
