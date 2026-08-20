@@ -26,6 +26,7 @@ DEPENDPATH += dialogs \
     actionmanager
 
 SOURCES += mainwindow.cpp \
+    gcsautomation.cpp \
     tabpositionindicator.cpp \
     fancyactionbar.cpp \
     fancytabwidget.cpp \
@@ -73,6 +74,7 @@ SOURCES += mainwindow.cpp \
     aboutdialog.cpp \
 
 HEADERS += mainwindow.h \
+    gcsautomation.h \
     tabpositionindicator.h \
     fancyactionbar.h \
     fancytabwidget.h \

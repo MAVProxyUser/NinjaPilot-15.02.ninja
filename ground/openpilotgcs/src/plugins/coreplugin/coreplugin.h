@@ -34,6 +34,7 @@
 namespace Core {
 namespace Internal {
 class MainWindow;
+class GcsAutomationServer;
 
 class CorePlugin : public ExtensionSystem::IPlugin {
     Q_OBJECT
@@ -52,6 +53,7 @@ public slots:
 
 private:
     MainWindow *m_mainWindow;
+    GcsAutomationServer *m_automation = nullptr;
 };
 } // namespace Internal
 } // namespace Core

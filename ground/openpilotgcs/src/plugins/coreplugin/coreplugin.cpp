@@ -29,6 +29,7 @@
 #include "coreplugin.h"
 #include "coreimpl.h"
 #include "mainwindow.h"
+#include "gcsautomation.h"
 #include <QtPlugin>
 #include <extensionsystem/pluginmanager.h>
 
@@ -58,6 +59,10 @@ bool CorePlugin::initialize(const QStringList &arguments, QString *errorMessage)
 void CorePlugin::extensionsInitialized()
 {
     m_mainWindow->extensionsInitialized();
+    // Optional scripting/automation surface (localhost, off unless
+    // NINJAPILOT_GCS_AUTOMATION=1). Started after the main window is up.
+    m_automation = new Core::Internal::GcsAutomationServer(this);
+    m_automation->start();
 }
 
 void CorePlugin::remoteArgument(const QString & arg)

@@ -141,7 +141,12 @@ void UAVGadgetManager::modeChanged(Core::IMode *mode)
         return;
     }
 
-    m_currentGadget->widget()->setFocus();
+    /* rapid mode changes can fire this before a current gadget exists (or
+     * with a half-torn-down one) - m_currentGadget / widget() null-crashed
+     * setFocus(). Guard both. */
+    if (m_currentGadget && m_currentGadget->widget()) {
+        m_currentGadget->widget()->setFocus();
+    }
     showToolbars(toolbarsShown());
 }
 
@@ -179,7 +184,12 @@ void UAVGadgetManager::setCurrentGadget(IUAVGadget *uavGadget)
             view->update();
         }
     }
-    uavGadget->widget()->setFocus();
+    /* uavGadget can be null (gadget removed / view emptied) and widget()
+     * can be null mid-construction; either crashed setFocus() on random
+     * gadget-change events. Guard both. */
+    if (uavGadget && uavGadget->widget()) {
+        uavGadget->widget()->setFocus();
+    }
     emit currentGadgetChanged(uavGadget);
 }
 
@@ -274,11 +284,16 @@ void UAVGadgetManager::showToolbars(bool show)
     }
 
     m_showToolbars = show;
-    SplitterOrView *next = m_splitterOrView->findFirstView();
-    do {
-        next->view()->showToolbar(show);
+    /* during rapid mode changes findFirstView() can return null (views mid
+     * teardown), and the old do-while dereferenced next->view() BEFORE the
+     * null test - crashing. Use a null-safe while. */
+    SplitterOrView *next = m_splitterOrView ? m_splitterOrView->findFirstView() : 0;
+    while (next) {
+        if (next->view()) {
+            next->view()->showToolbar(show);
+        }
         next = m_splitterOrView->findNextView(next);
-    } while (next);
+    }
 
     updateUavGadgetMenus();
 }

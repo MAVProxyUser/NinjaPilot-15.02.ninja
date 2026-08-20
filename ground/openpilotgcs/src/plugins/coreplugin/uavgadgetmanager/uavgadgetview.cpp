@@ -158,7 +158,9 @@ bool UAVGadgetView::hasGadget(IUAVGadget *uavGadget) const
 
 void UAVGadgetView::showToolbar(bool show)
 {
-    m_top->setHidden(!show);
+    if (m_top) {
+        m_top->setHidden(!show);
+    }
 }
 
 void UAVGadgetView::closeView()
