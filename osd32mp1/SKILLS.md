@@ -179,9 +179,47 @@ Then set the BRK SD boot switches and power-cycle. A `/dev/cu.usbmodem*`
 appears (ACM console) and `board_cmd.py` talks to it with autologin root.
 macOS gives EITHER console OR ECM network, never both (dwc2 FIFO limit); this
 ships the console. Physical `ttySTM0` UART stays as a hard fallback if the
-gadget ever fails. Next (needs the booted board, then CAN hardware): grow
-`/usr/local`, land the ninjapilot source, build `fw_realposix` — same as the
-RED, see the build recipe above.
+gadget ever fails.
+
+### The ACM-console image is a DEAD END for building on the BRK — use the ECM image
+
+The BRK has **no Ethernet** (only `lo`+`can0`), so the 133M source can't move
+over the 115200 serial console in any reasonable time, and **a live ACM->ECM
+gadget switch does NOT re-enumerate on macOS** (the board drops off USB
+entirely; needs a physical re-plug/reboot). Worse, the RED's gadget script
+notes the real reason ECM never worked there: with **ACM+ECM both bound the
+dwc2 controller runs out of IN-endpoint TX FIFOs** (only ~3; the 4th fails).
+
+So build a **second, ECM-ONLY image** (creates only `ecm.0`, no `acm.0` -> 2 IN
+endpoints, fits): `../Octavo/osd32mp1-brk-NINJAPILOT-ecm.img`. Same edits as the
+console image PLUS: gadget script links `ecm.0` not `acm.0`; **dropbear.socket**
+already enabled in stock; Mac `id_rsa.pub` -> **`/home/root/.ssh/authorized_keys`**
+(root home is `/home/root`, NOT `/root`); stock boot kept (`console=ttySTM0`
+only). Flash it, boot -> board answers at **192.168.7.1** (macOS auto-DHCPs a
+192.168.7.x), `ssh root@192.168.7.1` works (key or pw `ninjapilot`). VERIFIED
+working 2026-08-20 - this is the one to use for real work; the ACM image is only
+for a quick look.
+
+### Build fw_realposix ON THE BRK (the trap list)
+
+Over `ssh root@192.168.7.1`, in `/usr/local/ninja/src`:
+
+```bash
+# 1. grow /usr/local (resize2fs /dev/mmcblk0p7 -> 679M), land source (scp tar).
+# 2. no Qt on the board: bring the RED's prebuilt generator + synthetics:
+#    tar (on RED) build/uavobjgenerator build/uavobject-synthetics ground/uavobjgenerator
+#    -> scp to BRK -> `tar xm` in src (xm = mtimes now, so make won't regenerate).
+# 3. no .git -> version-info.py emits 0xNone (invalid C). Put a version-info.json
+#    at src root (hash/origin/time/last_tag/num_commits_past_tag/branch/dirty).
+# 4. build the ELF goal (make fw_realposix DELETES the elf as an opfw intermediate):
+FAKEROOTKEY=1 make QMAKE=true fw_realposix_elf     # FAKEROOTKEY bypasses the root check
+```
+
+Then install `ninjapilot.service` (`osd32mp1/systemd/`, brings can0 up, DNA in
+firmware), `mkdir -p /usr/local/ninja/fcwd`, `systemctl enable --now
+ninjapilot`. Reach the board over ECM for everything; on reboot it comes back
+on 192.168.7.1. **CAN hardware connects later** — until then the elf runs idle
+(can0 up, no nodes).
 
 ## Switch the USB gadget between console and network
 
