@@ -27,6 +27,7 @@
 #define USE_PATHPLANNER
 
 #include "opmapgadgetwidget.h"
+#include <QTimer>
 #include "ui_opmap_widget.h"
 
 #include <QtWidgets/QApplication>
@@ -940,8 +941,18 @@ void OPMapGadgetWidget::homePositionUpdated(UAVObject *hp)
     // manual pan afterward.
     if (set && (LLA[0] != 0.0 || LLA[1] != 0.0) && !m_auto_home_done) {
         m_auto_home_done = true;
-        m_map->SetCurrentPosition(internals::PointLatLng(LLA[0], LLA[1]));
-        setZoom(m_min_zoom + 15);
+        // Defer out of this UAVObject-update callback: calling SetZoom (which
+        // repaints the map) synchronously here re-enters the tile draw on an
+        // inconsistent stack and crashed. singleShot lets the update finish,
+        // then centers + zooms on a clean event-loop iteration.
+        const internals::PointLatLng hp(LLA[0], LLA[1]);
+        QTimer::singleShot(0, this, [this, hp]() {
+            if (!m_widget || !m_map) {
+                return;
+            }
+            m_map->SetCurrentPosition(hp);
+            setZoom(m_min_zoom + 15);
+        });
     }
 }
 

@@ -344,11 +344,15 @@ void MapGraphicItem::DrawMap2D(QPainter *painter)
                         if (t != 0) {
                             foreach(QByteArray img, t->Overlays) {
                                 if (img.count() != 0) {
-                                    if (!found) {
+                                    /* FromStream can return a NULL pixmap on a
+                                     * truncated/corrupt tile even with bytes
+                                     * present; drawing it crashes deep in
+                                     * QRasterPaintEngine::drawImage. Guard it. */
+                                    QPixmap px = PureImageProxy::FromStream(img);
+                                    if (!px.isNull()) {
                                         found = true;
-                                    }
-                                    {
-                                        painter->drawPixmap(core->tileRect.X(), core->tileRect.Y(), core->tileRect.Width(), core->tileRect.Height(), PureImageProxy::FromStream(img));
+                                        painter->drawPixmap(core->tileRect.X(), core->tileRect.Y(),
+                                                            core->tileRect.Width(), core->tileRect.Height(), px);
                                     }
                                 }
                             }
