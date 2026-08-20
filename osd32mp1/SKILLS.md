@@ -772,3 +772,45 @@ so AppleDouble junk never embarks; (2) when two "identical" directories
 hash differently, compare os.listdir() counts FIRST - dotfiles hide
 from globs; (3) the warning compares the UAVO hash, so with clean trees
 it only fires on REAL definition drift - treat it as meaningful again.
+## Drive the GCS from Python (QAccessible automation surface)
+
+The GCS exposes a localhost JSON control surface when launched with
+NINJAPILOT_GCS_AUTOMATION=1 (port via NINJAPILOT_GCS_AUTOMATION_PORT,
+default 17654). It uses Qt Accessibility so it covers the whole widget
+surface generically, plus first-class verbs for workspaces and menus.
+
+Launch ISOLATED so it never touches the user's config or the board:
+
+```bash
+XDG_CONFIG_HOME=/tmp/gcs-iso NINJAPILOT_GCS_AUTOMATION=1 \
+  ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/MacOS/NinjaPilotGCS &
+```
+
+Drive it with ground/pyuavtalk/gcs_client.py:
+
+```python
+from gcs_client import GcsClient
+c = GcsClient(); c.connect()
+c.workspaces()                       # Welcome/Flight data/Configuration/System/Scopes/HITL/Firmware
+c.workspace("Configuration")         # activate a workspace
+c.tree(depth=14)                     # full accessible tree (role/name/rect/actions/path)
+c.find(role="button", name="Save")   # search by role/name -> index paths
+c.do(path, "Press")                  # invoke an accessibility action
+c.set(path, "QuadX")                 # set combo/edit/checkbox by real widget
+c.menus(); c.menu("Tools/Options")   # enumerate + trigger File/Edit/Tools/Window/Help
+```
+
+Coverage note: QWidgets (config tabs, dialogs, menus, wizard) are fully
+exposed; QGraphicsView (map/PFD) and QML (Welcome) content is NOT deeply
+in the accessibility tree - address those by scene coordinates/QML roots
+if ever needed. The server runs on the GUI thread, so a modal dialog
+blocks it until closed - avoid triggering modal menu items in automation.
+
+**Fuzzing it found five SIGSEGV crashes on the first runs, all fixed:**
+UAVGadgetManager::setCurrentGadget / modeChanged / showToolbars +
+UAVGadgetView::showToolbar (null gadget/view/toolbar on gadget & rapid
+mode changes), SplitterOrView::unsplit (null/self view on close), and
+getChannelDescriptions in all four vehicle widgets (out-of-bounds
+channel index when GUIConfigData was written for a different airframe).
+RULE: a click must never crash the GCS - these are the pattern to grep
+for (unguarded ->widget()->setFocus(), raw list[] index writes).
