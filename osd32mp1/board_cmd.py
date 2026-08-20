@@ -26,10 +26,15 @@ MARKER = "__BOARD_CMD_DONE__"
 
 def open_console(path=None):
     if path is None:
+        path = os.environ.get("BOARD_CMD_DEV")   # e.g. /dev/cu.usbmodem3101 (BRK)
+    if path is None:
         cands = sorted(glob.glob("/dev/cu.usbmodem*"))
         if not cands:
             sys.exit("no /dev/cu.usbmodem* - is the board booted with the edited image?\n"
                      "(the stock image's ACM proto is 0xff and macOS will not bind it)")
+        if len(cands) > 1:
+            sys.stderr.write("[board_cmd] WARNING: multiple boards: %s ; using %s "
+                             "(set BOARD_CMD_DEV to choose)\n" % (cands, cands[-1]))
         path = cands[-1]
     fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     a = termios.tcgetattr(fd)
