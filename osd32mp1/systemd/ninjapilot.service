@@ -1,9 +1,14 @@
 [Unit]
 Description=NinjaPilot realposix flight firmware
-After=dronecan-allocator.service
-Wants=dronecan-allocator.service
+# The firmware now owns the CAN interface AND is the DroneCAN DNA allocator
+# (in flight/pios/posix/pios_sensors_hub.c). The separate Python
+# dronecan-allocator.service was RETIRED 2026-08-20 - it decoded the whole CAN
+# sensor firehose in userspace and, together with the m_can RX-FIFO overflow
+# storm it fed, starved the network softirqs into a telemetry NO-LINK. The
+# firmware brings can0 up here (was the allocator's ExecStartPre).
 
 [Service]
+ExecStartPre=-/sbin/ip link set can0 up type can bitrate 1000000
 ExecStart=/usr/local/ninja/src/build/fw_realposix/fw_realposix.elf
 WorkingDirectory=/usr/local/ninja/fcwd
 StandardOutput=null

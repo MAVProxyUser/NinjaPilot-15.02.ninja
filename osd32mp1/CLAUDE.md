@@ -10,6 +10,63 @@ here.
 
 ---
 
+## SOLVED: telemetry NO-LINK was a CAN softirq storm; DNA moved into the firmware (2026-08-20)
+
+The GCS went **NO LINK** under any load (the UDP stick stream was blamed, but
+it happened on wired Ethernet too). Root cause, proven by bisecting with
+`ip link set can0 down` (ping to the board went **250-4000 ms -> 0.66 ms**
+instantly):
+
+- SocketCAN RX runs in the **NET_RX softirq**, the *same* context as the IP
+  stack. The DroneCAN nodes stream ~1 kHz of frames; the tiny m_can hardware
+  RX-FIFO was overflowing constantly ("`can0: Rx FIFO 0 Message Lost`"), which
+  spammed the kernel log (**journald ~34 %**), and `ksoftirqd` pegged at
+  **94 %** trying to drain it. Zero idle CPU, 50 % softirq -> the network stack
+  never got serviced -> telemetry handshake timed out.
+- The extra straw was **`dronecan-allocator.service`** (the Python
+  `allocatord.py`): it decoded the *entire* firehose in userspace (~30 % of a
+  core) because its SocketCAN filter "failed open", and it was a *second*
+  reader of can0 (every frame copied to two sockets). Retiring it let the FIFO
+  drain, so the overflow storm stopped. Result with the firmware allocator
+  running and can0 up: **load 0.46, 18.9 % idle, softirq 1.8 %, 0 FIFO-lost in
+  30 s, ping 0.65 ms, telemetry connects.**
+
+**The fix (user's call - "make it speak DroneCAN, right off the bat"):** the
+DNA (dynamic node-ID allocation) **CentralizedServer now lives in
+`flight/pios/posix/pios_sensors_hub.c`** - the hub already decodes every one
+of these frames, so answering the handful of allocation requests is nearly
+free. `dronecan-allocator.service` is **stopped + disabled** (kept as a
+fallback). `ninjapilot.service` now brings `can0` up itself (was the
+allocator's `ExecStartPre`).
+
+Wire format was taken from the authoritative pydronecan sources and
+cross-checked byte-for-byte against real encoded frames (NOT derived):
+- Anonymous request id layout `(prio<<24)|(disc<<10)|((dtid&3)<<8)|0`; detect
+  via `src==0 && !(id&0x80) && ((id>>8)&3)==1`. Single-frame only.
+- Allocation DSDL: `byte0=(node_id<<1)|first_part`, then uid bytes (TAO).
+- Multi-frame: prepend 2-byte LE transfer CRC = CRC-16-CCITT(payload,
+  init=base_crc) where **base_crc=0xF258** for Allocation
+  (sig 0x0b2a812620a11d40). Tail byte `0x80(SOT)|0x40(EOT)|toggle|tid`, toggle
+  starts 0 and alternates.
+- Server state machine (mirrors `dronecan/app/dynamic_node_id.py`): 3-stage
+  accumulate (6+6+4=16), echo each stage, assign on stage 3. Known uid keeps
+  its id (persisted to `/home/root/ninja_dna.bin`), else preferred id if free,
+  else highest free in [1,125] avoiding the live-bus census.
+
+**VERIFIED**: rebooting node 124 (via `osd32mp1/reboot_node.py`, a plain node
+that does NOT allocate) -> node goes anonymous -> firmware allocates it (it got
+**123**, since it requests preferred=0 and 124/125 were live) -> node accepts
+(single clean handshake, correct CRC) -> streams at 1223 fps; GyroState/MagState
+read live over telemetry. Node ids are now genuinely dynamic (a rebooted
+pure-dynamic node may change number; it is stable thereafter via the persisted
+table). Tools that hard-code "124" should discover nodes instead.
+
+> Still open as separate levers if the bus is ever pushed harder: silence the
+> m_can FIFO-lost kernel log, and/or lower the DroneCAN IMU stream rate at the
+> source. Not needed at current rates now that the second reader is gone.
+
+---
+
 ## RULE: the BOARD REVISION picks the DTB, and getting it wrong looks like dead hardware
 
 This board is **hardware revision V1.2**. Octavo's v3.0 image ships only the

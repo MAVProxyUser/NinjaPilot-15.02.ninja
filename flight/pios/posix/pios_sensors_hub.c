@@ -579,6 +579,49 @@ static volatile uint8_t  streamctl_mag_hz;
 static uint8_t streamctl_tid;
 static double  streamctl_last_tx;
 
+/* --------------------------------------------------------------------------
+ * DroneCAN dynamic node-ID allocation (DNA), CENTRALISED server.
+ *
+ * The MP1 IS the allocator now - this replaces the separate Python
+ * allocatord.py daemon, which decoded the entire ~1 kHz CAN sensor firehose
+ * in userspace (~30 % of a core) and, together with the m_can RX-FIFO
+ * overflow storm it helped feed, starved the network softirqs so hard that
+ * telemetry died under any added load. We already decode every one of these
+ * frames here; answering the handful of allocation requests costs almost
+ * nothing on top.
+ *
+ * Wire format and the server state machine were taken from the authoritative
+ * pydronecan sources (dronecan/transport.py, dronecan/app/dynamic_node_id.py,
+ * CentralizedServer) and cross-checked against real encoded frames - NOT
+ * derived, per the "verify don't derive" rule. The 3-stage handshake:
+ *   node -> anon Allocation{first_part=1, node_id=pref, uid[0:6]}
+ *   us   -> Allocation{first_part=0, node_id=0,   uid[0:6]}   (echo)
+ *   node -> anon Allocation{first_part=0, uid[6:12]}
+ *   us   -> Allocation{first_part=0, node_id=0,   uid[0:12]}  (echo, multiframe)
+ *   node -> anon Allocation{first_part=0, uid[12:16]}
+ *   us   -> Allocation{first_part=0, node_id=ALLOC, uid[0:16]}(assign, multiframe)
+ */
+#define DNA_ALLOC_DTID       1u      /* uavcan.protocol.dynamic_node_id.Allocation */
+#define DNA_ALLOC_BASE_CRC   0xF258u /* crc16-ccitt of the Allocation DSDL signature
+                                      * 0x0b2a812620a11d40 (LE), init 0xFFFF */
+#define DNA_ALLOCATOR_NODE   127u    /* our node id (matches the retired daemon) */
+#define DNA_HEARTBEAT_SRC    100u    /* streamctl_tx source id - keep reserved   */
+#define DNA_RANGE_MIN        1u
+#define DNA_RANGE_MAX        125u
+#define DNA_FOLLOWUP_TMO_S   0.5     /* Allocation.FOLLOWUP_TIMEOUT_MS / 1000     */
+#define DNA_MAX_NODES        32u
+#define DNA_TABLE_PATH       "/home/root/ninja_dna.bin"
+
+struct dna_entry { uint8_t node_id; uint8_t uid[16]; };
+static struct dna_entry dna_table[DNA_MAX_NODES];
+static uint8_t  dna_table_count;
+static uint8_t  dna_seen[16];        /* 128-bit census of node ids seen on the bus */
+static uint8_t  dna_query[16];       /* unique_id under assembly                   */
+static uint8_t  dna_query_len;
+static double   dna_query_ts;
+static uint8_t  dna_tid;             /* transfer-id counter for our broadcasts     */
+static uint32_t dna_allocations;     /* health-tile / log counter                  */
+
 void PIOS_SENSORS_HUB_SetCanStreamRates(uint16_t imu_hz, uint8_t ak_hz,
                                         uint8_t baro_hz, uint8_t mag_hz)
 {
@@ -917,6 +960,210 @@ static float f16_to_f32(uint16_t h)
     return f;
 }
 
+/* CRC-16-CCITT (poly 0x1021, init 0xFFFF), the DroneCAN transfer CRC. */
+static uint16_t dna_crc16(const uint8_t *data, uint32_t len, uint16_t crc)
+{
+    for (uint32_t i = 0; i < len; i++) {
+        crc ^= (uint16_t)data[i] << 8;
+        for (int b = 0; b < 8; b++) {
+            crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021)
+                                 : (uint16_t)(crc << 1);
+        }
+    }
+    return crc;
+}
+
+/* Write one CAN frame with a short bounded retry on a momentarily full TX
+ * queue - allocation is rare and a dropped frame aborts the whole handshake
+ * (the node just retries), but a couple of ms of poll() here makes the first
+ * attempt succeed. Never blocks the sensor loop for long. */
+static void dna_write_frame(const struct can_frame *f)
+{
+    for (int attempt = 0; attempt < 4; attempt++) {
+        if (write(can_fd, f, sizeof(*f)) == (ssize_t)sizeof(*f)) {
+            return;
+        }
+        if (errno != EAGAIN && errno != ENOBUFS) {
+            return;
+        }
+        struct pollfd pfd = { .fd = can_fd, .events = POLLOUT };
+        poll(&pfd, 1, 1);          /* wait up to 1 ms for room */
+    }
+}
+
+/* Broadcast a DroneCAN message transfer (source `src`, data type `dtid`,
+ * multiframe transfer CRC seeded with `base_crc`). Splits `payload`/`len`
+ * into frames, prepends the 2-byte transfer CRC when multiframe, and stamps
+ * the SOT/EOT/toggle/transfer-id tail byte on each. Matches transport.py. */
+static void dna_broadcast(uint8_t src, uint16_t dtid, uint16_t base_crc,
+                          const uint8_t *payload, uint8_t len)
+{
+    uint8_t  stream[2 + 16];
+    uint8_t  slen = 0;
+    uint8_t  tid  = (uint8_t)(dna_tid++ & 0x1F);
+
+    if (len > 7) {                 /* multiframe: prepend LE transfer CRC */
+        uint16_t crc = dna_crc16(payload, len, base_crc);
+        stream[slen++] = (uint8_t)(crc & 0xFF);
+        stream[slen++] = (uint8_t)(crc >> 8);
+    }
+    memcpy(stream + slen, payload, len);
+    slen = (uint8_t)(slen + len);
+
+    uint32_t canid = CAN_EFF_FLAG | (30u << 24) | ((uint32_t)dtid << 8) | src;
+    uint8_t  ofs = 0, toggle = 0, first = 1;
+    do {
+        uint8_t chunk = (uint8_t)((slen - ofs) > 7 ? 7 : (slen - ofs));
+        struct can_frame f;
+        memset(&f, 0, sizeof(f));
+        f.can_id = canid;
+        memcpy(f.data, stream + ofs, chunk);
+        uint8_t sot = first ? 0x80u : 0u;
+        uint8_t eot = ((uint8_t)(ofs + chunk) >= slen) ? 0x40u : 0u;
+        f.data[chunk] = (uint8_t)(sot | eot | (toggle ? 0x20u : 0u) | tid);
+        f.can_dlc = (uint8_t)(chunk + 1);
+        dna_write_frame(&f);
+        ofs = (uint8_t)(ofs + chunk);
+        toggle ^= 1u;
+        first = 0;
+    } while (ofs < slen);
+}
+
+/* Pack an Allocation message: byte0 = (node_id<<1)|first_part, then uid[]. */
+static uint8_t dna_pack(uint8_t node_id, uint8_t first_part,
+                        const uint8_t *uid, uint8_t uid_len, uint8_t *out)
+{
+    out[0] = (uint8_t)((node_id << 1) | (first_part & 1u));
+    memcpy(out + 1, uid, uid_len);
+    return (uint8_t)(1 + uid_len);
+}
+
+static bool dna_id_taken(uint8_t id)
+{
+    if (id == DNA_ALLOCATOR_NODE || id == DNA_HEARTBEAT_SRC) {
+        return true;
+    }
+    for (uint8_t i = 0; i < dna_table_count; i++) {
+        if (dna_table[i].node_id == id) {
+            return true;
+        }
+    }
+    return (dna_seen[id >> 3] & (uint8_t)(1u << (id & 7))) != 0;
+}
+
+static void dna_save_table(void)
+{
+    int fd = open(DNA_TABLE_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        return;
+    }
+    for (uint8_t i = 0; i < dna_table_count; i++) {
+        if (write(fd, &dna_table[i], sizeof(dna_table[i])) != (ssize_t)sizeof(dna_table[i])) {
+            break;
+        }
+    }
+    close(fd);
+}
+
+static void dna_load_table(void)
+{
+    int fd = open(DNA_TABLE_PATH, O_RDONLY);
+    if (fd < 0) {
+        return;
+    }
+    dna_table_count = 0;
+    while (dna_table_count < DNA_MAX_NODES &&
+           read(fd, &dna_table[dna_table_count], sizeof(dna_table[0]))
+               == (ssize_t)sizeof(dna_table[0])) {
+        dna_table_count++;
+    }
+    close(fd);
+    PIOS_SHMLOG_Printf("[dna] loaded %u persisted allocations", dna_table_count);
+}
+
+/* Assign (or recall) a node id for a completed 16-byte unique_id. Mirrors
+ * CentralizedServer: known uid keeps its id; else honour the preferred id if
+ * free; else the highest free id in [MIN,MAX]. Returns 0 if none free. */
+static uint8_t dna_assign(const uint8_t *uid, uint8_t preferred)
+{
+    for (uint8_t i = 0; i < dna_table_count; i++) {
+        if (memcmp(dna_table[i].uid, uid, 16) == 0) {
+            return dna_table[i].node_id;
+        }
+    }
+    uint8_t alloc = 0;
+    if (preferred >= DNA_RANGE_MIN && preferred <= DNA_RANGE_MAX
+        && !dna_id_taken(preferred)) {
+        alloc = preferred;
+    } else {
+        for (uint8_t id = DNA_RANGE_MAX; id >= DNA_RANGE_MIN; id--) {
+            if (!dna_id_taken(id)) {
+                alloc = id;
+                break;
+            }
+        }
+    }
+    if (alloc && dna_table_count < DNA_MAX_NODES) {
+        dna_table[dna_table_count].node_id = alloc;
+        memcpy(dna_table[dna_table_count].uid, uid, 16);
+        dna_table_count++;
+        dna_save_table();
+    }
+    return alloc;
+}
+
+/* Handle one anonymous Allocation request frame (single-frame transfer). */
+static void dna_handle_request(const uint8_t *data, uint8_t dlc)
+{
+    if (dlc < 2) {
+        return;
+    }
+    uint8_t tail = data[dlc - 1];
+    if ((tail & 0xC0u) != 0xC0u) {      /* anonymous transfers are single-frame */
+        return;
+    }
+    uint8_t plen       = (uint8_t)(dlc - 1);
+    uint8_t first_part = data[0] & 1u;
+    uint8_t req_node   = (uint8_t)(data[0] >> 1);
+    const uint8_t *uid = &data[1];
+    uint8_t uid_len    = (uint8_t)(plen - 1);
+    double  now        = now_s();
+
+    if (dna_query_len && (now - dna_query_ts) > DNA_FOLLOWUP_TMO_S) {
+        dna_query_len = 0;              /* stale partial - start over */
+    }
+
+    uint8_t pl[17], n;
+    if (first_part) {
+        if (uid_len > 6) {
+            uid_len = 6;
+        }
+        memcpy(dna_query, uid, uid_len);
+        dna_query_len = uid_len;
+        dna_query_ts  = now;
+        n = dna_pack(0, 0, dna_query, dna_query_len, pl);
+        dna_broadcast(DNA_ALLOCATOR_NODE, DNA_ALLOC_DTID, DNA_ALLOC_BASE_CRC, pl, n);
+    } else if (uid_len == 6 && dna_query_len == 6) {
+        memcpy(dna_query + 6, uid, 6);
+        dna_query_len = 12;
+        dna_query_ts  = now;
+        n = dna_pack(0, 0, dna_query, 12, pl);
+        dna_broadcast(DNA_ALLOCATOR_NODE, DNA_ALLOC_DTID, DNA_ALLOC_BASE_CRC, pl, n);
+    } else if (uid_len == 4 && dna_query_len == 12) {
+        memcpy(dna_query + 12, uid, 4);
+        uint8_t alloc = dna_assign(dna_query, req_node);
+        if (alloc) {
+            n = dna_pack(alloc, 0, dna_query, 16, pl);
+            dna_broadcast(DNA_ALLOCATOR_NODE, DNA_ALLOC_DTID, DNA_ALLOC_BASE_CRC, pl, n);
+            dna_allocations++;
+            PIOS_SHMLOG_Printf("[dna] allocated node id %u (uid %02x%02x..%02x%02x)",
+                               alloc, dna_query[0], dna_query[1],
+                               dna_query[14], dna_query[15]);
+        }
+        dna_query_len = 0;
+    }
+}
+
 /**
  * Drain whatever CAN has for us. Single-frame messages only - which covers
  * the magnetometer, the one CAN sensor the flight code needs at rate.
@@ -950,8 +1197,16 @@ static void can_poll(void)
         }
         uint32_t id = f.can_id & CAN_EFF_MASK;
         uint8_t node = id & 0x7F;
-        if (node == 0) {
-            continue;         /* anonymous frames use a DIFFERENT id layout */
+        if (node != 0) {
+            dna_seen[node >> 3] |= (uint8_t)(1u << (node & 7)); /* bus census */
+        } else {
+            /* Anonymous frame: id layout is (prio<<24)|(disc<<10)|((dtid&3)<<8),
+             * service bit (0x80) clear. The only anonymous message we serve is
+             * the DNA Allocation request (dtid 1). */
+            if (!(id & 0x80u) && ((id >> 8) & 0x3u) == DNA_ALLOC_DTID) {
+                dna_handle_request(f.data, f.can_dlc);
+            }
+            continue;
         }
         uint16_t mt = (id >> 8) & 0xFFFF;
 
@@ -1213,6 +1468,7 @@ static void *hub_main(void *arg)
 {
     (void)arg;
     prctl(PR_SET_NAME, "sensorhub", 0, 0, 0);
+    dna_load_table();     /* recall persisted dynamic node-id allocations */
     double next_imu = now_s();
     double next_baro = now_s();
     double next_hmc = now_s();
