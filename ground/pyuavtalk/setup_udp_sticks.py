@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Configure + verify PPM-over-UDP stick input end to end.
 
-1. RMW ManualControlSettings -> PPM group on Thr/Roll/Pitch/Yaw/FlightMode,
+1. RMW ManualControlSettings -> PPM group on ALL 9 functions
+   (Thr/Roll/Pitch/Yaw/FlightMode/Collective/Accessory0/1/2 = ch1..9),
    persist onboard.
 2. RMW FlightModeSettings.Arming -> Yaw Right, persist.
 3. Walk the link-health matrix with udp_sticks.py as a subprocess:
@@ -81,17 +82,21 @@ client.run(duration=2, on_object=grab)
 mcs = fetch("ManualControlSettings")
 if not mcs:
     sys.exit("no ManualControlSettings readback - is the firmware up?")
-mcs["ChannelGroups"] = ["PPM", "PPM", "PPM", "PPM", "PPM",
-                        "None", "None", "None", "None"]
-mcs["ChannelNumber"] = [1, 2, 3, 4, 5, 0, 0, 0, 0]
+# all nine functions on PPM channels 1..9 (matches udp_sticks.py order:
+# Throttle Roll Pitch Yaw FlightMode Collective Accessory0/1/2)
+mcs["ChannelGroups"] = ["PPM"] * 9
+mcs["ChannelNumber"] = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 mcs["ChannelMin"] = [1000] * 9
-mcs["ChannelNeutral"] = [1025, 1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500]
+# throttle & the two triggers (collective, acc0) and the two button toggles
+# (acc1, acc2) rest at their low end; roll/pitch/yaw/flightmode centre at 1500
+mcs["ChannelNeutral"] = [1025, 1500, 1500, 1500, 1500, 1000, 1000, 1000, 1000]
 mcs["ChannelMax"] = [2000] * 9
 client.send_object("ManualControlSettings", mcs, msg_type=uavtalk.TYPE_OBJ_ACK)
 client.run(duration=1, on_object=grab)
 persist("ManualControlSettings")
 rb = fetch("ManualControlSettings")
-print("ChannelGroups readback:", rb["ChannelGroups"][:5] if rb else "NONE")
+print("ChannelGroups readback:", rb["ChannelGroups"] if rb else "NONE")
+print("ChannelNumber readback:", rb["ChannelNumber"] if rb else "NONE")
 
 fms = fetch("FlightModeSettings")
 if fms:

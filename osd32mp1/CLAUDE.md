@@ -2765,6 +2765,30 @@ marginal; a better antenna position would calm the blips at the root.
   matrix. VERIFIED 8/8 live: baseline orange, green, orange at 60%
   loss, red on dead stream, green restored, ARMED via UDP yaw-right,
   DISARMED via yaw-left.
+- **ALL NINE functions selectable over UDP PPM (2026-08-20)**: the map
+  used to bind only Thr/Roll/Pitch/Yaw/FlightMode (ChannelNumber
+  1..5, rest 0). setup_udp_sticks.py now writes ChannelGroups=PPM x9
+  and ChannelNumber=[1..9], so Collective (ch6), Accessory0 (ch7),
+  Accessory1 (ch8) and Accessory2 (ch9) map too - matching the sender's
+  channel order Throttle/Roll/Pitch/Yaw/FlightMode/Collective/Acc0/1/2
+  (manualcontrolsettings.xml elementnames confirm this is the object's
+  own function order). VERIFIED end-to-end: a synthetic frame with a
+  distinct value per channel [1100..1900] read back on
+  ManualControlCommand.Channel[0..8] byte-exact, and the mapped
+  Throttle/Roll/Pitch/Yaw/Collective/FlightModeSwitchPosition all
+  scaled correctly (Connected=True).
+- **Xbox 360/One axis bug fixed in udp_sticks.py (2026-08-20)**: the
+  wizard "didn't see pitch on the right stick or yaw on the left" NOT
+  because of the board - the sender read a 6-axis pad as
+  axis2=RX/axis3=RY, but the real layout is axis2=LeftTrigger /
+  axis3=RightX / axis4=RightY, so roll came off the left trigger and
+  right-stick-Y (real pitch) was never read. Rewritten on the SDL
+  GameController API (named LEFTX/LEFTY/RIGHTX/RIGHTY/TRIGGERLEFT/
+  TRIGGERRIGHT) with a raw-joystick fallback; `--show` prints the live
+  channel table. CAVEAT for actual flight: an Xbox left stick
+  spring-centres, so Throttle=LeftY rests at ~1500 (~50%) and never
+  reaches the low end arming needs - fine for RC-Input calibration and
+  wizard bring-up, but a non-springing throttle source is needed to arm.
 - **GPS UAVObjects now truthfully populated** (sensors.c 1 Hz):
   GPSSatellites.SatsInView from gnss.Auxiliary sats_visible
   (per-satellite arrays zeroed - the DroneCAN suite carries no per-sat
