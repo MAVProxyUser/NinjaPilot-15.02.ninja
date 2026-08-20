@@ -212,7 +212,7 @@ Over `ssh root@192.168.7.1`, in `/usr/local/ninja/src`:
 # 3. no .git -> version-info.py emits 0xNone (invalid C). Put a version-info.json
 #    at src root (hash/origin/time/last_tag/num_commits_past_tag/branch/dirty).
 # 4. build the ELF goal (make fw_realposix DELETES the elf as an opfw intermediate):
-FAKEROOTKEY=1 make QMAKE=true fw_realposix_elf     # FAKEROOTKEY bypasses the root check
+FAKEROOTKEY=1 make QMAKE=true -j2 fw_realposix_elf   # -j2 = both cores; FAKEROOTKEY bypasses the root check
 ```
 
 Then install `ninjapilot.service` (`osd32mp1/systemd/`, brings can0 up, DNA in
@@ -449,8 +449,18 @@ scp -o HostKeyAlgorithms=+ssh-rsa flight/pios/posix/pios_sensors_hub.c \
 ssh root@192.168.0.90 'chown build:build /usr/local/ninja/src/flight/pios/posix/pios_sensors_hub.c; \
   systemd-run --wait --pipe --collect --property=User=build \
     --property=WorkingDirectory=/usr/local/ninja/src \
-    /usr/bin/make QMAKE=true fw_realposix && systemctl restart ninjapilot'
+    /usr/bin/make QMAKE=true -j2 fw_realposix_elf && systemctl restart ninjapilot'
 ```
+
+**`-j2 fw_realposix_elf`, not `fw_realposix`** (both boards): `-j2` uses both
+Cortex-A7 cores (about halves a full build; fastest with the elf stopped, since
+the RT flight loop otherwise hogs a core), and the `fw_realposix_elf` goal skips
+the `.opfw` packaging (objcopy + firmware_info + pack) that realposix never runs
+— it runs the `.elf`. Note `make fw_realposix` treats the elf as an intermediate
+of the opfw chain and DELETES it; the `_elf` goal keeps it (it's the final
+target). One quirk: if the elf is missing AND nothing changed, `_elf` says
+"Nothing to be done" (the `.SECONDARY` elf isn't rebuilt) — a normal source
+change forces the relink, or `touch` a source first.
 
 An incremental rebuild of one .c + link is ~11 s. The
 `implicit declaration of PIOS_SHMLOG_Printf` warning is pre-existing (the file
@@ -673,7 +683,7 @@ print(m.get_hash_of_dirs(\"shared/uavobjectdefinition\", verbose=0, raw=1, n=16)
 **6. Rebuild the board firmware + restart**:
 
 ```bash
-ssh root@192.168.0.14 'systemd-run --wait --pipe --property=User=build --property=WorkingDirectory=/usr/local/ninja/src /usr/bin/make QMAKE=true fw_realposix && systemctl restart ninjapilot'
+ssh root@192.168.0.14 'systemd-run --wait --pipe --property=User=build --property=WorkingDirectory=/usr/local/ninja/src /usr/bin/make QMAKE=true -j2 fw_realposix_elf && systemctl restart ninjapilot'
 ```
 
 **7. End check**: GCS relaunched against the restarted firmware shows no
