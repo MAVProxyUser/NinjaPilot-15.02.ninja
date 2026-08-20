@@ -141,6 +141,48 @@ It self-tests against the specification's official vector and **refuses to
 emit a hash if that fails**. Do not remove that check — the first
 implementation was wrong and the vector is what caught it.
 
+## BRK board: make it reachable on macOS like the RED (2026-08-20)
+
+The Octavo **OSD32MP1-BRK** (breakout) is a second board on this bench. Its
+stock image `osd32mp1-brk-trusted-openstlinux-sdcard-v3_0_1.img` boots fine
+(heartbeat on D1) but presents an **RNDIS** gadget + mass_storage and has **no
+USB serial console** (only the physical UART `ttySTM0`). macOS has no RNDIS
+driver, so nothing appears — the same wall as the RED's stock image.
+
+The fix is the RED's custom gadget. A prepared, **verified** image is at
+`../Octavo/osd32mp1-brk-NINJAPILOT.img` — built offline with the
+`gpt.py`/`part.py`/`debugfs` recipe above, copying the RED's PROVEN live files
+onto the BRK rootfs (same OpenSTLinux base, identical partition layout, and it
+turns out the identical rootfs `PARTUUID=e91c4e10-…` too):
+
+- `/sbin/stm32_usbotg_eth_config.sh` → ECM + ACM (`image-edits/` version):
+  `func_eth=rndis.0`→`ecm.0`, adds `acm.0` → `/dev/ttyGS0`.
+- `/lib/systemd/system/serial-getty@.service` → the RED's, with
+  `--autologin root` (so `board_cmd.py` gets a root shell, no login prompt).
+- drop-in `serial-getty@ttyGS0.service.d/10-usb-gadget.conf` (getty timing) +
+  the `getty.target.wants/serial-getty@ttyGS0.service` enable symlink.
+- root password `$6$Nj7xK2mQ$…` (= `ninjapilot`, same hash as the RED).
+- boot `extlinux/extlinux.conf`: added `console=ttyGS0,115200`, kept the BRK's
+  own `root=PARTUUID=…` and `console=ttySTM0` fallback.
+
+**Left untouched: the BRK DTB** (`stm32mp157c-osd32mp1-brk.dtb`) — only the
+gadget/console/password changed, all board-agnostic.
+
+Flash it (destructive — re-verify the disk id; it was `/dev/disk10` = the 31 GB
+"NO NAME" SD, NOT the 1 TB/2 TB SanDisk SSDs):
+
+```bash
+diskutil unmountDisk /dev/disk10 && sudo dd if="../Octavo/osd32mp1-brk-NINJAPILOT.img" of=/dev/rdisk10 bs=1m && sync && diskutil eject /dev/disk10
+```
+
+Then set the BRK SD boot switches and power-cycle. A `/dev/cu.usbmodem*`
+appears (ACM console) and `board_cmd.py` talks to it with autologin root.
+macOS gives EITHER console OR ECM network, never both (dwc2 FIFO limit); this
+ships the console. Physical `ttySTM0` UART stays as a hard fallback if the
+gadget ever fails. Next (needs the booted board, then CAN hardware): grow
+`/usr/local`, land the ninjapilot source, build `fw_realposix` — same as the
+RED, see the build recipe above.
+
 ## Switch the USB gadget between console and network
 
 macOS gives you one or the other, never both (see `CLAUDE.md`). Default is the
