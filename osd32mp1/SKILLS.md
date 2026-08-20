@@ -338,35 +338,65 @@ type, the **transfer** rate/jitter/max-gap plus frames-per-message. Uses kernel
 `SO_TIMESTAMP`, and counts a transfer only on the tail byte's start-of-transfer
 bit - timing raw frames reports ~300 % jitter that is entirely artifact.
 
-## DroneCAN: grant node IDs and watch live sensor data
+## DroneCAN node-ID allocation is IN THE FIRMWARE now (2026-08-20)
 
-Nodes stay silent until something allocates them an ID:
-
-```bash
-ssh osd32mp1 'python3 /home/root/dronecan_allocator.py --seconds 60'
-```
-
-Runs the allocation server (node 127) plus a monitor, and prints each node's
-name, message mix and any GNSS fix. Grants persist in
-`/home/root/dronecan_alloc.db`, so IDs are stable across reboots.
-
-**One-time setup on the board:**
+The separate Python allocator (`dronecan-allocator.service` / `allocatord.py`)
+is **RETIRED** — it decoded the whole CAN firehose in userspace and starved the
+network softirqs into a telemetry NO-LINK (see `CLAUDE.md` "SOLVED: telemetry
+NO-LINK..."). The DroneCAN DNA CentralizedServer + NodeStatus now run natively
+in `flight/pios/posix/pios_sensors_hub.c`, and `ninjapilot.service` brings
+`can0` up itself. So: **just start ninjapilot** and nodes get allocated.
 
 ```bash
-ssh osd32mp1 'python3 -m pip install --no-cache-dir dronecan && apt-get update && apt-get install -y --no-install-recommends python3-sqlite3'
+ssh root@192.168.0.90 'systemctl start ninjapilot'    # brings can0 up + allocates
 ```
 
-`python3-sqlite3` is genuinely required and genuinely missing from the stock
-image — `dronecan.app.dynamic_node_id` imports `sqlite3` at module scope, so
-**`import dronecan` itself fails** without it, not just the allocator. The
-library `libsqlite3.so.0` is already present; only Python's `_sqlite3`
-extension is absent, and ST's OpenSTLinux apt feed has it.
+The Python allocator is stopped + disabled but kept as a fallback:
+`systemctl enable --now dronecan-allocator` re-arms it (it also needs
+`ExecStartPre` to own can0 again, and `python3-sqlite3` — its
+`dronecan.app.dynamic_node_id` imports sqlite3 at module scope, so `import
+dronecan` itself fails without it; ST's OpenSTLinux apt feed has it).
 
+## Build fw_realposix on the Mac and deploy to the board
 
-## Bring up CAN after a reboot (do this BEFORE believing any sensor is missing)
+The board holds its own git checkout at `/usr/local/ninja/src` (branch
+`master`) and builds natively with gcc 9.3.0. Edit in the repo, scp the file,
+build as user `build`, restart:
 
-`can0` comes up DOWN, and `ip` is not on root's default PATH — so the obvious
-command fails with a bare `sh: ip: not found`.
+```bash
+scp -o HostKeyAlgorithms=+ssh-rsa flight/pios/posix/pios_sensors_hub.c \
+    root@192.168.0.90:/usr/local/ninja/src/flight/pios/posix/
+ssh root@192.168.0.90 'chown build:build /usr/local/ninja/src/flight/pios/posix/pios_sensors_hub.c; \
+  systemd-run --wait --pipe --collect --property=User=build \
+    --property=WorkingDirectory=/usr/local/ninja/src \
+    /usr/bin/make QMAKE=true fw_realposix && systemctl restart ninjapilot'
+```
+
+An incremental rebuild of one .c + link is ~11 s. The
+`implicit declaration of PIOS_SHMLOG_Printf` warning is pre-existing (the file
+never includes `pios_shmlog.h`; it links fine).
+
+## Test the in-firmware DNA allocator
+
+Reboot a node with a PLAIN node (does NOT allocate, so it cannot mask a broken
+firmware allocator), then watch it get re-allocated and resume streaming:
+
+```bash
+ssh root@192.168.0.90 'python3 /home/root/reboot_node.py 124'   # osd32mp1/reboot_node.py
+# capture the handshake (anonymous src-0 requests + node-127 responses):
+ssh root@192.168.0.90 'timeout 6 candump -L can0 | grep -iE "can0 [0-9A-F]*(00|7F)#"'
+# confirm the node streams again (source id 0x7B=123, 0x7C=124, 0x7D=125):
+ssh root@192.168.0.90 'timeout 1 candump "can0,0000007B:0000007F" | wc -l'
+```
+
+Node ids are now genuinely dynamic: a rebooted pure-dynamic node (requests
+preferred=0) may renumber (e.g. 124->123, since 124/125 were live), then stays
+put via `/home/root/ninja_dna.bin`. The firmware's own NodeStatus is node 127
+(`candump "can0,1E01557F:1FFFFFFF"`).
+
+## Bring up CAN by hand (only when ninjapilot is NOT running)
+
+`can0` comes up DOWN, and `ip` is not on root's default PATH:
 
 ```bash
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -374,22 +404,11 @@ ip link set can0 up type can bitrate 1000000
 ip -br link show can0
 ```
 
-Then start the dynamic node-ID allocator. Until it runs, **every node sits
-broadcasting anonymous allocation requests and publishes no sensor data**, so
-the bus looks dead and a bridge run reports `mag: 0` and `gps: 0`:
-
-```bash
-setsid nohup python3 /home/root/dronecan_allocator.py > /tmp/alloc.log 2>&1 &
-```
-
-`setsid` matters: a plain `&` job is killed by SIGHUP when the ssh session ends.
-
-Healthy bus, ~15 s after the allocator starts:
-
-    msg 1001  25.1 Hz  node 125   magnetometer
-    msg 1061   5.0 Hz  node 124   gnss.Auxiliary
-    msg 1063   5.0 Hz  node 124   gnss.Heading
-    msg  341   3.0 Hz  nodes 124/125/127  NodeStatus
+**Network-recovery trick while developing:** if the board's network is laggy
+because CAN is flooding the NET_RX softirq, `ip link set can0 down` drops board
+ping from seconds to ~0.6 ms instantly. Not needed in normal operation now that
+the second (Python) CAN reader is gone, but handy if you ever re-introduce
+heavy CAN load.
 
 ## Read the magnetometer off CAN
 
