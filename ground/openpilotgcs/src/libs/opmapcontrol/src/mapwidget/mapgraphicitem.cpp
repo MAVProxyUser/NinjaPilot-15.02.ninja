@@ -111,16 +111,27 @@ void MapGraphicItem::ConstructLastImage(int const & zoomdiff)
     QImage temp;
     QSize size = boundingRect().size().toSize();
 
-    size.setWidth(size.width() * 2 * zoomdiff);
-    size.setHeight(size.height() * 2 * zoomdiff);
+    /* Clamp the transition scale: this is a one-frame zoom preview, sane
+     * only for a step of 1-2. A larger (or negative) zoomdiff would build
+     * a gigabyte image and crash - cap it. */
+    int zd = zoomdiff;
+    if (zd < 1) { zd = 1; }
+    if (zd > 2) { zd = 2; }
+
+    size.setWidth(size.width() * 2 * zd);
+    size.setHeight(size.height() * 2 * zd);
     temp = QImage(size, QImage::Format_ARGB32_Premultiplied);
+    if (temp.isNull()) {   /* allocation still refused - skip the preview */
+        lastimage = QImage();
+        return;
+    }
     temp.fill(0);
     QPainter imagePainter(&temp);
     imagePainter.translate(-boundingRect().topLeft());
-    imagePainter.scale(2 * zoomdiff, 2 * zoomdiff);
+    imagePainter.scale(2 * zd, 2 * zd);
     paintImage(&imagePainter);
     imagePainter.end();
-    lastimagepoint = Point(core->GetrenderOffset().X() * 2 * zoomdiff, core->GetrenderOffset().Y() * 2 * zoomdiff);
+    lastimagepoint = Point(core->GetrenderOffset().X() * 2 * zd, core->GetrenderOffset().Y() * 2 * zd);
     lastimage = temp;
 }
 void MapGraphicItem::paintImage(QPainter *painter)
@@ -381,11 +392,24 @@ void MapGraphicItem::DrawMap2D(QPainter *painter)
                                         int sh = ppx.height() / frac;
                                         int sx = (tp.X() & (frac - 1)) * sw;
                                         int sy = (tp.Y() & (frac - 1)) * sh;
-                                        painter->drawPixmap(
-                                            QRect(core->tileRect.X(), core->tileRect.Y(),
-                                                  core->tileRect.Width(), core->tileRect.Height()),
-                                            ppx, QRect(sx, sy, sw, sh));
-                                        found = true;
+                                        /* A degenerate source rect (sw/sh == 0 when the
+                                         * cached ancestor is smaller than frac) or one
+                                         * exceeding ppx, and a zero-size destination,
+                                         * both crash deep in drawImage. This fires on the
+                                         * auto-zoom-to-home path where the target zoom has
+                                         * no imagery, so guard everything before drawing. */
+                                        if (sw > 0 && sh > 0
+                                            && sx >= 0 && sy >= 0
+                                            && (sx + sw) <= ppx.width()
+                                            && (sy + sh) <= ppx.height()
+                                            && core->tileRect.Width() > 0
+                                            && core->tileRect.Height() > 0) {
+                                            painter->drawPixmap(
+                                                QRect(core->tileRect.X(), core->tileRect.Y(),
+                                                      core->tileRect.Width(), core->tileRect.Height()),
+                                                ppx, QRect(sx, sy, sw, sh));
+                                            found = true;
+                                        }
                                     }
                                 }
                             }
@@ -510,8 +534,14 @@ int MapGraphicItem::ZoomStep() const
 }
 void MapGraphicItem::SetZoomStep(int const & value)
 {
-    if (value - core->Zoom() > 0 && value <= MaxZoom()) {
-        ConstructLastImage(value - core->Zoom());
+    const int zoomdiff = value - core->Zoom();
+    /* ConstructLastImage scales a preview image by 2*zoomdiff; it is only
+     * meant for a single-step zoom (the +/- buttons move 1). A large
+     * programmatic jump (e.g. auto-zoom-to-home by many levels) would
+     * allocate gigabytes and segfault. Only build the preview for small
+     * steps; a big jump skips it (blank until the next normal paint). */
+    if (zoomdiff > 0 && zoomdiff <= 2 && value <= MaxZoom()) {
+        ConstructLastImage(zoomdiff);
     } else if (value != MaxZoom()) {
         lastimage = QImage();
     }

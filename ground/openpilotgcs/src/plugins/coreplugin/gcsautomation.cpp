@@ -21,6 +21,8 @@
 #include <QLineEdit>
 #include <QCheckBox>
 #include <QRadioButton>
+#include <QAbstractSlider>
+#include <QSpinBox>
 
 namespace Core {
 namespace Internal {
@@ -371,6 +373,10 @@ QJsonObject GcsAutomationServer::dispatch(const QJsonObject &req)
             chk->setChecked(val == "1" || val.compare("true", Qt::CaseInsensitive) == 0); done = true;
         } else if (auto *rb = qobject_cast<QRadioButton *>(obj)) {
             rb->setChecked(true); done = true;
+        } else if (auto *sld = qobject_cast<QAbstractSlider *>(obj)) {
+            sld->setValue(val.toInt()); done = true;   // sliders (e.g. map zoom)
+        } else if (auto *sb = qobject_cast<QSpinBox *>(obj)) {
+            sb->setValue(val.toInt()); done = true;
         } else if (auto *btn = qobject_cast<QAbstractButton *>(obj)) {
             btn->click(); done = true;
         }

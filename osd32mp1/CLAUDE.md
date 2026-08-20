@@ -3431,3 +3431,28 @@ still warns. TWO gotchas verifying it:
 uavo_sync.sh step 5 now verifies the dylib too. Confirmed 2026-08-19: all
 five (Mac XML, board XML, ELF, version_info.cpp, bundle dylib) = b8eb084b,
 so the warning was purely a stale RUNNING gcs - relaunch fixes it.
+## GCS map auto-zoom crash + the connected-fuzzing lesson (2026-08-19, night)
+
+The map auto-center-on-home feature crashed the GCS on the first home
+update: OPMapGadgetWidget::homePositionUpdated did SetZoom(min_zoom+15) -
+a single 15-level jump - and MapGraphicItem::ConstructLastImage builds a
+zoom-transition preview sized `boundingRect * 2 * zoomdiff`, so 2*15=30x
+allocated a ~gigabyte QImage and segfaulted deep in drawImage (crash
+address ~23 GB). That function is only sane for the +/- buttons'
+single-step zoomdiff. Fixed at the root: SetZoomStep only builds the
+preview for zoomdiff 1-2 (a big jump skips it, blank until the next
+normal paint), ConstructLastImage clamps the scale to [1,2] and bails if
+the QImage still won't allocate, and the auto-zoom is deferred via
+singleShot out of the object-update callback. VERIFIED via the automation
+by driving the real zoom slider to 16 extents incl. 2<->19 jumps: zero
+crashes.
+
+**THE LESSON worth repeating: crash-fuzz the GCS CONNECTED, not just
+disconnected.** Five crashes were found with an isolated board-less GCS,
+but the map/telemetry code paths (homePositionUpdated -> auto-zoom, PFD,
+config-from-live-objects) NEVER RUN without a board, so this sixth crash
+was missed until the user hit it on open. Copy the user config into an
+isolated XDG_CONFIG_HOME so a test GCS auto-connects but writes only
+there, then run ground/pyuavtalk/gcs_fuzz.py. And read crash stacks
+directly from ~/Library/Logs/DiagnosticReports/NinjaPilotGCS*.ips - the
+top app-dylib frame names the site.

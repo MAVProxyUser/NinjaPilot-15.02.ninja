@@ -806,11 +806,42 @@ in the accessibility tree - address those by scene coordinates/QML roots
 if ever needed. The server runs on the GUI thread, so a modal dialog
 blocks it until closed - avoid triggering modal menu items in automation.
 
-**Fuzzing it found five SIGSEGV crashes on the first runs, all fixed:**
+**Crash-hunt harness**: `ground/pyuavtalk/gcs_fuzz.py` cycles every
+workspace + walks the accessible tree, enumerates menus, hammers rapid
+workspace switching (mode-change race), clicks non-destructive buttons,
+and sweeps the map zoom across big jumps - each op watched for a dropped
+socket (= crash). It never clicks destructive controls and never touches
+the board. Read new macOS crash stacks yourself from
+`~/Library/Logs/DiagnosticReports/NinjaPilotGCS*.ips` (parse the JSON
+body after the first line; the top libCore/libConfig/libOPMapGadget frame
+is the site) - no need to ask the user to paste them.
+
+```bash
+XDG_CONFIG_HOME=/tmp/gcs-iso NINJAPILOT_GCS_AUTOMATION=1 \
+  ground/openpilotgcs/bin/NinjaPilotGCS.app/Contents/MacOS/NinjaPilotGCS &
+python3 ground/pyuavtalk/gcs_fuzz.py          # exit code = crashes seen
+```
+
+To exercise the MAP or config panels connected to a board, copy the
+user's config into the isolated dir so it auto-connects but writes only
+there: `mkdir -p /tmp/gcs-iso/NinjaPilot && cp ~/.config/NinjaPilot/* /tmp/gcs-iso/NinjaPilot/`.
+The map zoom control is an unnamed QSlider on Flight data; its
+accessibility Increase/Decrease are no-ops, so drive it with
+`c.set(path, "17")` (the `set` verb handles QAbstractSlider/QSpinBox).
+
+**Fuzzing it found SIX SIGSEGV crashes, all fixed:**
 UAVGadgetManager::setCurrentGadget / modeChanged / showToolbars +
 UAVGadgetView::showToolbar (null gadget/view/toolbar on gadget & rapid
 mode changes), SplitterOrView::unsplit (null/self view on close), and
 getChannelDescriptions in all four vehicle widgets (out-of-bounds
-channel index when GUIConfigData was written for a different airframe).
-RULE: a click must never crash the GCS - these are the pattern to grep
-for (unguarded ->widget()->setFocus(), raw list[] index writes).
+channel index when GUIConfigData was written for a different airframe);
+and the MAP auto-zoom-to-home (ConstructLastImage scales a preview by
+2*zoomdiff, so a multi-level SetZoom jump allocated gigabytes - now the
+transition preview is skipped for jumps >2 and the scale is clamped).
+RULE: a click/zoom must never crash the GCS - patterns to grep for:
+unguarded ->widget()->setFocus(), raw list[] index writes, and any
+image size computed as dimension*factor without a clamp.
+CRITICAL TEST-GAP LESSON: the first five were found DISCONNECTED, but the
+map crash only fires on a home update - so ALWAYS also run the fuzzer
+against a board-CONNECTED GCS (isolated config) or map/telemetry paths
+never get exercised.

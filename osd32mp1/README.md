@@ -575,6 +575,8 @@ and dronecan-allocator confirmed active throughout.
 |---|---|
 | `ap-periph-ninja-debug.patch` | **the custom AP_Periph diff** for node 124: declared BMP388 probe, I2C debug scanner (SDA/SCL-swap detection over `debug.LogMessage`), airspeed+battery trimmed. Apply to ArduPilot master, build with **gcc 10.2.1 only** |
 | `fw/AP_Periph-ninja-gcc10.bin` | the known-good binary built from that patch (195,244 B) — exactly what is flashed on node 124 |
+| `../ground/pyuavtalk/gcs_client.py` | Python client for the GCS QAccessible automation surface (NINJAPILOT_GCS_AUTOMATION=1): workspaces, menus, tree, find, click, set |
+| `../ground/pyuavtalk/gcs_fuzz.py` | GCS crash-hunt harness - cycles workspaces/menus/buttons/rapid-switch/map-zoom, watches for crashes (found 6, all fixed) |
 | `flash_until_boot.sh` | retry an over-CAN node flash until the node reports OPERATIONAL - the transfer is intermittently flaky (~840 reads = clean, 2x that = failing) |
 | `can_flash_verbose.py` | instrumented flasher: counts Read requests and max offset, the only trustworthy progress signal |
 | `fw/AP_Periph-ninja-navsat.bin` | node firmware with UBX-NAV-SAT capture + vendor msg 20502 (per-satellite table) |
