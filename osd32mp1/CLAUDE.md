@@ -52,6 +52,10 @@ cross-checked byte-for-byte against real encoded frames (NOT derived):
   accumulate (6+6+4=16), echo each stage, assign on stage 3. Known uid keeps
   its id (persisted to `/home/root/ninja_dna.bin`), else preferred id if free,
   else highest free in [1,125] avoiding the live-bus census.
+- The firmware is now a first-class node: it broadcasts
+  **`uavcan.protocol.NodeStatus`** (dtid 341) as node 127 once a second
+  (uptime u32 LE | health/mode/sub | vendor_status = allocation count).
+  VERIFIED on the wire: `1E01557F#05000000000000C6` -> uptime 5, OK/OPERATIONAL.
 
 **VERIFIED**: rebooting node 124 (via `osd32mp1/reboot_node.py`, a plain node
 that does NOT allocate) -> node goes anonymous -> firmware allocates it (it got

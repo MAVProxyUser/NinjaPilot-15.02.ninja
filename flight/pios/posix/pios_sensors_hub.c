@@ -604,6 +604,7 @@ static double  streamctl_last_tx;
 #define DNA_ALLOC_DTID       1u      /* uavcan.protocol.dynamic_node_id.Allocation */
 #define DNA_ALLOC_BASE_CRC   0xF258u /* crc16-ccitt of the Allocation DSDL signature
                                       * 0x0b2a812620a11d40 (LE), init 0xFFFF */
+#define DNA_NODESTATUS_DTID  341u    /* uavcan.protocol.NodeStatus (single frame) */
 #define DNA_ALLOCATOR_NODE   127u    /* our node id (matches the retired daemon) */
 #define DNA_HEARTBEAT_SRC    100u    /* streamctl_tx source id - keep reserved   */
 #define DNA_RANGE_MIN        1u
@@ -621,6 +622,8 @@ static uint8_t  dna_query_len;
 static double   dna_query_ts;
 static uint8_t  dna_tid;             /* transfer-id counter for our broadcasts     */
 static uint32_t dna_allocations;     /* health-tile / log counter                  */
+static uint8_t  ns_tid;              /* NodeStatus transfer-id counter             */
+static double   ns_boot;             /* monotonic origin for NodeStatus.uptime_sec */
 
 void PIOS_SENSORS_HUB_SetCanStreamRates(uint16_t imu_hz, uint8_t ak_hz,
                                         uint8_t baro_hz, uint8_t mag_hz)
@@ -1164,6 +1167,30 @@ static void dna_handle_request(const uint8_t *data, uint8_t dlc)
     }
 }
 
+/* Announce ourselves as a proper DroneCAN node (id 127): broadcast
+ * uavcan.protocol.NodeStatus (dtid 341) once a second. Single frame, 7 bytes:
+ * uptime_sec u32 LE | health(2)|mode(3)|sub_mode(3) | vendor_status u16 LE.
+ * We report OK/OPERATIONAL and put the allocation count in vendor_status. */
+static void nodestatus_tx(void)
+{
+    uint32_t uptime = (uint32_t)(now_s() - ns_boot);
+    uint16_t vend   = (uint16_t)dna_allocations;
+    struct can_frame f;
+    memset(&f, 0, sizeof(f));
+    f.can_id  = CAN_EFF_FLAG | (30u << 24)
+                | ((uint32_t)DNA_NODESTATUS_DTID << 8) | DNA_ALLOCATOR_NODE;
+    f.data[0] = (uint8_t)(uptime & 0xFF);
+    f.data[1] = (uint8_t)(uptime >> 8);
+    f.data[2] = (uint8_t)(uptime >> 16);
+    f.data[3] = (uint8_t)(uptime >> 24);
+    f.data[4] = 0;                       /* health=OK, mode=OPERATIONAL, sub=0 */
+    f.data[5] = (uint8_t)(vend & 0xFF);
+    f.data[6] = (uint8_t)(vend >> 8);
+    f.data[7] = (uint8_t)(0xC0u | (ns_tid++ & 0x1F));   /* single-frame tail */
+    f.can_dlc = 8;
+    dna_write_frame(&f);
+}
+
 /**
  * Drain whatever CAN has for us. Single-frame messages only - which covers
  * the magnetometer, the one CAN sensor the flight code needs at rate.
@@ -1186,6 +1213,7 @@ static void can_poll(void)
         if (now - streamctl_last_tx >= 1.0) {
             streamctl_last_tx = now;
             streamctl_tx();
+            nodestatus_tx();      /* announce node 127 once a second */
         }
     }
 
@@ -1469,6 +1497,7 @@ static void *hub_main(void *arg)
     (void)arg;
     prctl(PR_SET_NAME, "sensorhub", 0, 0, 0);
     dna_load_table();     /* recall persisted dynamic node-id allocations */
+    ns_boot = now_s();    /* NodeStatus uptime origin */
     double next_imu = now_s();
     double next_baro = now_s();
     double next_hmc = now_s();
