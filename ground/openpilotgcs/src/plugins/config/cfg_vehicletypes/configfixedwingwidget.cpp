@@ -53,25 +53,25 @@ QStringList ConfigFixedWingWidget::getChannelDescriptions()
     GUIConfigDataUnion configData = getConfigData();
 
     if (configData.fixedwing.FixedWingPitch1 > 0) {
-        channelDesc[configData.fixedwing.FixedWingPitch1 - 1] = QString("FixedWingPitch1");
+        { int _ci = (configData.fixedwing.FixedWingPitch1) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("FixedWingPitch1"); } }
     }
     if (configData.fixedwing.FixedWingPitch2 > 0) {
-        channelDesc[configData.fixedwing.FixedWingPitch2 - 1] = QString("FixedWingPitch2");
+        { int _ci = (configData.fixedwing.FixedWingPitch2) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("FixedWingPitch2"); } }
     }
     if (configData.fixedwing.FixedWingRoll1 > 0) {
-        channelDesc[configData.fixedwing.FixedWingRoll1 - 1] = QString("FixedWingRoll1");
+        { int _ci = (configData.fixedwing.FixedWingRoll1) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("FixedWingRoll1"); } }
     }
     if (configData.fixedwing.FixedWingRoll2 > 0) {
-        channelDesc[configData.fixedwing.FixedWingRoll2 - 1] = QString("FixedWingRoll2");
+        { int _ci = (configData.fixedwing.FixedWingRoll2) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("FixedWingRoll2"); } }
     }
     if (configData.fixedwing.FixedWingYaw1 > 0) {
-        channelDesc[configData.fixedwing.FixedWingYaw1 - 1] = QString("FixedWingYaw1");
+        { int _ci = (configData.fixedwing.FixedWingYaw1) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("FixedWingYaw1"); } }
     }
     if (configData.fixedwing.FixedWingYaw2 > 0) {
-        channelDesc[configData.fixedwing.FixedWingYaw2 - 1] = QString("FixedWingYaw2");
+        { int _ci = (configData.fixedwing.FixedWingYaw2) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("FixedWingYaw2"); } }
     }
     if (configData.fixedwing.FixedWingThrottle > 0) {
-        channelDesc[configData.fixedwing.FixedWingThrottle - 1] = QString("FixedWingThrottle");
+        { int _ci = (configData.fixedwing.FixedWingThrottle) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("FixedWingThrottle"); } }
     }
     return channelDesc;
 }

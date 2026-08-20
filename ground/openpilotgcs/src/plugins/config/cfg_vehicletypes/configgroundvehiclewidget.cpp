@@ -54,16 +54,16 @@ QStringList ConfigGroundVehicleWidget::getChannelDescriptions()
     GUIConfigDataUnion configData = getConfigData();
 
     if (configData.ground.GroundVehicleSteering1 > 0) {
-        channelDesc[configData.ground.GroundVehicleSteering1 - 1] = QString("GroundSteering1");
+        { int _ci = (configData.ground.GroundVehicleSteering1) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("GroundSteering1"); } }
     }
     if (configData.ground.GroundVehicleSteering2 > 0) {
-        channelDesc[configData.ground.GroundVehicleSteering2 - 1] = QString("GroundSteering2");
+        { int _ci = (configData.ground.GroundVehicleSteering2) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("GroundSteering2"); } }
     }
     if (configData.ground.GroundVehicleThrottle1 > 0) {
-        channelDesc[configData.ground.GroundVehicleThrottle1 - 1] = QString("GroundMotor1");
+        { int _ci = (configData.ground.GroundVehicleThrottle1) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("GroundMotor1"); } }
     }
     if (configData.ground.GroundVehicleThrottle2 > 0) {
-        channelDesc[configData.ground.GroundVehicleThrottle2 - 1] = QString("GroundMotor2");
+        { int _ci = (configData.ground.GroundVehicleThrottle2) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("GroundMotor2"); } }
     }
     return channelDesc;
 }

@@ -58,67 +58,67 @@ QStringList ConfigMultiRotorWidget::getChannelDescriptions()
 
     // Octocopter X motor definition
     if (multi.VTOLMotorNNE > 0 && multi.VTOLMotorNNE <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorNNE - 1] = QString("VTOLMotorNNE");
+        { int _ci = (multi.VTOLMotorNNE) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorNNE"); } }
     }
     if (multi.VTOLMotorENE > 0 && multi.VTOLMotorENE <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorENE - 1] = QString("VTOLMotorENE");
+        { int _ci = (multi.VTOLMotorENE) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorENE"); } }
     }
     if (multi.VTOLMotorESE > 0 && multi.VTOLMotorESE <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorESE - 1] = QString("VTOLMotorESE");
+        { int _ci = (multi.VTOLMotorESE) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorESE"); } }
     }
     if (multi.VTOLMotorSSE > 0 && multi.VTOLMotorSSE <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorSSE - 1] = QString("VTOLMotorSSE");
+        { int _ci = (multi.VTOLMotorSSE) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorSSE"); } }
     }
     if (multi.VTOLMotorSSW > 0 && multi.VTOLMotorSSW <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorSSW - 1] = QString("VTOLMotorSSW");
+        { int _ci = (multi.VTOLMotorSSW) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorSSW"); } }
     }
     if (multi.VTOLMotorWSW > 0 && multi.VTOLMotorWSW <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorWSW - 1] = QString("VTOLMotorWSW");
+        { int _ci = (multi.VTOLMotorWSW) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorWSW"); } }
     }
     if (multi.VTOLMotorWNW > 0 && multi.VTOLMotorWNW <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorWNW - 1] = QString("VTOLMotorWNW");
+        { int _ci = (multi.VTOLMotorWNW) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorWNW"); } }
     }
     if (multi.VTOLMotorNNW > 0 && multi.VTOLMotorNNW <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorNNW - 1] = QString("VTOLMotorNNW");
+        { int _ci = (multi.VTOLMotorNNW) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorNNW"); } }
     }
     // End OctocopterX
 
     if (multi.VTOLMotorN > 0 && multi.VTOLMotorN <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorN - 1] = QString("VTOLMotorN");
+        { int _ci = (multi.VTOLMotorN) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorN"); } }
     }
     if (multi.VTOLMotorNE > 0 && multi.VTOLMotorNE <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorNE - 1] = QString("VTOLMotorNE");
+        { int _ci = (multi.VTOLMotorNE) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorNE"); } }
     }
     if (multi.VTOLMotorNW > 0 && multi.VTOLMotorNW <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorNW - 1] = QString("VTOLMotorNW");
+        { int _ci = (multi.VTOLMotorNW) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorNW"); } }
     }
     if (multi.VTOLMotorS > 0 && multi.VTOLMotorS <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorS - 1] = QString("VTOLMotorS");
+        { int _ci = (multi.VTOLMotorS) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorS"); } }
     }
     if (multi.VTOLMotorSE > 0 && multi.VTOLMotorSE <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorSE - 1] = QString("VTOLMotorSE");
+        { int _ci = (multi.VTOLMotorSE) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorSE"); } }
     }
     if (multi.VTOLMotorSW > 0 && multi.VTOLMotorSW <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorSW - 1] = QString("VTOLMotorSW");
+        { int _ci = (multi.VTOLMotorSW) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorSW"); } }
     }
     if (multi.VTOLMotorW > 0 && multi.VTOLMotorW <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorW - 1] = QString("VTOLMotorW");
+        { int _ci = (multi.VTOLMotorW) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorW"); } }
     }
     if (multi.VTOLMotorE > 0 && multi.VTOLMotorE <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.VTOLMotorE - 1] = QString("VTOLMotorE");
+        { int _ci = (multi.VTOLMotorE) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("VTOLMotorE"); } }
     }
     if (multi.TRIYaw > 0 && multi.TRIYaw <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.TRIYaw - 1] = QString("Tri-Yaw");
+        { int _ci = (multi.TRIYaw) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("Tri-Yaw"); } }
     }
 
     if (multi.Accessory0 > 0 && multi.Accessory0 <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.Accessory0 - 1] = QString("Accessory0");
+        { int _ci = (multi.Accessory0) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("Accessory0"); } }
     }
     if (multi.Accessory1 > 0 && multi.Accessory1 <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.Accessory1 - 1] = QString("Accessory1");
+        { int _ci = (multi.Accessory1) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("Accessory1"); } }
     }
     if (multi.Accessory2 > 0 && multi.Accessory2 <= ConfigMultiRotorWidget::CHANNEL_NUMELEM) {
-        channelDesc[multi.Accessory2 - 1] = QString("Accessory2");
+        { int _ci = (multi.Accessory2) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("Accessory2"); } }
     }
 
     return channelDesc;

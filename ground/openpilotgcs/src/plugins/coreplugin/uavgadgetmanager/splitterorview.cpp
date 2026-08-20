@@ -315,10 +315,15 @@ void SplitterOrView::unsplit(IUAVGadget *gadget)
             break;
         }
     }
-    if (splitterOrView) {
+    /* the loop can leave splitterOrView == view (the one about to be
+     * deleted) when no OTHER view exists, and m_view/m_splitter can be null
+     * mid-teardown - either crashed layout()->addWidget(). Guard both. */
+    if (splitterOrView && splitterOrView != view) {
         if (splitterOrView->isView()) {
-            layout()->addWidget(splitterOrView->m_view);
-        } else {
+            if (splitterOrView->m_view) {
+                layout()->addWidget(splitterOrView->m_view);
+            }
+        } else if (splitterOrView->m_splitter) {
             layout()->addWidget(splitterOrView->m_splitter);
         }
         layout()->removeWidget(m_splitter);

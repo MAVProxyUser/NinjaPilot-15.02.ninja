@@ -54,64 +54,64 @@ QStringList ConfigCcpmWidget::getChannelDescriptions()
     heliGUISettingsStruct heli    = configData.heli;
 
     if (heli.Throttle > 0) {
-        channelDesc[heli.Throttle - 1] = QString("Throttle");
+        { int _ci = (heli.Throttle) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("Throttle"); } }
     }
     if (heli.Tail > 0) {
-        channelDesc[heli.Tail - 1] = QString("Tail");
+        { int _ci = (heli.Tail) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("Tail"); } }
     }
 
     switch (heli.FirstServoIndex) {
     case 0:
         // front
         if (heli.ServoIndexW > 0) {
-            channelDesc[heli.ServoIndexW - 1] = QString("Elevator");
+            { int _ci = (heli.ServoIndexW) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("Elevator"); } }
         }
         if (heli.ServoIndexX > 0) {
-            channelDesc[heli.ServoIndexX - 1] = QString("Roll1");
+            { int _ci = (heli.ServoIndexX) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("Roll1"); } }
         }
         if (heli.ServoIndexY > 0) {
-            channelDesc[heli.ServoIndexY - 1] = QString("Roll2");
+            { int _ci = (heli.ServoIndexY) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("Roll2"); } }
         }
         break;
     case 1:
         // right
         if (heli.ServoIndexW > 0) {
-            channelDesc[heli.ServoIndexW - 1] = QString("ServoW");
+            { int _ci = (heli.ServoIndexW) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("ServoW"); } }
         }
         if (heli.ServoIndexX > 0) {
-            channelDesc[heli.ServoIndexX - 1] = QString("ServoX");
+            { int _ci = (heli.ServoIndexX) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("ServoX"); } }
         }
         if (heli.ServoIndexY > 0) {
-            channelDesc[heli.ServoIndexY - 1] = QString("ServoY");
+            { int _ci = (heli.ServoIndexY) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("ServoY"); } }
         }
         break;
     case 2:
         // rear
         if (heli.ServoIndexW > 0) {
-            channelDesc[heli.ServoIndexW - 1] = QString("Elevator");
+            { int _ci = (heli.ServoIndexW) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("Elevator"); } }
         }
         if (heli.ServoIndexX > 0) {
-            channelDesc[heli.ServoIndexX - 1] = QString("Roll1");
+            { int _ci = (heli.ServoIndexX) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("Roll1"); } }
         }
         if (heli.ServoIndexY > 0) {
-            channelDesc[heli.ServoIndexY - 1] = QString("Roll2");
+            { int _ci = (heli.ServoIndexY) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("Roll2"); } }
         }
         break;
     case 3:
         // left
         if (heli.ServoIndexW > 0) {
-            channelDesc[heli.ServoIndexW - 1] = QString("ServoW");
+            { int _ci = (heli.ServoIndexW) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("ServoW"); } }
         }
         if (heli.ServoIndexX > 0) {
-            channelDesc[heli.ServoIndexX - 1] = QString("ServoX");
+            { int _ci = (heli.ServoIndexX) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("ServoX"); } }
         }
         if (heli.ServoIndexY > 0) {
-            channelDesc[heli.ServoIndexY - 1] = QString("ServoY");
+            { int _ci = (heli.ServoIndexY) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("ServoY"); } }
         }
         break;
     }
     if (heli.ServoIndexZ > 0) {
-        channelDesc[heli.ServoIndexZ - 1] = QString("ServoZ");
+        { int _ci = (heli.ServoIndexZ) - 1; if (_ci >= 0 && _ci < channelDesc.size()) { channelDesc[_ci] = QString("ServoZ"); } }
     }
     return channelDesc;
 }
