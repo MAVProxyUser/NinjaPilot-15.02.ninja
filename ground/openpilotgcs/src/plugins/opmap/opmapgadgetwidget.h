@@ -212,6 +212,7 @@ private slots:
     void on_leFind_returnPressed();
 
 private:
+    bool m_auto_home_done = false;   // one-shot: center+zoom on first valid home
     int m_min_zoom;
     int m_max_zoom;
     double m_heading; // uav heading

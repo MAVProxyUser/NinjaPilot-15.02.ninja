@@ -932,6 +932,17 @@ void OPMapGadgetWidget::homePositionUpdated(UAVObject *hp)
         return; // error
     }
     setHome(internals::PointLatLng(LLA[0], LLA[1]), LLA[2]);
+
+    // NinjaPilot: the FIRST time a real (non-zero) home arrives, snap the
+    // map onto it and zoom in close - the equivalent of ~15 '+' clicks
+    // from the default world view - so the local flying area is framed
+    // without any manual panning/zooming. One-shot, so it never fights a
+    // manual pan afterward.
+    if (set && (LLA[0] != 0.0 || LLA[1] != 0.0) && !m_auto_home_done) {
+        m_auto_home_done = true;
+        m_map->SetCurrentPosition(internals::PointLatLng(LLA[0], LLA[1]));
+        setZoom(m_min_zoom + 15);
+    }
 }
 
 // *************************************************************************************
