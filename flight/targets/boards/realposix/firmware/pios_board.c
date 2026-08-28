@@ -34,6 +34,7 @@
 #include <manualcontrolsettings.h>
 #include <actuatorsettings.h>
 #include <taskinfo.h>
+#include <stdlib.h>     /* getenv - runtime bus selection (RED vs BRK) */
 
 
 /*
@@ -185,7 +186,20 @@ void PIOS_Board_Init(void)
      * still leave a debuggable firmware, and the hub reports which sensors
      * came up. It only fails hard when NOTHING initialised.
      */
-    if (PIOS_SENSORS_HUB_Init(PIOS_REALPOSIX_I2C_DEV, PIOS_REALPOSIX_CAN_IF) != 0) {
+    /* The I2C bus is board-specific but the realposix target/config header is
+     * shared: the RED's sensor tree is on /dev/i2c-3, the BRK's on /dev/i2c-1
+     * (I2C2, PF1/PG15). Override the compile-time default at runtime via
+     * NINJAPILOT_I2C_DEV (and NINJAPILOT_CAN_IF) so one binary serves both -
+     * the per-board systemd unit sets them. Empty/unset -> the RED defaults. */
+    const char *i2c_dev = getenv("NINJAPILOT_I2C_DEV");
+    const char *can_if  = getenv("NINJAPILOT_CAN_IF");
+    if (!i2c_dev || !*i2c_dev) {
+        i2c_dev = PIOS_REALPOSIX_I2C_DEV;
+    }
+    if (!can_if || !*can_if) {
+        can_if = PIOS_REALPOSIX_CAN_IF;
+    }
+    if (PIOS_SENSORS_HUB_Init(i2c_dev, can_if) != 0) {
         PIOS_DEBUG_Assert(0);
     }
 #endif
