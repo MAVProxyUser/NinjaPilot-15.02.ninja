@@ -694,6 +694,32 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                     am.Status = AUXMAGSENSOR_STATUS_OK;
                     am.Temperature = h.have_auxmag_temp ? h.auxmag_temp_raw : 0;
                     AuxMagSensorSet(&am);
+
+                    /*
+                     * Sole-mag failover (BRK): the note above is right when a
+                     * primary RM3100 exists, but if there is NO primary mag
+                     * (have_mag false - e.g. the BRK with CAN parked and only
+                     * the local HMC5883L on I2C), AuxMagSensor alone drives
+                     * nothing: filtermag's default AuxMagSettings.Usage is
+                     * ONBOARDONLY, so it ignores the aux mag and the estimator
+                     * fuses NO magnetometer -> no heading reference, MAG alarm.
+                     * So promote the HMC to MagSensor too when it is the only
+                     * mag. have_mag true (RED) -> this never fires and the
+                     * RM3100 stays the board mag, no last-writer conflict.
+                     * Parallels the baro2 -> BaroSensor failover.
+                     */
+                    if (!h.have_mag) {
+                        MagSensorData m;
+                        float mv[3] = { h.mag2_ga[0] * 1000.0f,  /* Ga -> mGa */
+                                        h.mag2_ga[1] * 1000.0f,
+                                        h.mag2_ga[2] * 1000.0f };
+                        applyMagCal(mv);
+                        m.x = mv[0];
+                        m.y = mv[1];
+                        m.z = mv[2];
+                        m.temperature = h.baro_temp_c;
+                        MagSensorSet(&m);
+                    }
                 }
 
                 if (h.gps_count != last_gps) {
