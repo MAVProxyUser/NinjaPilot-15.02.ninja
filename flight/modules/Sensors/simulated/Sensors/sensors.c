@@ -883,10 +883,19 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                         if (revo.FusionAlgorithm == REVOSETTINGS_FUSIONALGORITHM_BASICCOMPLEMENTARY) {
                             static uint32_t prev_mag_count = 0;
                             static uint8_t mag_quiet_s = 0;
-                            if (h.mag_count > 0) {
-                                if (h.mag_count != prev_mag_count) {
-                                    uint32_t delta = h.mag_count - prev_mag_count;
-                                    prev_mag_count = h.mag_count;
+#ifdef NINJAPILOT_BRK
+                            /* No CAN RM3100 on the BRK: the local HMC5883L is
+                             * the board mag (published as MagSensor above), so
+                             * the transport-health tile must watch ITS counter
+                             * (mag2_count), else MAG stays greyed forever. */
+                            uint32_t mag_cnt = h.mag2_count;
+#else
+                            uint32_t mag_cnt = h.mag_count;   /* RM3100 over CAN */
+#endif
+                            if (mag_cnt > 0) {
+                                if (mag_cnt != prev_mag_count) {
+                                    uint32_t delta = mag_cnt - prev_mag_count;
+                                    prev_mag_count = mag_cnt;
                                     mag_quiet_s    = 0;
                                     if (delta >= 13) {   /* at least half the native rate */
                                         AlarmsClear(SYSTEMALARMS_ALARM_MAGNETOMETER);
