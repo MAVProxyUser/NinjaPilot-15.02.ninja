@@ -625,6 +625,7 @@ static uint32_t dna_allocations;     /* health-tile / log counter               
 static uint8_t  ns_tid;              /* NodeStatus transfer-id counter             */
 static double   ns_boot;             /* monotonic origin for NodeStatus.uptime_sec */
 
+#ifndef NINJAPILOT_BRK  /* ===== CAN support: entirely compiled out on the BRK ===== */
 void PIOS_SENSORS_HUB_SetCanStreamRates(uint16_t imu_hz, uint8_t ak_hz,
                                         uint8_t baro_hz, uint8_t mag_hz)
 {
@@ -659,9 +660,11 @@ static void streamctl_tx(void)
         /* full TX queue at this instant - the next second's beat covers it */
     }
 }
+#endif /* !NINJAPILOT_BRK (SetCanStreamRates + streamctl_tx) */
 static uint64_t can_bits;   /* hub thread only */
 static uint64_t can_frames; /* hub thread only */
 
+#ifndef NINJAPILOT_BRK  /* ===== CAN init / DSDL decode / DNA allocator / can_poll ===== */
 static bool can_init(const char *ifname)
 {
     struct sockaddr_can addr;
@@ -1486,6 +1489,8 @@ static void can_poll(void)
     }
 }
 
+#endif /* !NINJAPILOT_BRK (CAN init / decode / allocator / can_poll) */
+
 /* ------------------------------------------------------------ reader thread */
 static pthread_t hub_thread;
 static volatile bool hub_run;
@@ -1496,7 +1501,9 @@ static void *hub_main(void *arg)
 {
     (void)arg;
     prctl(PR_SET_NAME, "sensorhub", 0, 0, 0);
+#ifndef NINJAPILOT_BRK
     dna_load_table();     /* recall persisted dynamic node-id allocations */
+#endif
     ns_boot = now_s();    /* NodeStatus uptime origin */
     double next_imu = now_s();
     double next_baro = now_s();
@@ -1587,9 +1594,11 @@ static void *hub_main(void *arg)
             }
         }
 
+#ifndef NINJAPILOT_BRK
         if (have_can) {
             can_poll();
         }
+#endif
 
         if (t >= next_canload) {
             /* rolling 1 s bus utilisation for the CAN health tile; permille
@@ -1736,7 +1745,11 @@ int32_t PIOS_SENSORS_HUB_Init(const char *i2c_dev, const char *can_if)
         have_b280 = bmp280_init();
         have_hmc = hmc_init();
     }
+#ifndef NINJAPILOT_BRK
     have_can = can_init(can_if);
+#else
+    (void)can_if;             /* CAN compiled out on the BRK build */
+#endif
 
     hub.have_imu = have_mpu;
     hub.have_baro = have_bmp;

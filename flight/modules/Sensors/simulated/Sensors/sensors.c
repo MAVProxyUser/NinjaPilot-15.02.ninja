@@ -218,8 +218,10 @@ static void sensorHubSettingsUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
     SensorHubSettingsData shs;
 
     SensorHubSettingsGet(&shs);
+#ifndef NINJAPILOT_BRK
     PIOS_SENSORS_HUB_SetCanStreamRates(shs.CanImuRateHz, shs.CanAk8975RateHz,
                                        shs.CanBaroRateHz, shs.CanMagRateHz);
+#endif
     PIOS_SHMLOG_Printf("[sensors] CAN stream command: imu=%u ak=%u baro=%u mag=%u Hz",
                        (unsigned)shs.CanImuRateHz, (unsigned)shs.CanAk8975RateHz,
                        (unsigned)shs.CanBaroRateHz, (unsigned)shs.CanMagRateHz);
@@ -695,20 +697,19 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                     am.Temperature = h.have_auxmag_temp ? h.auxmag_temp_raw : 0;
                     AuxMagSensorSet(&am);
 
+#ifdef NINJAPILOT_BRK
                     /*
-                     * Sole-mag failover (BRK): the note above is right when a
-                     * primary RM3100 exists, but if there is NO primary mag
-                     * (have_mag false - e.g. the BRK with CAN parked and only
-                     * the local HMC5883L on I2C), AuxMagSensor alone drives
-                     * nothing: filtermag's default AuxMagSettings.Usage is
-                     * ONBOARDONLY, so it ignores the aux mag and the estimator
-                     * fuses NO magnetometer -> no heading reference, MAG alarm.
-                     * So promote the HMC to MagSensor too when it is the only
-                     * mag. have_mag true (RED) -> this never fires and the
-                     * RM3100 stays the board mag, no last-writer conflict.
-                     * Parallels the baro2 -> BaroSensor failover.
+                     * BRK build has CAN compiled out, so there is no RM3100 and
+                     * the local HMC5883L is the ONLY magnetometer. Publish it as
+                     * MagSensor (the board mag the estimator fuses), not just
+                     * AuxMagSensor - filtermag's default AuxMagSettings.Usage is
+                     * ONBOARDONLY and would otherwise ignore the aux mag, leaving
+                     * the AHRS with no heading reference and a MAG alarm. On a
+                     * non-BRK (RED) build this is compiled out and the RM3100
+                     * stays the board mag, so there is never a last-writer
+                     * conflict. Parallels the baro2 -> BaroSensor failover.
                      */
-                    if (!h.have_mag) {
+                    {
                         MagSensorData m;
                         float mv[3] = { h.mag2_ga[0] * 1000.0f,  /* Ga -> mGa */
                                         h.mag2_ga[1] * 1000.0f,
@@ -720,6 +721,7 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                         m.temperature = h.baro_temp_c;
                         MagSensorSet(&m);
                     }
+#endif
                 }
 
                 if (h.gps_count != last_gps) {

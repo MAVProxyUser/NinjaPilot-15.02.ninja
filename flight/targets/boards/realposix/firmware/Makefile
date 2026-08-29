@@ -201,6 +201,14 @@ CFLAGS += $(ARCHFLAGS)
 CFLAGS += $(UAVOBJDEFINE)
 
 CFLAGS += -DDIAG_STACK
+
+# OSD32MP1-BRK board build (make NINJAPILOT_BRK=1): no CAN hardware. Compiles
+# out all CAN support in the sensor hub (allocator, socket, DSDL decode,
+# streamctl) and promotes the local HMC5883L to the primary MagSensor. The RED
+# build omits the flag and keeps the CAN/DroneCAN path + RM3100 primary mag.
+ifeq ($(NINJAPILOT_BRK),1)
+CFLAGS += -DNINJAPILOT_BRK
+endif
 CFLAGS += -DDIA_MIXERSTATUS
 CFLAGS += -DDIAG_RATEDESIRED
 CFLAGS += -DDIAG_I2C_WDG_STATS
