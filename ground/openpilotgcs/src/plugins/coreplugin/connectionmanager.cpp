@@ -503,14 +503,27 @@ void ConnectionManager::updateConnectionDropdown()
             }
         }
     } else {
-        // NinjaPilot: the flight controller is a network device (UDP telemetry to
-        // the OSD32MP1), so an idle GCS should offer that first, not a serial port.
+        // NinjaPilot: the flight controller is usually a network device (UDP
+        // telemetry to the OSD32MP1), so an idle GCS offers that first rather
+        // than a serial port.
+        //
+        // The esp32wroom board is the exception -- it speaks UAVTalk over its
+        // USB-serial adapter -- so the preferred device is overridable. Set
+        //   NINJAPILOT_GCS_PREFER="Serial: cu.usbserial-210"
+        // (any prefix of the entry as it appears in the Connections dropdown)
+        // to have the GCS select and auto-connect that instead. Unset, the
+        // behaviour is exactly as before: UDP.
+        QByteArray preferEnv = qgetenv("NINJAPILOT_GCS_PREFER");
+        QString prefer = preferEnv.isEmpty() ? QString("UDP") : QString::fromLocal8Bit(preferEnv);
+
         for (int i = 0; i < m_availableDevList->count(); i++) {
-            if (m_availableDevList->itemData(i, Qt::ToolTipRole).toString().startsWith("UDP")) {
+            if (m_availableDevList->itemData(i, Qt::ToolTipRole).toString().startsWith(prefer)) {
                 m_availableDevList->setCurrentIndex(i);
                 // ... and connect to it by itself at launch, once. A manual
                 // disconnect afterwards stays disconnected.
                 if (!m_udpAutoConnectTried && polling) {
+                    // (the flag name predates the override; it just means
+                    //  "we have already taken our one automatic attempt")
                     QString devName = m_availableDevList->itemData(i, Qt::ToolTipRole).toString();
                     foreach(DevListItem d, m_devList) {
                         if (d.getConName() == devName) {

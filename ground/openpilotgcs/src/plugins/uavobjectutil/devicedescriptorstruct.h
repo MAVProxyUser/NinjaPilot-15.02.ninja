@@ -60,6 +60,11 @@ public:
             return QString("RealPosix");
 
             break;
+        case 0x1202:
+            // NinjaPilot ESP32 port on the SparkFun Thing Plus
+            return QString("ESP32 Thing Plus");
+
+            break;
         default:
             return QString("");
 

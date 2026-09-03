@@ -174,6 +174,17 @@ QIODevice *SerialConnection::openDevice(const QString &deviceName)
                     && serialHandle->setParity(QSerialPort::NoParity)
                     && serialHandle->setStopBits(QSerialPort::OneStop)
                     && serialHandle->setFlowControl(QSerialPort::NoFlowControl)) {
+                    // Deassert DTR and RTS.
+                    //
+                    // QSerialPort asserts both when it opens a port. On the
+                    // USB-serial adapters used by ESP32 boards those lines are
+                    // wired to EN/RESET and GPIO0 (it is how esptool reboots
+                    // the chip), so opening the port holds the board in reset
+                    // and the GCS sits on NO LINK forever while the port shows
+                    // as connected. Harmless on boards that ignore them.
+                    serialHandle->setDataTerminalReady(false);
+                    serialHandle->setRequestToSend(false);
+
                     qDebug() << "Serial telemetry running at " << m_config->speed();
                     m_deviceOpened = true;
                 }

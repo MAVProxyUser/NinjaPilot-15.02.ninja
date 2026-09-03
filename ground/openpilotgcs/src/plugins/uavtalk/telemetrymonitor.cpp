@@ -26,6 +26,12 @@
  */
 
 #include "telemetrymonitor.h"
+
+/* The generation token must OUTLIVE this object: a TelemetryMonitor is
+ * constructed per connection and deleted on disconnect, so a member here
+ * would forget the last synced generation at exactly the moment it is
+ * needed. Process-lifetime by design. */
+static quint32 lastSettingsGeneration = 0;
 #include "coreplugin/connectionmanager.h"
 #include "coreplugin/icore.h"
 
@@ -74,6 +80,15 @@ void TelemetryMonitor::startRetrievingObjects()
 {
     // Clear object queue
     queue.clear();
+    /* SettingsGeneration goes first: if the board still presents the same
+     * generation we recorded after our last COMPLETE retrieval, every
+     * settings object in the queue is provably unchanged and gets pruned
+     * when the reply lands (see transactionCompleted). Boards without the
+     * object simply NACK and the full retrieval proceeds as always. */
+    UAVObject *genObj = objMngr->getObject(QString("SettingsGeneration"));
+    if (genObj) {
+        queue.enqueue(genObj);
+    }
     // Get all objects, add metaobjects, settings and data objects with OnChange update mode to the queue
     QList< QList<UAVObject *> > objs = objMngr->getObjects();
     for (int n = 0; n < objs.length(); ++n) {
@@ -82,12 +97,20 @@ void TelemetryMonitor::startRetrievingObjects()
         UAVDataObject *dobj = dynamic_cast<UAVDataObject *>(obj);
         UAVObject::Metadata mdata = obj->getMetadata();
         if (mobj != NULL) {
-            queue.enqueue(obj);
+            /* Metaobjects are NOT prefetched. There are ~111 of them and
+             * they were half of the connect burst, yet nothing needs them
+             * until a user looks at or edits metadata -- the GCS's own
+             * send engine runs off its local copies, which default to the
+             * same XML values the firmware compiled in. The object
+             * browser fetches them on first use (showMetaData); a board
+             * carrying saved metadata overrides is the one case that now
+             * syncs late instead of at connect. */
         } else if (dobj != NULL) {
             if (dobj->isSettingsObject()) {
                 queue.enqueue(obj);
             } else {
-                if (UAVObject::GetFlightTelemetryUpdateMode(mdata) == UAVObject::UPDATEMODE_ONCHANGE) {
+                if (UAVObject::GetFlightTelemetryUpdateMode(mdata) == UAVObject::UPDATEMODE_ONCHANGE &&
+                    obj != genObj) {   // already enqueued first, above
                     queue.enqueue(obj);
                 }
             }
@@ -105,6 +128,13 @@ void TelemetryMonitor::startRetrievingObjects()
 void TelemetryMonitor::stopRetrievingObjects()
 {
     qDebug("Object retrieval has been cancelled");
+    /* Only a retrieval stopped MIDWAY invalidates the generation token --
+     * this slot also runs on every ordinary disconnect, where the queue is
+     * already empty and the last sync completed. Wiping the token there
+     * silently disabled the reconnect skip entirely. */
+    if (!queue.isEmpty() || objPending != NULL) {
+        lastSettingsGeneration = 0;
+    }
     queue.clear();
 }
 
@@ -116,6 +146,12 @@ void TelemetryMonitor::retrieveNextObject()
     // If queue is empty return
     if (queue.isEmpty()) {
         qDebug("Object retrieval completed");
+        {
+            UAVObject *genObj = objMngr->getObject(QString("SettingsGeneration"));
+            if (genObj) {
+                lastSettingsGeneration = genObj->getField("Generation")->getValue().toUInt();
+            }
+        }
         if (firmwareIAPObj->getBoardType()) {
             emit connected();
         } else {
@@ -148,6 +184,26 @@ void TelemetryMonitor::transactionCompleted(UAVObject *obj, bool success)
         // Disconnect from sending object
         obj->disconnect(this);
         objPending = NULL;
+
+        if (success && obj->getName() == "SettingsGeneration") {
+            quint32 gen = obj->getField("Generation")->getValue().toUInt();
+            if (gen != 0 && gen == lastSettingsGeneration) {
+                /* Board settings provably unchanged since our last complete
+                 * sync: drop every settings object from the queue. Metas are
+                 * lazy already, so what remains is the handful of on-change
+                 * data snapshots. */
+                int before = queue.count();
+                QMutableListIterator<UAVObject *> it(queue);
+                while (it.hasNext()) {
+                    UAVDataObject *dobj = dynamic_cast<UAVDataObject *>(it.next());
+                    if (dobj && dobj->isSettingsObject()) {
+                        it.remove();
+                    }
+                }
+                qDebug() << QString("SettingsGeneration match (%1): pruned %2 settings objects from retrieval")
+                    .arg(gen).arg(before - queue.count());
+            }
+        }
         // Process next object if telemetry is still available
         GCSTelemetryStats::DataFields gcsStats = gcsStatsObj->getData();
 

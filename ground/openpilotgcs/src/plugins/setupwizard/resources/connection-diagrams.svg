@@ -47520,4 +47520,147 @@
      inkscape:label="MS4525-speed-sensor"
      style="display:inline"
      transform="matrix(0.77129601,0,0,0.77129601,-757.27445,90.740389)" />
+<g
+         transform="matrix(0.4,0,0,0.4,-131.04473,-97.93132)"
+         id="esp32-satellite">
+        <path
+           style="fill:none;stroke:#777777;stroke-width:14.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none"
+           inkscape:connector-curvature="0"
+           stroke-miterlimit="4"
+           d="M 1250,1530 C 1185.1,1524.03 1129,1544.3 1079,1570.7"
+           id="esp32-path11315" />
+        <path
+           style="fill:none;stroke:#777777;stroke-width:14.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none"
+           inkscape:connector-curvature="0"
+           stroke-miterlimit="4"
+           d="M 1490,1530 C 1540.3,1528.91 1605,1535.3 1645,1566.6"
+           id="esp32-path11317" />
+        <path
+           id="esp32-path11319"
+           d="M 1371.2889,1318.8556 L 1371.2889,1194.0962 L 1596.2889,1194.0962 L 1596.2889,1052.7282"
+           inkscape:connector-curvature="0"
+           style="fill:none;stroke:#1f4697;stroke-width:15.29999924;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none"
+           sodipodi:nodetypes="cccc" />
+        <path
+           id="esp32-path11321"
+           d="M 1356.2889,1318.8556 L 1356.2889,1179.0962 L 1581.2889,1179.0962 L 1581.2889,1052.7282"
+           inkscape:connector-curvature="0"
+           style="fill:none;stroke:#d81900;stroke-width:15.29999924;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none"
+           sodipodi:nodetypes="cccc" />
+        <path
+           id="esp32-path11323"
+           d="M 1386.2889,1318.8556 L 1386.2889,1209.0962 L 1611.7889,1209.0963 L 1611.7889,1052.7282"
+           inkscape:connector-curvature="0"
+           style="fill:none;stroke:#ec6004;stroke-width:15.29999924;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none"
+           sodipodi:nodetypes="cccc" />
+        <path
+           id="esp32-path11325"
+           d="M 1342.571,1318.8556 L 1342.571,1164.0962 L 1566.2889,1164.0962 L 1566.2889,1052.7282"
+           inkscape:connector-curvature="0"
+           style="fill:none;stroke:#000000;stroke-width:15.30000019;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none"
+           sodipodi:nodetypes="cccc" />
+        <rect
+           x="1250"
+           y="1320"
+           stroke-miterlimit="4"
+           width="237"
+           height="272"
+           ry="11.5"
+           style="color:#000000;fill:url(#linearGradient10168-9);fill-rule:nonzero;stroke:#000000;stroke-width:5.76999998;stroke-miterlimit:4;stroke-dasharray:none;enable-background:accumulate"
+           id="esp32-rect11327"
+           rx="11.5" />
+        <text
+           sodipodi:linespacing="125%"
+           xml:space="preserve"
+           x="1368.6637"
+           y="1415.5746"
+           font-style="normal"
+           line-height="125%"
+           font-size="40px"
+           font-weight="normal"
+           style="font-size:40px;font-style:normal;font-weight:normal;text-align:center;line-height:125%;letter-spacing:0px;word-spacing:0px;text-anchor:middle;fill:#ffffff;font-family:Sans"
+           id="esp32-text11329"><tspan
+             x="1368.6637"
+             y="1415.5746"
+             id="esp32-tspan11331">Spectrum</tspan></text>
+        <text
+           sodipodi:linespacing="125%"
+           line-height="125%"
+           x="1291.984"
+           y="1500.4048"
+           font-style="normal"
+           font-size="100px"
+           xml:space="preserve"
+           font-weight="normal"
+           style="font-size:100px;font-style:normal;font-weight:normal;line-height:125%;letter-spacing:0px;word-spacing:0px;fill:#000000;font-family:Sans"
+           id="esp32-text11333"><tspan
+             style="font-size:40px;fill:#ffffff"
+             x="1291.984"
+             y="1500.4048"
+             font-size="40px"
+             id="esp32-tspan11335">Satellite</tspan></text>
+      </g>
+<g id="controller-esp32" style="display:inline">
+<rect x="552" y="86" width="130" height="278" rx="10" style="fill:#b01116;stroke:#5a0808;stroke-width:2"/>
+<rect x="597" y="76" width="40" height="20" rx="5" style="fill:#9a9aa2;stroke:#55555c;stroke-width:1.2"/>
+<text x="617" y="71" style="font-size:9px;font-family:Arial;fill:#444444;text-anchor:middle">USB-C</text>
+<rect x="560" y="96" width="24" height="14" rx="2" style="fill:#f2f2ee;stroke:#888880;stroke-width:1"/>
+<rect x="568" y="216" width="98" height="112" rx="3" style="fill:#c9ccd2;stroke:#7d838d;stroke-width:1.5"/>
+<rect x="568" y="308" width="98" height="20" style="fill:#2b2b31"/>
+<path d="M 576,310 v 16" style="stroke:#c9a227;stroke-width:1.6"/>
+<path d="M 596,310 v 16" style="stroke:#c9a227;stroke-width:1.6"/>
+<path d="M 616,310 v 16" style="stroke:#c9a227;stroke-width:1.6"/>
+<path d="M 636,310 v 16" style="stroke:#c9a227;stroke-width:1.6"/>
+<path d="M 656,310 v 16" style="stroke:#c9a227;stroke-width:1.6"/>
+<text x="617" y="246" style="font-size:12px;font-family:Arial;font-weight:bold;fill:#3a3f46;text-anchor:middle">ESP32</text>
+<text x="617" y="260" style="font-size:9px;font-family:Arial;fill:#3a3f46;text-anchor:middle">WROOM-32E</text>
+<rect x="604" y="344" width="26" height="12" rx="3" style="fill:#2f7d32;stroke:#194a1b;stroke-width:1"/>
+<circle cx="560" cy="108" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="124" r="3.4" style="fill:#ffd24d;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="140" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="156" r="3.4" style="fill:#ffd24d;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="172" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="188" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="204" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="220" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="236" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="252" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="268" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="284" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="300" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="316" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="332" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="560" cy="348" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="108" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="124" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="140" r="3.4" style="fill:#ffd24d;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="156" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="172" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="188" r="3.4" style="fill:#ffd24d;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="204" r="3.4" style="fill:#ffd24d;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="220" r="3.4" style="fill:#ffd24d;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="236" r="3.4" style="fill:#ffd24d;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="252" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="268" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="284" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="300" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="316" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="332" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<circle cx="674" cy="348" r="3.4" style="fill:#c8a34a;stroke:#4a3a10;stroke-width:0.6"/>
+<path d="M 556,124 L 516,128" style="stroke:#0a7fb8;stroke-width:1.2;fill:none"/>
+<text x="512" y="131" style="font-size:10px;font-family:Arial;fill:#0a7fb8;text-anchor:end">3V3 - DSM orange</text>
+<path d="M 556,156 L 516,162" style="stroke:#0a7fb8;stroke-width:1.2;fill:none"/>
+<text x="512" y="165" style="font-size:10px;font-family:Arial;fill:#0a7fb8;text-anchor:end">GND - DSM black</text>
+<path d="M 678,140 L 718,140" style="stroke:#0a7fb8;stroke-width:1.2;fill:none"/>
+<text x="722" y="143" style="font-size:10px;font-family:Arial;fill:#0a7fb8;text-anchor:start">RX1 (16) - DSM gray</text>
+<path d="M 678,188 L 718,176" style="stroke:#0a7fb8;stroke-width:1.2;fill:none"/>
+<text x="722" y="179" style="font-size:10px;font-family:Arial;fill:#b0450a;text-anchor:start">M1 - NW motor (15)</text>
+<path d="M 678,204 L 718,198" style="stroke:#0a7fb8;stroke-width:1.2;fill:none"/>
+<text x="722" y="201" style="font-size:10px;font-family:Arial;fill:#b0450a;text-anchor:start">M2 - NE motor (33)</text>
+<path d="M 678,220 L 718,220" style="stroke:#0a7fb8;stroke-width:1.2;fill:none"/>
+<text x="722" y="223" style="font-size:10px;font-family:Arial;fill:#b0450a;text-anchor:start">M3 - SE motor (27)</text>
+<path d="M 678,236 L 718,242" style="stroke:#0a7fb8;stroke-width:1.2;fill:none"/>
+<text x="722" y="245" style="font-size:10px;font-family:Arial;fill:#b0450a;text-anchor:start">M4 - SW motor (12)</text>
+<text x="617" y="382" style="font-size:12px;font-family:Arial;font-weight:bold;fill:#222222;text-anchor:middle">SparkFun ESP32 Thing Plus</text>
+</g>
 </svg>

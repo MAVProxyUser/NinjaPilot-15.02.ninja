@@ -565,6 +565,42 @@ void UploaderGadgetWidget::rebootWithDialog()
 
 void UploaderGadgetWidget::systemReboot()
 {
+    {
+        /* ESP32 Thing Plus: there is no serial bootloader to enter -- the
+         * firmware answers the IAP reset sequence with a plain restart.
+         * Send the three commands, then wait for telemetry to return
+         * instead of hunting for a DFU device that will never appear
+         * (which is what put "Reboot failed!" on every wizard save). */
+        ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+        UAVObjectUtilManager *utilMngr     = pm->getObject<UAVObjectUtilManager>();
+        if (utilMngr && (utilMngr->getBoardModel() & 0xff00) == 0x1200) {
+            UAVObjectManager *objManager = pm->getObject<UAVObjectManager>();
+            UAVObject *fwIAP = dynamic_cast<UAVDataObject *>(objManager->getObject("FirmwareIAPObj"));
+            foreach(quint16 cmd, QList<quint16>() << 1122 << 2233 << 3344) {
+                fwIAP->getField("Command")->setValue(cmd);
+                fwIAP->updated();
+                sleep(600);
+            }
+            emit progressUpdate(BOOTING, QVariant());
+            TelemetryManager *telemetryManager = pm->getObject<TelemetryManager>();
+            ResultEventLoop rebootLoop;
+            connect(telemetryManager, SIGNAL(disconnected()), &rebootLoop, SLOT(success()));
+            rebootLoop.run(REBOOT_TIMEOUT); // board going down; ignore result
+            disconnect(telemetryManager, SIGNAL(disconnected()), &rebootLoop, SLOT(success()));
+            if (!telemetryManager->isConnected()) {
+                ResultEventLoop upLoop;
+                connect(telemetryManager, SIGNAL(connected()), &upLoop, SLOT(success()));
+                if (upLoop.run(REBOOT_TIMEOUT) != 0) {
+                    emit progressUpdate(FAILURE, QVariant());
+                    return;
+                }
+                disconnect(telemetryManager, SIGNAL(connected()), &upLoop, SLOT(success()));
+            }
+            emit progressUpdate(SUCCESS, QVariant());
+            return;
+        }
+    }
+
     ResultEventLoop eventLoop;
 
     connect(this, SIGNAL(bootloaderSuccess()), &eventLoop, SLOT(success()));

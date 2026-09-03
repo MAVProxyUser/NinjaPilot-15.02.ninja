@@ -31,6 +31,8 @@
 #include "ui_uavobjectbrowser.h"
 #include "ui_viewoptions.h"
 #include "uavobjectmanager.h"
+#include "uavdataobject.h"
+#include <extensionsystem/pluginmanager.h>
 #include <QStringList>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -102,6 +104,25 @@ void UAVObjectBrowserWidget::showMetaData(bool show)
     QList<QModelIndex> metaIndexes = m_model->getMetaDataIndexes();
     foreach(QModelIndex index, metaIndexes) {
         m_browser->treeView->setRowHidden(index.row(), index.parent(), !show);
+    }
+
+    if (show && !m_metaDataFetched) {
+        /* Metaobjects are no longer prefetched at connect (they were half
+         * the retrieval burst); the first time someone actually looks at
+         * metadata, sync all of them from the board so the rows show the
+         * flight side's truth rather than local defaults. */
+        ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+        UAVObjectManager *objManager     = pm->getObject<UAVObjectManager>();
+        if (objManager) {
+            QList< QList<UAVObject *> > objList = objManager->getObjects();
+            foreach(const QList<UAVObject *> &instances, objList) {
+                UAVDataObject *dobj = dynamic_cast<UAVDataObject *>(instances.first());
+                if (dobj && dobj->getMetaObject()) {
+                    dobj->getMetaObject()->requestUpdate();
+                }
+            }
+            m_metaDataFetched = true;
+        }
     }
 }
 

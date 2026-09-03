@@ -93,6 +93,7 @@ signals:
     void viewOptionsChanged(bool categorized, bool scientific, bool metadata, bool description);
     void splitterChanged(QByteArray state);
 private:
+    bool m_metaDataFetched = false;
     QPushButton *m_requestUpdate;
     QPushButton *m_sendUpdate;
     Ui_UAVObjectBrowser *m_browser;

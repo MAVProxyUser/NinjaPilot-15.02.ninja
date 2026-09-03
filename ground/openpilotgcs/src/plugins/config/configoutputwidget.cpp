@@ -376,6 +376,13 @@ void ConfigOutputWidget::refreshWidgetsValues(UAVObject *obj)
             // TIM5_CH1 (ch8). See osd32mp1/dt-pwm-unlock.sh for the pins.
             bankLabels << "1 TIM8 (1-3)" << "2 TIM4 (4-5)" << "3 TIM5 (6,8)" << "4 TIM3 (7)";
             channelBanks << 1 << 1 << 1 << 2 << 2 << 3 << 4 << 3 << 4 << 4;
+        } else if ((board & 0xff00) == 0x1200) {
+            /* NinjaPilot ESP32 Thing Plus: the MCPWM driver applies bank
+             * 0's rate to every timer (channels share MCPWM timers in
+             * fixed pairs), so the four motor outputs are ONE bank and
+             * its rate is the global PWM frame rate. Plain PWM only. */
+            bankLabels << "1 MCPWM (1-4)";
+            channelBanks << 1 << 1 << 1 << 1;
         }
     }
 

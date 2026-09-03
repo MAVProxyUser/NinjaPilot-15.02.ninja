@@ -136,7 +136,22 @@ CONFIG += depend_includepath
 
 # Custom rule to generate MOC files for Q_OBJECT classes defined in .cpp files
 submiteditorwidget_moc.target = submiteditorwidget.moc
-submiteditorwidget_moc.depends = $$PWD/submiteditorwidget.cpp
-submiteditorwidget_moc.commands = moc $$PWD/submiteditorwidget.cpp -o submiteditorwidget.moc
+# submiteditorwidget.cpp does #include "submiteditorwidget.moc", so the .moc
+# has to exist next to the source. Two separate hazards if the checkout path
+# contains a space (e.g. "OP Revo Redux"), and building through a space-free
+# symlink does NOT avoid them because qmake resolves $$PWD to the real path:
+#
+#   1. an unquoted expansion hands moc three filenames
+#      ("Too many input files specified") -- hence $$shell_quote below;
+#   2. more fundamentally, GNU make cannot express a TARGET whose path
+#      contains a space, so this rule can never fire and make reports
+#      "No rule to make target .../submiteditorwidget.moc".
+#
+# Because of (2) the generated .moc is kept in the source tree as a checked-in
+# build artifact. If it goes missing, regenerate it by hand:
+#
+#   moc src/libs/utils/submiteditorwidget.cpp -o src/libs/utils/submiteditorwidget.moc
+submiteditorwidget_moc.depends = $$quote($$PWD/submiteditorwidget.cpp)
+submiteditorwidget_moc.commands = moc $$shell_quote($$PWD/submiteditorwidget.cpp) -o submiteditorwidget.moc
 QMAKE_EXTRA_TARGETS += submiteditorwidget_moc
 PRE_TARGETDEPS += submiteditorwidget.moc

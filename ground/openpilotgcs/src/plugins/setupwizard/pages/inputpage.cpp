@@ -45,6 +45,25 @@ InputPage::~InputPage()
     delete ui;
 }
 
+void InputPage::initializePage()
+{
+    /* The ESP32 Thing Plus target has exactly one receiver input: a
+     * Spektrum satellite on the pin silkscreened RX1. Offering PWM, PPM or
+     * S.Bus here would write a configuration the firmware cannot serve. */
+    bool dsmOnly = getWizard()->getControllerType() == SetupWizard::CONTROLLER_ESP32;
+
+    ui->pwmButton->setEnabled(!dsmOnly);
+    ui->ppmButton->setEnabled(!dsmOnly);
+    ui->sbusButton->setEnabled(!dsmOnly);
+    if (dsmOnly) {
+        ui->spectrumButton->setChecked(true);
+        QString why = tr("This board takes a Spektrum satellite on RX1 only.");
+        ui->pwmButton->setToolTip(why);
+        ui->ppmButton->setToolTip(why);
+        ui->sbusButton->setToolTip(why);
+    }
+}
+
 bool InputPage::validatePage()
 {
     if (ui->pwmButton->isChecked()) {
@@ -93,6 +112,12 @@ bool InputPage::restartNeeded(VehicleConfigurationSource::INPUT_TYPE selectedTyp
         }
         break;
     }
+    case SetupWizard::CONTROLLER_ESP32:
+        /* The Spektrum satellite is the only receiver this board has, and
+         * it lives on a fixed UART -- there is no port mode to flip and
+         * nothing a reboot would re-init. */
+        return false;
+
     case SetupWizard::CONTROLLER_REVO:
     case SetupWizard::CONTROLLER_REALPOSIX:
     case SetupWizard::CONTROLLER_DISCOVERYF4:

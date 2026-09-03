@@ -31,6 +31,7 @@
 
 #include <extensionsystem/pluginmanager.h>
 #include <uavobjectutil/uavobjectutilmanager.h>
+#include "actuatorsettings.h"
 
 ControllerPage::ControllerPage(SetupWizard *wizard, QWidget *parent) :
     AbstractWizardPage(wizard, parent),
@@ -85,6 +86,27 @@ bool ControllerPage::isComplete() const
 bool ControllerPage::validatePage()
 {
     getWizard()->setControllerType((SetupWizard::CONTROLLER_TYPE)ui->boardTypeCombo->itemData(ui->boardTypeCombo->currentIndex()).toInt());
+    if (getWizard()->getControllerType() == SetupWizard::CONTROLLER_ESP32) {
+        /* Seed the wizard's actuator endpoints from the live board. The
+         * Thing Plus keeps its motor endpoints in the firmware's RF
+         * calibration; if the output calibration pages run (network
+         * telemetry flow) the user updates these, and if they are skipped
+         * (USB flow) the wizard writes back exactly what the board already
+         * had. Either way nothing calibrated is lost to page defaults. */
+        ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+        UAVObjectManager *uavoManager     = pm->getObject<UAVObjectManager>();
+        ActuatorSettings *act = ActuatorSettings::GetInstance(uavoManager);
+        if (act) {
+            ActuatorSettings::DataFields d = act->getData();
+            QList<actuatorChannelSettings> list = getWizard()->getActuatorSettings();
+            for (int i = 0; i < list.count() && i < (int)ActuatorSettings::CHANNELMAX_NUMELEM; i++) {
+                list[i].channelMin     = d.ChannelMin[i];
+                list[i].channelNeutral = d.ChannelNeutral[i];
+                list[i].channelMax     = d.ChannelMax[i];
+            }
+            getWizard()->setActuatorSettings(list);
+        }
+    }
     if (getWizard()->getControllerType() == SetupWizard::CONTROLLER_CC || getWizard()->getControllerType() == SetupWizard::CONTROLLER_CC3D) {
         getWizard()->setGpsType(SetupWizard::GPS_DISABLED);
     }
@@ -118,6 +140,9 @@ SetupWizard::CONTROLLER_TYPE ControllerPage::getControllerType()
     case 0x1101:
         return SetupWizard::CONTROLLER_REALPOSIX;
 
+    case 0x1202:
+        return SetupWizard::CONTROLLER_ESP32;
+
     case 0x0904:
         return SetupWizard::CONTROLLER_DISCOVERYF4;
 
@@ -141,6 +166,7 @@ void ControllerPage::setupBoardTypes()
     ui->boardTypeCombo->addItem(tr("OpenPilot CopterControl 3D"), SetupWizard::CONTROLLER_CC3D);
     ui->boardTypeCombo->addItem(tr("OpenPilot Revolution"), SetupWizard::CONTROLLER_REVO);
     ui->boardTypeCombo->addItem(tr("NinjaPilot RealPosix (OSD32MP1)"), SetupWizard::CONTROLLER_REALPOSIX);
+    ui->boardTypeCombo->addItem(tr("NinjaPilot ESP32 Thing Plus"), SetupWizard::CONTROLLER_ESP32);
     ui->boardTypeCombo->addItem(tr("OpenPilot OPLink Radio Modem"), SetupWizard::CONTROLLER_OPLINK);
     ui->boardTypeCombo->addItem(tr("OpenPilot DiscoveryF4"), SetupWizard::CONTROLLER_DISCOVERYF4);
 }

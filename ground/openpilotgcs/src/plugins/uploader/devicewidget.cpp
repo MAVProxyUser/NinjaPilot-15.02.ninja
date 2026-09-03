@@ -110,6 +110,11 @@ void DeviceWidget::populate()
         // this fork's qrc no longer carries the Revolution artwork)
         devicePic.load(":/uploader/images/gcs-board-osd32mp1.png");
         break;
+    case 0x1202:
+        // NinjaPilot ESP32 Thing Plus -- board photo pending an asset;
+        // the name label above already identifies it.
+        devicePic.load("");
+        break;
     default:
         // Clear
         devicePic.load("");

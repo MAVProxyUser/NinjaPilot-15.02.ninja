@@ -419,9 +419,26 @@ void OutputChannelForm::updateChannelLabel()
             isRealposix = true;
         }
     }
+    static const char *esp32Pins[4] = { "GPIO15", "GPIO33", "GPIO27", "GPIO12" };
+    static const char *esp32PinDetail[4] = {
+        "GPIO15 (ADC2_3 / TOUCH3 / MTDO) = M1 front-left",
+        "GPIO33 (ADC1_5 / TOUCH8 / 32K_XN) = M2 front-right",
+        "GPIO27 (ADC2_7 / TOUCH7) = M3 rear-right",
+        "GPIO12 (ADC2_5 / TOUCH5 / MTDI) = M4 rear-left"
+    };
+    bool isEsp32 = false;
+    if (pm) {
+        UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
+        if (utilMngr && (utilMngr->getBoardModel() & 0xff00) == 0x1200) {
+            isEsp32 = true;
+        }
+    }
     if (isRealposix && index() < 8) {
         ui.actuatorNumber->setText(QString("%1 %2").arg(index() + 1).arg(realposixPins[index()]));
         ui.actuatorNumber->setToolTip(tr("Output %1: %2").arg(index() + 1).arg(realposixPinDetail[index()]));
+    } else if (isEsp32 && index() < 4) {
+        ui.actuatorNumber->setText(QString("%1 %2").arg(index() + 1).arg(esp32Pins[index()]));
+        ui.actuatorNumber->setToolTip(tr("Output %1: %2").arg(index() + 1).arg(esp32PinDetail[index()]));
     } else {
         ui.actuatorNumber->setText(QString("%1").arg(index() + 1));
     }

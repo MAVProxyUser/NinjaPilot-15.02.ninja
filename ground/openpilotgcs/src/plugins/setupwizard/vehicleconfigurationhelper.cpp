@@ -178,6 +178,12 @@ void VehicleConfigurationHelper::applyHardwareConfiguration()
             break;
         }
         break;
+    case VehicleConfigurationSource::CONTROLLER_ESP32:
+        /* Fixed-function hardware: the Spektrum satellite is on a dedicated
+         * UART, PWM out is on dedicated MCPWM pins, and telemetry arrives
+         * over WiFi or the USB serial console. There are no CC_/RM_ port
+         * muxes on this board, so there is nothing to write here. */
+        break;
     case VehicleConfigurationSource::CONTROLLER_REVO:
     case VehicleConfigurationSource::CONTROLLER_REALPOSIX:
     case VehicleConfigurationSource::CONTROLLER_NANO:
@@ -423,13 +429,28 @@ void VehicleConfigurationHelper::applyActuatorConfiguration()
     {
         ActuatorSettings::DataFields data = actSettings->getData();
 
+        bool esp32 = m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_ESP32;
+
         QList<actuatorChannelSettings> actuatorSettings = m_configSource->getActuatorSettings();
         for (quint16 i = 0; i < ActuatorSettings::CHANNELMAX_NUMELEM; i++) {
             data.ChannelType[i]    = ActuatorSettings::CHANNELTYPE_PWM;
             data.ChannelAddr[i]    = i;
+            /* On the ESP32 Thing Plus these were seeded from the live
+             * board when the controller was selected (controllerpage.cpp),
+             * so writing them back is lossless whether or not the output
+             * calibration pages ran. */
             data.ChannelMin[i]     = actuatorSettings[i].channelMin;
             data.ChannelNeutral[i] = actuatorSettings[i].channelNeutral;
             data.ChannelMax[i]     = actuatorSettings[i].channelMax;
+        }
+
+        if (esp32 && (bankMode == ActuatorSettings::BANKMODE_ONESHOT125 ||
+                      bankMode == ActuatorSettings::BANKMODE_PWMSYNC)) {
+            /* The MCPWM output driver speaks plain PWM only; OneShot and
+             * PWMSync would configure a waveform the hardware never
+             * produces. Fall back to the fast PWM rate. */
+            bankMode     = ActuatorSettings::BANKMODE_PWM;
+            escFrequence = RAPID_ESC_FREQUENCY;
         }
 
         data.MotorsSpinWhileArmed = ActuatorSettings::MOTORSSPINWHILEARMED_FALSE;
@@ -841,7 +862,14 @@ void VehicleConfigurationHelper::applyManualControlDefaults()
 
     ManualControlSettings::ChannelGroupsOptions channelType = ManualControlSettings::CHANNELGROUPS_PWM;
 
-    if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REALPOSIX) {
+    if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_ESP32) {
+        /* The firmware registers the satellite under the DSM (Main port)
+         * channel group; that is also what the board's own provisioning
+         * writes. Only the group assignment is written here -- channel
+         * numbers, reversals and endpoints belong to the user's RC
+         * calibration and survive the wizard untouched. */
+        channelType = ManualControlSettings::CHANNELGROUPS_DSMMAINPORT;
+    } else if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REALPOSIX) {
         /* Every receiver on this board arrives through the PPM channel
          * group - the UDP network receiver registers there by design
          * (and a future hardware PPM driver would too). Mapping the

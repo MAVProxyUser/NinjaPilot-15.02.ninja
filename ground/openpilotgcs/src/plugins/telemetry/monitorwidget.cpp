@@ -1,4 +1,5 @@
 #include "monitorwidget.h"
+#include <cmath>
 
 #include <utils/stylehelper.h>
 
@@ -176,8 +177,16 @@ MonitorWidget::MonitorWidget(QWidget *parent) :
 
     connected = false;
 
-    setMin(0.0);
-    setMax(1200.0);
+    /* Serial-era scaling (linear, 1200 bytes/s full scale) pegged the Rx
+     * bar permanently once telemetry moved to WiFi -- ordinary idle push
+     * traffic is ~1.1 KB/s. Log scale from 100 B/s to 20 KB/s: idle sits
+     * mid-band, silence and connect bursts are both visible. */
+    setMin(100.0);
+    setMax(20000.0);
+    /* GCS->board is heartbeats and occasional settings writes: single
+     * bytes-per-second at idle, a few hundred in a save burst. */
+    txMinValue = 5.0;
+    txMaxValue = 5000.0;
 
     telemetryUpdated(0.0, 0.0);
 }
@@ -216,7 +225,7 @@ void MonitorWidget::telemetryConnected()
     if (!connected) {
         // flash the lights
         setToolTip(tr("Connected"));
-        telemetryUpdated(maxValue, maxValue);
+        telemetryUpdated(txMaxValue, maxValue);
         connected = true;
     }
 }
@@ -230,7 +239,7 @@ void MonitorWidget::telemetryDisconnected()
         setToolTip(tr("Disconnected"));
 
         // flash the lights???
-        telemetryUpdated(maxValue, maxValue);
+        telemetryUpdated(txMaxValue, maxValue);
 
         telemetryUpdated(0.0, 0.0);
     }
@@ -243,8 +252,11 @@ void MonitorWidget::telemetryDisconnected()
  */
 void MonitorWidget::telemetryUpdated(double txRate, double rxRate)
 {
-    double txIndex = (txRate - minValue) / (maxValue - minValue) * txNodes.count();
-    double rxIndex = (rxRate - minValue) / (maxValue - minValue) * rxNodes.count();
+    /* Logarithmic bar mapping -- see the comment at setMax(). */
+    double txIndex = (txRate <= txMinValue) ? 0.0 :
+                     log10(txRate / txMinValue) / log10(txMaxValue / txMinValue) * txNodes.count();
+    double rxIndex = (rxRate <= minValue) ? 0.0 :
+                     log10(rxRate / minValue) / log10(maxValue / minValue) * rxNodes.count();
 
     if (connected) {
         this->setToolTip(QString("Tx: %0 bytes/s, Rx: %1 bytes/s").arg(txRate).arg(rxRate));

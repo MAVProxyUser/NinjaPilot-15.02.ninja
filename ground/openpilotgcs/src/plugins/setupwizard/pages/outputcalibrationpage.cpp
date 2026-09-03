@@ -456,6 +456,10 @@ void OutputCalibrationPage::setWizardPage()
 
 void OutputCalibrationPage::initializePage()
 {
+    if (getWizard()->getControllerType() == SetupWizard::CONTROLLER_ESP32 &&
+        !ui->label_2->text().contains(tr("THING PLUS POWER NOTE"))) {
+        ui->label_2->setText(tr("<p><b><font color='red'>THING PLUS POWER NOTE:</font> remove USB from the flight controller before attaching the flight battery. The ESC/BEC 5V rail is tied to VUSB, so the board must only ever see one power source at a time. Keep the GCS connected over WiFi telemetry for this procedure.</b></p>") + ui->label_2->text());
+    }
     if (m_vehicleScene) {
         setupVehicle();
         startWizard();

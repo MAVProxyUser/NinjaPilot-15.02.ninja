@@ -34,6 +34,9 @@
 #include <QThread>
 #include <QStringList>
 #include <QDir>
+#include "uavtalk/telemetrymanager.h"
+#include <coreplugin/icore.h>
+#include <coreplugin/connectionmanager.h>
 #include <QFileDialog>
 #include <QList>
 #include <QErrorMessage>
@@ -439,6 +442,52 @@ void LoggingPlugin::replayStarted()
 void LoggingPlugin::extensionsInitialized()
 {
     addAutoReleasedObject(logConnection);
+
+    /* Log every session without being asked. The first real flight of
+     * the ESP32 board ended in an unexplained tumble with no record of
+     * it -- an anomaly is only diagnosable if the tape was already
+     * rolling. Files land in ~/NinjaPilot-logs, timestamped, one per
+     * telemetry session; replay connections are excluded. */
+    ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+    TelemetryManager *tm = pm->getObject<TelemetryManager>();
+    qDebug() << "LoggingPlugin: auto-log hookup, TelemetryManager =" << tm;
+    if (tm) {
+        bool a = connect(tm, SIGNAL(connected()), this, SLOT(autoStartLogging()));
+        bool b = connect(tm, SIGNAL(disconnected()), this, SLOT(autoStopLogging()));
+        qDebug() << "LoggingPlugin: auto-log connects" << a << b;
+    }
+}
+
+void LoggingPlugin::autoStartLogging()
+{
+    qDebug() << "LoggingPlugin: autoStartLogging, state =" << state;
+    if (state != IDLE) {
+        return;
+    }
+    QString connName = Core::ICore::instance()->connectionManager()->getCurrentDevice().getConName();
+    if (connName.startsWith("Logfile", Qt::CaseInsensitive)) {
+        return; // replaying a log; do not re-log it
+    }
+    QDir dir(QDir::homePath() + "/NinjaPilot-logs");
+    if (!dir.exists()) {
+        dir.mkpath(".");
+    }
+    QString fileName = dir.filePath(
+        QString("NP-%1.opl").arg(QDateTime::currentDateTime().toString("yyyy-MM-dd_hh-mm-ss")));
+    startLogging(fileName);
+    if (cmd) {
+        cmd->action()->setText(tr("Stop logging"));
+    }
+}
+
+void LoggingPlugin::autoStopLogging()
+{
+    if (state == LOGGING) {
+        stopLogging();
+        if (cmd) {
+            cmd->action()->setText(tr("Start logging..."));
+        }
+    }
 }
 
 void LoggingPlugin::shutdown()

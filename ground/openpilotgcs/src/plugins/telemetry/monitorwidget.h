@@ -48,6 +48,12 @@ private:
 
     double minValue;
     double maxValue;
+    /* The two directions live in different worlds: the board pushes ~1 KB/s
+     * of telemetry at idle while the GCS sends a few dozen bytes of
+     * heartbeats -- one shared scale starves whichever side it was not
+     * tuned for. minValue/maxValue keep the RX meaning; TX gets its own. */
+    double txMinValue;
+    double txMaxValue;
 
     QGraphicsSvgItem *graph;
 

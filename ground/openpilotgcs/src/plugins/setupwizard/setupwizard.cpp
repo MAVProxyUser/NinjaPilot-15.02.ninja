@@ -98,6 +98,7 @@ int SetupWizard::nextId() const
         case CONTROLLER_CC3D:
         case CONTROLLER_REVO:
         case CONTROLLER_REALPOSIX:
+        case CONTROLLER_ESP32:
         case CONTROLLER_NANO:
         case CONTROLLER_DISCOVERYF4:
             return PAGE_INPUT;
@@ -146,7 +147,8 @@ int SetupWizard::nextId() const
          * user's choice is carried forward in RAM and re-applied+saved
          * atomically at the final Save page. STM32 targets keep the
          * original persist+reboot (their receiver hardware needs it). */
-        if (getControllerType() != CONTROLLER_REALPOSIX && isRestartNeeded()) {
+        if (getControllerType() != CONTROLLER_REALPOSIX &&
+            getControllerType() != CONTROLLER_ESP32 && isRestartNeeded()) {
             saveHardwareSettings();
             reboot();
         }
@@ -181,6 +183,29 @@ int SetupWizard::nextId() const
     }
 
     case PAGE_BIAS_CALIBRATION:
+        /* ESP32 Thing Plus: the ESC/BEC 5V line feeds VUSB, so the flight
+         * battery and USB must never be connected at the same time. When
+         * the calibration pages are skipped, the firmware's RF calibration
+         * (transmitter switch-wiggle) keeps owning the motor endpoints. */
+        if (getControllerType() == CONTROLLER_ESP32) {
+            QString connName = Core::ICore::instance()->connectionManager()->getCurrentDevice().getConName();
+            bool usbAttached = connName.startsWith("USB:", Qt::CaseInsensitive) ||
+                               connName.startsWith("Serial:", Qt::CaseInsensitive);
+            if (usbAttached) {
+                return PAGE_AIRFRAME_INITIAL_TUNING;
+            }
+            /* Network link: output calibration (sliders against a running
+             * board) is fine on battery power. ESC RANGE calibration is
+             * not offered at all -- it needs the controller alive and
+             * holding max throttle BEFORE the ESCs first see power, and
+             * on this single-rail board the controller and the ESCs power
+             * up together (the BEC feeds VUSB). The stock page's flow
+             * would demand exactly the battery-plus-USB state this board
+             * cannot survive. True range calibration is the BOARD_ESC_CAL
+             * boot mode (see the port's README); idle points come from
+             * the RF switch-wiggle calibration. */
+            return PAGE_OUTPUT_CALIBRATION;
+        }
         if (getVehicleType() == VEHICLE_MULTI) {
             return PAGE_ESC_CALIBRATION;
         } else {
@@ -218,6 +243,7 @@ int SetupWizard::nextId() const
         case CONTROLLER_CC3D:
         case CONTROLLER_REVO:
         case CONTROLLER_REALPOSIX:
+        case CONTROLLER_ESP32:
         case CONTROLLER_NANO:
         case CONTROLLER_DISCOVERYF4:
             switch (getVehicleType()) {
@@ -259,6 +285,9 @@ QString SetupWizard::getSummaryText()
         break;
     case CONTROLLER_REALPOSIX:
         summary.append(tr("NinjaPilot RealPosix (OSD32MP1)"));
+        break;
+    case CONTROLLER_ESP32:
+        summary.append(tr("NinjaPilot ESP32 Thing Plus"));
         break;
     case CONTROLLER_NANO:
         summary.append(tr("OpenPilot Nano"));

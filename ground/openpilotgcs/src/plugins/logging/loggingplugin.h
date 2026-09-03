@@ -128,6 +128,12 @@ public:
     bool initialize(const QStringList & arguments, QString *errorString);
     void shutdown();
 
+private slots:
+    void autoStartLogging();
+    void autoStopLogging();
+
+public:
+
     LoggingConnection *getLogConnection()
     {
         return logConnection;

@@ -168,12 +168,25 @@ void VehicleConfig::updateChannelNames()
                   << "PB5 RPi-33 (TIM3_CH2)"
                   << "PH10 JP19 (TIM5_CH1, DT off)";
 
+    /* ESP32 Thing Plus: the four MCPWM outputs, named by the pin numbers
+     * on the board's silkscreen -- the same names the wiring diagram and
+     * the README use. Quad X order: M1 front-left, M2 front-right,
+     * M3 rear-right, M4 rear-left. */
+    QStringList esp32Pins;
+    esp32Pins << "GPIO15 - ADC2_3/TOUCH3/MTDO"
+              << "GPIO33 - ADC1_5/TOUCH8/32K_XN"
+              << "GPIO27 - ADC2_7/TOUCH7"
+              << "GPIO12 - ADC2_5/TOUCH5/MTDI";
+
     bool isRealposix = false;
+    bool isEsp32     = false;
     ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
     if (pm) {
         UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
-        if (utilMngr && (utilMngr->getBoardModel() & 0xff00) == 0x1100) {
-            isRealposix = true;
+        if (utilMngr) {
+            int model = utilMngr->getBoardModel();
+            isRealposix = (model & 0xff00) == 0x1100;
+            isEsp32     = (model & 0xff00) == 0x1200;
         }
     }
 
@@ -182,7 +195,11 @@ void VehicleConfig::updateChannelNames()
     for (int i = 0; i < (int)VehicleConfig::CHANNEL_NUMELEM; i++) {
         if (isRealposix && i < realposixPins.count()) {
             channelNames << QString("%1: %2").arg(i + 1).arg(realposixPins.at(i));
-        } else if (isRealposix) {
+        } else if (isEsp32 && i < esp32Pins.count()) {
+            /* No "N:" prefix -- the form already badges each row with the
+             * channel number, and repeating it just adds noise. */
+            channelNames << esp32Pins.at(i);
+        } else if (isRealposix || isEsp32) {
             channelNames << QString("Channel%1 (unmapped)").arg(i + 1);
         } else {
             channelNames << QString("Channel%1").arg(i + 1);

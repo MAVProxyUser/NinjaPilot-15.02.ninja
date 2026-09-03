@@ -26,6 +26,8 @@
  */
 
 #include "configgadgetwidget.h"
+#include <QScrollArea>
+#include <QLabel>
 #include "configrevowidget.h"
 #include "configrevohwwidget.h"
 
@@ -192,6 +194,55 @@ void ConfigGadgetWidget::onAutopilotConnect()
 
             qwd = new ConfigRevoHWWidget(this);
             stackWidget->replaceTab(ConfigGadgetWidget::hardware, qwd);
+        } else if ((board & 0xff00) == 0x1200) {
+            /* NinjaPilot ESP32 Thing Plus: runs the CC-style Attitude
+             * module (complementary filter, AttitudeSettings board
+             * rotation, AccelGyroSettings bias), so the CopterControl
+             * attitude widget is the right calibration screen. The CC
+             * hardware widget is NOT installed -- it edits port muxes
+             * this board does not have. */
+            QWidget *qwd = new ConfigCCAttitudeWidget(this);
+            stackWidget->replaceTab(ConfigGadgetWidget::sensors, qwd);
+
+            /* The hardware on this board is fixed-function -- no port
+             * muxes to configure -- so the hardware tab is a reference
+             * card: the pin map, the telemetry endpoints, and the one
+             * rule that can destroy the board. */
+            QLabel *hw = new QLabel(this);
+            hw->setWordWrap(true);
+            hw->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+            hw->setMargin(12);
+            hw->setTextInteractionFlags(Qt::TextSelectableByMouse);
+            hw->setText(
+                "<h2>SparkFun ESP32 Thing Plus &mdash; fixed-function hardware</h2>"
+                "<p>Nothing on this page needs configuring: every peripheral is on a "
+                "dedicated pin chosen at build time.</p>"
+                "<table cellpadding='4'>"
+                "<tr><th align='left'>Function</th><th align='left'>Pin</th><th align='left'>Notes</th></tr>"
+                "<tr><td>Motor 1 (front-left)</td><td><b>15</b></td><td>MCPWM, one bank, rate on the Output tab</td></tr>"
+                "<tr><td>Motor 2 (front-right)</td><td><b>33</b></td><td></td></tr>"
+                "<tr><td>Motor 3 (rear-right)</td><td><b>27</b></td><td></td></tr>"
+                "<tr><td>Motor 4 (rear-left)</td><td><b>12</b></td><td>strap pin, freed by eFuse</td></tr>"
+                "<tr><td>Spektrum satellite</td><td><b>16 (RX1)</b></td><td>UART2, DSM stream</td></tr>"
+                "<tr><td>IMU (ICM-20602)</td><td>SCLK 5 / MISO 19 / MOSI 18 / CS 14</td><td>SPI3, data-ready on 34</td></tr>"
+                "<tr><td>LED</td><td>13</td><td>slow = disarmed, fast = armed</td></tr>"
+                "<tr><td>BOOT button</td><td>0</td><td>hold ~3 s after boot: erase settings</td></tr>"
+                "</table>"
+                "<h3>Telemetry</h3>"
+                "<p>WiFi: UAVTalk on TCP and UDP port <b>9000</b> (UDP preferred), discovery "
+                "beacon on UDP 9999. Credentials are provisioned offline with "
+                "<code>tools/wifi_setup.py</code>; erase them before flying. "
+                "Serial fallback: UART0 at 57600 through the USB bridge.</p>"
+                "<h3 style='color:#c00'>Power rule</h3>"
+                "<p><b>Never connect the flight battery and USB at the same time.</b> "
+                "The ESC/BEC 5&nbsp;V line feeds VUSB, so two supplies meet on one rail. "
+                "Anything needing powered motors runs on battery with the GCS over WiFi; "
+                "anything on USB runs with motors unpowered.</p>");
+            QScrollArea *hwScroll = new QScrollArea(this);
+            hwScroll->setWidget(hw);
+            hwScroll->setWidgetResizable(true);
+            hwScroll->setFrameStyle(QFrame::NoFrame);
+            stackWidget->replaceTab(ConfigGadgetWidget::hardware, hwScroll);
         } else {
             // Unknown board
             qDebug() << "Unknown board " << board;

@@ -17,7 +17,14 @@ public:
     qint64 bytesAvailable() const;
     qint64 bytesToWrite() const
     {
-        return m_file.bytesToWrite();
+        /* Report an empty backlog always. UAVTalk refuses to transmit
+         * once a device reports more than its 2KB serial-era backlog
+         * limit pending, and QFile's internal buffer legitimately sits
+         * above that under a 25Hz telemetry stream -- which made the
+         * logger drop objects and spam "io device full" while the disk
+         * was absorbing everything without complaint. A file sink does
+         * not need flow control. */
+        return 0;
     };
     bool open(OpenMode mode);
     void setFileName(QString name)
