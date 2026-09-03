@@ -136,22 +136,27 @@ CONFIG += depend_includepath
 
 # Custom rule to generate MOC files for Q_OBJECT classes defined in .cpp files
 submiteditorwidget_moc.target = submiteditorwidget.moc
-# submiteditorwidget.cpp does #include "submiteditorwidget.moc", so the .moc
-# has to exist next to the source. Two separate hazards if the checkout path
-# contains a space (e.g. "OP Revo Redux"), and building through a space-free
-# symlink does NOT avoid them because qmake resolves $$PWD to the real path:
+# submiteditorwidget.cpp does #include "submiteditorwidget.moc", so a .moc has
+# to be reachable from that translation unit. The target below is RELATIVE, so
+# it lands in the build directory, which is already on the include path -- the
+# .cpp finds it there and no copy in the source tree is needed.
 #
-#   1. an unquoted expansion hands moc three filenames
-#      ("Too many input files specified") -- hence $$shell_quote below;
-#   2. more fundamentally, GNU make cannot express a TARGET whose path
-#      contains a space, so this rule can never fire and make reports
-#      "No rule to make target .../submiteditorwidget.moc".
+# Two hazards, both handled here:
 #
-# Because of (2) the generated .moc is kept in the source tree as a checked-in
-# build artifact. If it goes missing, regenerate it by hand:
+#   1. an unquoted expansion hands moc three filenames when the checkout path
+#      contains a space (e.g. "OP Revo Redux") -- hence $$shell_quote.
+#   2. `moc` is NOT on PATH when Qt comes from Homebrew, which is keg-only:
+#      the rule fired and died with "make: moc: No such file or directory",
+#      leaving a build that only worked because a stale .moc happened to sit
+#      in the source tree. Use Qt's own binary directory instead of hoping.
 #
-#   moc src/libs/utils/submiteditorwidget.cpp -o src/libs/utils/submiteditorwidget.moc
+# This was previously documented as "GNU make cannot express a TARGET whose
+# path contains a space, so this rule can never fire", and the .moc was kept
+# in the source tree as a checked-in build artifact to work around it. That
+# diagnosis was wrong: the target is relative and has no space in it. The real
+# fault was (2). Verified 2026-09-02 by deleting the source-tree .moc and
+# building clean.
 submiteditorwidget_moc.depends = $$quote($$PWD/submiteditorwidget.cpp)
-submiteditorwidget_moc.commands = moc $$shell_quote($$PWD/submiteditorwidget.cpp) -o submiteditorwidget.moc
+submiteditorwidget_moc.commands = $$shell_quote($$[QT_INSTALL_BINS]/moc) $$shell_quote($$PWD/submiteditorwidget.cpp) -o submiteditorwidget.moc
 QMAKE_EXTRA_TARGETS += submiteditorwidget_moc
 PRE_TARGETDEPS += submiteditorwidget.moc
