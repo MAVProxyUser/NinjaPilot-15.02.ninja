@@ -242,6 +242,28 @@ static void stabilizationInnerloopTask()
             crit = true;
         }
 #endif
+#if defined(USE_ESP32)
+        /*
+         * Ignore the first pass.
+         *
+         * gyroupdates is incremented by GyroStateUpdatedCb, which starts
+         * firing as soon as the callback is connected -- before this loop has
+         * run even once. Whatever accumulated in that window lands on pass
+         * zero and is not a missed deadline at all. Measured here it is
+         * consistently 4, which trips the > 3 CRITICAL threshold and raises a
+         * Stabilization alarm on every single boot. Every pass after it is
+         * exactly 1.
+         */
+        static bool first_pass = true;
+
+        if (first_pass) {
+            first_pass = false;
+            stabSettings.monitor.gyroupdates = 0;
+            warn  = false;
+            error = false;
+            crit  = false;
+        } else
+#endif
         // check if gyro keeps updating
         if (stabSettings.monitor.gyroupdates < 1) {
             // error if gyro didn't update at all!
@@ -274,6 +296,31 @@ static void stabilizationInnerloopTask()
                 if (gapMs > 96) {
                     crit = true;
                 }
+            }
+            lastPassMs = nowMs;
+        }
+#elif defined(USE_ESP32)
+        /* Same reasoning as the realposix branch above, with ESP32 numbers:
+         * the characterized lwIP/kernel-lock stalls pause the scheduler
+         * ~3.6 ms a couple of times a second, samples queue rather than
+         * drop, and the loop catches up within a pass. Counting missed
+         * samples turned that known-normal hiccup into a STAB warning
+         * blinking at an idle bench. Judge the wall-clock pass gap
+         * instead: warn past 12 ms, critical past 30 ms. */
+        {
+            static uint32_t lastPassMs = 0;
+            static bool     wdArmed    = false;
+            uint32_t nowMs = xTaskGetTickCount() * portTICK_RATE_MS;
+            if (wdArmed) {
+                uint32_t gapMs = nowMs - lastPassMs;
+                if (gapMs > 12) {
+                    warn = true;
+                }
+                if (gapMs > 30) {
+                    crit = true;
+                }
+            } else {
+                wdArmed = true;
             }
             lastPassMs = nowMs;
         }

@@ -51,7 +51,12 @@ typedef struct {
 /* Init module section */
 extern initmodule_t __module_initcall_start[], __module_initcall_end[];
 
-#ifdef USE_SIM_POSIX
+#if defined(USE_SIM_POSIX) || defined(USE_ESP32)
+/* USE_ESP32 shares this path deliberately: the STM32 branch below
+ * collects initcalls into custom linker sections, and ESP-IDF
+ * generates its own linker script, so those sections are not
+ * available to us. The generated InitModules()/StartModules() pair
+ * does the same job with no linker support required. */
 
 extern void InitModules();
 extern void StartModules();
@@ -105,7 +110,7 @@ extern void StartModules();
       } \
     }
 
-#endif /* USE_SIM_POSIX */
+#endif /* USE_SIM_POSIX || USE_ESP32 */
 
 #endif /* PIOS_INITCALL_H */
 

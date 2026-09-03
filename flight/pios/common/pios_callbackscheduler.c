@@ -272,6 +272,19 @@ DelayedCallbackInfo *PIOS_CALLBACKSCHEDULER_Create(
     int t = 0;
     LL_FOREACH(schedulerTasks, task) {
         if (task->priorityTask == priorityTask) {
+            // Found an existing scheduler task for this priority. Callbacks
+            // registered here SHARE its stack, so it has to be as large as
+            // the largest request -- not merely as large as whatever the
+            // first caller happened to ask for. Without this, a modest
+            // callback registering first silently caps every later one.
+            //
+            // All Create() calls happen before Start() spawns the tasks, so
+            // growing the figure here is honoured. (If a task has already
+            // been spawned, FreeRTOS cannot resize it; that case would need
+            // the caller to register earlier.)
+            if (task->stackSize < stacksize) {
+                task->stackSize = stacksize;
+            }
             break; // found
         }
         t++;

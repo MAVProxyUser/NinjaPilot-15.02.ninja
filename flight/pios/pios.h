@@ -45,6 +45,11 @@ extern "C" {
 #ifdef USE_SIM_POSIX
 /* SimPosix version of this file. This will probably be removed later */
 #include <pios_sim_posix.h>
+#elif defined(USE_ESP32)
+/* ESP32 (Xtensa LX6/LX7). Like the POSIX branch this bypasses the STM32
+ * include chain entirely -- ESP-IDF owns FreeRTOS, the linker script and the
+ * startup path, so none of the ST peripheral-library headers below apply. */
+#include <pios_esp32.h>
 #else
 
 /* C Lib includes */
@@ -315,7 +320,7 @@ extern "C" {
 /* Performance counters */
 /* #define IDLE_COUNTS_PER_SEC_AT_NO_LOAD 995998 */
 
-#endif /* USE_SIM_POSIX */
+#endif /* USE_SIM_POSIX / USE_ESP32 */
 
 
 #ifdef __cplusplus

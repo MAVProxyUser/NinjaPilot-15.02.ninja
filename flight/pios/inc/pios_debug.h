@@ -47,7 +47,9 @@
 
 extern const char *PIOS_DEBUG_AssertMsg;
 
-#ifdef USE_SIM_POSIX
+#if defined(USE_SIM_POSIX) || defined(USE_ESP32)
+/* No timer-channel debug pins on these targets, and pios_tim_priv.h carries
+ * STM32 peripheral-library types that will not compile here. */
 void PIOS_DEBUG_Init(void);
 #else
 #include <pios_tim_priv.h>

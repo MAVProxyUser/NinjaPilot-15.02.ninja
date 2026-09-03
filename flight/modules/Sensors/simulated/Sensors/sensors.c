@@ -47,6 +47,7 @@
  */
 
 #include <openpilot.h>
+#include <pios_shmlog.h>
 
 #include "attitudestate.h"
 #include "accelsensor.h"
@@ -213,6 +214,7 @@ static struct {
     bool  baroTempEnabled;
 } scal;
 
+#ifdef PIOS_INCLUDE_SENSORS_HUB
 static void sensorHubSettingsUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
 {
     SensorHubSettingsData shs;
@@ -224,6 +226,7 @@ static void sensorHubSettingsUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
                        (unsigned)shs.CanImuRateHz, (unsigned)shs.CanAk8975RateHz,
                        (unsigned)shs.CanBaroRateHz, (unsigned)shs.CanMagRateHz);
 }
+#endif /* PIOS_INCLUDE_SENSORS_HUB */
 
 static void sensorCalUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
 {
@@ -392,8 +395,10 @@ int32_t SensorsInitialize(void)
     RevoCalibrationConnectCallback(&sensorCalUpdatedCb);
     AttitudeSettingsConnectCallback(&sensorCalUpdatedCb);
     RevoSettingsConnectCallback(&sensorCalUpdatedCb);
+#ifdef PIOS_INCLUDE_SENSORS_HUB
     SensorHubSettingsConnectCallback(&sensorHubSettingsUpdatedCb);
     sensorHubSettingsUpdatedCb(NULL);
+#endif
 
     return 0;
 }
