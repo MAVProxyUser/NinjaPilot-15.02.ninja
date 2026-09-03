@@ -65,6 +65,14 @@ public:
             return QString("ESP32 Thing Plus");
 
             break;
+        case 0x1302:
+            // NinjaPilot LiteWing port (ESP32-S3, brushed coreless nano).
+            // The 0x02 is NOT a LiteWing revision: attitude.c keys its
+            // MPU6000-family sensor path off board_rev == 0x02, so every
+            // board in this family is stuck with it.
+            return QString("LiteWing ESP32-S3");
+
+            break;
         default:
             return QString("");
 

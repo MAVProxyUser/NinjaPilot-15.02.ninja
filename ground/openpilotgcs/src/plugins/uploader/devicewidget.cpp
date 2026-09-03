@@ -115,6 +115,10 @@ void DeviceWidget::populate()
         // the name label above already identifies it.
         devicePic.load("");
         break;
+    case 0x1302:
+        // NinjaPilot LiteWing ESP32-S3 -- board photo pending an asset.
+        devicePic.load("");
+        break;
     default:
         // Clear
         devicePic.load("");
