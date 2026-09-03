@@ -1,0 +1,187 @@
+<?xml version="1.0" ?>
+<!-- LiteWing ESP32-S3 brushed nano quad.
+     Physical numbers, not placeholders:
+       mass          55 g  (45 g airframe + ~10 g 1S LiPo)
+       diagonal      99 mm motor-to-motor (100x100 mm PCB)
+       max thrust    22026 g/motor -> T/W 1.60
+       motorConstant 2.4e-08 = 0.216 N at 3000 rad/s
+     Rotor order is the OpenPilot QuadX convention M1 NW, M2 NE, M3 SE, M4 SW,
+     which on real LiteWing hardware is a PLACEHOLDER until the MOT_n to
+     physical corner mapping is read off the PCB silkscreen. -->
+<sdf version="1.9">
+  <world name="litewing">
+    <physics name="1ms" type="ignored"><max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor></physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+    <gravity>0 0 -9.80665</gravity>
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows><pose>0 0 10 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse><specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+    <model name="ground_plane"><static>true</static>
+      <link name="link">
+        <collision name="c"><geometry><plane><normal>0 0 1</normal><size>50 50</size></plane></geometry></collision>
+        <visual name="v"><geometry><plane><normal>0 0 1</normal><size>50 50</size></plane></geometry>
+          <material><ambient>0.3 0.35 0.3 1</ambient><diffuse>0.35 0.45 0.35 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="litewing">
+      <pose>0 0 0.03 0 0 0</pose>
+      <link name="base_link">
+        <inertial>
+          <mass>0.055</mass>
+          <!-- 100x100 mm PCB plate plus four corner motors -->
+          <inertia><ixx>5.0e-05</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>5.0e-05</iyy><iyz>0</iyz><izz>9.5e-05</izz></inertia>
+        </inertial>
+        <collision name="c"><geometry><box><size>0.10 0.10 0.012</size></box></geometry></collision>
+        <visual name="pcb"><geometry><box><size>0.10 0.10 0.012</size></box></geometry>
+          <material><ambient>0.05 0.25 0.10 1</ambient><diffuse>0.05 0.35 0.12 1</diffuse></material></visual>
+        <visual name="nose"><pose>0.042 0 0.008 0 0 0</pose>
+          <geometry><box><size>0.016 0.03 0.004</size></box></geometry>
+          <material><ambient>0.9 0.2 0.1 1</ambient><diffuse>1.0 0.25 0.1 1</diffuse></material></visual>
+        <sensor name="imu_sensor" type="imu">
+          <always_on>1</always_on><update_rate>500</update_rate>
+          <topic>/litewing/imu</topic>
+        </sensor>
+      </link>
+      <link name="rotor_0">
+        <pose>0.035 0.035 0.012 0 0 0</pose>
+        <inertial><mass>0.0005</mass>
+          <inertia><ixx>1e-8</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1e-8</iyy><iyz>0</iyz><izz>2e-8</izz></inertia>
+        </inertial>
+        <visual name="v"><geometry><cylinder><radius>0.0275</radius><length>0.001</length></cylinder></geometry>
+          <material><ambient>0.1 0.7 0.9 0.7</ambient><diffuse>0.1 0.7 0.9 0.7</diffuse></material></visual>
+      </link>
+      <joint name="rotor_0_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_0</child>
+        <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit>
+          <dynamics><damping>0.0</damping></dynamics></axis>
+      </joint>
+      <link name="rotor_1">
+        <pose>0.035 -0.035 0.012 0 0 0</pose>
+        <inertial><mass>0.0005</mass>
+          <inertia><ixx>1e-8</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1e-8</iyy><iyz>0</iyz><izz>2e-8</izz></inertia>
+        </inertial>
+        <visual name="v"><geometry><cylinder><radius>0.0275</radius><length>0.001</length></cylinder></geometry>
+          <material><ambient>0.1 0.7 0.9 0.7</ambient><diffuse>0.1 0.7 0.9 0.7</diffuse></material></visual>
+      </link>
+      <joint name="rotor_1_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_1</child>
+        <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit>
+          <dynamics><damping>0.0</damping></dynamics></axis>
+      </joint>
+      <link name="rotor_2">
+        <pose>-0.035 -0.035 0.012 0 0 0</pose>
+        <inertial><mass>0.0005</mass>
+          <inertia><ixx>1e-8</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1e-8</iyy><iyz>0</iyz><izz>2e-8</izz></inertia>
+        </inertial>
+        <visual name="v"><geometry><cylinder><radius>0.0275</radius><length>0.001</length></cylinder></geometry>
+          <material><ambient>0.1 0.7 0.9 0.7</ambient><diffuse>0.1 0.7 0.9 0.7</diffuse></material></visual>
+      </link>
+      <joint name="rotor_2_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_2</child>
+        <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit>
+          <dynamics><damping>0.0</damping></dynamics></axis>
+      </joint>
+      <link name="rotor_3">
+        <pose>-0.035 0.035 0.012 0 0 0</pose>
+        <inertial><mass>0.0005</mass>
+          <inertia><ixx>1e-8</ixx><ixy>0</ixy><ixz>0</ixz>
+                   <iyy>1e-8</iyy><iyz>0</iyz><izz>2e-8</izz></inertia>
+        </inertial>
+        <visual name="v"><geometry><cylinder><radius>0.0275</radius><length>0.001</length></cylinder></geometry>
+          <material><ambient>0.1 0.7 0.9 0.7</ambient><diffuse>0.1 0.7 0.9 0.7</diffuse></material></visual>
+      </link>
+      <joint name="rotor_3_joint" type="revolute">
+        <parent>base_link</parent><child>rotor_3</child>
+        <axis><xyz>0 0 1</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit>
+          <dynamics><damping>0.0</damping></dynamics></axis>
+      </joint>
+      <!-- M1 NW front-left -->
+      <plugin filename="gz-sim-multicopter-motor-model-system"
+              name="gz::sim::systems::MulticopterMotorModel">
+        <robotNamespace>litewing</robotNamespace>
+        <jointName>rotor_0_joint</jointName>
+        <linkName>rotor_0</linkName>
+        <turningDirection>cw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>3000.0</maxRotVelocity>
+        <motorConstant>2.4e-08</motorConstant>
+        <momentConstant>0.012</momentConstant>
+        <commandSubTopic>gazebo/command/motor_speed</commandSubTopic>
+        <actuator_number>0</actuator_number>
+        <rotorDragCoefficient>2.0e-06</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-08</rollingMomentCoefficient>
+        <motorSpeedPubTopic>motor_speed/0</motorSpeedPubTopic>
+        <motorType>velocity</motorType>
+      </plugin>
+      <!-- M2 NE front-right -->
+      <plugin filename="gz-sim-multicopter-motor-model-system"
+              name="gz::sim::systems::MulticopterMotorModel">
+        <robotNamespace>litewing</robotNamespace>
+        <jointName>rotor_1_joint</jointName>
+        <linkName>rotor_1</linkName>
+        <turningDirection>ccw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>3000.0</maxRotVelocity>
+        <motorConstant>2.4e-08</motorConstant>
+        <momentConstant>0.012</momentConstant>
+        <commandSubTopic>gazebo/command/motor_speed</commandSubTopic>
+        <actuator_number>1</actuator_number>
+        <rotorDragCoefficient>2.0e-06</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-08</rollingMomentCoefficient>
+        <motorSpeedPubTopic>motor_speed/1</motorSpeedPubTopic>
+        <motorType>velocity</motorType>
+      </plugin>
+      <!-- M3 SE rear-right -->
+      <plugin filename="gz-sim-multicopter-motor-model-system"
+              name="gz::sim::systems::MulticopterMotorModel">
+        <robotNamespace>litewing</robotNamespace>
+        <jointName>rotor_2_joint</jointName>
+        <linkName>rotor_2</linkName>
+        <turningDirection>cw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>3000.0</maxRotVelocity>
+        <motorConstant>2.4e-08</motorConstant>
+        <momentConstant>0.012</momentConstant>
+        <commandSubTopic>gazebo/command/motor_speed</commandSubTopic>
+        <actuator_number>2</actuator_number>
+        <rotorDragCoefficient>2.0e-06</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-08</rollingMomentCoefficient>
+        <motorSpeedPubTopic>motor_speed/2</motorSpeedPubTopic>
+        <motorType>velocity</motorType>
+      </plugin>
+      <!-- M4 SW rear-left -->
+      <plugin filename="gz-sim-multicopter-motor-model-system"
+              name="gz::sim::systems::MulticopterMotorModel">
+        <robotNamespace>litewing</robotNamespace>
+        <jointName>rotor_3_joint</jointName>
+        <linkName>rotor_3</linkName>
+        <turningDirection>ccw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>3000.0</maxRotVelocity>
+        <motorConstant>2.4e-08</motorConstant>
+        <momentConstant>0.012</momentConstant>
+        <commandSubTopic>gazebo/command/motor_speed</commandSubTopic>
+        <actuator_number>3</actuator_number>
+        <rotorDragCoefficient>2.0e-06</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-08</rollingMomentCoefficient>
+        <motorSpeedPubTopic>motor_speed/3</motorSpeedPubTopic>
+        <motorType>velocity</motorType>
+      </plugin>
+    </model>
+  </world>
+</sdf>
