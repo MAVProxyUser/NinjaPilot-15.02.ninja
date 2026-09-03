@@ -27,6 +27,10 @@ import gz.transport13 as transport
 from gz.msgs10.actuators_pb2 import Actuators
 from gz.msgs10.imu_pb2 import IMU
 from gz.msgs10.pose_v_pb2 import Pose_V
+from gz.msgs10.marker_pb2 import Marker
+from gz.msgs10.empty_pb2 import Empty
+from gz.msgs10.world_control_pb2 import WorldControl
+from gz.msgs10.boolean_pb2 import Boolean
 
 MAX_RAD   = 3000.0        # must match worlds/litewing.sdf maxRotVelocity
 DUTY_FULL = 1000.0        # ActuatorCommand full scale = 100.0 % duty
@@ -35,7 +39,8 @@ TARGET_Z  = float(os.environ.get("LITEWING_ALT", "1.5"))
 RAD2DEG   = 57.2957795
 
 state = {"z": 0.0, "vz": 0.0, "last_z": None, "last_t": None,
-         "roll": 0.0, "pitch": 0.0, "imu": 0, "armed": False}
+         "roll": 0.0, "pitch": 0.0, "imu": 0, "armed": False, "ialt": 0.0,
+         "x": 0.0, "y": 0.0}
 thr = [0.0]; yaw = [1500]
 lock = threading.Lock()
 
@@ -83,6 +88,7 @@ def on_pose(msg):
                     if dt > 1e-3:
                         state["vz"] = 0.7 * state["vz"] + 0.3 * (z - state["last_z"]) / dt
                 state["last_z"], state["last_t"], state["z"] = z, now, z
+                state["x"], state["y"] = p.position.x, p.position.y
                 q = p.orientation
                 sinr = 2 * (q.w * q.x + q.y * q.z); cosr = 1 - 2 * (q.x * q.x + q.y * q.y)
                 state["roll"] = math.degrees(math.atan2(sinr, cosr))
@@ -92,6 +98,73 @@ def on_pose(msg):
 
 node.subscribe(IMU, "/litewing/imu", on_imu)
 node.subscribe(Pose_V, "/world/litewing/pose/info", on_pose)
+
+def unpause():
+    """A GUI connecting to a running server can leave the world PAUSED, and a
+    paused world publishes no IMU and steps no physics -- the aircraft sits at
+    its spawn pose looking like a firmware failure while the flight log claims
+    a perfect hover. That exact confusion cost a session. Force it running."""
+    req = WorldControl(); req.pause = False
+    try:
+        node.request("/world/litewing/control", req, WorldControl, Boolean, 2000)
+    except Exception:
+        pass
+
+
+# --- flight trail ----------------------------------------------------------
+# gz renders LINE_STRIP at 1px regardless of scale, invisible at scene
+# distance, so each segment is a translucent CYLINDER instead -- the same
+# lesson gazebo_bridge.py records. 40 mm tube suits a 100 mm airframe.
+TRAIL_D = 0.04
+_trail = {"last": None, "n": 0}
+
+def trail_clear():
+    m = Marker(); m.ns = "litewing_trail"; m.action = Marker.DELETE_ALL
+    try:
+        node.request("/marker", m, Marker, Empty, 100)
+    except Exception:
+        pass
+
+def trail_add(a, b):
+    dx, dy, dz = b[0]-a[0], b[1]-a[1], b[2]-a[2]
+    length = math.sqrt(dx*dx + dy*dy + dz*dz)
+    if length < 0.005:
+        return
+    _trail["n"] += 1
+    m = Marker(); m.ns = "litewing_trail"; m.id = 100 + _trail["n"]
+    m.action = Marker.ADD_MODIFY; m.type = Marker.CYLINDER
+    for tgt in (m.material.ambient, m.material.diffuse, m.material.emissive):
+        tgt.r, tgt.g, tgt.b, tgt.a = (0.1, 0.9, 1.0, 0.65)
+    m.scale.x = m.scale.y = TRAIL_D; m.scale.z = length
+    m.pose.position.x = (a[0]+b[0])/2.0
+    m.pose.position.y = (a[1]+b[1])/2.0
+    m.pose.position.z = (a[2]+b[2])/2.0
+    ux, uy, uz = dx/length, dy/length, dz/length
+    if uz > 0.99999:      q = (1.0, 0.0, 0.0, 0.0)
+    elif uz < -0.99999:   q = (0.0, 1.0, 0.0, 0.0)
+    else:
+        ax, ay, az = -uy, ux, 0.0
+        n = math.sqrt(ax*ax + ay*ay) or 1.0
+        ang = math.acos(max(-1.0, min(1.0, uz))); sh = math.sin(ang/2.0)
+        q = (math.cos(ang/2.0), ax/n*sh, ay/n*sh, az*sh)
+    m.pose.orientation.w, m.pose.orientation.x = q[0], q[1]
+    m.pose.orientation.y, m.pose.orientation.z = q[2], q[3]
+    try:
+        node.request("/marker", m, Marker, Empty, 50)   # reply is Empty, not Boolean
+    except Exception:
+        pass
+
+def trail_pump():
+    while True:
+        if state["armed"]:
+            with lock:
+                pt = (state["x"], state["y"], state["z"])
+            if _trail["last"] is None or math.dist(pt, _trail["last"]) > 0.03:
+                if _trail["last"] is not None:
+                    trail_add(_trail["last"], pt)
+                _trail["last"] = pt
+        time.sleep(0.15)
+
 
 def stick_pump():
     while True:
@@ -119,11 +192,16 @@ def motor_pump():
             motor_pub.publish(m)
         time.sleep(0.01)
 
+unpause(); trail_clear()
 threading.Thread(target=stick_pump, daemon=True).start()
 threading.Thread(target=motor_pump, daemon=True).start()
+threading.Thread(target=trail_pump, daemon=True).start()
 time.sleep(3)
 
 print("[bridge] IMU frames received: %d" % state["imu"], flush=True)
+if state["imu"] == 0:
+    sys.exit("ABORT: no IMU from Gazebo -- world paused or not running. "
+             "Nothing below would have been a real flight.")
 # ---- nano gains -----------------------------------------------------------
 # Bank1 ships with 4-inch-class values (rate Kp 0.0032 / Ki 0.0075, attitude
 # Kp 3.2) tuned for a ~500 g quad. A 55 g airframe has a fraction of the
@@ -166,7 +244,12 @@ while time.time() - t0 < float(os.environ.get("LITEWING_SECONDS", "22")):
     # it reaches the gain, and the authority band is deliberately narrow --
     # the firmware owns attitude, this only owns height.
     err = max(-1.0, min(1.0, TARGET_Z - z))
-    thr[0] = max(0.35, min(0.80, HOVER + 0.10 * err - 0.16 * vz))
+    # small integral so it actually settles ON the commanded height instead of
+    # drooping to wherever P alone balances gravity; clamped so it cannot wind
+    # up while the airframe is still on the ground.
+    if state["armed"]:
+        state["ialt"] = max(-0.08, min(0.08, state["ialt"] + 0.010 * err * 0.02))
+    thr[0] = max(0.35, min(0.80, HOVER + 0.10 * err + state["ialt"] - 0.16 * vz))
     now = time.time() - t0
     if now - last >= 1.0:
         last = now
