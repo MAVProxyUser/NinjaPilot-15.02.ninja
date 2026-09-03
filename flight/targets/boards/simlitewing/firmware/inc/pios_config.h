@@ -97,6 +97,8 @@
  * build takes (ATTITUDE_IMU_DRIVER = PIOS_ICM20602_Driver); on this
  * target that driver is the posix simulation shim fed from bridge
  * sensor objects (pios_icm20602_sim.c). */
+#define PIOS_INCLUDE_I2C
+#define PIOS_INCLUDE_BMP280
 #define PIOS_INCLUDE_ICM20602
 #define PIOS_INCLUDE_RID_SIM   /* Remote ID pack -> UDP :9020 (tools/remoteid_listen.py) */
 /* #define PIOS_INCLUDE_OPLINKRCVR */

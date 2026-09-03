@@ -155,6 +155,7 @@ SRC += $(PIOSCORECOMMON)/pios_gcsrcvr.c
 # The sensor-driver registry (PIOS_SENSORS_Register & co) that the simulated
 # ICM-20602 registers with -- same file the ESP32 hardware build compiles.
 SRC += $(PIOS)/common/pios_sensors.c
+SRC += $(PIOS)/common/pios_bmp280.c
 
 ## PIOS Hardware
 include $(PIOS)/posix/library.mk
