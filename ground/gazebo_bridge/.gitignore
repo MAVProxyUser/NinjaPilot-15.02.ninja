@@ -1,3 +1,4 @@
 venv/
 __pycache__/
 .fc_status.json
+logs/*.csv
