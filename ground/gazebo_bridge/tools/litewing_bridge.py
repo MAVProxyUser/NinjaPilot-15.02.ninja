@@ -257,4 +257,45 @@ while time.time() - t0 < float(os.environ.get("LITEWING_SECONDS", "22")):
         print(" %4.1f  %6.3f  %+6.2f  %+6.1f  %+6.1f   %4.0f   %s"
               % (now, z, vz, r, p, thr[0] * 1000, [int(x) for x in ac]), flush=True)
     time.sleep(0.02)
+
+# ---- commanded descent and touchdown, not a throttle cut -------------------
+# Dropping thr to 0 from hover is a free fall: 1.5 m is ~0.55 s and lands at
+# about 5.4 m/s, which on real hardware is how you break arms. Walk the
+# altitude setpoint down at a fixed rate, let the same PD fly it, and only
+# cut power once the airframe is actually resting on the ground.
+DESCENT_RATE = 0.35          # m/s
+TOUCHDOWN_Z  = 0.012         # body half-thickness is 0.006; allow a margin
+print("\n[bridge] commanded descent at %.2f m/s" % DESCENT_RATE, flush=True)
+with lock:
+    tgt = state["z"]
+t_land = time.time(); last = 0.0; touched = 0
+while time.time() - t_land < 25.0:
+    dt = 0.02
+    tgt = max(0.0, tgt - DESCENT_RATE * dt)
+    with lock:
+        z, vz = state["z"], state["vz"]
+    err = max(-1.0, min(1.0, tgt - z))
+    state["ialt"] = max(-0.08, min(0.08, state["ialt"] + 0.010 * err * dt))
+    thr[0] = max(0.30, min(0.80, HOVER + 0.10 * err + state["ialt"] - 0.16 * vz))
+    now = time.time() - t_land
+    if now - last >= 0.5:
+        last = now
+        print("  land %4.1f  alt %6.3f  vz %+5.2f  tgt %5.3f  duty %4.0f"
+              % (now, z, vz, tgt, thr[0] * 1000), flush=True)
+    # touchdown: resting on the ground and not moving, for several samples
+    if z < TOUCHDOWN_Z and abs(vz) < 0.05:
+        touched += 1
+        if touched > 25:
+            break
+    else:
+        touched = 0
+    time.sleep(dt)
+
 thr[0] = 0.0
+time.sleep(0.5)
+with lock:
+    print("[bridge] touchdown at %.3f m, vz %+.2f m/s" % (state["z"], state["vz"]), flush=True)
+fms = fetch("FlightModeSettings"); fms["Arming"] = "Always Disarmed"
+client.send_object("FlightModeSettings", fms); time.sleep(1.0)
+fs = fetch("FlightStatus")
+print("[bridge] disarmed: %s" % (fs["Armed"] if fs else "?"), flush=True)
