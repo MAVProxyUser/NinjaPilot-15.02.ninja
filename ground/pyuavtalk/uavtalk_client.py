@@ -72,6 +72,17 @@ class SerialTransport(object):
     def __init__(self, port, baud):
         import serial  # only required for --serial
         self.ser = serial.Serial(port, baud, timeout=0)
+        # On the usual ESP32 USB-serial adapters DTR and RTS are wired to
+        # EN/RESET and GPIO0 (that is how esptool reboots the chip). pyserial
+        # asserts both when it opens the port, which holds the board in reset
+        # -- the symptom is a link that reads zero bytes at every baud while
+        # esptool can still talk to the chip perfectly well. Deassert them so
+        # opening the port is a passive act.
+        try:
+            self.ser.dtr = False
+            self.ser.rts = False
+        except (OSError, IOError):
+            pass  # not all adapters expose the modem lines
 
     def send(self, data):
         self.ser.write(data)
