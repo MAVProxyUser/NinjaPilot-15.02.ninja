@@ -39,6 +39,18 @@ extern uintptr_t pios_uavo_settings_fs_id;
  * @param[in] instId The instance ID
  * @return 0 if success or -1 if failure
  */
+/*
+ * Linker anchor.
+ *
+ * uavobjectmanager.c defines UAVObjSave/UAVObjLoad/UAVObjDelete as WEAK
+ * aliases to a stub that returns success without storing anything. A weak
+ * definition satisfies every reference, so a linker building from an archive
+ * never has a reason to extract THIS file -- and settings silently do not
+ * persist, with save cheerfully reporting success. Referencing a symbol that
+ * exists only here forces the real implementation into the link.
+ */
+const int uavobject_persistence_linked = 1;
+
 int32_t UAVObjSave(UAVObjHandle obj_handle, uint16_t instId)
 {
     PIOS_Assert(obj_handle);

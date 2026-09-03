@@ -73,6 +73,12 @@ int32_t UAVObjDelete(UAVObjHandle obj_handle, uint16_t instId) __attribute__((we
 #endif
 
 
+#if defined(USE_ESP32)
+struct UAVOData *uavo_registry[UAVO_REGISTRY_MAX];
+uint16_t uavo_registry_count;
+uint16_t uavo_registry_overflow;
+#endif
+
 // Private variables
 static xSemaphoreHandle mutex;
 static const UAVObjMetadata defMetadata = {
@@ -89,6 +95,13 @@ static const UAVObjMetadata defMetadata = {
 
 static UAVObjStats stats;
 
+/* Bumped on every settings-object change (see sendEvent). systemmod
+ * publishes it through the SettingsGeneration UAVO so a reconnecting GCS
+ * can prove its cached settings are still current and skip refetching
+ * them. Seeded at init so two different boots can never present the same
+ * value for different state. */
+volatile uint32_t uavobj_settings_generation;
+
 /**
  * Initialize the object manager
  * \return 0 Success
@@ -98,6 +111,18 @@ int32_t UAVObjInitialize()
 {
     // Initialize variables
     memset(&stats, 0, sizeof(UAVObjStats));
+    /* The seed must differ across boots, or a reboot that loads different
+     * NVS content could present a colliding generation and let the GCS
+     * falsely skip its refetch. The tick is always zero this early, so use
+     * the hardware RNG where there is one. */
+#if defined(USE_ESP32)
+    {
+        extern uint32_t esp_random(void);
+        uavobj_settings_generation = esp_random();
+    }
+#else
+    uavobj_settings_generation = (uint32_t)PIOS_DELAY_GetuS() ^ 0x5EED5EED;
+#endif
 
     /* Initialize _uavo_handles start/stop pointers */
         #if (defined(__MACH__) && defined(__APPLE__))
@@ -254,6 +279,19 @@ UAVObjHandle UAVObjRegister(uint32_t id,
     if (!uavo_data) {
         goto unlock_exit;
     }
+
+#if defined(USE_ESP32)
+    /* Record it in the registry the iterator walks -- see the note on
+     * UAVO_LIST_ITERATE in uavobjectprivate.h for why the linker section
+     * cannot be trusted on this target. */
+    if (uavo_registry_count < UAVO_REGISTRY_MAX) {
+        uavo_registry[uavo_registry_count++] = uavo_data;
+    } else {
+        /* Silently losing an object here is exactly the bug this replaced,
+         * so make it countable rather than invisible. */
+        uavo_registry_overflow++;
+    }
+#endif
 
     /* Fill in the details about this UAVO */
     uavo_data->id = id;
@@ -867,6 +905,19 @@ return rc;
  */
 int32_t UAVObjSetData(UAVObjHandle obj_handle, const void *dataIn)
 {
+    /* A NULL handle here is a generated XxxGet/XxxSet on an object whose
+     * Initialize() never ran -- a module compiled in without its object.
+     * Dereferencing it faults INSIDE the object manager, in one observed
+     * case while holding the global object mutex: every other task then
+     * blocks forever, the receiver and LED freeze, and the task watchdog
+     * reboots the board two seconds later. That cost two days to trace to
+     * takeOffLocationHandler calling PositionStateGet() on an object this
+     * target never initialized, triggered only at the moment of ARMING.
+     * Refuse politely instead; the caller sees -1 exactly as it would for
+     * a missing instance. */
+    if (!obj_handle) {
+        return -1;
+    }
     return UAVObjSetInstanceData(obj_handle, 0, dataIn);
 }
 
@@ -878,6 +929,19 @@ int32_t UAVObjSetData(UAVObjHandle obj_handle, const void *dataIn)
  */
 int32_t UAVObjSetDataField(UAVObjHandle obj_handle, const void *dataIn, uint32_t offset, uint32_t size)
 {
+    /* A NULL handle here is a generated XxxGet/XxxSet on an object whose
+     * Initialize() never ran -- a module compiled in without its object.
+     * Dereferencing it faults INSIDE the object manager, in one observed
+     * case while holding the global object mutex: every other task then
+     * blocks forever, the receiver and LED freeze, and the task watchdog
+     * reboots the board two seconds later. That cost two days to trace to
+     * takeOffLocationHandler calling PositionStateGet() on an object this
+     * target never initialized, triggered only at the moment of ARMING.
+     * Refuse politely instead; the caller sees -1 exactly as it would for
+     * a missing instance. */
+    if (!obj_handle) {
+        return -1;
+    }
     return UAVObjSetInstanceDataField(obj_handle, 0, dataIn, offset, size);
 }
 
@@ -889,6 +953,19 @@ int32_t UAVObjSetDataField(UAVObjHandle obj_handle, const void *dataIn, uint32_t
  */
 int32_t UAVObjGetData(UAVObjHandle obj_handle, void *dataOut)
 {
+    /* A NULL handle here is a generated XxxGet/XxxSet on an object whose
+     * Initialize() never ran -- a module compiled in without its object.
+     * Dereferencing it faults INSIDE the object manager, in one observed
+     * case while holding the global object mutex: every other task then
+     * blocks forever, the receiver and LED freeze, and the task watchdog
+     * reboots the board two seconds later. That cost two days to trace to
+     * takeOffLocationHandler calling PositionStateGet() on an object this
+     * target never initialized, triggered only at the moment of ARMING.
+     * Refuse politely instead; the caller sees -1 exactly as it would for
+     * a missing instance. */
+    if (!obj_handle) {
+        return -1;
+    }
     return UAVObjGetInstanceData(obj_handle, 0, dataOut);
 }
 
@@ -900,6 +977,19 @@ int32_t UAVObjGetData(UAVObjHandle obj_handle, void *dataOut)
  */
 int32_t UAVObjGetDataField(UAVObjHandle obj_handle, void *dataOut, uint32_t offset, uint32_t size)
 {
+    /* A NULL handle here is a generated XxxGet/XxxSet on an object whose
+     * Initialize() never ran -- a module compiled in without its object.
+     * Dereferencing it faults INSIDE the object manager, in one observed
+     * case while holding the global object mutex: every other task then
+     * blocks forever, the receiver and LED freeze, and the task watchdog
+     * reboots the board two seconds later. That cost two days to trace to
+     * takeOffLocationHandler calling PositionStateGet() on an object this
+     * target never initialized, triggered only at the moment of ARMING.
+     * Refuse politely instead; the caller sees -1 exactly as it would for
+     * a missing instance. */
+    if (!obj_handle) {
+        return -1;
+    }
     return UAVObjGetInstanceDataField(obj_handle, 0, dataOut, offset, size);
 }
 
@@ -913,6 +1003,19 @@ int32_t UAVObjGetDataField(UAVObjHandle obj_handle, void *dataOut, uint32_t offs
 int32_t UAVObjSetInstanceData(UAVObjHandle obj_handle, uint16_t instId,
                               const void *dataIn)
 {
+    /* A NULL handle here is a generated XxxGet/XxxSet on an object whose
+     * Initialize() never ran -- a module compiled in without its object.
+     * Dereferencing it faults INSIDE the object manager, in one observed
+     * case while holding the global object mutex: every other task then
+     * blocks forever, the receiver and LED freeze, and the task watchdog
+     * reboots the board two seconds later. That cost two days to trace to
+     * takeOffLocationHandler calling PositionStateGet() on an object this
+     * target never initialized, triggered only at the moment of ARMING.
+     * Refuse politely instead; the caller sees -1 exactly as it would for
+     * a missing instance. */
+    if (!obj_handle) {
+        return -1;
+    }
     PIOS_Assert(obj_handle);
 
     // Lock
@@ -963,6 +1066,19 @@ unlock_exit:
  */
 int32_t UAVObjSetInstanceDataField(UAVObjHandle obj_handle, uint16_t instId, const void *dataIn, uint32_t offset, uint32_t size)
 {
+    /* A NULL handle here is a generated XxxGet/XxxSet on an object whose
+     * Initialize() never ran -- a module compiled in without its object.
+     * Dereferencing it faults INSIDE the object manager, in one observed
+     * case while holding the global object mutex: every other task then
+     * blocks forever, the receiver and LED freeze, and the task watchdog
+     * reboots the board two seconds later. That cost two days to trace to
+     * takeOffLocationHandler calling PositionStateGet() on an object this
+     * target never initialized, triggered only at the moment of ARMING.
+     * Refuse politely instead; the caller sees -1 exactly as it would for
+     * a missing instance. */
+    if (!obj_handle) {
+        return -1;
+    }
     PIOS_Assert(obj_handle);
 
     // Lock
@@ -1030,6 +1146,19 @@ unlock_exit:
 int32_t UAVObjGetInstanceData(UAVObjHandle obj_handle, uint16_t instId,
                               void *dataOut)
 {
+    /* A NULL handle here is a generated XxxGet/XxxSet on an object whose
+     * Initialize() never ran -- a module compiled in without its object.
+     * Dereferencing it faults INSIDE the object manager, in one observed
+     * case while holding the global object mutex: every other task then
+     * blocks forever, the receiver and LED freeze, and the task watchdog
+     * reboots the board two seconds later. That cost two days to trace to
+     * takeOffLocationHandler calling PositionStateGet() on an object this
+     * target never initialized, triggered only at the moment of ARMING.
+     * Refuse politely instead; the caller sees -1 exactly as it would for
+     * a missing instance. */
+    if (!obj_handle) {
+        return -1;
+    }
     PIOS_Assert(obj_handle);
 
     // Lock
@@ -1076,6 +1205,19 @@ unlock_exit:
  */
 int32_t UAVObjGetInstanceDataField(UAVObjHandle obj_handle, uint16_t instId, void *dataOut, uint32_t offset, uint32_t size)
 {
+    /* A NULL handle here is a generated XxxGet/XxxSet on an object whose
+     * Initialize() never ran -- a module compiled in without its object.
+     * Dereferencing it faults INSIDE the object manager, in one observed
+     * case while holding the global object mutex: every other task then
+     * blocks forever, the receiver and LED freeze, and the task watchdog
+     * reboots the board two seconds later. That cost two days to trace to
+     * takeOffLocationHandler calling PositionStateGet() on an object this
+     * target never initialized, triggered only at the moment of ARMING.
+     * Refuse politely instead; the caller sees -1 exactly as it would for
+     * a missing instance. */
+    if (!obj_handle) {
+        return -1;
+    }
     PIOS_Assert(obj_handle);
 
     // Lock
@@ -1530,6 +1672,11 @@ xSemaphoreGiveRecursive(mutex);
  */
 int32_t sendEvent(struct UAVOBase *obj, uint16_t instId, UAVObjEventType triggered_event)
 {
+    if (obj->flags.isSettings &&
+        (triggered_event == EV_UPDATED || triggered_event == EV_UNPACKED)) {
+        uavobj_settings_generation++;
+    }
+
     /* Set up the message that will be sent to all registered listeners */
     UAVObjEvent msg = {
         .obj    = (UAVObjHandle)obj,

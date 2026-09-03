@@ -54,12 +54,51 @@ extern struct UAVOData *__start__uavo_handles[] __attribute__((weak));
 extern struct UAVOData *__stop__uavo_handles[] __attribute__((weak));
 #endif
 
+#if defined(USE_ESP32)
+
+/*
+ * Iterate an explicit registry instead of the linker section.
+ *
+ * The section scheme above assumes every object's handle lands between
+ * __start__uavo_handles and __stop__uavo_handles. On ESP-IDF it does not.
+ * Handles live in object files inside libmain.a, and an archive member is
+ * only pulled in when something already references it -- which happens
+ * BEFORE KEEP() can protect anything -- so section membership depends on the
+ * reference graph. Measured on this target: 112 uavobject .c files compiled,
+ * 50 handles in the section, and ActuatorSettings' handle sitting at exactly
+ * __stop__uavo_handles, one slot past the end.
+ *
+ * The symptom is nasty because nothing looks broken. The object registers
+ * fine and its handle holds the right pointer, so every module that reaches
+ * it through XxxHandle() works. Only UAVObjGetByID() misses it, so the object
+ * is invisible to telemetry alone -- the GCS gets a NACK for one settings
+ * object per build, and WHICH object changes whenever the reference graph
+ * shifts. It moved from HwSettings to ActuatorSettings just by adding a
+ * default mixer.
+ *
+ * Registration is the one place that sees every object, so record them there
+ * and iterate that. Nothing here depends on the linker any more.
+ */
+#define UAVO_REGISTRY_MAX 128
+extern struct UAVOData *uavo_registry[UAVO_REGISTRY_MAX];
+extern uint16_t uavo_registry_count;
+extern uint16_t uavo_registry_overflow;
+
+#define UAVO_LIST_ITERATE(_item) \
+    for (uint16_t _uavo_i = 0; _uavo_i < uavo_registry_count; _uavo_i++) { \
+        struct UAVOData *_item = uavo_registry[_uavo_i]; \
+        if (_item == NULL) { continue; }
+
+#else /* !USE_ESP32 */
+
 #define UAVO_LIST_ITERATE(_item) \
     for (struct UAVOData * *_uavo_slot = __start__uavo_handles; \
          _uavo_slot && _uavo_slot < __stop__uavo_handles; \
          _uavo_slot++) { \
         struct UAVOData *_item = *_uavo_slot; \
         if (_item == NULL) { continue; }
+
+#endif /* USE_ESP32 */
 
 /**
  * List of event queues and the eventmask associated with the queue.

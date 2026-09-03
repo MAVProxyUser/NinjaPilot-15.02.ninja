@@ -57,6 +57,8 @@ static int32_t objectTransaction(UAVTalkConnectionData *connection, uint8_t type
 static int32_t sendObject(UAVTalkConnectionData *connection, uint8_t type, uint32_t objId, uint16_t instId, UAVObjHandle obj);
 static int32_t sendSingleObject(UAVTalkConnectionData *connection, uint8_t type, uint32_t objId, uint16_t instId, UAVObjHandle obj);
 static int32_t receiveObject(UAVTalkConnectionData *connection, uint8_t type, uint32_t objId, uint16_t instId, uint8_t *data);
+
+
 static void updateAck(UAVTalkConnectionData *connection, uint8_t type, uint32_t objId, uint16_t instId);
 // UavTalk Process FSM functions
 static bool UAVTalkProcess_SYNC(UAVTalkConnectionData *connection, UAVTalkInputProcessor *iproc, uint8_t *rxbuffer, uint8_t length, uint8_t *position);
@@ -1095,8 +1097,20 @@ static bool UAVTalkProcess_DATA(UAVTalkConnectionData *connection, UAVTalkInputP
     return true;
 }
 
-static bool UAVTalkProcess_CS(UAVTalkConnectionData *connection, UAVTalkInputProcessor *iproc, uint8_t *rxbuffer, __attribute__((unused)) uint8_t length, uint8_t *position)
+static bool UAVTalkProcess_CS(UAVTalkConnectionData *connection, UAVTalkInputProcessor *iproc, uint8_t *rxbuffer, uint8_t length, uint8_t *position)
 {
+    /* Every other state loops on `length > (*position)` and returns false
+     * when the feed runs dry mid-field; this one read the CRC byte
+     * unconditionally. When a frame's header+payload lands exactly on the
+     * receive-chunk boundary (10-byte header + 118-byte ActuatorSettings
+     * payload against a 128-byte telemetry read is the natural example),
+     * DATA completes on the last byte of the chunk and this state then
+     * consumed a stale byte one past the valid feed as the "CRC". The
+     * frame failed CRC deterministically and the write was lost with no
+     * NACK. Wait for the real CRC byte instead. */
+    if (length <= (*position)) {
+        return false;
+    }
     // Check the CRC byte
     uint8_t rxbyte = rxbuffer[(*position)++];
 
