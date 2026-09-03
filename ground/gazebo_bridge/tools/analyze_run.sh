@@ -23,7 +23,9 @@ echo "--- board log: decode from the FC's own flash ---"
 # NOT `| tail -1`: that swallowed the "flights present" line and the
 # stale-merge/timestamp warnings, which is how a contaminated decode
 # reached the analysis unnoticed.
-"$PY" "$HERE/decode_fcwd.py" "$HOME/ninjapilot-build/fcwd" "$OUT"
+# NINJAPILOT_FCWD overrides where the firmware ran (run_wroom.sh uses its
+# own scratch fcwd for the wroom twin); default stays the simposix build dir.
+"$PY" "$HERE/decode_fcwd.py" "${NINJAPILOT_FCWD:-$HOME/ninjapilot-build/fcwd}" "$OUT"
 
 # Before trusting ANY score: is the shape we are grading against the shape the
 # vehicle was actually given? PathDesired is logged on change, so this is

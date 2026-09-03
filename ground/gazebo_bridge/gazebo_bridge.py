@@ -66,6 +66,38 @@ def print(*args, **kwargs):  # noqa: A001 - deliberate module-wide shadow
 # state estimator/hold-mode logic work", since the latter was found to be
 # broken independent of which vertical-channel filter algorithm is used).
 TEST_MODE = os.environ.get("NINJAPILOT_TEST_MODE", "scripted")
+# NINJAPILOT_TARGET=wroom drives the SIM_WROOM twin of the ESP32 Thing Plus
+# instead of simposix: no StateEstimation/PathFollower/PathPlanner on that
+# stack, so the Revo-specific config writes are skipped, baro/mag are not
+# published (the twin is a GPS-only experiment by design), and flying is
+# done pilot-style through the sticks (see wroom_pilot.py).
+WROOM = os.environ.get("NINJAPILOT_TARGET", "") == "wroom"
+
+
+def _stab1_modes():
+    # Wroom flies the board's own Stabilized1 default - twin fidelity.
+    # Yaw is RATE (fork default since 2026-09-01): AxisLock's accumulator
+    # winds up during the arming yaw gesture and kicks the motors with a
+    # full-scale yaw command at first spool (seen in the 16:30 real-flight
+    # log as a 160us diagonal PWM split); Rate yaw has no accumulator, so
+    # the gesture dies with the stick. Simposix keeps its yaw-Attitude
+    # convention.
+    return ["Attitude", "Attitude", "Rate"] if WROOM else ["Attitude", "Attitude", "Attitude"]
+
+
+def _fms_values(armed):
+    fms = bov.flight_mode_settings(armed, _stab1_modes())
+    if WROOM:
+        # Switch position 1 is the ONBOARD-flip slot. The sequencer
+        # (flight/modules/Flip) writes StabilizationDesired's per-axis
+        # modes itself, so this slot flies plain Attitude - it exists so
+        # Bank2 is ACTIVE during the maneuver, because innerloop.c clamps
+        # every rate setpoint to the active bank's MaximumRate and
+        # Bank1's 180 would cut the flip to a 2s mush. Position 5
+        # (Stabilized6, Rate/Rate/Rate by default) keeps the ground-
+        # piloted flip alive for A/B comparison - also on Bank2.
+        fms["Stabilization2Settings"] = ["Attitude", "Attitude", "AxisLock", "Manual"]
+    return fms
 # NINJAPILOT_MISSION=star flies ONLY the 5-point star at 8m + land -
 # a ~90s iteration loop for corner/yaw tuning instead of the 4.5min
 # full star/octagon/KF mission.
@@ -616,13 +648,20 @@ class ControlState(object):
         # RevoSettings.FusionAlgorithm value CHANGE (while disarmed) does,
         # confirmed by reading stateestimation.c's own reinit gate.
         self.request_estimator_reset = False
+        # Attitude sticks (-1..1), used by the wroom pilot modes; the
+        # simposix modes leave them at neutral and fly via hold modes.
+        self.roll = 0.0
+        self.pitch = 0.0
+        self.yaw = 0.0
 
     def gcs_channels(self):
         throttle_us = int(round(1000 + self.throttle * 1000))
         return [
             throttle_us,
-            1500, 1500, 1500,                      # Roll/Pitch/Yaw sticks - neutral
-            bov.flight_mode_channel(self.mode_position),
+            bov.slider_channel(self.roll),
+            bov.slider_channel(self.pitch),
+            bov.slider_channel(self.yaw),
+            bov.flight_mode_channel(self.mode_position, 6 if WROOM else bov.FLIGHT_MODE_NUMBER),
             1500, 1500, 1500,                      # unused disturbance channels
         ]
 
@@ -2074,6 +2113,7 @@ def set_yaw_control(client, mode):
 
 _last_relay = [None]   # latest RelayTuning (periodic 1Hz while tuning)
 _last_bank1 = [None]   # latest StabilizationSettingsBank1 (pushed on change)
+_last_flipstatus = [None]   # latest FlipStatus (onboard flip sequencer state)
 _last_flightstatus = [None]  # latest FlightStatus (mode verification)
 _fms_position_override = [None]  # FlightModePosition override (autotune remaps slot 4)
 
@@ -3730,10 +3770,14 @@ def uavtalk_thread():
                       f"{home['Be'][0]:.4f} {home['Be'][1]:.4f} {home['Be'][2]:.4f}", flush=True)
                 break
             time.sleep(0.1)
-        send_reliable("RevoSettings", bov.resolve_enum_values(db["RevoSettings"], bov.REVOSETTINGS_DEFAULTS))
-        time.sleep(0.2)
-        send_reliable("HomeLocation", bov.resolve_enum_values(db["HomeLocation"], home))
-        time.sleep(0.2)
+        # The wroom twin has no StateEstimation/filter chain - RevoSettings,
+        # HomeLocation and AltitudeFilterSettings would land on objects
+        # nothing reads. Skipped so the config story matches the board.
+        if not WROOM:
+            send_reliable("RevoSettings", bov.resolve_enum_values(db["RevoSettings"], bov.REVOSETTINGS_DEFAULTS))
+            time.sleep(0.2)
+            send_reliable("HomeLocation", bov.resolve_enum_values(db["HomeLocation"], home))
+            time.sleep(0.2)
         send_reliable("MixerSettings", bov.resolve_enum_values(db["MixerSettings"], bov.mixer_settings()))
         time.sleep(0.2)
         # STOCK values, deliberately. An earlier session set
@@ -3750,11 +3794,12 @@ def uavtalk_thread():
         # The stock slow rate is slow BY DESIGN: real accel bias drifts
         # over minutes, and everything faster than that is real motion the
         # integrator needs to see.
-        send_reliable("AltitudeFilterSettings", {
-            "AccelLowPassKp": 0.04, "AccelDriftKi": 0.0005,
-            "InitializationAccelDriftKi": 0.2, "BaroKp": 0.04,
-        })
-        time.sleep(0.2)
+        if not WROOM:
+            send_reliable("AltitudeFilterSettings", {
+                "AccelLowPassKp": 0.04, "AccelDriftKi": 0.0005,
+                "InitializationAccelDriftKi": 0.2, "BaroKp": 0.04,
+            })
+            time.sleep(0.2)
         # Without this, the flight side has no idea GCSReceiver's channels
         # are meant to be Throttle/Roll/Pitch/Yaw/FlightMode - nothing ever
         # reaches ManualControlCommand/StabilizationDesired at all.
@@ -3765,11 +3810,14 @@ def uavtalk_thread():
             "ChannelNeutral": [1050, 1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500],
             "ChannelMax": [2000] * 9,
             "ResponseTime": [0] * 7, "Deadband": 0.02, "DeadbandAssistedControl": 0.08,
-            "FlightModeNumber": 5, "FailsafeFlightModeSwitchPosition": -1,
+            # wroom uses 6 switch bins so position 5 (Stabilized6, the
+            # piloted-flip Rate slot) exists; with 5 bins it would clamp
+            # into the PathPlanner bin - a mode this stack cannot fly
+            "FlightModeNumber": 6 if WROOM else 5, "FailsafeFlightModeSwitchPosition": -1,
             "FailsafeChannel": [-1, 0, 0, 0, 0, 0, 0, 0],
         })
         time.sleep(0.2)
-        fms = bov.flight_mode_settings(control.armed, ["Attitude", "Attitude", "Attitude"])
+        fms = _fms_values(control.armed)
         send_reliable("FlightModeSettings", bov.resolve_enum_values(db["FlightModeSettings"], fms))
         time.sleep(0.2)
         # This bridge exists to unit-test real flight-code changes, so it
@@ -4004,8 +4052,9 @@ def uavtalk_thread():
             "LandVerticalVelPID": [0.35, 3.0, 0.05, 0.9],
         }
         _vtol_pf_values[0] = bov.resolve_enum_values(db["VtolPathFollowerSettings"], vtol_pf)
-        send_reliable("VtolPathFollowerSettings", _vtol_pf_values[0])
-        time.sleep(0.2)
+        if not WROOM:  # no PathFollower on the wroom twin
+            send_reliable("VtolPathFollowerSettings", _vtol_pf_values[0])
+            time.sleep(0.2)
         # Note: VtolPathFollowerSettings.YawControl="manual" (set above)
         # makes vtolflycontroller.cpp's UpdateStabilizationDesired() take
         # the yaw_attitude=false branch (flight/modules/PathFollower/
@@ -4078,6 +4127,13 @@ def uavtalk_thread():
             "LowThrottleZeroIntegral": "TRUE",
             "ScaleToAirspeed": 0, "ScaleToAirspeedLimits": [0.05, 3],
             "FlightModeAssistMap": ["None"] * 6,
+            # Wroom: switch position 1 (the flip slot) pulls its gains from
+            # Bank2; everything else stays on Bank1. The bank mirror is
+            # re-copied from the mapped bank on every mode change, so the
+            # flip rates apply the instant the mode switches - and hover's
+            # rates come back the instant it switches home.
+            "FlightModeMap": (["Bank1", "Bank2", "Bank1", "Bank1", "Bank1", "Bank2"]
+                              if WROOM else ["Bank1"] * 6),
         }
         send_reliable("StabilizationSettings", bov.resolve_enum_values(db["StabilizationSettings"], stab_settings))
         time.sleep(0.2)
@@ -4222,17 +4278,52 @@ def uavtalk_thread():
         send_reliable("StabilizationSettingsBank1", bov.resolve_enum_values(db["StabilizationSettingsBank1"], stab_bank))
         send_reliable("StabilizationBank", bov.resolve_enum_values(db["StabilizationBank"], stab_bank))
         time.sleep(0.2)
+        if WROOM:
+            # Bank2 = the FLIP bank (switch position 1 via FlightModeMap):
+            # identical to Bank1 except the stick-to-rate scale. In Rate
+            # mode the stick commands stick*ManualRate deg/s straight into
+            # the rate loop (stabilizedhandler.c), so ManualRate.Pitch IS
+            # the flip rate: 450 deg/s = 0.8s per revolution. MaximumRate
+            # raised to match so nothing clips it. Hover never sees these -
+            # it flies Bank1.
+            flip_bank = dict(stab_bank)
+            # 460, down from 540: at the ~0.25s command lag, rate*lag is the
+            # angle the endgame must predict across - 540 made it 135 deg
+            # and the exit-angle variance behind every drift outlier; 460
+            # trims that to 115 for ~0.15s of extra rotation time.
+            flip_bank["ManualRate"] = [460, 460, 175]
+            flip_bank["MaximumRate"] = [500, 500, 175]
+            # MEASURED AND REVERTED (cr09): raising rate Kd here as a
+            # feed-forward (pid_apply_setpoint's D acts on gamma*setpoint -
+            # gyro, gamma=1, so Kd kicks on setpoint changes) made the tail
+            # WORSE (worst drift 12.6 vs 4.8, lows 3.3 vs 7.8) - the same
+            # kick that would brake the taper also spikes on the full-stick
+            # slam at flip entry. Do not re-try without separating the two.
+            send_reliable("StabilizationSettingsBank2", bov.resolve_enum_values(db["StabilizationSettingsBank2"], flip_bank))
+            time.sleep(0.2)
 
     def on_connected():
         send_config()
         configured["done"] = True
         _mission_client[0] = client
-        target = {"manual_hover": manual_hover_test,
-                  "poshold": poshold_test,
-                  "mission": mission_test,
-                  "pull_logs": pull_logs_only,
-                  "autotune": autotune_test,
-                  "intercept": intercept_test}.get(TEST_MODE, run_test_sequence)
+        modes = {"manual_hover": manual_hover_test,
+                 "poshold": poshold_test,
+                 "mission": mission_test,
+                 "pull_logs": pull_logs_only,
+                 "autotune": autotune_test,
+                 "intercept": intercept_test}
+        if WROOM:
+            # Pilot-in-the-loop modes for the ESP32 twin (no hold modes,
+            # no missions - the stack under test cannot fly those).
+            import wroom_pilot
+            wroom_pilot.bind(sys.modules[__name__])
+            modes.update({"wroom_hover": wroom_pilot.hover_test,
+                          "wroom_sticks": wroom_pilot.sticks_test,
+                          "wroom_rth": wroom_pilot.rth_test,
+                          "wroom_flip": wroom_pilot.flip_test,
+                          "wroom_oflip": wroom_pilot.onboard_flip_test,
+                          "wroom_creep": wroom_pilot.creep_test})
+        target = modes.get(TEST_MODE, run_test_sequence)
 
         def run_with_fc_logging():
             # Runs in its own thread while client.run() keeps pumping packets
@@ -4244,7 +4335,16 @@ def uavtalk_thread():
                                  else (FC_LOG_OBJECTS_MISSION + (
                                      FC_LOG_OBJECTS_DEEP
                                      if os.environ.get("NINJAPILOT_DEEP_LOG") == "1" else [])
-                                     if TEST_MODE in ("mission", "intercept") else ()))
+                                     if TEST_MODE in ("mission", "intercept")
+                                     # wroom flip diagnosis: the whole command
+                                     # chain, fast - SD in, RateDesired out of
+                                     # the outer loop, ActuatorDesired out of
+                                     # the inner
+                                     else ([("StabilizationDesired", "periodic", 100),
+                                            ("RateDesired", "periodic", 100),
+                                            ("ActuatorDesired", "periodic", 100),
+                                            ("FlipStatus", "onchange", 0)]
+                                           if TEST_MODE.startswith("wroom_") else ())))
                 time.sleep(1.0)  # let metadata writes land before arming
             target()
             if TEST_MODE != "pull_logs":
@@ -4312,6 +4412,8 @@ def uavtalk_thread():
             _last_log_status[0] = decoded
         elif objdef.name == "RelayTuning":
             _last_relay[0] = decoded
+        elif objdef.name == "FlipStatus":
+            _last_flipstatus[0] = decoded
         elif objdef.name == "StabilizationSettingsBank1":
             _last_bank1[0] = decoded
         elif objdef.name == "DebugLogEntry":
@@ -4427,7 +4529,7 @@ def uavtalk_thread():
         while True:
             if configured["done"] and client.connected:
                 if control.armed != last_arm_state["armed"]:
-                    fms = bov.flight_mode_settings(control.armed, ["Attitude", "Attitude", "Attitude"])
+                    fms = _fms_values(control.armed)
                     # The arming toggle re-sends the WHOLE FlightModeSettings
                     # (UAVTalk writes are whole-object) - without honoring
                     # this override it silently stomps any custom switch
@@ -4640,12 +4742,16 @@ _accel_send_count = [0, 0.0]  # [total sends, last debug print time]
 # send_config()'s wait_for_mag/HomeLocation.Be step already blocks briefly
 # at startup for the same reason.
 def publish_baro(client):
+    if WROOM:
+        return  # GPS-only twin: the board has no baro
     have_baro, baro_alt = state.baro_snapshot()
     if have_baro:
         client.send_object("BaroSensor", {"Altitude": baro_alt, "Temperature": 25.0, "Pressure": 101.3})
 
 
 def publish_mag(client):
+    if WROOM:
+        return  # GPS-only twin: no mag consumer on this stack
     have_mag, mag_body = state.mag_snapshot()
     if have_mag:
         client.send_object("MagSensor", {"x": mag_body[0], "y": mag_body[1], "z": mag_body[2], "temperature": 25.0})
@@ -4737,7 +4843,33 @@ gz_motor_pub = None
 # lands on the wrong physical motor and fights itself. Matching each mixer
 # motor to the rotor that's actually in its assumed slot gives a complete,
 # unambiguous remap: M1->rotor_2, M2->rotor_0, M3->rotor_3, M4->rotor_1.
+# ch1..4 -> X3 rotor index: ch1=front-left(rotor_2), ch2=front-right
+# (rotor_0), ch3=rear-right(rotor_3), ch4=rear-left(rotor_1). VERIFIED
+# correct by a deliberate falsification test (2026-09-01): remapping
+# ch1/ch2 to the rear rotors flipped the sim on takeoff - the mixer's
+# +pitch on motors 1&2 lifts the DROPPED nose by thrusting under it,
+# so motors 1&2 being the FRONT pair is the consistent geometry, on the
+# sim and on the real board alike.
 CHANNEL_TO_ROTOR = [2, 0, 3, 1]
+
+# NINJAPILOT_MOTOR_EFF="1.0,0.9,1.0,1.0": per-CHANNEL thrust efficiency,
+# for reproducing real-airframe asymmetries in the sim. The sim's default
+# motors are mathematically identical - which is precisely why the sim
+# never reproduced the 2026-09-01 forward-flip: there was no weak corner
+# to lean on. Efficiency scales THRUST (omega scales by sqrt).
+MOTOR_EFF = [float(x) for x in os.environ.get("NINJAPILOT_MOTOR_EFF", "1,1,1,1").split(",")]
+# NINJAPILOT_MOTOR_BOOST: omega multiplier (capped at max) - emulates a
+# punchier airframe. The X3 hovers at 68% PWM (TWR 1.47); a 4-inch quad
+# hovers around 20-30% - a regime the stock model physically cannot reach.
+MOTOR_BOOST = float(os.environ.get("NINJAPILOT_MOTOR_BOOST", "1.0"))
+# NINJAPILOT_MOTOR_FLOOR="1168,1161,1168,1166": per-channel PWM floor,
+# emulating raised ActuatorSettings neutrals (motor never drops below its
+# spool point while armed) without touching the firmware's settings.
+MOTOR_FLOOR = [float(x) for x in os.environ.get("NINJAPILOT_MOTOR_FLOOR", "1000,1000,1000,1000").split(",")]
+# NINJAPILOT_MOTOR_DEADBAND="0,120,0,0": per-channel us of ESC deadband -
+# the motor produces nothing until PWM exceeds 1000+deadband, the classic
+# uncalibrated-ESC asymmetry that by-ear neutral tuning hides.
+MOTOR_DEADBAND = [float(x) for x in os.environ.get("NINJAPILOT_MOTOR_DEADBAND", "0,0,0,0").split(",")]
 
 
 def publish_motor_speeds(channels):
@@ -4758,8 +4890,9 @@ def publish_motor_speeds(channels):
     # mixer's linear addition actually assumes.
     speeds = [0.0, 0.0, 0.0, 0.0]
     for ch_idx, rotor_idx in enumerate(CHANNEL_TO_ROTOR):
-        frac = max(0.0, min(1.0, (channels[ch_idx] - 1000) / 1000.0))
-        speeds[rotor_idx] = math.sqrt(frac) * MOTOR_MAX_RAD_S
+        pwm = max(channels[ch_idx], MOTOR_FLOOR[ch_idx])
+        frac = max(0.0, min(1.0, (pwm - 1000.0 - MOTOR_DEADBAND[ch_idx]) / 1000.0))
+        speeds[rotor_idx] = min(1.0, math.sqrt(frac * MOTOR_EFF[ch_idx]) * MOTOR_BOOST) * MOTOR_MAX_RAD_S
     msg = Actuators()
     msg.velocity.extend(speeds)
     gz_motor_pub.publish(msg)
