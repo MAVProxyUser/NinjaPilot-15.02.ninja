@@ -51,6 +51,7 @@
 #include <objectpersistence.h>
 #include <flightstatus.h>
 #include <systemstats.h>
+#include <settingsgeneration.h>
 #include <systemsettings.h>
 #include <i2cstats.h>
 #include <taskinfo.h>
@@ -557,6 +558,15 @@ static void updateStats()
     float temp_voltage = PIOS_ADC_PinGetVolt(PIOS_ADC_TEMPERATURE_PIN);
     stats.CPUTemp = PIOS_CONVERT_VOLT_TO_CPU_TEMP(temp_voltage);;
 #endif
+    if (SettingsGenerationHandle()) {
+        extern volatile uint32_t uavobj_settings_generation;
+        SettingsGenerationData gen;
+        SettingsGenerationGet(&gen);
+        if (gen.Generation != uavobj_settings_generation) {
+            gen.Generation = uavobj_settings_generation;
+            SettingsGenerationSet(&gen);
+        }
+    }
     SystemStatsSet(&stats);
 }
 
