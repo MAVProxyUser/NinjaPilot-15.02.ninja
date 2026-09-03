@@ -43,6 +43,10 @@ HEADERS += \
     $$UAVOBJECT_SYNTHETICS/actuatorcommand.h \
     $$UAVOBJECT_SYNTHETICS/actuatordesired.h \
     $$UAVOBJECT_SYNTHETICS/actuatorsettings.h \
+    $$UAVOBJECT_SYNTHETICS/settingsgeneration.h \
+    $$UAVOBJECT_SYNTHETICS/flipstatus.h \
+    $$UAVOBJECT_SYNTHETICS/remoteidsettings.h \
+    $$UAVOBJECT_SYNTHETICS/remoteidstatus.h \
     $$UAVOBJECT_SYNTHETICS/airspeedsensor.h \
     $$UAVOBJECT_SYNTHETICS/airspeedsettings.h \
     $$UAVOBJECT_SYNTHETICS/airspeedstate.h \
@@ -155,6 +159,10 @@ SOURCES += \
     $$UAVOBJECT_SYNTHETICS/actuatorcommand.cpp \
     $$UAVOBJECT_SYNTHETICS/actuatordesired.cpp \
     $$UAVOBJECT_SYNTHETICS/actuatorsettings.cpp \
+    $$UAVOBJECT_SYNTHETICS/settingsgeneration.cpp \
+    $$UAVOBJECT_SYNTHETICS/flipstatus.cpp \
+    $$UAVOBJECT_SYNTHETICS/remoteidsettings.cpp \
+    $$UAVOBJECT_SYNTHETICS/remoteidstatus.cpp \
     $$UAVOBJECT_SYNTHETICS/airspeedsensor.cpp \
     $$UAVOBJECT_SYNTHETICS/airspeedsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/airspeedstate.cpp \

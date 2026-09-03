@@ -44,7 +44,9 @@ static GCSReceiverData gcsreceiverdata;
 
 /* Provide a RCVR driver */
 static int32_t PIOS_GCSRCVR_Get(uint32_t rcvr_id, uint8_t channel);
+#ifdef PIOS_INCLUDE_RTC
 static void PIOS_gcsrcvr_Supervisor(uint32_t ppm_id);
+#endif
 
 const struct pios_rcvr_driver pios_gcsrcvr_rcvr_driver = {
     .read = PIOS_GCSRCVR_Get,
@@ -160,10 +162,14 @@ extern int32_t PIOS_GCSRCVR_Init(__attribute__((unused)) uint32_t *gcsrcvr_id)
     /* Register uavobj callback */
     GCSReceiverConnectCallback(gcsreceiver_updated);
 
-    /* Register the failsafe timer callback. */
+    /* Register the failsafe timer callback (only where an RTC tick exists;
+     * on RTC-less boards the GCS receiver has no staleness supervisor, same
+     * effective behavior as the posix no-op). */
+#ifdef PIOS_INCLUDE_RTC
     if (!PIOS_RTC_RegisterTickCallback(PIOS_gcsrcvr_Supervisor, (uint32_t)gcsrcvr_dev)) {
         PIOS_DEBUG_Assert(0);
     }
+#endif
 
     return 0;
 }
@@ -185,6 +191,7 @@ static int32_t PIOS_GCSRCVR_Get(__attribute__((unused)) uint32_t rcvr_id, uint8_
     return gcsreceiverdata.Channel[channel];
 }
 
+#ifdef PIOS_INCLUDE_RTC
 static void PIOS_gcsrcvr_Supervisor(uint32_t gcsrcvr_id)
 {
     /* Recover our device context */
@@ -211,6 +218,7 @@ static void PIOS_gcsrcvr_Supervisor(uint32_t gcsrcvr_id)
 
     gcsrcvr_dev->Fresh = false;
 }
+#endif /* PIOS_INCLUDE_RTC */
 
 #endif /* PIOS_INCLUDE_GCSRCVR */
 

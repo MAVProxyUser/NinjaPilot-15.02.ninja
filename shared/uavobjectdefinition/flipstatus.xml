@@ -1,0 +1,13 @@
+<xml>
+    <object name="FlipStatus" singleinstance="true" settings="false" category="Control">
+        <description>Command and state of the onboard flip sequencer (Flip module): the ground side writes Command, the board owns the whole maneuver at loop rate.</description>
+        <field name="Command" units="" type="enum" elements="1" options="None,Flip" defaultvalue="None"/>
+        <field name="State" units="" type="enum" elements="1" options="Idle,Punch,Rotate,Catch,Done,Abort" defaultvalue="Idle"/>
+        <field name="Flips" units="count" type="uint16" elements="1" defaultvalue="0"/>
+        <field name="LastAngle" units="deg" type="float" elements="1" defaultvalue="0"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="false" updatemode="onchange" period="0"/>
+        <telemetryflight acked="false" updatemode="onchange" period="0"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>

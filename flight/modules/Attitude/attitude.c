@@ -64,7 +64,13 @@
 
 #include <pios_sensors.h>
 #include <pios_adxl345.h>
+#if defined(PIOS_INCLUDE_ICM20602)
+/* This target's IMU is an ICM-20602, which has its own driver -- the parts
+ * differ in temperature scaling, accel DLPF and filter bandwidths. */
+#include <pios_icm20602.h>
+#else
 #include <pios_mpu6000.h>
+#endif
 
 #include "CoordinateConversions.h"
 #include <pios_notify.h>
@@ -83,7 +89,16 @@ PERF_DEFINE_COUNTER(counterAtt);
 // - 0xA7710004 number of accel samples read for each loop (cc only).
 
 // Private constants
+// Overridable per board, the same way Stabilization, Actuator, Receiver,
+// ManualControl, System and Telemetry already allow. The 540-byte default is
+// tuned for CopterControl's Cortex-M3; Xtensa's windowed ABI needs several
+// times that for the same code, and 540 silently smashes the scheduler's
+// ready list rather than reporting a clean overflow.
+#ifndef PIOS_ATTITUDE_STACK_SIZE
 #define STACK_SIZE_BYTES    540
+#else
+#define STACK_SIZE_BYTES    PIOS_ATTITUDE_STACK_SIZE
+#endif
 #define TASK_PRIORITY       (tskIDLE_PRIORITY + 3)
 
 // Attitude module loop interval (defined by sensor rate in pios_config.h)
@@ -115,7 +130,9 @@ static void AttitudeTask(void *parameters);
 static float gyro_correct_int[3] = { 0, 0, 0 };
 static xQueueHandle gyro_queue;
 
+#if defined(PIOS_INCLUDE_ADXL345)
 static int32_t updateSensors(AccelStateData *, GyroStateData *);
+#endif
 static int32_t updateSensorsCC3D(AccelStateData *accelStateData, GyroStateData *gyrosData);
 static void updateAttitude(AccelStateData *, GyroStateData *);
 static void settingsUpdatedCb(UAVObjEvent *objEv);
@@ -142,6 +159,20 @@ static bool apply_gyro_temp  = false;
 static bool apply_accel_temp = false;
 static AccelGyroSettingsgyro_temp_coeffData gyro_temp_coeff;;
 static AccelGyroSettingsaccel_temp_coeffData accel_temp_coeff;
+/*
+ * Which Invensense driver provides the sensor queue.
+ *
+ * The ICM-20602 is NOT an MPU6000. It shares most of the register map, which
+ * is why one driver served both for a while, but its temperature scaling,
+ * accel DLPF register and DLPF bandwidths all differ -- so this target has
+ * its own driver rather than a WHO_AM_I exception in the shared one.
+ */
+#if defined(PIOS_INCLUDE_ICM20602)
+#define ATTITUDE_IMU_DRIVER PIOS_ICM20602_Driver
+#else
+#define ATTITUDE_IMU_DRIVER PIOS_MPU6000_Driver
+#endif
+
 static AccelGyroSettingstemp_calibrated_extentData temp_calibrated_extent;
 static float temperature = NAN;
 static float accel_temp_bias[3] = { 0 };
@@ -244,9 +275,9 @@ static void AttitudeTask(__attribute__((unused)) void *parameters)
     bool cc3d = BOARDISCC3D;
 
     if (cc3d) {
-#if defined(PIOS_INCLUDE_MPU6000)
+#if defined(PIOS_INCLUDE_ICM20602) || defined(PIOS_INCLUDE_MPU6000)
 
-        gyro_test    = PIOS_MPU6000_Driver.test(0);
+        gyro_test    = ATTITUDE_IMU_DRIVER.test(0);
         mpu6000_data = pios_malloc(sizeof(PIOS_SENSORS_3Axis_SensorsWithTemp) + sizeof(Vector3i16) * 2);
 #endif
     } else {
@@ -323,7 +354,12 @@ static void AttitudeTask(__attribute__((unused)) void *parameters)
         if (cc3d) {
             retval = updateSensorsCC3D(&accelState, &gyros);
         } else {
+#if defined(PIOS_INCLUDE_ADXL345)
             retval = updateSensors(&accelState, &gyros);
+#else
+            /* No analog-gyro/ADXL345 path compiled in on this board. */
+            retval = -1;
+#endif
         }
 
         // Only update attitude when sensor data is good
@@ -339,6 +375,28 @@ static void AttitudeTask(__attribute__((unused)) void *parameters)
             PERF_MEASURE_PERIOD(counterPeriod);
             AlarmsClear(SYSTEMALARMS_ALARM_ATTITUDE);
         }
+#if defined(SIMPOSIX)
+        /* Sim-twin ground truth for the sensor->attitude handshake: how often
+         * the loop found data vs timed out, once per second. */
+        {
+            static uint32_t sim_ok = 0, sim_err = 0;
+            static portTickType sim_last = 0;
+            if (retval == 0) {
+                sim_ok++;
+            } else {
+                sim_err++;
+            }
+            portTickType sim_now = xTaskGetTickCount();
+            if (sim_now - sim_last >= 1000 / portTICK_RATE_MS) {
+                sim_last = sim_now;
+                printf("[SIMPOSIX-IFDEF-MARKER] attitude: ok=%lu err=%lu cc3d=%d period_ms=%lu tick=%lu\n",
+                       (unsigned long)sim_ok, (unsigned long)sim_err, (int)cc3d,
+                       (unsigned long)sensor_period_ms, (unsigned long)sim_now);
+                fflush(stdout);
+                sim_ok = sim_err = 0;
+            }
+        }
+#endif
         vTaskDelayUntil(&lastSysTime, sensor_period_ms / portTICK_PERIOD_MS);
     }
 }
@@ -348,6 +406,7 @@ static void AttitudeTask(__attribute__((unused)) void *parameters)
  * @param[in] attitudeRaw Populate the UAVO instead of saving right here
  * @return 0 if successfull, -1 if not
  */
+#if defined(PIOS_INCLUDE_ADXL345)
 static int32_t updateSensors(AccelStateData *accelState, GyroStateData *gyros)
 {
     struct pios_adxl345_data accel_data;
@@ -461,6 +520,7 @@ static int32_t updateSensors(AccelStateData *accelState, GyroStateData *gyros)
 
     return 0;
 }
+#endif /* PIOS_INCLUDE_ADXL345 */
 
 /**
  * Get an update from the sensors
@@ -474,10 +534,42 @@ static int32_t updateSensorsCC3D(AccelStateData *accelStateData, GyroStateData *
     float temp = 0;
     uint8_t count   = 0;
 
-#if defined(PIOS_INCLUDE_MPU6000)
+#if defined(PIOS_INCLUDE_ICM20602) || defined(PIOS_INCLUDE_MPU6000)
 
-    xQueueHandle queue = PIOS_MPU6000_Driver.get_queue(0);
+    xQueueHandle queue = ATTITUDE_IMU_DRIVER.get_queue(0);
+#if defined(USE_ESP32) || defined(SIMPOSIX)
+    /*
+     * SIMPOSIX too: the posix twins are fed GyroSensor/AccelSensor over UDP
+     * from a host process (Gazebo bridge, bench_test --sim-sensors) whose
+     * jitter dwarfs the ESP32's. Measured 2026-09-02 with a 345 Hz host pump:
+     * the one-period wait timed out ~100 times a second, and because
+     * alarms.c only lets a severity DROP after PIOS_ALARM_GRACETIME, the
+     * Attitude alarm read Error 99.7% of the time while the estimator was
+     * happily updating 400 times a second - which blocked arming (Error
+     * outranks Critical in SystemAlarms). Same tolerance as the board it
+     * twins fixes it.
+     *
+     * Wait TWO nominal sample periods, not one.
+     *
+     * sensor_period_ms is exactly the interval samples arrive at (2ms at
+     * PIOS_SENSOR_RATE 500), so waiting that long leaves no margin at all:
+     * a sample that is even slightly late times out and raises
+     * SYSTEMALARMS_ALARM_ATTITUDE, even though the sensor is fine. The
+     * non-CC3D path above already waits two periods and says so in its
+     * comment; this one does not, and on a target with more scheduling
+     * jitter than an STM32 it flapped between OK and Error roughly half the
+     * time, dragging Stabilization and Actuator alarms with it.
+     */
+    /* 5 sample periods, not 2: with WiFi telemetry active this platform has
+     * characterized whole-scheduler stall windows of up to ~4ms (lwIP timer
+     * work on core 0 colliding with flight tasks through the SMP kernel
+     * lock, plus PHY housekeeping). Samples are not lost -- the queue
+     * buffers them -- but delivery can slip past 2 periods, and the alarm
+     * that fires on one late wakeup is scarier than the hiccup itself. */
+    BaseType_t ret     = xQueueReceive(queue, (void *)mpu6000_data, 5 * sensor_period_ms);
+#else
     BaseType_t ret     = xQueueReceive(queue, (void *)mpu6000_data, sensor_period_ms);
+#endif
     while (ret == pdTRUE) {
         gyros[0]  += mpu6000_data->sample[1].x;
         gyros[1]  += mpu6000_data->sample[1].y;
@@ -548,7 +640,7 @@ static int32_t updateSensorsCC3D(AccelStateData *accelStateData, GyroStateData *
     }
     // gyrosData->temperature  = 35.0f + ((float)mpu6000_data.temperature + 512.0f) / 340.0f;
     // accelsData->temperature = 35.0f + ((float)mpu6000_data.temperature + 512.0f) / 340.0f;
-#endif /* if defined(PIOS_INCLUDE_MPU6000) */
+#endif /* if defined(PIOS_INCLUDE_ICM20602) || defined(PIOS_INCLUDE_MPU6000) */
 
     if (rotate) {
         // TODO: rotate sensors too so stabilization is well behaved
@@ -772,7 +864,7 @@ static void settingsUpdatedCb(__attribute__((unused)) UAVObjEvent *objEv)
 
     if (BOARDISCC3D) {
         float scales[2];
-        PIOS_MPU6000_Driver.get_scale(scales, 2, 0);
+        ATTITUDE_IMU_DRIVER.get_scale(scales, 2, 0);
         accel_bias.X  = accelGyroSettings.accel_bias.X;
         accel_bias.Y  = accelGyroSettings.accel_bias.Y;
         accel_bias.Z  = accelGyroSettings.accel_bias.Z;

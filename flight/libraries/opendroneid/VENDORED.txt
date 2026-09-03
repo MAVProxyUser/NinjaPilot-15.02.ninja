@@ -1,0 +1,1 @@
+opendroneid-core-c 12cbebb, libopendroneid/opendroneid.{c,h} only, unmodified. Apache-2.0 (see LICENSE). https://github.com/opendroneid/opendroneid-core-c

@@ -1,0 +1,15 @@
+<xml>
+    <object name="RemoteIDSettings" singleinstance="true" settings="true" category="System">
+        <description>ASTM F3411 Broadcast Remote ID content. The RemoteID module encodes these once a second into a Message Pack (Basic ID, Location/Vector, System, Self-ID, Operator ID) and hands it to the board's transmitter (a WiFi beacon vendor element on the ESP32). Location comes from GPSPositionSensor when it has a fix; without a GPS the Location message reports unknown position, which is NOT a compliant broadcast by itself.</description>
+        <field name="Enabled" units="" type="enum" elements="1" options="FALSE,TRUE" defaultvalue="FALSE"/>
+        <field name="IDType" units="" type="enum" elements="1" options="None,SerialNumber,CAARegistrationID,UTMAssignedUUID" defaultvalue="None"/>
+        <field name="UASID" units="ascii" type="uint8" elements="20" defaultvalue="0"/>
+        <field name="UAType" units="" type="enum" elements="1" options="None,Aeroplane,HelicopterOrMultirotor,Gyroplane,HybridLift,Ornithopter,Glider,Kite,FreeBalloon,CaptiveBalloon,Airship,FreeFallParachute,Rocket,TetheredPoweredAircraft,GroundObstacle,Other" defaultvalue="HelicopterOrMultirotor"/>
+        <field name="OperatorID" units="ascii" type="uint8" elements="20" defaultvalue="0"/>
+        <field name="SelfIDText" units="ascii" type="uint8" elements="23" defaultvalue="0"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="true" updatemode="onchange" period="0"/>
+        <telemetryflight acked="true" updatemode="onchange" period="0"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>

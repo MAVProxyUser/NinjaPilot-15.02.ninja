@@ -34,6 +34,9 @@
 #include <stabilizationdesired.h>
 #include <flightmodesettings.h>
 #include <stabilizationbank.h>
+#ifdef MODULE_FLIP_BUILTIN
+#include <flipstatus.h>
+#endif
 
 // Private constants
 
@@ -75,6 +78,21 @@ void stabilizedHandler(bool newinit)
         StabilizationDesiredInitialize();
         StabilizationBankInitialize();
     }
+#ifdef MODULE_FLIP_BUILTIN
+    // While the Flip module runs a maneuver it is the SOLE writer of
+    // StabilizationDesired (same single-owner discipline as ArduCopter's
+    // flip mode taking over from the pilot). Interleaving stick writes at
+    // receiver rate mid-flip would fight the sequencer at 50Hz.
+    {
+        FlipStatusStateOptions flipState;
+        FlipStatusStateGet(&flipState);
+        if (flipState == FLIPSTATUS_STATE_PUNCH ||
+            flipState == FLIPSTATUS_STATE_ROTATE ||
+            flipState == FLIPSTATUS_STATE_CATCH) {
+            return;
+        }
+    }
+#endif
     ManualControlCommandData cmd;
     ManualControlCommandGet(&cmd);
 

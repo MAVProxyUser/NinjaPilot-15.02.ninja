@@ -1,0 +1,13 @@
+<xml>
+    <object name="RemoteIDStatus" singleinstance="true" settings="false" category="System">
+        <description>What the RemoteID module is actually broadcasting: state, where the position came from, how many messages are in the pack, and a transmit counter.</description>
+        <field name="State" units="" type="enum" elements="1" options="Disabled,NoID,NoTransmitter,Broadcasting" defaultvalue="Disabled"/>
+        <field name="PositionSource" units="" type="enum" elements="1" options="None,GPS" defaultvalue="None"/>
+        <field name="Messages" units="count" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="TxCount" units="count" type="uint32" elements="1" defaultvalue="0"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="false" updatemode="periodic" period="1000"/>
+        <telemetryflight acked="false" updatemode="periodic" period="1000"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>

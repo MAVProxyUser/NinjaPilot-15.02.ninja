@@ -8,7 +8,7 @@
         <field name="Stabilization1Settings" units="" type="enum"
 		elementnames="Roll,Pitch,Yaw,Thrust"
 		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,RelayRate,RelayAttitude,AltitudeHold,AltitudeVario,CruiseControl"
-		defaultvalue="Attitude,Attitude,AxisLock,Manual"
+		defaultvalue="Attitude,Attitude,Rate,Manual"
 		limits="%NE:AltitudeHold:AltitudeVario:CruiseControl; \
 			%NE:AltitudeHold:AltitudeVario:CruiseControl; \
 			%NE:AltitudeHold:AltitudeVario:CruiseControl:Attitude:Rattitude:Acro+:WeakLeveling:VirtualBar; \
@@ -30,7 +30,7 @@
         <field name="Stabilization3Settings" units="" type="enum"
 		elementnames="Roll,Pitch,Yaw,Thrust"
 		options="Manual,Rate,Attitude,AxisLock,WeakLeveling,VirtualBar,Acro+,Rattitude,RelayRate,RelayAttitude,AltitudeHold,AltitudeVario,CruiseControl"
-		defaultvalue="Rate,Rate,Rate,Manual"
+		defaultvalue="Attitude,Attitude,Rate,Manual"
 		limits="%NE:AltitudeHold:AltitudeVario:CruiseControl; \
 			%NE:AltitudeHold:AltitudeVario:CruiseControl; \
 			%NE:AltitudeHold:AltitudeVario:CruiseControl:Attitude:Rattitude:Acro+:WeakLeveling:VirtualBar; \

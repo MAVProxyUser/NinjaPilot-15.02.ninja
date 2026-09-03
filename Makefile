@@ -210,12 +210,13 @@ export OPGCSSYNTHDIR := $(BUILD_DIR)/openpilotgcs-synthetics
 DIRS += $(OPGCSSYNTHDIR)
 
 # Define supported board lists
-ALL_BOARDS    := coptercontrol oplinkmini simposix realposix
+ALL_BOARDS    := coptercontrol oplinkmini simposix realposix simwroom
 
 # Short names of each board (used to display board name in parallel builds)
 coptercontrol_short    := 'cc  '
 oplinkmini_short       := 'oplm'
 simposix_short          := 'posx'
+simwroom_short          := 'wrom'
 realposix_short         := 'real'
 
 # Start out assuming that we'll build fw, bl and bu for all boards
@@ -226,9 +227,9 @@ EF_BOARDS  := $(ALL_BOARDS)
 
 # SimPosix doesn't have a BL, BU or EF target so we need to
 # filter them out to prevent errors on the all_flight target.
-BL_BOARDS  := $(filter-out simposix realposix, $(BL_BOARDS))
-BU_BOARDS  := $(filter-out simposix realposix gpsplatinum, $(BU_BOARDS))
-EF_BOARDS  := $(filter-out simposix realposix, $(EF_BOARDS))
+BL_BOARDS  := $(filter-out simposix realposix simwroom, $(BL_BOARDS))
+BU_BOARDS  := $(filter-out simposix realposix simwroom gpsplatinum, $(BU_BOARDS))
+EF_BOARDS  := $(filter-out simposix realposix simwroom, $(EF_BOARDS))
 
 # Generate the targets for whatever boards are left in each list
 FW_TARGETS := $(addprefix fw_, $(FW_BOARDS))
@@ -260,7 +261,7 @@ $(1): fw_$(1)_opfw
 fw_$(1): fw_$(1)_opfw
 
 fw_$(1)_%: uavobjects_flight
-ifeq ($(filter $(1),simposix realposix),)
+ifeq ($(filter $(1),simposix realposix simwroom),)
 	$(V1) $$(ARM_GCC_VERSION_CHECK_TEMPLATE)
 endif
 	$(V1) $(MKDIR) -p $(BUILD_DIR)/fw_$(1)/dep
@@ -682,9 +683,9 @@ endif
 ##############################
 
 # Firmware files to package
-PACKAGE_FW_EXCLUDE  := fw_simposix fw_realposix $(if $(PACKAGE_FW_INCLUDE_DISCOVERYF4BARE),,fw_discoveryf4bare)
+PACKAGE_FW_EXCLUDE  := fw_simposix fw_realposix fw_simwroom $(if $(PACKAGE_FW_INCLUDE_DISCOVERYF4BARE),,fw_discoveryf4bare)
 PACKAGE_FW_TARGETS  := $(filter-out $(PACKAGE_FW_EXCLUDE), $(FW_TARGETS))
-PACKAGE_ELF_TARGETS := $(filter     fw_simposix fw_realposix, $(FW_TARGETS))
+PACKAGE_ELF_TARGETS := $(filter     fw_simposix fw_realposix fw_simwroom, $(FW_TARGETS))
 
 # Rules to generate GCS resources used to embed firmware binaries into the GCS.
 # They are used later by the vehicle setup wizard to update board firmware.
