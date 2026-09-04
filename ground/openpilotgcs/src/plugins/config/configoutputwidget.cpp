@@ -139,6 +139,58 @@ ConfigOutputWidget::~ConfigOutputWidget()
     }
 }
 
+/**
+ * @brief Make the Output tab describe the connected board's actual output stage.
+ *
+ * A brushed board has no ESC anywhere in the path: the flight code writes an
+ * LEDC duty cycle straight to a MOSFET gate at a fixed carrier. So "PWM /
+ * PWMSync / OneShot125" are not modes it can be in, and the update-rate box
+ * describes a frame rate that does not exist -- PIOS_Servo_SetHz() is a no-op
+ * on that backend. Showing them enabled invites someone to set a value that is
+ * silently ignored, or worse to reason about endpoints in microseconds.
+ */
+void ConfigOutputWidget::applyBoardOutputUnits()
+{
+    bool brushed = false;
+    ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+
+    if (pm) {
+        UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
+        if (utilMngr) {
+            brushed = (utilMngr->getBoardModel() & 0xff00) == 0x1300;
+        }
+    }
+
+    for (unsigned int i = 0; i < ActuatorCommand::CHANNEL_NUMELEM; i++) {
+        OutputChannelForm *form = getOutputChannelForm(i);
+        if (form) {
+            form->applyBoardLimits();
+        }
+    }
+
+    foreach(OutputBankControls controls, m_banks) {
+        if (controls.rateCombo()) {
+            controls.rateCombo()->setEnabled(!brushed);
+            controls.rateCombo()->setToolTip(brushed
+                ? tr("Not used on this board: the outputs are a fixed-carrier "
+                     "duty cycle, not timed frames.")
+                : QString());
+        }
+        if (controls.modeCombo()) {
+            controls.modeCombo()->setEnabled(!brushed);
+            controls.modeCombo()->setToolTip(brushed
+                ? tr("Brushed: LEDC duty straight to the MOSFET gates, no ESC. "
+                     "Channel values are tenths of a percent, 0..1000.")
+                : QString());
+        }
+    }
+
+    m_ui->channelOutTest->setToolTip(brushed
+        ? tr("Values are 0..1000 = 0..100%% duty. There is no ESC arming "
+             "threshold -- any non-zero value turns a motor.")
+        : QString());
+}
+
 void ConfigOutputWidget::enableControls(bool enable)
 {
     ConfigTaskWidget::enableControls(enable);
@@ -301,6 +353,17 @@ void ConfigOutputWidget::setColor(QWidget *widget, const QColor color)
 void ConfigOutputWidget::refreshWidgetsValues(UAVObject *obj)
 {
     bool dirty = isDirty();
+
+    /* Re-apply the per-board output range and units BEFORE the values are
+     * pushed into the widgets.
+     *
+     * These forms are built at GCS startup, when no board is connected and
+     * getBoardModel() is 0, so anything decided once in their constructor is
+     * decided from nothing. For a brushed board that meant the spinboxes kept
+     * the microsecond floor of 500 and clamped a stored ChannelMin of 0 up to
+     * it -- displaying 500, and writing 500 back on the next save, which is
+     * 50% throttle at rest on a board with no ESC to ignore it. */
+    applyBoardOutputUnits();
 
     ConfigTaskWidget::refreshWidgetsValues(obj);
 

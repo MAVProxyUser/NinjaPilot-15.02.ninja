@@ -82,6 +82,7 @@ public:
 
 protected:
     void enableControls(bool enable);
+    void applyBoardOutputUnits();
     void setWarning(QString message);
 
 private:

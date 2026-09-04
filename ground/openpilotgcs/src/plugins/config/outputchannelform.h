@@ -53,6 +53,7 @@ public:
      * the form is constructed at GCS startup, before any board
      * is known, so pin names can only be applied later */
     void updateChannelLabel();
+    void applyBoardLimits();
 public slots:
     int min() const;
     void setMin(int minimum);

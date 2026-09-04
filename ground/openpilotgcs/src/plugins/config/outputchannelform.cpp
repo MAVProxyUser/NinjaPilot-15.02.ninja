@@ -52,29 +52,7 @@ OutputChannelForm::OutputChannelForm(const int index, QWidget *parent) :
     ui.actuatorLink->setChecked(false);
     connect(ui.actuatorLink, SIGNAL(toggled(bool)), this, SLOT(linkToggled(bool)));
 
-    /* Set limits.
-     *
-     * These bounds are microseconds on every board with an ESC, and the 500
-     * floor is a sane one there -- no ESC understands a shorter pulse. On a
-     * BRUSHED board a channel value is tenths of a percent DUTY instead, and
-     * the endpoints are 0 / 0 / 1000. A 500 floor cannot represent 0, so the
-     * spinbox would silently clamp ChannelMin up to 500 the moment this tab
-     * was opened, and 500 there is 50% throttle on all four motors at rest.
-     * So the range follows the board. */
-    int outMin = MINOUTPUT_VALUE;
-    int outMax = MAXOUTPUT_VALUE;
-
-    if (isBrushedBoard()) {
-        outMin = 0;
-        outMax = 1000;
-    }
-
-    ui.actuatorMin->setMaximum(outMax);
-    ui.actuatorMax->setMaximum(outMax);
-    ui.actuatorValue->setMaximum(outMax);
-    ui.actuatorMin->setMinimum(outMin);
-    ui.actuatorMax->setMinimum(outMin);
-    ui.actuatorValue->setMinimum(outMin);
+    applyBoardLimits();
 
     setChannelRange();
 
@@ -88,6 +66,46 @@ OutputChannelForm::OutputChannelForm(const int index, QWidget *parent) :
  * so a channel value is 0..1000 tenths of a percent. Everything else here is
  * microseconds.
  */
+/**
+ * @brief Set the spinbox range for the connected board's output units.
+ *
+ * MUST be re-runnable, and must be re-run once a board is actually connected.
+ * This widget is built at GCS startup when getBoardModel() returns 0, so
+ * deciding the range only in the constructor decides it from no board at all.
+ *
+ * That is not cosmetic here. The stock bounds are MICROSECONDS and the 500
+ * floor is sensible there -- no ESC understands a shorter pulse. A brushed
+ * board's channel value is tenths of a percent DUTY with endpoints 0/0/1000,
+ * and a 500 floor cannot represent 0: the spinbox silently clamps ChannelMin
+ * from 0 up to 500, which on that board is 50% throttle on every motor at
+ * rest. Leaving the decision in the constructor meant exactly that happened,
+ * with the board showing Min 500 against a stored 0.
+ */
+void OutputChannelForm::applyBoardLimits()
+{
+    const bool brushed = isBrushedBoard();
+    const int outMin   = brushed ? 0 : MINOUTPUT_VALUE;
+    const int outMax   = brushed ? 1000 : MAXOUTPUT_VALUE;
+
+    // widen before narrowing, so a value legal under the new range is never
+    // clipped on the way between the two
+    ui.actuatorMin->setMinimum(qMin(outMin, ui.actuatorMin->minimum()));
+    ui.actuatorMax->setMinimum(qMin(outMin, ui.actuatorMax->minimum()));
+    ui.actuatorValue->setMinimum(qMin(outMin, ui.actuatorValue->minimum()));
+    ui.actuatorMin->setMaximum(outMax);
+    ui.actuatorMax->setMaximum(outMax);
+    ui.actuatorValue->setMaximum(outMax);
+    ui.actuatorMin->setMinimum(outMin);
+    ui.actuatorMax->setMinimum(outMin);
+    ui.actuatorValue->setMinimum(outMin);
+
+    const QString unit = brushed ? tr("0..1000 = 0..100%% duty (brushed, no ESC)")
+                                 : tr("microseconds");
+    ui.actuatorMin->setToolTip(unit);
+    ui.actuatorMax->setToolTip(unit);
+    ui.actuatorNeutral->setToolTip(unit);
+}
+
 bool OutputChannelForm::isBrushedBoard()
 {
     ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
