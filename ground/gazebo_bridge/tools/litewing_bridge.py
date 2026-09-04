@@ -166,6 +166,25 @@ def trail_pump():
         time.sleep(0.15)
 
 
+def baro_pump():
+    """Simulated BMP280. Gazebo gives truth altitude; convert it to a pressure
+    with the standard atmosphere (the exact inverse of what handleBaro and
+    AltFilter do), add realistic noise, and publish BaroSensor at 25 Hz -- the
+    rate a real BMP280 in x16/x2 runs at. A noiseless baro would not exercise
+    the Kalman at all, so 0.15 m of it goes in deliberately."""
+    import random
+    ATM = 101325.0
+    b = db["BaroSensor"]
+    while True:
+        with lock:
+            z = state["z"]
+        alt = z + random.gauss(0.0, 0.15)
+        pa = ATM * (1.0 - alt / 44330.0) ** 5.255
+        client.transport.send(uavtalk.build_packet(uavtalk.TYPE_OBJ, b.obj_id, 0,
+            b.pack({"Altitude": alt, "Temperature": 25.0, "Pressure": pa})))
+        time.sleep(0.04)
+
+
 def stick_pump():
     while True:
         us = int(1000 + max(0.0, min(1.0, thr[0])) * 1000)
@@ -181,8 +200,15 @@ def motor_pump():
     like a tuning problem and is not one. Poll the object explicitly so the
     motors get fresh values at loop rate."""
     ac_o = db["ActuatorCommand"]
+    ps_o = db["PositionState"]
+    vs_o = db["VelocityState"]
+    n = 0
     while True:
         client.transport.send(uavtalk.build_packet(uavtalk.TYPE_OBJ_REQ, ac_o.obj_id, 0))
+        n += 1
+        if n % 5 == 0:   # 20 Hz is plenty for a display/telemetry read
+            client.transport.send(uavtalk.build_packet(uavtalk.TYPE_OBJ_REQ, ps_o.obj_id, 0))
+            client.transport.send(uavtalk.build_packet(uavtalk.TYPE_OBJ_REQ, vs_o.obj_id, 0))
         ac = latest.get("ActuatorCommand")
         if ac:
             m = Actuators()
@@ -196,6 +222,7 @@ unpause(); trail_clear()
 threading.Thread(target=stick_pump, daemon=True).start()
 threading.Thread(target=motor_pump, daemon=True).start()
 threading.Thread(target=trail_pump, daemon=True).start()
+threading.Thread(target=baro_pump, daemon=True).start()
 time.sleep(3)
 
 print("[bridge] IMU frames received: %d" % state["imu"], flush=True)
@@ -234,7 +261,7 @@ print("[bridge] armed: %s" % state["armed"], flush=True)
 if not state["armed"]:
     sys.exit("did not arm")
 
-print("\n  t     alt      vz     roll   pitch   duty   ActuatorCommand")
+print("\n  t   gz_alt   fc_alt   gz_vz   fc_vz   roll  pitch  duty")
 t0 = time.time(); last = 0
 while time.time() - t0 < float(os.environ.get("LITEWING_SECONDS", "22")):
     with lock:
@@ -253,9 +280,12 @@ while time.time() - t0 < float(os.environ.get("LITEWING_SECONDS", "22")):
     now = time.time() - t0
     if now - last >= 1.0:
         last = now
-        ac = latest.get("ActuatorCommand", {}).get("Channel", [0, 0, 0, 0])[:4]
-        print(" %4.1f  %6.3f  %+6.2f  %+6.1f  %+6.1f   %4.0f   %s"
-              % (now, z, vz, r, p, thr[0] * 1000, [int(x) for x in ac]), flush=True)
+        ps = latest.get("PositionState", {})
+        vs = latest.get("VelocityState", {})
+        fc_alt = -float(ps.get("Down", 0.0))
+        fc_vz  = -float(vs.get("Down", 0.0))
+        print(" %4.1f  %6.3f  %6.3f  %+6.2f  %+6.2f  %+5.1f  %+5.1f  %4.0f"
+              % (now, z, fc_alt, vz, fc_vz, r, p, thr[0] * 1000), flush=True)
     time.sleep(0.02)
 
 # ---- commanded descent and touchdown, not a throttle cut -------------------

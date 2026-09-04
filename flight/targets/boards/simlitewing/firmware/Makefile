@@ -69,6 +69,11 @@ MODULES += Flip
 # ASTM F3411 Broadcast Remote ID (flight/modules/RemoteID). On the twin the
 # pack goes out as the beacon element bytes over UDP :9020 (pios_rid_sim.c).
 MODULES += RemoteID
+# Barometric altitude filter: publishes PositionState.Down / VelocityState.Down,
+# the only inputs Stabilization/altitudeloop.c was missing. altitudeloop itself
+# is already compiled (the Stabilization wildcard picks it up) and outerloop.c
+# already dispatches to it for the ALTITUDEHOLD / ALTITUDEVARIO thrust modes.
+MODULES += AltFilter
 
 SRC += $(FLIGHTLIB)/notification.c
 SRC += $(FLIGHTLIB)/opendroneid/opendroneid.c

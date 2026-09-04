@@ -57,7 +57,15 @@ PIOS_SENSORS_Instance *PIOS_SENSORS_GetInstanceByType(const PIOS_SENSORS_Instanc
     PIOS_SENSORS_Instance *sensor;
 
     LL_FOREACH((PIOS_SENSORS_Instance *)previous_instance, sensor) {
-        if (sensor->type && type) {
+        /* BITWISE and, not logical: PIOS_SENSORS_TYPE is a bitmask and the
+         * point of this call is to match against it. As `&&` this tested
+         * "both operands are non-zero", which is true for every registered
+         * sensor, so the function returned the FIRST sensor in the list
+         * regardless of the type asked for. Asking for a baro on a board
+         * whose first sensor is a gyro handed back the gyro, and calling
+         * ->poll() on it dereferenced NULL (queue-based drivers set
+         * .poll = NULL), segfaulting the firmware. */
+        if (sensor->type & type) {
             return sensor;
         }
     }
