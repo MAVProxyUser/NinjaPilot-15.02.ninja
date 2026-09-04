@@ -213,11 +213,22 @@ class Session(object):
         self.client = client
         self.accel = None
         self.updates = 0
+        # Every sample is queued, not just the newest.
+        #
+        # run() polls the transport in 0.2s chunks, so AccelState at 20ms
+        # arrives about ten frames at a time. Keeping only the latest threw
+        # nine of every ten away, which is why collection crawled.
+        self.pending = []
 
     def _on_object(self, objdef, _inst, values):
         if objdef.name == "AccelState":
             self.accel = (values["x"], values["y"], values["z"])
+            self.pending.append(self.accel)
             self.updates += 1
+
+    def drain(self):
+        got, self.pending = self.pending, []
+        return got
 
     def pump(self, seconds):
         # Always pass on_object: without it the client prints every decoded
@@ -248,79 +259,67 @@ class Session(object):
         print()
 
         samples = []
+        self.drain()
         while len(samples) < want:
-            seen = self.updates
-            self.pump(0.05)
-            if self.updates == seen or self.accel is None:
-                continue
-            if classify(self.accel) != pose:
-                print("\n    board moved -- re-place it.")
-                return self.gather(pose, want, settle)
-            samples.append(self.accel)
-            if len(samples) % 10 == 0 or len(samples) == want:
-                print("\r    %d/%d samples" % (len(samples), want), end="", flush=True)
+            self.pump(0.1)
+            for sample in self.drain():
+                if classify(sample) != pose:
+                    print("\n    board moved -- re-place it.")
+                    return self.gather(pose, want, settle)
+                samples.append(sample)
+            if samples:
+                print("\r    %d/%d samples" % (min(len(samples), want), want),
+                      end="", flush=True)
         print()
         return np.array(samples).mean(axis=0)
 
 
-    def gather_rotating(self, need_buckets=16, quiet_axes=0.85,
-                        band=(0.70, 1.30), steady=0.15, window=8):
+    def gather_rotating(self, need_buckets=16, quiet_axes=0.85, band=(0.55, 1.45)):
         """Collect gravity samples while the board is slowly turned by hand.
 
-        This is the magnetometer-style flow, and it does work for an accel --
-        with one filter. A magnetometer reads the same field whether or not it
-        is moving; an accelerometer reads gravity PLUS whatever you are doing to
-        it, so samples taken mid-jerk have to go.
+        The filter here is deliberately loose, because the two obvious ones are
+        both wrong on an uncalibrated board:
 
-        The obvious filter is "keep it if the magnitude is 1 g", and it is
-        WRONG here: the whole reason to run a calibration is that the magnitude
-        is not 1 g yet. This board reads 10.91 where gravity is 9.807, so a
-        tight band around g threw away every single sample and the tool sat
-        there collecting nothing.
+        "keep it if |a| is 1 g" throws away everything. This board reads 10.91
+        where gravity is 9.807 -- that offset is the entire reason to run a
+        calibration, so a tight band around g rejects every single sample.
 
-        So the test is STEADINESS, not correctness. A hand rotating a board
-        smoothly changes the reading slowly; a jerk shows up as a spike in the
-        magnitude over a few samples. Keep anything whose magnitude is steady
-        across a short window and merely in the right ballpark -- the band is
-        deliberately wide enough to admit a badly offset sensor, because that is
-        the case being fixed.
+        "keep it if |a| is STEADY" is worse, and subtler. With a -1.09 m/s^2
+        bias, |a| genuinely swings from about 8.7 to 10.9 as the board turns
+        over. That swing is not noise, it is the measurement -- an offset
+        ellipsoid is exactly a body whose radius depends on direction. Gating
+        on a steady magnitude rejects samples for showing the effect being
+        measured, and collection stalls.
 
-        Turning it slowly gives more keepers; jerking it just wastes samples.
-        Nothing has to be held still and nothing has to be counted.
+        So: accept anything in a wide plausibility band, bin by direction, and
+        average within each bin. Averaging is what removes the hand movement,
+        and it works because dynamic acceleration is roughly zero-mean over a
+        slow sweep while the bias is not. Gross outliers -- a real jolt -- fall
+        outside the band and are dropped.
         """
         buckets = {}
         kept = 0
         seen_total = 0
-        recent = []
         print("\n  Slowly rotate the board through every attitude -- like")
         print("  turning a ball over in your hands. It stops on its own.\n")
 
         deadline = time.time() + 300.0
         last_draw = 0.0
         while time.time() < deadline:
-            n = self.updates
-            self.pump(0.05)
-            if self.updates == n or self.accel is None:
-                continue
-            seen_total += 1
-            vec = np.array(self.accel, dtype=float)
-            mag = np.linalg.norm(vec)
-            recent.append(mag)
-            if len(recent) > window:
-                recent.pop(0)
-            if len(recent) < window:
-                continue
-            if not (band[0] * GRAV < mag < band[1] * GRAV):
-                continue                       # not a plausible 1g reading at all
-            if float(np.std(recent)) > steady:
-                continue                       # magnitude lurching: being jerked
-            kept += 1
-            unit = vec / mag
-            key = tuple(int(round(c)) for c in np.clip(unit * 1.3, -1, 1))
-            buckets.setdefault(key, []).append(vec)
+            self.pump(0.1)
+            for sample in self.drain():
+                seen_total += 1
+                vec = np.array(sample, dtype=float)
+                mag = np.linalg.norm(vec)
+                if not (band[0] * GRAV < mag < band[1] * GRAV):
+                    continue
+                kept += 1
+                unit = vec / mag
+                key = tuple(int(round(c)) for c in np.clip(unit * 1.3, -1, 1))
+                buckets.setdefault(key, []).append(vec)
 
             covered = self._axis_coverage(buckets, quiet_axes)
-            if time.time() - last_draw > 0.25:
+            if time.time() - last_draw > 0.2:
                 last_draw = time.time()
                 print("\r    %d samples, %d/26 directions, %s        "
                       % (kept, len(buckets), self._missing_text(covered)),
@@ -329,16 +328,15 @@ class Session(object):
                 break
         print()
 
-        if not all(self._axis_coverage(buckets, quiet_axes).values()):
-            print("    Not enough coverage to fit. Missing: %s"
-                  % self._missing_text(self._axis_coverage(buckets, quiet_axes)))
+        covered = self._axis_coverage(buckets, quiet_axes)
+        if not all(covered.values()):
+            print("    Not enough coverage to fit. %s" % self._missing_text(covered))
             return None
-        if seen_total and kept * 4 < seen_total:
-            print("    (note: %d%% of samples were dropped as movement -- "
-                  "turning it more slowly helps)" % (100 - 100 * kept // seen_total))
+        if seen_total and kept * 2 < seen_total:
+            print("    (note: %d%% of samples fell outside the plausible band)"
+                  % (100 - 100 * kept // seen_total))
         print("    fitting %d averaged directions from %d samples"
               % (len(buckets), kept))
-        # one averaged point per direction, so a slow patch cannot outvote a fast one
         return np.array([np.mean(v, axis=0) for v in buckets.values()])
 
     @staticmethod
