@@ -58,6 +58,10 @@
 #include "attitudestate.h"
 #include "attitudesettings.h"
 #include "accelgyrosettings.h"
+#ifdef PIOS_INCLUDE_RAW_SENSORS
+#include "accelsensor.h"
+#include "gyrosensor.h"
+#endif
 #include "flightstatus.h"
 #include "manualcontrolcommand.h"
 #include "taskinfo.h"
@@ -254,6 +258,10 @@ int32_t AttitudeInitialize(void)
     trim_requested = false;
 
     AttitudeSettingsConnectCallback(&settingsUpdatedCb);
+#ifdef PIOS_INCLUDE_RAW_SENSORS
+    AccelSensorInitialize();
+    GyroSensorInitialize();
+#endif
     AccelGyroSettingsConnectCallback(&settingsUpdatedCb);
     return 0;
 }
@@ -603,7 +611,19 @@ static int32_t updateSensorsCC3D(AccelStateData *accelStateData, GyroStateData *
     accels[0] *= accel_scale.X * invcount;
     accels[1] *= accel_scale.Y * invcount;
     accels[2] *= accel_scale.Z * invcount;
-    temp *= invcount;
+    /* Centidegrees to degrees C.
+     *
+     * PIOS_SENSORS hands temperature over as "Degrees Celsius * 100"
+     * (pios_sensors.h), and this module used it raw while comparing it against
+     * AccelGyroSettings.temp_calibrated_extent, whose units are deg C -- a
+     * factor of 100 out. sensors.c on the Revo path has always applied this
+     * same 0.01f; only this path missed it.
+     *
+     * It stayed invisible because every temperature coefficient defaults to
+     * zero, so the bounded value was computed and then multiplied by nothing.
+     * The moment a thermal calibration exists the extent is a real window, and
+     * a reading of 2982 would sit outside every sane one. */
+    temp *= invcount * 0.01f;
 
     if (isnan(temperature)) {
         temperature = temp;
@@ -680,6 +700,39 @@ static int32_t updateSensorsCC3D(AccelStateData *accelStateData, GyroStateData *
     PERF_TIMED_SECTION_END(counterUpd);
     GyroStateSet(gyrosData);
     AccelStateSet(accelStateData);
+
+#ifdef PIOS_INCLUDE_RAW_SENSORS
+    /* Also publish the RAW sensor objects, which the Revo path gets from
+     * sensors.c and this one otherwise never produces.
+     *
+     * They are not a duplicate of AccelState/GyroState. Those two are the
+     * corrected outputs and carry no temperature field at all, while the
+     * thermal calibration wizard fits drift against exactly that: the
+     * uncorrected reading paired with the die temperature. Without these the
+     * wizard samples nothing and silently fits a flat line.
+     *
+     * "Raw" here means before accel_bias and before the gyro's running
+     * integral correction -- the terms the calibration is trying to
+     * characterise -- but after scaling and board rotation, so the axes agree
+     * with everything else.
+     */
+    {
+        AccelSensorData accelSensor;
+        GyroSensorData gyroSensor;
+
+        accelSensor.x = accels[0];
+        accelSensor.y = accels[1];
+        accelSensor.z = accels[2];
+        accelSensor.temperature = temperature;
+        AccelSensorSet(&accelSensor);
+
+        gyroSensor.x = gyros[0];
+        gyroSensor.y = gyros[1];
+        gyroSensor.z = gyros[2];
+        gyroSensor.temperature = temperature;
+        GyroSensorSet(&gyroSensor);
+    }
+#endif /* PIOS_INCLUDE_RAW_SENSORS */
 
     return 0;
 }

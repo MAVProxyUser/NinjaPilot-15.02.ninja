@@ -245,11 +245,20 @@ void ConfigGadgetWidget::onAutopilotConnect()
             stackWidget->replaceTab(ConfigGadgetWidget::hardware, hwScroll);
         } else if ((board & 0xff00) == 0x1300) {
             /* NinjaPilot LiteWing (ESP32-S3, brushed coreless nano).
-             * Same CC-style Attitude module as the Thing Plus, so the same
-             * calibration screen applies -- AttitudeSettings board rotation
-             * and AccelGyroSettings bias/scale, which is where the six-point
-             * accel calibration lands. */
-            QWidget *qwd = new ConfigCCAttitudeWidget(this);
+             *
+             * Gets the REVO sensor screen, not the CopterControl one, for the
+             * same reason realposix (0x11) does: the CC screen offers level
+             * and gyro-bias only, while this board's firmware now publishes
+             * the raw AccelSensor/GyroSensor objects WITH die temperature and
+             * registers RevoSettings, which is everything the six-point and
+             * thermal calibrations actually need. attitude.c has applied
+             * accel and gyro temperature coefficients all along; nothing was
+             * ever able to produce them.
+             *
+             * The board id is a fiction anyway -- it exists to tell the GCS
+             * which screens to show -- so pointing it at the screens whose
+             * data the firmware genuinely provides is the honest mapping. */
+            QWidget *qwd = new ConfigRevoWidget(this);
             stackWidget->replaceTab(ConfigGadgetWidget::sensors, qwd);
 
             QLabel *hw = new QLabel(this);
