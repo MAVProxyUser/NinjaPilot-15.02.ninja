@@ -63,6 +63,8 @@ private:
     QGraphicsSvgItem *quad;
     /* Board-specific pin numbers drawn over the quad-X motors. */
     QGraphicsSvgItem *m_pinBadges;
+    QSvgRenderer *m_renderer;
+    void updatePinBadges();
     bool invertMotors;
 
     virtual void registerWidgets(ConfigTaskWidget &parent);
