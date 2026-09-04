@@ -243,6 +243,63 @@ void ConfigGadgetWidget::onAutopilotConnect()
             hwScroll->setWidgetResizable(true);
             hwScroll->setFrameStyle(QFrame::NoFrame);
             stackWidget->replaceTab(ConfigGadgetWidget::hardware, hwScroll);
+        } else if ((board & 0xff00) == 0x1300) {
+            /* NinjaPilot LiteWing (ESP32-S3, brushed coreless nano).
+             * Same CC-style Attitude module as the Thing Plus, so the same
+             * calibration screen applies -- AttitudeSettings board rotation
+             * and AccelGyroSettings bias/scale, which is where the six-point
+             * accel calibration lands. */
+            QWidget *qwd = new ConfigCCAttitudeWidget(this);
+            stackWidget->replaceTab(ConfigGadgetWidget::sensors, qwd);
+
+            QLabel *hw = new QLabel(this);
+            hw->setWordWrap(true);
+            hw->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+            hw->setMargin(12);
+            hw->setTextInteractionFlags(Qt::TextSelectableByMouse);
+            hw->setText(
+                "<h2>LiteWing V2.6.C &mdash; fixed-function hardware</h2>"
+                "<p>Nothing on this page needs configuring: every peripheral is on a "
+                "dedicated pin chosen at build time.</p>"
+                "<table cellpadding='4'>"
+                "<tr><th align='left'>Function</th><th align='left'>Pin</th><th align='left'>Notes</th></tr>"
+                "<tr><td>Motor 1</td><td><b>5</b></td><td>LEDC duty, 24 kHz carrier &mdash; NOT a servo pulse</td></tr>"
+                "<tr><td>Motor 2</td><td><b>6</b></td><td></td></tr>"
+                "<tr><td>Motor 3</td><td><b>3</b></td><td></td></tr>"
+                "<tr><td>Motor 4</td><td><b>4</b></td><td>all four via IRLML6344 low-side MOSFETs</td></tr>"
+                "<tr><td>IMU (MPU-6050)</td><td>SCL 10 / SDA 11</td><td>I2C0 at 400 kHz, data-ready on 12</td></tr>"
+                "<tr><td>Expansion I2C1</td><td>SDA 40 / SCL 41</td><td>free bus for a baro or ToF module</td></tr>"
+                "<tr><td>LEDs</td><td>blue 7 / red 8 / green 9</td><td></td></tr>"
+                "<tr><td>Battery sense</td><td>2</td><td>ADC not built in this firmware</td></tr>"
+                "</table>"
+                "<h3>Outputs are DUTY, not microseconds</h3>"
+                "<p>The motors are coreless brushed units on MOSFETs with no ESC in "
+                "between, so a channel value is <b>tenths of a percent duty</b>: "
+                "0&nbsp;= stopped, 1000&nbsp;= 100&nbsp;%. Channel endpoints are "
+                "0&nbsp;/&nbsp;0&nbsp;/&nbsp;1000 and <b>must stay that way</b> &mdash; "
+                "the usual 1000/1000/2000 would mean full throttle at rest. The Output "
+                "tab's frame-rate box does nothing here.</p>"
+                "<h3>Control</h3>"
+                "<p>There is no radio receiver on this board. All five channels come "
+                "from the <b>GCS receiver</b> over the telemetry link, so the GCS is "
+                "the transmitter.</p>"
+                "<h3>Telemetry</h3>"
+                "<p>WiFi: UAVTalk on UDP port <b>9000</b>, credentials provisioned with "
+                "<code>tools/wifi_setup.py</code>. Serial: UART0 at <b>57600</b> through "
+                "the onboard CH340K. Note these are <b>either/or</b> &mdash; on a "
+                "successful WiFi join the telemetry port moves to WiFi.</p>"
+                "<h3>Power</h3>"
+                "<p>Unlike the ESP32 quad, <b>USB and the battery may be connected at "
+                "the same time</b> &mdash; that is how the pack charges. U1 (AO3401A) "
+                "isolates the battery from VBUS whenever USB is present, and the TP4056 "
+                "charges through it. On USB alone the motor rail is limited to about "
+                "917&nbsp;mA for all four motors, so the props will spin but will not "
+                "lift.</p>");
+            QScrollArea *hwScroll = new QScrollArea(this);
+            hwScroll->setWidget(hw);
+            hwScroll->setWidgetResizable(true);
+            hwScroll->setFrameStyle(QFrame::NoFrame);
+            stackWidget->replaceTab(ConfigGadgetWidget::hardware, hwScroll);
         } else {
             // Unknown board
             qDebug() << "Unknown board " << board;

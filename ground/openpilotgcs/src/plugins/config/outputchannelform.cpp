@@ -52,17 +52,54 @@ OutputChannelForm::OutputChannelForm(const int index, QWidget *parent) :
     ui.actuatorLink->setChecked(false);
     connect(ui.actuatorLink, SIGNAL(toggled(bool)), this, SLOT(linkToggled(bool)));
 
-    // Set limits
-    ui.actuatorMin->setMaximum(MAXOUTPUT_VALUE);
-    ui.actuatorMax->setMaximum(MAXOUTPUT_VALUE);
-    ui.actuatorValue->setMaximum(MAXOUTPUT_VALUE);
-    ui.actuatorMin->setMinimum(MINOUTPUT_VALUE);
-    ui.actuatorMax->setMinimum(MINOUTPUT_VALUE);
-    ui.actuatorValue->setMinimum(MINOUTPUT_VALUE);
+    /* Set limits.
+     *
+     * These bounds are microseconds on every board with an ESC, and the 500
+     * floor is a sane one there -- no ESC understands a shorter pulse. On a
+     * BRUSHED board a channel value is tenths of a percent DUTY instead, and
+     * the endpoints are 0 / 0 / 1000. A 500 floor cannot represent 0, so the
+     * spinbox would silently clamp ChannelMin up to 500 the moment this tab
+     * was opened, and 500 there is 50% throttle on all four motors at rest.
+     * So the range follows the board. */
+    int outMin = MINOUTPUT_VALUE;
+    int outMax = MAXOUTPUT_VALUE;
+
+    if (isBrushedBoard()) {
+        outMin = 0;
+        outMax = 1000;
+    }
+
+    ui.actuatorMin->setMaximum(outMax);
+    ui.actuatorMax->setMaximum(outMax);
+    ui.actuatorValue->setMaximum(outMax);
+    ui.actuatorMin->setMinimum(outMin);
+    ui.actuatorMax->setMinimum(outMin);
+    ui.actuatorValue->setMinimum(outMin);
 
     setChannelRange();
 
     disableMouseWheelEvents();
+}
+
+/**
+ * @brief Does the connected board express outputs as duty rather than pulse width?
+ *
+ * LiteWing (0x13xx) drives coreless motors straight off MOSFETs with no ESC,
+ * so a channel value is 0..1000 tenths of a percent. Everything else here is
+ * microseconds.
+ */
+bool OutputChannelForm::isBrushedBoard()
+{
+    ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+
+    if (!pm) {
+        return false;
+    }
+    UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
+    if (!utilMngr) {
+        return false;
+    }
+    return (utilMngr->getBoardModel() & 0xff00) == 0x1300;
 }
 
 OutputChannelForm::~OutputChannelForm()
@@ -419,6 +456,20 @@ void OutputChannelForm::updateChannelLabel()
             isRealposix = true;
         }
     }
+    static const char *litewingPins[4] = { "GPIO5", "GPIO6", "GPIO3", "GPIO4" };
+    static const char *litewingPinDetail[4] = {
+        "GPIO5 = MOT_1, IRLML6344 low-side MOSFET, LEDC duty",
+        "GPIO6 = MOT_2, IRLML6344 low-side MOSFET, LEDC duty",
+        "GPIO3 = MOT_3, IRLML6344 low-side MOSFET, LEDC duty",
+        "GPIO4 = MOT_4, IRLML6344 low-side MOSFET, LEDC duty"
+    };
+    bool isLitewing = false;
+    if (pm) {
+        UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
+        if (utilMngr && (utilMngr->getBoardModel() & 0xff00) == 0x1300) {
+            isLitewing = true;
+        }
+    }
     static const char *esp32Pins[4] = { "GPIO15", "GPIO33", "GPIO27", "GPIO12" };
     static const char *esp32PinDetail[4] = {
         "GPIO15 (ADC2_3 / TOUCH3 / MTDO) = M1 front-left",
@@ -433,7 +484,10 @@ void OutputChannelForm::updateChannelLabel()
             isEsp32 = true;
         }
     }
-    if (isRealposix && index() < 8) {
+    if (isLitewing && index() < 4) {
+        ui.actuatorNumber->setText(QString("%1 %2").arg(index() + 1).arg(litewingPins[index()]));
+        ui.actuatorNumber->setToolTip(tr("Output %1: %2").arg(index() + 1).arg(litewingPinDetail[index()]));
+    } else if (isRealposix && index() < 8) {
         ui.actuatorNumber->setText(QString("%1 %2").arg(index() + 1).arg(realposixPins[index()]));
         ui.actuatorNumber->setToolTip(tr("Output %1: %2").arg(index() + 1).arg(realposixPinDetail[index()]));
     } else if (isEsp32 && index() < 4) {

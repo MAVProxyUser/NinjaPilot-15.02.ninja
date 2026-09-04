@@ -1,15 +1,35 @@
 #!/usr/bin/env python3
-"""Persist ManualControlSettings with the GCS receiver group so the INPUT
-health tile responds to GCS Control / joystick input (GCSReceiver over
-UAVTalk). Saves via ObjectPersistence and verifies by readback."""
-import sys, time
-sys.path.insert(0, "/Users/kfinisterre/Desktop/OP Revo Redux/NinjaPilot-15.02.ninja/ground/pyuavtalk")
-import uavtalk
-from uavtalk_client import UAVTalkClient, UdpTransport
+"""Persist ManualControlSettings with the GCS receiver group, so the GCS (or a
+joystick, or a script) IS the radio -- GCSReceiver over UAVTalk. Saves via
+ObjectPersistence and verifies by readback.
 
-XML = "/Users/kfinisterre/Desktop/OP Revo Redux/NinjaPilot-15.02.ninja/shared/uavobjectdefinition"
-db = uavtalk.UAVObjectDB(XML)
-client = UAVTalkClient(UdpTransport("192.168.0.90", 9000), db)
+Works over either transport, which matters on boards that have no receiver at
+all: LiteWing is flown this way permanently, set up over USB on the bench and
+flown over WiFi.
+
+    persist_gcs_receiver.py --udp 192.168.0.90:9000
+    persist_gcs_receiver.py --serial /dev/cu.wchusbserial8320
+"""
+import argparse, os, sys, time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import uavtalk
+from uavtalk_client import UAVTalkClient, UdpTransport, SerialTransport, default_xml_dir
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--udp", metavar="HOST:PORT")
+ap.add_argument("--serial", metavar="PORT")
+ap.add_argument("--baud", type=int, default=57600)
+ap.add_argument("--xmldir", default=None)
+args = ap.parse_args()
+
+if args.serial:
+    transport = SerialTransport(args.serial, args.baud)
+else:
+    host, _, port = (args.udp or "192.168.0.90:9000").partition(":")
+    transport = UdpTransport(host, int(port or 9000))
+
+db = uavtalk.UAVObjectDB(args.xmldir or default_xml_dir())
+client = UAVTalkClient(transport, db)
 
 MCS = {
     "ChannelGroups": [5, 5, 5, 5, 5, 7, 7, 7, 7],   # GCS on Thr/Roll/Pitch/Yaw/Mode

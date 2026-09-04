@@ -72,6 +72,9 @@ private:
     bool m_inChannelTest;
     QString m_mixerType;
 
+private:
+    static bool isBrushedBoard();
+
 private slots:
     void linkToggled(bool state);
     void reverseChannel(bool state);
