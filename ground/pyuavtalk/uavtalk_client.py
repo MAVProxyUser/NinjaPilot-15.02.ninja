@@ -113,6 +113,14 @@ class UAVTalkClient(object):
         self.db = db
         self.parser = uavtalk.UAVTalkParser()
         self.connected = False
+        # Handshake state lives on the instance, not inside run().
+        #
+        # run() is called both as a long-lived loop and as a short poll -- the
+        # calibration tool drives it in 50ms slices between prompts. When this
+        # was a local, every slice restarted the handshake at HANDSHAKEREQ, so
+        # the flight side cycled Disconnected -> HandshakeAck -> Connected over
+        # and over and the link never settled.
+        self.gcs_status = GCS_STATUS_HANDSHAKEREQ
         # Metaobject (objId+1) payloads received from the flight side, keyed
         # by the metaobject id. Metaobjects are not in the XML db, so run()
         # stashes their raw 8-byte payloads here instead of dispatching them.
@@ -140,14 +148,13 @@ class UAVTalkClient(object):
         """Drive the handshake and dispatch every decoded object to on_object(objdef,
         inst_id, decoded_values). Calls on_connected() once, the moment the flight
         side confirms the link. Runs until `duration` seconds pass, or forever."""
-        gcs_status = GCS_STATUS_HANDSHAKEREQ
         last_handshake_send = 0.0
         start = time.time()
 
         while duration is None or (time.time() - start) < duration:
             now = time.time()
             if now - last_handshake_send > 1.0:
-                self._send_gcs_status(gcs_status)
+                self._send_gcs_status(self.gcs_status)
                 last_handshake_send = now
 
             data = self.transport.poll_recv(0.2)
@@ -189,9 +196,9 @@ class UAVTalkClient(object):
 
                 if objdef.name == "FlightTelemetryStats":
                     status = decoded["Status"]
-                    if status == "HandshakeAck" and gcs_status != GCS_STATUS_CONNECTED:
-                        gcs_status = GCS_STATUS_CONNECTED
-                        self._send_gcs_status(gcs_status)
+                    if status == "HandshakeAck" and self.gcs_status != GCS_STATUS_CONNECTED:
+                        self.gcs_status = GCS_STATUS_CONNECTED
+                        self._send_gcs_status(self.gcs_status)
                     elif status == "Connected" and not self.connected:
                         self.connected = True
                         print("[link] connected to flight side")
