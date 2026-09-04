@@ -27,6 +27,7 @@
  */
 
 #include "connectionmanager.h"
+#include <QSettings>
 
 #include <aggregation/aggregate.h>
 #include <coreplugin/iconnection.h>
@@ -133,6 +134,17 @@ bool ConnectionManager::connectDevice(DevListItem device)
     // remember the connection/device details
     m_connectionDevice = connection_device;
     m_ioDev = io_dev;
+
+    /* Remember what actually worked, so the next launch comes back to it.
+     *
+     * The auto-select below only ever considered names starting with "USB",
+     * which is true of the stock USB-HID boards and of nothing else. A board on
+     * a serial port -- every ESP32 target here, over its USB-serial bridge --
+     * could never be picked, so the dropdown settled on whatever happened to be
+     * first, in practice the always-present UDP entry, and the operator
+     * reselected their board by hand on every start. */
+    QSettings settings;
+    settings.setValue(QLatin1String("ConnectionManager/lastDevice"), deviceName);
 
     connect(m_connectionDevice.connection, SIGNAL(destroyed(QObject *)), this, SLOT(onConnectionDestroyed(QObject *)), Qt::QueuedConnection);
 
@@ -475,11 +487,26 @@ void ConnectionManager::devChanged(IConnection *connection)
 
 void ConnectionManager::updateConnectionDropdown()
 {
+    QSettings settings;
+    const QString lastDevice = settings.value(QLatin1String("ConnectionManager/lastDevice")).toString();
+
     // add all the list again to the combobox
     foreach(DevListItem d, m_devList) {
         if (!d.getConName().contains("Nano") && !d.getConName().contains("Revolution")) { // ONLY cc3d or Atom supported. 
             m_availableDevList->addItem(d.getConName());
             m_availableDevList->setItemData(m_availableDevList->count() - 1, d.getConName(), Qt::ToolTipRole);
+
+            /* The last connection that actually worked wins, whatever bus it
+             * was on. Checked before the USB rule so a remembered serial board
+             * is not overridden by a USB device appearing later in the list. */
+            if (!m_ioDev && !lastDevice.isEmpty() && d.getConName() == lastDevice) {
+                m_availableDevList->setCurrentIndex(m_availableDevList->count() - 1);
+                if (m_mainWindow->generalSettings()->autoConnect() && polling) {
+                    qDebug() << "ConnectionManager: reconnecting to last device" << lastDevice;
+                    connectDevice(d);
+                }
+                continue;
+            }
             if (!m_ioDev && d.getConName().startsWith("USB")) {
                 if (m_mainWindow->generalSettings()->autoConnect() || m_mainWindow->generalSettings()->autoSelect()) {
                     m_availableDevList->setCurrentIndex(m_availableDevList->count() - 1);

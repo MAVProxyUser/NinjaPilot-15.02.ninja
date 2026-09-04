@@ -15,6 +15,7 @@
  */
 
 #include "pfdqmlgadgetconfiguration.h"
+#include <QFile>
 #include "utils/pathutils.h"
 
 /**
@@ -47,6 +48,19 @@ PfdQmlGadgetConfiguration::PfdQmlGadgetConfiguration(QString classId, QSettings 
     if (qSettings != 0) {
         m_qmlFile            = qSettings->value("qmlFile").toString();
         m_qmlFile            = Utils::PathUtils().InsertDataPath(m_qmlFile);
+
+        /* A configuration that names no QML file leaves the PFD as a plain grey
+         * rectangle with nothing to render and nothing to explain why. That is
+         * what a fresh or partially-written GCS config gives you, because the
+         * member default here is the literal string "Unknown" and it is then
+         * handed straight to the view. Fall back to the shipped PFD instead, so
+         * an unconfigured gadget draws something rather than failing silently. */
+        if (m_qmlFile.isEmpty() || m_qmlFile == "Unknown" || !QFile::exists(m_qmlFile)) {
+            QString fallback = Utils::PathUtils().InsertDataPath("%%DATAPATH%%pfd/default/Pfd.qml");
+            if (QFile::exists(fallback)) {
+                m_qmlFile = fallback;
+            }
+        }
 
         m_earthFile          = qSettings->value("earthFile").toString();
         m_earthFile          = Utils::PathUtils().InsertDataPath(m_earthFile);
