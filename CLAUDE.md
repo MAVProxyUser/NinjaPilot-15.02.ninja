@@ -1325,3 +1325,50 @@ add to them. A hand-written short list dropped MarkerManager and the flight
 trails vanished; a single-plugin block left the wind panel filling the whole
 window. The world now embeds gz-sim's own `gui.config` verbatim and appends
 only the wind panel (anchored top-right).
+
+## Ground tooling: use pyuavtalk, never hand-rolled framing (2026-09-04)
+
+`ground/pyuavtalk/` is the ground-side UAVTalk stack and it already has
+everything. Reaching past it is how you get subtle, plausible-looking bugs.
+
+- `uavtalk.py` — `UAVObjectDB(xml_dir)` parses the definitions, derives each
+  object id from the name/field hash, and packs/unpacks **by field name**.
+- `uavtalk_client.py` — `UdpTransport` and `SerialTransport`, plus
+  `UAVTalkClient`, which drives the GCS handshake, replies to acked pushes,
+  and stashes metaobject payloads (an object's metadata lives at `objid + 1`).
+- `persist_gcs_receiver.py --serial|--udp` — point the sticks at the GCS
+  receiver and save it. The fix for any board with no radio receiver.
+- `accel_calibrate.py` / `test_accel_calibrate.py` — accel calibration over
+  either transport.
+
+**UAVObject fields are serialised sorted by ELEMENT SIZE, not in XML order.**
+Hand-computed offsets therefore decode the wrong fields while still looking
+sane. This misread `ActuatorSettings` on a LiteWing and reported dangerous
+brushless endpoints on a board that actually held safe brushed ones — the
+2-byte arrays come first, so `BankMode`'s 6 bytes land *after* ChannelMax/
+Neutral/Min, not before. `uavtalk.py` gets this right for free.
+
+**The two flight paths disagree about `accel_bias`, and it is not cosmetic:**
+
+    sensors.c  (Revo)    accels = (raw - accel_bias) * accel_scale
+    attitude.c (CC3D)    accels =  raw * accel_scale - accel_bias
+
+An ellipsoid fit returns a centre in RAW units, which `sensors.c` wants
+directly; `attitude.c` scales first and needs `centre * scale`. The GCS writes
+the raw centre either way — correct for Revo, ~3e-2 m/s² out on a CC3D-path
+board (which is every ESP32 target here, `BOARDISCC3D`). Also note
+`calibrationutils.cpp` carries two solvers: `SixPointInConstFieldCal` takes
+exactly six samples, while `EllipsoidCalibration` takes any N and is the one
+the accel wizard actually calls.
+
+**You cannot separate accel bias from gain error in one orientation.** Both are
+perfectly steady, so a low standard deviation is evidence for neither. Flip the
+board: `b = (z_up + z_dn)/2`, `s = (z_dn - z_up)/2g`. And you cannot *wave* an
+accelerometer the way you wave a magnetometer — a mag reads the same field
+moving or not, an accel reads gravity plus whatever you are doing to it. What
+generalises is the ellipsoid fit over many orientations, not the waving.
+
+**RULE: when polling `UAVTalkClient.run()` in short slices, the handshake state
+must persist.** It lives on the instance now; as a local it restarted at
+HANDSHAKEREQ every call and the link cycled Disconnected → HandshakeAck →
+Connected forever without settling.
