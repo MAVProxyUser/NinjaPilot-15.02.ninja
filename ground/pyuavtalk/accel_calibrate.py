@@ -13,11 +13,19 @@ Two modes:
                upright   z = -g*s + b        b = (z_up + z_dn) / 2
                inverted  z = +g*s + b        s = (z_dn - z_up) / (2g)
 
-  --six    The full six-point calibration, the same one the GCS wizard runs.
-           Solves for per-axis scale and bias against a constant field
-           magnitude. This is the port of CalibrationUtils::
-           SixPointInConstFieldCal() from calibrationutils.cpp; the comments
-           there explain the difference-in-magnitude formulation.
+  --six    The six fixed poses, solved the way the GCS wizard solves them --
+           with EllipsoidCalibration(fitAlongXYZ=true). (calibrationutils.cpp
+           also carries SixPointInConstFieldCal, ported here as well, but the
+           accel wizard does not call it.)
+
+  --cloud N
+           The same fit over N free-form orientations instead of six named
+           poses. Note you cannot WAVE an accelerometer the way you wave a
+           magnetometer: a mag reads the same field moving or not, while an
+           accel reads gravity plus whatever you are doing to it, so a sample
+           taken mid-swing is not a gravity measurement. What generalises is
+           the ellipsoid fit, not the waving -- hold the board still in as many
+           attitudes as you like and every one of them feeds the fit.
 
 Poses are recognised from the accelerometer itself, not from AttitudeState, so
 they are yaw-invariant -- which matters because a board with no magnetometer
@@ -29,6 +37,7 @@ persisted to flash with --save. Nothing here ever arms anything.
 
   accel_calibrate.py --serial /dev/cu.wchusbserial8320 --six
   accel_calibrate.py --udp 192.168.4.1:9000 --flip
+  accel_calibrate.py --serial /dev/cu.wchusbserial8320 --cloud 30
   accel_calibrate.py --serial /dev/cu.wchusbserial8320 --six --apply --save
 """
 import argparse
@@ -143,6 +152,60 @@ def six_point_in_const_field_cal(const_mag, x, y, z):
     return S, -b
 
 
+def ellipsoid_calibration(nominal, x, y, z):
+    """Port of CalibrationUtils::EllipsoidCalibration(fitAlongXYZ=true).
+
+    This is what the GCS accel wizard actually runs -- not
+    SixPointInConstFieldCal, which is also in calibrationutils.cpp but unused by
+    that path. The difference that matters is the sample count: the six-point
+    solver needs EXACTLY six, because it writes five difference equations
+    between consecutive poses. This one least-squares-fits an ellipsoid to an
+    arbitrary point cloud, so more orientations simply make it better
+    conditioned.
+
+    fitAlongXYZ=true constrains the fit to axis-aligned (no cross-axis terms).
+    That is not a simplification we are choosing -- AccelGyroSettings can only
+    store three scales and three biases, with no calibration matrix, so a
+    rotated ellipsoid has nowhere to go for the accel.
+
+    Returns (scale[3], center[3], radii[3]) with center in RAW sensor units.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    z = np.asarray(z, dtype=float)
+
+    D = np.column_stack([x * x, y * y, z * z, 2 * x, 2 * y, 2 * z])
+    v = np.linalg.solve(D.T @ D, D.T @ np.ones(len(x)))
+
+    center = -v[3:6] / v[0:3]
+    gam = 1.0 + (v[3] ** 2 / v[0] + v[4] ** 2 / v[1] + v[5] ** 2 / v[2])
+    radii = np.sqrt(gam / v[0:3])
+    scale = nominal / radii
+    return scale, center, radii
+
+
+def bias_for_firmware(center, scale, path):
+    """Convert an ellipsoid centre into the accel_bias the FIRMWARE expects.
+
+    The two flight paths disagree, and it is not cosmetic:
+
+      sensors.c  (Revo)   accels = (raw - accel_bias) * accel_scale
+      attitude.c (CC3D)   accels =  raw * accel_scale - accel_bias
+
+    The ellipsoid fit gives a centre in RAW units, which is what sensors.c
+    wants directly. attitude.c scales BEFORE subtracting, so it needs
+    centre * scale instead. The GCS writes the raw centre either way, which is
+    right for Revo and off by a factor of scale on a CC3D-path board -- a few
+    percent of the bias, small but real.
+
+    The ESP32/LiteWing targets take the attitude.c path (BOARDISCC3D), so that
+    is the default here.
+    """
+    if path == "sensors":
+        return np.asarray(center, dtype=float)
+    return np.asarray(center, dtype=float) * np.asarray(scale, dtype=float)
+
+
 class Session(object):
     """Runs the client loop while letting the caller drive pose by pose."""
 
@@ -200,6 +263,61 @@ class Session(object):
         return np.array(samples).mean(axis=0)
 
 
+    def gather_cloud(self, want, sep_deg=25.0, still_tol=0.06, window=12):
+        """Collect `want` STILL samples spread over many orientations.
+
+        You cannot wave an accelerometer the way you wave a magnetometer. The
+        mag reads the same field whether or not it is moving, so a continuous
+        sweep is fine; an accelerometer reads gravity PLUS whatever you are
+        doing to it, so a sample taken mid-swing is not a gravity measurement
+        at all. What generalises is the ellipsoid fit, not the waving: hold the
+        board still in as many attitudes as you like and let the fit use them
+        all.
+
+        So this waits for stillness rather than for a named pose, and refuses a
+        sample whose direction is within sep_deg of one already taken -- that is
+        what stops a hundred readings of the same face being mistaken for
+        coverage.
+        """
+        kept = []
+        recent = []
+        print("\n  Hold the board still in one attitude, then move to another.")
+        print("  Aim for all six faces plus corners; %d points wanted.\n" % want)
+
+        deadline = time.time() + 600.0
+        while len(kept) < want and time.time() < deadline:
+            seen = self.updates
+            self.pump(0.05)
+            if self.updates == seen or self.accel is None:
+                continue
+            recent.append(self.accel)
+            if len(recent) > window:
+                recent.pop(0)
+            if len(recent) < window:
+                continue
+
+            arr = np.array(recent)
+            if arr.std(axis=0).max() > still_tol:
+                continue                      # still moving
+            mean = arr.mean(axis=0)
+            norm = np.linalg.norm(mean)
+            if not (0.7 * GRAV < norm < 1.3 * GRAV):
+                continue                      # not a clean 1g reading
+            unit = mean / norm
+            if any(np.dot(unit, k / np.linalg.norm(k)) > np.cos(np.radians(sep_deg))
+                   for k in kept):
+                continue                      # too close to one we already have
+            kept.append(mean)
+            recent.clear()
+            print("\r    %d/%d orientations captured" % (len(kept), want),
+                  end="", flush=True)
+        print()
+        if len(kept) < want:
+            print("    timed out with %d points." % len(kept))
+            return None if len(kept) < 9 else np.array(kept)
+        return np.array(kept)
+
+
 def set_stream_rate(client, obj_name, period_ms):
     """Switch an object to PERIODIC at period_ms. Returns the previous metadata.
 
@@ -233,6 +351,11 @@ def main():
     ap.add_argument("--xmldir", default=None)
     ap.add_argument("--six", action="store_true", help="full six-point calibration")
     ap.add_argument("--flip", action="store_true", help="two-pose bias vs gain check")
+    ap.add_argument("--cloud", type=int, metavar="N", default=0,
+                    help="fit N free-form still orientations instead of 6 fixed poses")
+    ap.add_argument("--convention", choices=("attitude", "sensors"), default="attitude",
+                    help="which firmware path applies the terms (default attitude.c, "
+                         "which is what the ESP32/LiteWing targets use)")
     ap.add_argument("--samples", type=int, default=100, help="samples per pose")
     ap.add_argument("--apply", action="store_true",
                     help="write the result to AccelGyroSettings (RAM)")
@@ -240,8 +363,8 @@ def main():
                     help="with --apply, also persist it to flash")
     args = ap.parse_args()
 
-    if not (args.six or args.flip):
-        ap.error("pick --six or --flip")
+    if not (args.six or args.flip or args.cloud):
+        ap.error("pick --six, --flip or --cloud N")
     if args.save and not args.apply:
         ap.error("--save needs --apply")
 
@@ -264,9 +387,14 @@ def main():
     if saved_meta:
         print("AccelState raised to 20 ms for this run (restored at the end).")
 
-    poses = SIX if args.six else FLIP
+    cloud_points = None
+    poses = [] if args.cloud else (SIX if args.six else FLIP)
     means = {}
     try:
+        if args.cloud:
+            cloud_points = session.gather_cloud(args.cloud)
+            if cloud_points is None:
+                return 1
         for pose in poses:
             m = session.gather(pose, args.samples)
             if m is None:
@@ -306,21 +434,30 @@ def main():
             print("  -> Both terms small.")
         return 0
 
-    x = [means[p][0] for p in SIX]
-    y = [means[p][1] for p in SIX]
-    z = [means[p][2] for p in SIX]
-    S, b = six_point_in_const_field_cal(GRAV, x, y, z)
+    if cloud_points is not None:
+        pts = cloud_points
+    else:
+        pts = np.array([means[p] for p in SIX])
+
+    # EllipsoidCalibration, not SixPointInConstFieldCal: this is the solver the
+    # GCS wizard actually calls, and it accepts any number of points.
+    S, centre, radii = ellipsoid_calibration(GRAV, pts[:, 0], pts[:, 1], pts[:, 2])
+    b = bias_for_firmware(centre, S, args.convention)
+    print("  fitted radii  %.4f %.4f %.4f  (from %d points)"
+          % (radii[0], radii[1], radii[2], len(pts)))
     print("  accel_scale  X=%.5f  Y=%.5f  Z=%.5f" % tuple(S))
     print("  accel_bias   X=%+.4f  Y=%+.4f  Z=%+.4f  m/s^2" % tuple(b))
     print("               (%+.0f  %+.0f  %+.0f mg)"
           % tuple(1000.0 * v / GRAV for v in b))
 
     resid = []
-    for p in SIX:
-        v = means[p]
-        c = [S[i] * v[i] - b[i] for i in range(3)]
+    for v in pts:
+        if args.convention == "sensors":
+            c = [(v[i] - b[i]) * S[i] for i in range(3)]
+        else:
+            c = [S[i] * v[i] - b[i] for i in range(3)]
         resid.append(np.linalg.norm(c))
-    print("\n  corrected |a| per pose: %s" % " ".join("%.3f" % r for r in resid))
+    print("\n  corrected |a|: %s" % " ".join("%.3f" % r for r in resid[:8]))
     print("  worst error vs %.3f: %.3f m/s^2"
           % (GRAV, max(abs(r - GRAV) for r in resid)))
 
