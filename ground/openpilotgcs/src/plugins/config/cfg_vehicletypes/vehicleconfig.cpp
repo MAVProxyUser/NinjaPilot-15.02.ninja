@@ -178,8 +178,18 @@ void VehicleConfig::updateChannelNames()
               << "GPIO27 - ADC2_7/TOUCH7"
               << "GPIO12 - ADC2_5/TOUCH5/MTDI";
 
+    /* LiteWing: four coreless motors on low-side MOSFETs. Named by the
+     * schematic's own MOT_n nets, because on this board the silkscreen number
+     * and the motor number are not the same thing. */
+    QStringList litewingPins;
+    litewingPins << "GPIO5 - MOT_1"
+                 << "GPIO6 - MOT_2"
+                 << "GPIO3 - MOT_3"
+                 << "GPIO4 - MOT_4";
+
     bool isRealposix = false;
     bool isEsp32     = false;
+    bool isLitewing  = false;
     ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
     if (pm) {
         UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
@@ -187,6 +197,7 @@ void VehicleConfig::updateChannelNames()
             int model = utilMngr->getBoardModel();
             isRealposix = (model & 0xff00) == 0x1100;
             isEsp32     = (model & 0xff00) == 0x1200;
+            isLitewing  = (model & 0xff00) == 0x1300;
         }
     }
 
@@ -199,7 +210,9 @@ void VehicleConfig::updateChannelNames()
             /* No "N:" prefix -- the form already badges each row with the
              * channel number, and repeating it just adds noise. */
             channelNames << esp32Pins.at(i);
-        } else if (isRealposix || isEsp32) {
+        } else if (isLitewing && i < litewingPins.count()) {
+            channelNames << litewingPins.at(i);
+        } else if (isRealposix || isEsp32 || isLitewing) {
             channelNames << QString("Channel%1 (unmapped)").arg(i + 1);
         } else {
             channelNames << QString("Channel%1").arg(i + 1);

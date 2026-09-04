@@ -61,6 +61,8 @@ protected:
 private:
     Ui_MultiRotorConfigWidget *m_aircraft;
     QGraphicsSvgItem *quad;
+    /* Board-specific pin numbers drawn over the quad-X motors. */
+    QGraphicsSvgItem *m_pinBadges;
     bool invertMotors;
 
     virtual void registerWidgets(ConfigTaskWidget &parent);
