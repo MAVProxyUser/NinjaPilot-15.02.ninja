@@ -263,59 +263,103 @@ class Session(object):
         return np.array(samples).mean(axis=0)
 
 
-    def gather_cloud(self, want, sep_deg=25.0, still_tol=0.06, window=12):
-        """Collect `want` STILL samples spread over many orientations.
+    def gather_rotating(self, need_buckets=16, quiet_axes=0.85,
+                        band=(0.70, 1.30), steady=0.15, window=8):
+        """Collect gravity samples while the board is slowly turned by hand.
 
-        You cannot wave an accelerometer the way you wave a magnetometer. The
-        mag reads the same field whether or not it is moving, so a continuous
-        sweep is fine; an accelerometer reads gravity PLUS whatever you are
-        doing to it, so a sample taken mid-swing is not a gravity measurement
-        at all. What generalises is the ellipsoid fit, not the waving: hold the
-        board still in as many attitudes as you like and let the fit use them
-        all.
+        This is the magnetometer-style flow, and it does work for an accel --
+        with one filter. A magnetometer reads the same field whether or not it
+        is moving; an accelerometer reads gravity PLUS whatever you are doing to
+        it, so samples taken mid-jerk have to go.
 
-        So this waits for stillness rather than for a named pose, and refuses a
-        sample whose direction is within sep_deg of one already taken -- that is
-        what stops a hundred readings of the same face being mistaken for
-        coverage.
+        The obvious filter is "keep it if the magnitude is 1 g", and it is
+        WRONG here: the whole reason to run a calibration is that the magnitude
+        is not 1 g yet. This board reads 10.91 where gravity is 9.807, so a
+        tight band around g threw away every single sample and the tool sat
+        there collecting nothing.
+
+        So the test is STEADINESS, not correctness. A hand rotating a board
+        smoothly changes the reading slowly; a jerk shows up as a spike in the
+        magnitude over a few samples. Keep anything whose magnitude is steady
+        across a short window and merely in the right ballpark -- the band is
+        deliberately wide enough to admit a badly offset sensor, because that is
+        the case being fixed.
+
+        Turning it slowly gives more keepers; jerking it just wastes samples.
+        Nothing has to be held still and nothing has to be counted.
         """
-        kept = []
+        buckets = {}
+        kept = 0
+        seen_total = 0
         recent = []
-        print("\n  Hold the board still in one attitude, then move to another.")
-        print("  Aim for all six faces plus corners; %d points wanted.\n" % want)
+        print("\n  Slowly rotate the board through every attitude -- like")
+        print("  turning a ball over in your hands. It stops on its own.\n")
 
-        deadline = time.time() + 600.0
-        while len(kept) < want and time.time() < deadline:
-            seen = self.updates
+        deadline = time.time() + 300.0
+        last_draw = 0.0
+        while time.time() < deadline:
+            n = self.updates
             self.pump(0.05)
-            if self.updates == seen or self.accel is None:
+            if self.updates == n or self.accel is None:
                 continue
-            recent.append(self.accel)
+            seen_total += 1
+            vec = np.array(self.accel, dtype=float)
+            mag = np.linalg.norm(vec)
+            recent.append(mag)
             if len(recent) > window:
                 recent.pop(0)
             if len(recent) < window:
                 continue
+            if not (band[0] * GRAV < mag < band[1] * GRAV):
+                continue                       # not a plausible 1g reading at all
+            if float(np.std(recent)) > steady:
+                continue                       # magnitude lurching: being jerked
+            kept += 1
+            unit = vec / mag
+            key = tuple(int(round(c)) for c in np.clip(unit * 1.3, -1, 1))
+            buckets.setdefault(key, []).append(vec)
 
-            arr = np.array(recent)
-            if arr.std(axis=0).max() > still_tol:
-                continue                      # still moving
-            mean = arr.mean(axis=0)
-            norm = np.linalg.norm(mean)
-            if not (0.7 * GRAV < norm < 1.3 * GRAV):
-                continue                      # not a clean 1g reading
-            unit = mean / norm
-            if any(np.dot(unit, k / np.linalg.norm(k)) > np.cos(np.radians(sep_deg))
-                   for k in kept):
-                continue                      # too close to one we already have
-            kept.append(mean)
-            recent.clear()
-            print("\r    %d/%d orientations captured" % (len(kept), want),
-                  end="", flush=True)
+            covered = self._axis_coverage(buckets, quiet_axes)
+            if time.time() - last_draw > 0.25:
+                last_draw = time.time()
+                print("\r    %d samples, %d/26 directions, %s        "
+                      % (kept, len(buckets), self._missing_text(covered)),
+                      end="", flush=True)
+            if len(buckets) >= need_buckets and all(covered.values()):
+                break
         print()
-        if len(kept) < want:
-            print("    timed out with %d points." % len(kept))
-            return None if len(kept) < 9 else np.array(kept)
-        return np.array(kept)
+
+        if not all(self._axis_coverage(buckets, quiet_axes).values()):
+            print("    Not enough coverage to fit. Missing: %s"
+                  % self._missing_text(self._axis_coverage(buckets, quiet_axes)))
+            return None
+        if seen_total and kept * 4 < seen_total:
+            print("    (note: %d%% of samples were dropped as movement -- "
+                  "turning it more slowly helps)" % (100 - 100 * kept // seen_total))
+        print("    fitting %d averaged directions from %d samples"
+              % (len(buckets), kept))
+        # one averaged point per direction, so a slow patch cannot outvote a fast one
+        return np.array([np.mean(v, axis=0) for v in buckets.values()])
+
+    @staticmethod
+    def _axis_coverage(buckets, thresh):
+        """Has each of the six faces been pointed down at some point?"""
+        got = {p[0]: False for p in POSES}
+        for vecs in buckets.values():
+            unit = np.mean(vecs, axis=0)
+            unit = unit / np.linalg.norm(unit)
+            for name, axis, sign, _desc in POSES:
+                if unit[axis] * sign > thresh:
+                    got[name] = True
+        return got
+
+    @staticmethod
+    def _missing_text(covered):
+        missing = [n for n, ok in covered.items() if not ok]
+        if not missing:
+            return "coverage complete"
+        return "still need: " + ", ".join(
+            POSE_BY_NAME[m][3].split(",")[0].lower() for m in missing[:3])
 
 
 def set_stream_rate(client, obj_name, period_ms):
@@ -351,8 +395,8 @@ def main():
     ap.add_argument("--xmldir", default=None)
     ap.add_argument("--six", action="store_true", help="full six-point calibration")
     ap.add_argument("--flip", action="store_true", help="two-pose bias vs gain check")
-    ap.add_argument("--cloud", type=int, metavar="N", default=0,
-                    help="fit N free-form still orientations instead of 6 fixed poses")
+    ap.add_argument("--rotate", action="store_true",
+                    help="just turn the board over in your hands (default)")
     ap.add_argument("--convention", choices=("attitude", "sensors"), default="attitude",
                     help="which firmware path applies the terms (default attitude.c, "
                          "which is what the ESP32/LiteWing targets use)")
@@ -363,8 +407,8 @@ def main():
                     help="with --apply, also persist it to flash")
     args = ap.parse_args()
 
-    if not (args.six or args.flip or args.cloud):
-        ap.error("pick --six, --flip or --cloud N")
+    if not (args.six or args.flip):
+        args.rotate = True
     if args.save and not args.apply:
         ap.error("--save needs --apply")
 
@@ -388,11 +432,11 @@ def main():
         print("AccelState raised to 20 ms for this run (restored at the end).")
 
     cloud_points = None
-    poses = [] if args.cloud else (SIX if args.six else FLIP)
+    poses = [] if args.rotate else (SIX if args.six else FLIP)
     means = {}
     try:
-        if args.cloud:
-            cloud_points = session.gather_cloud(args.cloud)
+        if args.rotate:
+            cloud_points = session.gather_rotating()
             if cloud_points is None:
                 return 1
         for pose in poses:
