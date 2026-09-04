@@ -35,6 +35,7 @@
 #include "uavobjectutilmanager.h"
 #include "cfg_vehicletypes/vehicleconfig.h"
 #include <QWidget>
+#include <QLabel>
 #include <QList>
 #include <QSignalMapper>
 
@@ -83,6 +84,7 @@ public:
 protected:
     void enableControls(bool enable);
     void applyBoardOutputUnits();
+    QLabel *m_brushedBanner;
     void setWarning(QString message);
 
 private:

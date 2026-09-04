@@ -26,6 +26,7 @@
  */
 
 #include "configoutputwidget.h"
+#include <QLabel>
 #include "outputchannelform.h"
 #include "configvehicletypewidget.h"
 
@@ -49,6 +50,8 @@
 
 ConfigOutputWidget::ConfigOutputWidget(QWidget *parent) : ConfigTaskWidget(parent)
 {
+    m_brushedBanner = NULL;
+
     m_ui = new Ui_OutputWidget();
     m_ui->setupUi(this);
 
@@ -168,27 +171,47 @@ void ConfigOutputWidget::applyBoardOutputUnits()
         }
     }
 
+    /* Say it on the page, not in a tooltip.
+     *
+     * The controls below describe an ESC that is not present on this board:
+     * PWM / PWMSync / OneShot125 are pulse formats, and the update rate is a
+     * frame rate. A brushed output is an LEDC duty cycle sent straight to a
+     * MOSFET gate at a fixed carrier, so those two controls have nothing to
+     * act on -- PIOS_Servo_SetHz() is a no-op on that backend. Greying them
+     * out says "unavailable"; it does not say the numbers in the column below
+     * mean something completely different from microseconds, which is the part
+     * that actually gets people hurt. */
+    if (!m_brushedBanner) {
+        m_brushedBanner = new QLabel(this);
+        m_brushedBanner->setWordWrap(true);
+        m_brushedBanner->setTextFormat(Qt::RichText);
+        m_brushedBanner->setStyleSheet(
+            "QLabel { background:#3b2f14; color:#ffd479; border:1px solid #7a5c1e;"
+            " border-radius:4px; padding:8px; }");
+        m_brushedBanner->setText(
+            tr("<b>Brushed outputs &mdash; these channels are a DUTY CYCLE, not microseconds.</b>"
+               "<br>0 = stopped, 1000 = 100&nbsp;%%. Coreless motors are driven straight from "
+               "MOSFET gates at a fixed 24&nbsp;kHz carrier, with no ESC in between, so "
+               "<i>Update rate</i> and <i>Mode</i> below do not apply and are disabled."
+               "<br>Endpoints must stay <b>0 / 0 / 1000</b>. The usual 1000/1000/2000 would be "
+               "full throttle on every motor the moment the board powers up, and there is no "
+               "ESC arming threshold to save you."));
+        if (QVBoxLayout *lay = qobject_cast<QVBoxLayout *>(m_ui->groupBox->layout())) {
+            lay->insertWidget(0, m_brushedBanner);
+        }
+    }
+    m_brushedBanner->setVisible(brushed);
+    m_ui->groupBox->setTitle(brushed ? tr("Output Configuration \xe2\x80\x94 brushed, duty cycle")
+                                     : tr("Output Configuration"));
+
     foreach(OutputBankControls controls, m_banks) {
         if (controls.rateCombo()) {
             controls.rateCombo()->setEnabled(!brushed);
-            controls.rateCombo()->setToolTip(brushed
-                ? tr("Not used on this board: the outputs are a fixed-carrier "
-                     "duty cycle, not timed frames.")
-                : QString());
         }
         if (controls.modeCombo()) {
             controls.modeCombo()->setEnabled(!brushed);
-            controls.modeCombo()->setToolTip(brushed
-                ? tr("Brushed: LEDC duty straight to the MOSFET gates, no ESC. "
-                     "Channel values are tenths of a percent, 0..1000.")
-                : QString());
         }
     }
-
-    m_ui->channelOutTest->setToolTip(brushed
-        ? tr("Values are 0..1000 = 0..100%% duty. There is no ESC arming "
-             "threshold -- any non-zero value turns a motor.")
-        : QString());
 }
 
 void ConfigOutputWidget::enableControls(bool enable)

@@ -150,24 +150,14 @@ ConfigMultiRotorWidget::ConfigMultiRotorWidget(QWidget *parent) :
     quad->setSharedRenderer(renderer);
     quad->setElementId("quad-x");
 
-    /* Pin badges over the quad-X motors.
-     *
-     * These used to be baked INSIDE the quad-x group in the SVG, which meant
-     * every board got the ESP32 Thing Plus pin numbers -- a LiteWing showed
-     * 15/33/27/12 for motors that are actually on GPIO5/6/3/4. They are now
-     * separate top-level groups in the shared SVG, and the right one is picked
-     * from the connected board. Position comes from the SVG's own geometry
-     * rather than hardcoded offsets: boundsOnElement() reports both groups in
-     * the same coordinate space, so the difference places the badges exactly
-     * where the artwork intends.
-     *
-     * Only quad-X has badges; setupUI() hides them for every other frame. */
-    m_pinBadges = new QGraphicsSvgItem(quad);
-    m_pinBadges->setSharedRenderer(renderer);
-    m_pinBadges->setVisible(false);
+    /* No pin numbers are painted on the artwork. They were baked into the
+     * quad-x group in the shared SVG, so every board showed the ESP32 Thing
+     * Plus pins; lifting them out to select per board then took them out of
+     * that group's transform (matrix(1.25,0,0,-1.25,...), note the negative Y)
+     * and they landed unscaled and offset, doubling up on the motor numbers
+     * the artwork already draws. The pin for each motor is named in the
+     * "Motor output channels" combo below, which is the right place for it. */
 
-    m_renderer = renderer;
-    updatePinBadges();
 
     QGraphicsScene *scene = new QGraphicsScene();
     scene->addItem(quad);
@@ -191,47 +181,6 @@ ConfigMultiRotorWidget::ConfigMultiRotorWidget(QWidget *parent) :
     m_aircraft->multiThrottleCurve->setYAxisLabel(tr("Output"));
 
     updateEnableControls();
-}
-
-/**
- * @brief Pick the motor pin badges for whatever board is connected NOW.
- *
- * Must be callable more than once. The constructor runs at GCS startup, when
- * no board is connected and getBoardModel() is 0, so choosing the badge only
- * there means it is chosen from nothing and never revisited -- the artwork
- * falls back to bare motor numbers even after the board arrives. refresh calls
- * this again once the board has identified itself.
- */
-void ConfigMultiRotorWidget::updatePinBadges()
-{
-    if (!m_pinBadges || !m_renderer) {
-        return;
-    }
-
-    QString badgeId;
-    ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
-    if (pm) {
-        UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
-        if (utilMngr) {
-            int model = utilMngr->getBoardModel();
-            if ((model & 0xff00) == 0x1200) {
-                badgeId = "quadx-esp32-pins";
-            } else if ((model & 0xff00) == 0x1300) {
-                badgeId = "quadx-litewing-pins";
-            }
-        }
-    }
-
-    if (badgeId.isEmpty() || !m_renderer->elementExists(badgeId)) {
-        m_pinBadges->setVisible(false);
-        return;
-    }
-    if (m_pinBadges->elementId() != badgeId) {
-        m_pinBadges->setElementId(badgeId);
-        m_pinBadges->setPos(m_renderer->boundsOnElement(badgeId).topLeft()
-                            - m_renderer->boundsOnElement("quad-x").topLeft());
-    }
-    m_pinBadges->setVisible(quad && quad->elementId() == "quad-x");
 }
 
 ConfigMultiRotorWidget::~ConfigMultiRotorWidget()
@@ -466,8 +415,6 @@ void ConfigMultiRotorWidget::updateRcCurvesUsed()
  */
 void ConfigMultiRotorWidget::refreshWidgetsValues(QString frameType)
 {
-    // The board may only have identified itself after this widget was built.
-    updatePinBadges();
 
     Q_ASSERT(m_aircraft);
 
@@ -916,11 +863,6 @@ void ConfigMultiRotorWidget::updateAirframe(QString frameType)
 
     if (elementId != "" && elementId != quad->elementId()) {
         quad->setElementId(elementId);
-        /* The badges are drawn for the quad-X layout only -- every other frame
-         * puts its motors somewhere else. */
-        if (m_pinBadges && !m_pinBadges->elementId().isEmpty()) {
-            m_pinBadges->setVisible(elementId == "quad-x");
-        }
         m_aircraft->quadShape->setSceneRect(quad->boundingRect());
         m_aircraft->quadShape->fitInView(quad, Qt::KeepAspectRatio);
     }
