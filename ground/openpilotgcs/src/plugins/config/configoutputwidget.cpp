@@ -26,7 +26,6 @@
  */
 
 #include "configoutputwidget.h"
-#include <QLabel>
 #include "outputchannelform.h"
 #include "configvehicletypewidget.h"
 
@@ -50,7 +49,6 @@
 
 ConfigOutputWidget::ConfigOutputWidget(QWidget *parent) : ConfigTaskWidget(parent)
 {
-    m_brushedBanner = NULL;
 
     m_ui = new Ui_OutputWidget();
     m_ui->setupUi(this);
@@ -152,64 +150,72 @@ ConfigOutputWidget::~ConfigOutputWidget()
  * on that backend. Showing them enabled invites someone to set a value that is
  * silently ignored, or worse to reason about endpoints in microseconds.
  */
-void ConfigOutputWidget::applyBoardOutputUnits()
+/**
+ * @brief Is the connected board's output stage brushed (LEDC duty, no ESC)?
+ */
+bool ConfigOutputWidget::isBrushedBoard() const
 {
-    bool brushed = false;
     ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
 
-    if (pm) {
-        UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
-        if (utilMngr) {
-            brushed = (utilMngr->getBoardModel() & 0xff00) == 0x1300;
-        }
+    if (!pm) {
+        return false;
     }
+    UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
+    return utilMngr && (utilMngr->getBoardModel() & 0xff00) == 0x1300;
+}
 
+/**
+ * @brief Re-apply the per-channel output range for the connected board.
+ *
+ * Runs BEFORE values are pushed into the widgets, because the spinbox range
+ * decides whether a stored value survives being displayed. See
+ * OutputChannelForm::applyBoardLimits().
+ */
+void ConfigOutputWidget::applyBoardOutputUnits()
+{
     for (unsigned int i = 0; i < ActuatorCommand::CHANNEL_NUMELEM; i++) {
         OutputChannelForm *form = getOutputChannelForm(i);
         if (form) {
             form->applyBoardLimits();
         }
     }
+}
 
-    /* Say it on the page, not in a tooltip.
-     *
-     * The controls below describe an ESC that is not present on this board:
-     * PWM / PWMSync / OneShot125 are pulse formats, and the update rate is a
-     * frame rate. A brushed output is an LEDC duty cycle sent straight to a
-     * MOSFET gate at a fixed carrier, so those two controls have nothing to
-     * act on -- PIOS_Servo_SetHz() is a no-op on that backend. Greying them
-     * out says "unavailable"; it does not say the numbers in the column below
-     * mean something completely different from microseconds, which is the part
-     * that actually gets people hurt. */
-    if (!m_brushedBanner) {
-        m_brushedBanner = new QLabel(this);
-        m_brushedBanner->setWordWrap(true);
-        m_brushedBanner->setTextFormat(Qt::RichText);
-        m_brushedBanner->setStyleSheet(
-            "QLabel { background:#3b2f14; color:#ffd479; border:1px solid #7a5c1e;"
-            " border-radius:4px; padding:8px; }");
-        m_brushedBanner->setText(
-            tr("<b>Brushed outputs &mdash; these channels are a DUTY CYCLE, not microseconds.</b>"
-               "<br>0 = stopped, 1000 = 100&nbsp;%%. Coreless motors are driven straight from "
-               "MOSFET gates at a fixed 24&nbsp;kHz carrier, with no ESC in between, so "
-               "<i>Update rate</i> and <i>Mode</i> below do not apply and are disabled."
-               "<br>Endpoints must stay <b>0 / 0 / 1000</b>. The usual 1000/1000/2000 would be "
-               "full throttle on every motor the moment the board powers up, and there is no "
-               "ESC arming threshold to save you."));
-        if (QVBoxLayout *lay = qobject_cast<QVBoxLayout *>(m_ui->groupBox->layout())) {
-            lay->insertWidget(0, m_brushedBanner);
-        }
+/**
+ * @brief Make the bank controls name what this board actually drives.
+ *
+ * Must run AFTER ConfigTaskWidget::refreshWidgetsValues(), which repopulates
+ * these combos from the UAVObject enum and would otherwise wipe the text.
+ *
+ * "PWM" is simply not true here. There is no ESC and no pulse: the flight code
+ * writes an LEDC duty cycle straight to a MOSFET gate at a fixed carrier, so
+ * the mode is Brushed and the rate box describes a gate, not a frame rate.
+ * Both fields are ignored by the brushed backend (PIOS_Servo_SetHz() is a
+ * no-op there), so naming them honestly costs nothing and stops the tab
+ * implying the channel numbers below are microseconds.
+ */
+void ConfigOutputWidget::applyBrushedBankLabels()
+{
+    if (!isBrushedBoard()) {
+        return;
     }
-    m_brushedBanner->setVisible(brushed);
-    m_ui->groupBox->setTitle(brushed ? tr("Output Configuration \xe2\x80\x94 brushed, duty cycle")
-                                     : tr("Output Configuration"));
 
     foreach(OutputBankControls controls, m_banks) {
-        if (controls.rateCombo()) {
-            controls.rateCombo()->setEnabled(!brushed);
+        if (QComboBox *mode = controls.modeCombo()) {
+            mode->blockSignals(true);
+            mode->clear();
+            mode->addItem(tr("Brushed"));
+            mode->setCurrentIndex(0);
+            mode->setEnabled(false);
+            mode->blockSignals(false);
         }
-        if (controls.modeCombo()) {
-            controls.modeCombo()->setEnabled(!brushed);
+        if (QComboBox *rate = controls.rateCombo()) {
+            rate->blockSignals(true);
+            rate->clear();
+            rate->addItem(tr("MOSFET 24 kHz"));
+            rate->setCurrentIndex(0);
+            rate->setEnabled(false);
+            rate->blockSignals(false);
         }
     }
 }
@@ -377,18 +383,17 @@ void ConfigOutputWidget::refreshWidgetsValues(UAVObject *obj)
 {
     bool dirty = isDirty();
 
-    /* Re-apply the per-board output range and units BEFORE the values are
-     * pushed into the widgets.
-     *
-     * These forms are built at GCS startup, when no board is connected and
-     * getBoardModel() is 0, so anything decided once in their constructor is
-     * decided from nothing. For a brushed board that meant the spinboxes kept
-     * the microsecond floor of 500 and clamped a stored ChannelMin of 0 up to
-     * it -- displaying 500, and writing 500 back on the next save, which is
-     * 50% throttle at rest on a board with no ESC to ignore it. */
+    /* Range first: these forms are built at GCS startup when no board is
+     * connected and getBoardModel() is 0, so a range decided once in their
+     * constructor is decided from nothing. For a brushed board that left the
+     * microsecond floor of 500 in place, clamping a stored ChannelMin of 0 up
+     * to it -- 50% throttle at rest on a board with no ESC to ignore it. */
     applyBoardOutputUnits();
 
     ConfigTaskWidget::refreshWidgetsValues(obj);
+
+    // ...and the bank labels last, since the base class repopulates them.
+    applyBrushedBankLabels();
 
     // Get Actuator Settings
     ActuatorSettings *actuatorSettings = ActuatorSettings::GetInstance(getObjectManager());
