@@ -127,7 +127,16 @@ IPconnectionConnection::IPconnectionConnection()
      * tools/wifi_setup.py (or a second GCS) for the port -- a beacon listener
      * that made other tools fail would be a poor trade for convenience. */
     m_beaconSocket = new QUdpSocket(this);
-    if (m_beaconSocket->bind(9999, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
+    /* Bind AnyIPv4 explicitly, not the default QHostAddress::Any.
+     *
+     * Any gives a dual-stack IPv6 socket, and on macOS/BSD an IPv4 BROADCAST
+     * datagram is not delivered to one of those. The board broadcasts IPv4, so
+     * the beacon arrived for a plain IPv4 listener (tools/wifi_setup.py saw it
+     * fine) while the GCS sat there with a bound socket that never received
+     * anything -- the most confusing kind of failure, because lsof shows the
+     * port held and everything looks correct. */
+    if (m_beaconSocket->bind(QHostAddress::AnyIPv4, 9999,
+                             QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
         connect(m_beaconSocket, SIGNAL(readyRead()), this, SLOT(onBeaconDatagram()));
     }
     m_beaconExpiry = new QTimer(this);
