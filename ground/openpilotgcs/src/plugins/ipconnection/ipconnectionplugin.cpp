@@ -289,6 +289,20 @@ QIODevice *IPconnectionConnection::openDevice(const QString &deviceName)
     if (!deviceName.isEmpty() && m_discovered.contains(deviceName)) {
         HostName = deviceName;
         Port     = 9000;
+        /* Force UDP as well as host and port.
+         *
+         * Leaving the transport to whatever the options page happened to hold
+         * meant a discovered board still failed to connect until the operator
+         * knew to switch TCP->UDP by hand -- which defeats the entire point of
+         * discovery: the beacon told us exactly where the board is and how to
+         * reach it, so making someone supply the missing third field is a
+         * worse experience than typing the IP in the first place.
+         *
+         * The ESP32 firmware serves UAVTalk on both, and UDP is the one it
+         * prefers: it is connectionless, so a board that reboots mid-session
+         * simply resumes, where a TCP session has to be torn down and
+         * re-established. */
+        UseTCP = false;
     }
 
     if (ipSocket) {
