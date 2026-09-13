@@ -357,13 +357,20 @@ static void actuatorTask(__attribute__((unused)) void *parameters)
         }
 
 #ifdef PIOS_ACTUATOR_BRUSHED_OUTPUTS
+        AlarmsClear(SYSTEMALARMS_ALARM_ACTUATOR);
         if (actuator_brushed_clamped) {
             /* Settings on the board are not the settings flying: somebody wrote
              * brushless resting endpoints to a brushed airframe and they were
-             * refused. Say so, every cycle, until they are corrected. */
-            AlarmsSet(SYSTEMALARMS_ALARM_ACTUATOR, SYSTEMALARMS_ALARM_WARNING);
-        } else {
-            AlarmsClear(SYSTEMALARMS_ALARM_ACTUATOR);
+             * refused. Say so, every cycle, until they are corrected.
+             *
+             * SYSTEMCONFIGURATION, not ACTUATOR. This is a configuration
+             * complaint, not an actuator fault, and ACTUATOR is load-bearing:
+             * the GCS output-calibration page refuses to run when it is
+             * anything but OK, which is correct behaviour for a genuinely
+             * unhealthy actuator module and wrong here. Overloading it turned
+             * a benign "I ignored your bad endpoints" into "the actuator
+             * module is in an error state" and stopped the wizard dead. */
+            AlarmsSet(SYSTEMALARMS_ALARM_SYSTEMCONFIGURATION, SYSTEMALARMS_ALARM_WARNING);
         }
 #else
         AlarmsClear(SYSTEMALARMS_ALARM_ACTUATOR);
@@ -987,7 +994,15 @@ static void ActuatorSettingsUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
     {
         bool clamped = false;
 
-        for (int i = 0; i < ACTUATORSETTINGS_CHANNELMIN_NUMELEM; i++) {
+        /* Only the channels that actually reach a pin.
+         *
+         * ActuatorSettings carries 12 channels; this board drives 4, and
+         * PIOS_Servo_Set() ignores anything above that. The unused eight keep
+         * their 1000 default, which is meaningless when nothing is wired to
+         * them -- but clamping on them raised the configuration warning
+         * permanently, on a board whose four real channels were perfectly
+         * correct. A warning that is always on is a warning nobody reads. */
+        for (int i = 0; i < PIOS_ACTUATOR_BRUSHED_CHANNELS; i++) {
             if (actuatorSettings.ChannelMin[i] > PIOS_ACTUATOR_BRUSHED_REST_MAX) {
                 actuatorSettings.ChannelMin[i] = 0;
                 clamped = true;

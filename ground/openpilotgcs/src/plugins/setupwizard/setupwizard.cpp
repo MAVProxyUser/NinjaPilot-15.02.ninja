@@ -188,6 +188,23 @@ int SetupWizard::nextId() const
          * battery and USB must never be connected at the same time. When
          * the calibration pages are skipped, the firmware's RF calibration
          * (transmitter switch-wiggle) keeps owning the motor endpoints. */
+        /* LiteWing skips output calibration on EVERY transport, not just USB.
+         *
+         * There is nothing to calibrate: no ESC exists, and the endpoints are
+         * 0 / 0 / 1000 by construction because a channel is duty, not pulse
+         * width. Worse, the page is microsecond-native -- its slider bottom is
+         * 1000, which on this board is 100 % throttle. Running it over WiFi
+         * span a motor with the slider showing zero, and its own
+         * checkAlarms() then aborted with "the actuator module is in an error
+         * state" because the firmware had clamped the endpoints it wrote and
+         * raised a warning saying so.
+         *
+         * The rule below is about a different hazard on a different board (the
+         * ESP32 quad's BEC sharing VUSB), so LiteWing is decided first and
+         * separately rather than folded into it. */
+        if (getControllerType() == CONTROLLER_LITEWING) {
+            return PAGE_AIRFRAME_INITIAL_TUNING;
+        }
         if (getControllerType() == CONTROLLER_ESP32 || getControllerType() == CONTROLLER_LITEWING) {
             QString connName = Core::ICore::instance()->connectionManager()->getCurrentDevice().getConName();
             bool usbAttached = connName.startsWith("USB:", Qt::CaseInsensitive) ||
