@@ -86,7 +86,8 @@ bool ControllerPage::isComplete() const
 bool ControllerPage::validatePage()
 {
     getWizard()->setControllerType((SetupWizard::CONTROLLER_TYPE)ui->boardTypeCombo->itemData(ui->boardTypeCombo->currentIndex()).toInt());
-    if (getWizard()->getControllerType() == SetupWizard::CONTROLLER_ESP32) {
+    if (getWizard()->getControllerType() == SetupWizard::CONTROLLER_ESP32
+        || getWizard()->getControllerType() == SetupWizard::CONTROLLER_LITEWING) {
         /* Seed the wizard's actuator endpoints from the live board. The
          * Thing Plus keeps its motor endpoints in the firmware's RF
          * calibration; if the output calibration pages run (network
@@ -143,6 +144,16 @@ SetupWizard::CONTROLLER_TYPE ControllerPage::getControllerType()
     case 0x1202:
         return SetupWizard::CONTROLLER_ESP32;
 
+    case 0x1302:
+        /* LiteWing is its OWN board, not a variant of the Thing Plus. It has
+         * different pins, brushed outputs instead of ESCs, and no radio
+         * receiver of its own. Sharing CONTROLLER_ESP32 would work today only
+         * because their needs happen to coincide, and would silently apply one
+         * board's assumptions to the other the moment they diverge. Without a
+         * case here it falls through to CONTROLLER_UNKNOWN and the wizard's
+         * Next button stays disabled, which is where a LiteWing got stuck. */
+        return SetupWizard::CONTROLLER_LITEWING;
+
     case 0x0904:
         return SetupWizard::CONTROLLER_DISCOVERYF4;
 
@@ -167,6 +178,7 @@ void ControllerPage::setupBoardTypes()
     ui->boardTypeCombo->addItem(tr("OpenPilot Revolution"), SetupWizard::CONTROLLER_REVO);
     ui->boardTypeCombo->addItem(tr("NinjaPilot RealPosix (OSD32MP1)"), SetupWizard::CONTROLLER_REALPOSIX);
     ui->boardTypeCombo->addItem(tr("NinjaPilot ESP32 Thing Plus"), SetupWizard::CONTROLLER_ESP32);
+    ui->boardTypeCombo->addItem(tr("NinjaPilot LiteWing (ESP32-S3)"), SetupWizard::CONTROLLER_LITEWING);
     ui->boardTypeCombo->addItem(tr("OpenPilot OPLink Radio Modem"), SetupWizard::CONTROLLER_OPLINK);
     ui->boardTypeCombo->addItem(tr("OpenPilot DiscoveryF4"), SetupWizard::CONTROLLER_DISCOVERYF4);
 }

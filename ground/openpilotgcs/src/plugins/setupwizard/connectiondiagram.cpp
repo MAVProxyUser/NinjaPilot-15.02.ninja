@@ -90,6 +90,7 @@ void ConnectionDiagram::setupGraphicsScene()
             elementsToShow << "controller-revo";
             break;
         case VehicleConfigurationSource::CONTROLLER_ESP32:
+        case VehicleConfigurationSource::CONTROLLER_LITEWING:
             elementsToShow << "controller-esp32";
             break;
         case VehicleConfigurationSource::CONTROLLER_NANO:
@@ -181,6 +182,7 @@ void ConnectionDiagram::setupGraphicsScene()
             prefix = "revo-";
             break;
         case VehicleConfigurationSource::CONTROLLER_ESP32:
+        case VehicleConfigurationSource::CONTROLLER_LITEWING:
             prefix = "esp32-";
             break;
         case VehicleConfigurationSource::CONTROLLER_NANO:

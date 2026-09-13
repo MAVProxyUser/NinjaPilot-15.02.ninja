@@ -179,6 +179,7 @@ void VehicleConfigurationHelper::applyHardwareConfiguration()
         }
         break;
     case VehicleConfigurationSource::CONTROLLER_ESP32:
+    case VehicleConfigurationSource::CONTROLLER_LITEWING:
         /* Fixed-function hardware: the Spektrum satellite is on a dedicated
          * UART, PWM out is on dedicated MCPWM pins, and telemetry arrives
          * over WiFi or the USB serial console. There are no CC_/RM_ port
@@ -429,12 +430,24 @@ void VehicleConfigurationHelper::applyActuatorConfiguration()
     {
         ActuatorSettings::DataFields data = actSettings->getData();
 
-        bool esp32 = m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_ESP32;
+        VehicleConfigurationSource::CONTROLLER_TYPE ctrl = m_configSource->getControllerType();
+        bool esp32    = ctrl == VehicleConfigurationSource::CONTROLLER_ESP32;
+        bool litewing = ctrl == VehicleConfigurationSource::CONTROLLER_LITEWING;
 
         QList<actuatorChannelSettings> actuatorSettings = m_configSource->getActuatorSettings();
         for (quint16 i = 0; i < ActuatorSettings::CHANNELMAX_NUMELEM; i++) {
             data.ChannelType[i]    = ActuatorSettings::CHANNELTYPE_PWM;
-            data.ChannelAddr[i]    = i;
+            if (!litewing) {
+                /* Identity is right where a mixer row and an output pin are the
+                 * same thing, and a mis-ordered motor is fixed by moving an ESC
+                 * lead. LiteWing's motors are soldered to fixed pins, so
+                 * ChannelAddr IS its corner mapping -- 1,2,3,0, derived from
+                 * the PCB and confirmed by driving each mixer row on the bench.
+                 * Resetting it to identity would silently cross the motors and
+                 * flip the airframe on takeoff, with nothing in the UI to say
+                 * so. Other boards keep the original behaviour untouched. */
+                data.ChannelAddr[i] = i;
+            }
             /* On the ESP32 Thing Plus these were seeded from the live
              * board when the controller was selected (controllerpage.cpp),
              * so writing them back is lossless whether or not the output
@@ -862,7 +875,8 @@ void VehicleConfigurationHelper::applyManualControlDefaults()
 
     ManualControlSettings::ChannelGroupsOptions channelType = ManualControlSettings::CHANNELGROUPS_PWM;
 
-    if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_ESP32) {
+    if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_ESP32
+        || m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_LITEWING) {
         /* The firmware registers the satellite under the DSM (Main port)
          * channel group; that is also what the board's own provisioning
          * writes. Only the group assignment is written here -- channel

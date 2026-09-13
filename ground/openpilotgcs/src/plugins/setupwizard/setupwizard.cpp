@@ -99,6 +99,7 @@ int SetupWizard::nextId() const
         case CONTROLLER_REVO:
         case CONTROLLER_REALPOSIX:
         case CONTROLLER_ESP32:
+        case CONTROLLER_LITEWING:
         case CONTROLLER_NANO:
         case CONTROLLER_DISCOVERYF4:
             return PAGE_INPUT;
@@ -148,7 +149,7 @@ int SetupWizard::nextId() const
          * atomically at the final Save page. STM32 targets keep the
          * original persist+reboot (their receiver hardware needs it). */
         if (getControllerType() != CONTROLLER_REALPOSIX &&
-            getControllerType() != CONTROLLER_ESP32 && isRestartNeeded()) {
+            getControllerType() != CONTROLLER_ESP32 && getControllerType() != CONTROLLER_LITEWING && isRestartNeeded()) {
             saveHardwareSettings();
             reboot();
         }
@@ -187,7 +188,7 @@ int SetupWizard::nextId() const
          * battery and USB must never be connected at the same time. When
          * the calibration pages are skipped, the firmware's RF calibration
          * (transmitter switch-wiggle) keeps owning the motor endpoints. */
-        if (getControllerType() == CONTROLLER_ESP32) {
+        if (getControllerType() == CONTROLLER_ESP32 || getControllerType() == CONTROLLER_LITEWING) {
             QString connName = Core::ICore::instance()->connectionManager()->getCurrentDevice().getConName();
             bool usbAttached = connName.startsWith("USB:", Qt::CaseInsensitive) ||
                                connName.startsWith("Serial:", Qt::CaseInsensitive);
@@ -244,6 +245,7 @@ int SetupWizard::nextId() const
         case CONTROLLER_REVO:
         case CONTROLLER_REALPOSIX:
         case CONTROLLER_ESP32:
+        case CONTROLLER_LITEWING:
         case CONTROLLER_NANO:
         case CONTROLLER_DISCOVERYF4:
             switch (getVehicleType()) {
@@ -287,6 +289,7 @@ QString SetupWizard::getSummaryText()
         summary.append(tr("NinjaPilot RealPosix (OSD32MP1)"));
         break;
     case CONTROLLER_ESP32:
+    case CONTROLLER_LITEWING:
         summary.append(tr("NinjaPilot ESP32 Thing Plus"));
         break;
     case CONTROLLER_NANO:
