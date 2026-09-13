@@ -26,6 +26,8 @@
  */
 
 #include "configinputwidget.h"
+#include "extensionsystem/pluginmanager.h"
+#include "uavobjectutilmanager.h"
 
 #include <extensionsystem/pluginmanager.h>
 #include <coreplugin/generalsettings.h>
@@ -1794,6 +1796,31 @@ void ConfigInputWidget::resetActuatorSettings()
 
     QString mixerType;
 
+    /* What "stopped" means depends on the output stage, and getting it wrong
+     * here is not a cosmetic bug -- this runs the moment the wizard opens.
+     *
+     * On a board driving ESCs a channel is a pulse width, 1000us is the ESC's
+     * stop, and parking every motor there is exactly the safety measure it
+     * looks like. On a BRUSHED board a channel is tenths of a percent duty
+     * straight into a MOSFET gate, so the same 1000 is 100% THROTTLE: the
+     * wizard's own safety step spins every motor on the airframe. That was
+     * observed on a LiteWing, where the first screen of the transmitter setup
+     * wizard ran all four motors up on USB power alone.
+     *
+     * There is no ESC deadband on such a board to absorb the mistake, so the
+     * stop is 0 and it applies to every channel type -- 1500 would be worse
+     * still, clamping to full scale. */
+    bool brushed = false;
+    {
+        ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+        if (pm) {
+            UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
+            if (utilMngr) {
+                brushed = (utilMngr->getBoardModel() & 0xff00) == 0x1300;
+            }
+        }
+    }
+
     // Clear all output data : Min, max, neutral at same value
     // 1000 for motors and 1500 for all others (Reversable motor included)
     for (unsigned int output = 0; output < 12; output++) {
@@ -1804,15 +1831,17 @@ void ConfigInputWidget::resetActuatorSettings()
         if (field) {
             mixerType = field->getValue().toString();
         }
-        if ((mixerType == "Motor") || (mixerType == "Disabled")) {
-            actuatorSettingsData.ChannelMax[output]     = 1000;
-            actuatorSettingsData.ChannelMin[output]     = 1000;
-            actuatorSettingsData.ChannelNeutral[output] = 1000;
+        int stop;
+        if (brushed) {
+            stop = 0;
+        } else if ((mixerType == "Motor") || (mixerType == "Disabled")) {
+            stop = 1000;
         } else {
-            actuatorSettingsData.ChannelMax[output]     = 1500;
-            actuatorSettingsData.ChannelMin[output]     = 1500;
-            actuatorSettingsData.ChannelNeutral[output] = 1500;
+            stop = 1500;
         }
+        actuatorSettingsData.ChannelMax[output]     = stop;
+        actuatorSettingsData.ChannelMin[output]     = stop;
+        actuatorSettingsData.ChannelNeutral[output] = stop;
         actuatorSettingsObj->setData(actuatorSettingsData);
     }
 }
