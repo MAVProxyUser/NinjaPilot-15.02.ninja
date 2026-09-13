@@ -63,6 +63,11 @@ signals:
     void oplinkConnect();
     void oplinkDisconnect();
 
+
+private:
+    /* Board model the tabs were last built for; 0 = none yet. */
+    int m_appliedBoard = 0;
+
 protected:
     void resizeEvent(QResizeEvent *event);
 

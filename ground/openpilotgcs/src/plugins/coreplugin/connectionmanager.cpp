@@ -143,8 +143,19 @@ bool ConnectionManager::connectDevice(DevListItem device)
      * could never be picked, so the dropdown settled on whatever happened to be
      * first, in practice the always-present UDP entry, and the operator
      * reselected their board by hand on every start. */
+    /* Remember the DEVICE name, not the display name.
+     *
+     * getConName() is shortName() + ": " + displayName, and for the IP
+     * connection shortName() is "TCP" or "UDP" depending on a config flag. So
+     * the display name of one physical board changes when that setting is
+     * flipped: connect while it says TCP and you store "TCP: ESP32 <ip>
+     * (WiFi)", then switch to UDP and the very same board enumerates as
+     * "UDP: ESP32 <ip> (WiFi)" and never matches again. device.name is the
+     * port path or the IP -- it identifies the thing itself and does not move
+     * when a transport setting does. */
     QSettings settings;
-    settings.setValue(QLatin1String("ConnectionManager/lastDevice"), deviceName);
+    settings.setValue(QLatin1String("ConnectionManager/lastDevice"),
+                      connection_device.device.name);
 
     connect(m_connectionDevice.connection, SIGNAL(destroyed(QObject *)), this, SLOT(onConnectionDestroyed(QObject *)), Qt::QueuedConnection);
 
@@ -499,7 +510,7 @@ void ConnectionManager::updateConnectionDropdown()
             /* The last connection that actually worked wins, whatever bus it
              * was on. Checked before the USB rule so a remembered serial board
              * is not overridden by a USB device appearing later in the list. */
-            if (!m_ioDev && !lastDevice.isEmpty() && d.getConName() == lastDevice) {
+            if (!m_ioDev && !lastDevice.isEmpty() && d.device.name == lastDevice) {
                 m_availableDevList->setCurrentIndex(m_availableDevList->count() - 1);
                 if (m_mainWindow->generalSettings()->autoConnect() && polling) {
                     qDebug() << "ConnectionManager: reconnecting to last device" << lastDevice;

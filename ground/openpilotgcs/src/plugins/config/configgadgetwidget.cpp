@@ -26,6 +26,7 @@
  */
 
 #include "configgadgetwidget.h"
+#include "uavobjectmanager.h"
 #include <QScrollArea>
 #include <QLabel>
 #include "configrevowidget.h"
@@ -116,6 +117,25 @@ ConfigGadgetWidget::ConfigGadgetWidget(QWidget *parent) : QWidget(parent)
     connect(telMngr, SIGNAL(connected()), this, SLOT(onAutopilotConnect()));
     connect(telMngr, SIGNAL(disconnected()), this, SLOT(onAutopilotDisconnect()));
 
+    /* Also re-run when FirmwareIAPObj arrives.
+     *
+     * connected() fires the moment the link is up, and the board-specific tabs
+     * below are chosen from getBoardModel() at that instant -- but that reads
+     * FirmwareIAPObj, which is only retrieved LATER in the settings sweep. It
+     * is a race, and which way it falls depends on the transport: over serial
+     * the object usually beats the signal, over UDP it usually does not, and
+     * the board then identifies as Unknown and stays that way because nothing
+     * ever asks again. Same shape of bug as the motor pin badges and the
+     * output-range limits: a board-dependent decision made once, at a moment
+     * when the board is not necessarily known yet. */
+    UAVObjectManager *objMngr = pm->getObject<UAVObjectManager>();
+    if (objMngr) {
+        UAVObject *iap = objMngr->getObject(QString("FirmwareIAPObj"));
+        if (iap) {
+            connect(iap, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(onAutopilotConnect()));
+        }
+    }
+
     // And check whether by any chance we are not already connected
     if (telMngr->isConnected()) {
         onAutopilotConnect();
@@ -178,6 +198,16 @@ void ConfigGadgetWidget::onAutopilotConnect()
     UAVObjectUtilManager *utilMngr     = pm->getObject<UAVObjectUtilManager>();
     if (utilMngr) {
         int board = utilMngr->getBoardModel();
+
+        /* Idempotent: this is now called on every FirmwareIAPObj update, and
+         * rebuilding the tabs each time would throw away whatever the operator
+         * was doing in them. Only act when the answer actually changes, and
+         * never act on 0 -- that is "not known yet", not a board. */
+        if (board == 0 || board == m_appliedBoard) {
+            return;
+        }
+        m_appliedBoard = board;
+
         if ((board & 0xff00) == 1024) {
             // CopterControl family
             QWidget *qwd = new ConfigCCAttitudeWidget(this);
