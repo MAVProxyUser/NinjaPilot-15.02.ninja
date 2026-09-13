@@ -120,6 +120,32 @@ QString LoggingConnection::shortName()
 LoggingThread::~LoggingThread()
 {
     stopLogging();
+
+    /* stopLogging() ends in quit(), which only POSTS a request to this thread's
+     * event loop -- it returns immediately, with the thread still running. The
+     * base QThread destructor then runs, finds it alive, and calls qFatal:
+     *
+     *   QThread: Destroyed while thread is still running
+     *
+     * which aborts the whole GCS. It happens on every exit, so the application
+     * never shuts down cleanly, and anything a plugin would have written on the
+     * way out is simply lost. That is not merely untidy -- a crash at the wrong
+     * moment strands whatever the running screen had half-applied, which on a
+     * flight controller can mean a board left in a configuration nobody chose.
+     *
+     * So wait for the event loop to actually leave. The wait is AFTER
+     * stopLogging() returns, deliberately: that function holds a QWriteLocker
+     * for the duration, and blocking while holding it would deadlock against
+     * this thread's own handlers rather than let them finish.
+     *
+     * Bounded, because a hang on exit is its own bug. If the thread will not
+     * come back in three seconds something is genuinely stuck and terminating
+     * is better than never quitting -- we are being destroyed regardless. */
+    if (!wait(3000)) {
+        qWarning() << "LoggingThread did not exit in 3s; terminating";
+        terminate();
+        wait(1000);
+    }
 }
 
 /**
