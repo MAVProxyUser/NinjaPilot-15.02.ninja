@@ -106,6 +106,14 @@ static bool set_channel(uint8_t mixer_channel, uint16_t value);
 static void actuator_update_rate_if_changed(bool force_update);
 static void MixerSettingsUpdatedCb(UAVObjEvent *ev);
 static void ActuatorSettingsUpdatedCb(UAVObjEvent *ev);
+#ifdef PIOS_ACTUATOR_BRUSHED_OUTPUTS
+/* Armed state, cached at file scope so set_channel() can see it. The loop's
+ * own flightStatus is a local. */
+static volatile bool actuator_is_armed;
+/* Latched: the loop clears the Actuator alarm every cycle, so a warning raised
+ * in the settings callback would be wiped before anyone saw it. */
+static volatile bool actuator_brushed_clamped;
+#endif
 static void SettingsUpdatedCb(UAVObjEvent *ev);
 float ProcessMixer(const int index, const float curve1, const float curve2,
                    ActuatorDesiredData *desired,
@@ -265,6 +273,9 @@ static void actuatorTask(__attribute__((unused)) void *parameters)
         dTSeconds = dTMilliseconds * 0.001f;
 
         FlightStatusGet(&flightStatus);
+#ifdef PIOS_ACTUATOR_BRUSHED_OUTPUTS
+        actuator_is_armed = (flightStatus.Armed == FLIGHTSTATUS_ARMED_ARMED);
+#endif
         ActuatorDesiredGet(&desired);
         ActuatorCommandGet(&command);
 
@@ -345,7 +356,18 @@ static void actuatorTask(__attribute__((unused)) void *parameters)
             continue;
         }
 
+#ifdef PIOS_ACTUATOR_BRUSHED_OUTPUTS
+        if (actuator_brushed_clamped) {
+            /* Settings on the board are not the settings flying: somebody wrote
+             * brushless resting endpoints to a brushed airframe and they were
+             * refused. Say so, every cycle, until they are corrected. */
+            AlarmsSet(SYSTEMALARMS_ALARM_ACTUATOR, SYSTEMALARMS_ALARM_WARNING);
+        } else {
+            AlarmsClear(SYSTEMALARMS_ALARM_ACTUATOR);
+        }
+#else
         AlarmsClear(SYSTEMALARMS_ALARM_ACTUATOR);
+#endif
 
         float curve1 = 0.0f;
         float curve2 = 0.0f;
@@ -798,6 +820,38 @@ static bool set_channel(uint8_t mixer_channel, uint16_t value)
 #else
 static bool set_channel(uint8_t mixer_channel, uint16_t value)
 {
+#ifdef PIOS_ACTUATOR_BRUSHED_OUTPUTS
+    /* HARD INVARIANT: a disarmed brushed board outputs nothing.
+     *
+     * Every other protection here is a value being correct somewhere --
+     * ChannelMin being 0, the GCS knowing what kind of board this is, a
+     * settings clamp catching a bad write. Those are all worth having and all
+     * of them are one mistake away from failing, because on this output stage
+     * a plausible number means full throttle rather than a stop.
+     *
+     * This does not depend on any of them. Disarmed means zero duty at the
+     * last point before the pin, whatever the settings say, whoever wrote
+     * them, on every path including failsafe. The GCS input wizard parking
+     * every output at 1000 -- and then CRASHING before it could restore them,
+     * leaving a motor running on the bench for five minutes -- is exactly the
+     * sequence this exists to make impossible.
+     *
+     * The one carve-out is ActuatorCommandReadOnly(): the documented override
+     * where an operator has deliberately taken manual control of the outputs,
+     * which is how the GCS Output tab and the bench motor test drive pins with
+     * nothing armed. That is a considered act, not a side effect of opening a
+     * screen, and it is not what went wrong here -- the wizard never touched
+     * that mechanism. It wrote SETTINGS, and the ordinary disarmed path
+     * faithfully output ChannelMin. Closing the accidental path while leaving
+     * the deliberate one open is the distinction worth drawing; blocking both
+     * would just mean bench testing requires arming, which is worse.
+     *
+     * Costs nothing when armed, which is the only time a motor should turn. */
+    if (!actuator_is_armed && !ActuatorCommandReadOnly()) {
+        value = 0;
+    }
+#endif
+
     switch (actuatorSettings.ChannelType[mixer_channel]) {
     case ACTUATORSETTINGS_CHANNELTYPE_PWMALARMBUZZER:
         PIOS_Servo_Set(actuatorSettings.ChannelAddr[mixer_channel],
@@ -906,6 +960,49 @@ static void actuator_update_rate_if_changed(bool force_update)
 static void ActuatorSettingsUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
 {
     ActuatorSettingsGet(&actuatorSettings);
+
+#ifdef PIOS_ACTUATOR_BRUSHED_OUTPUTS
+    /* A brushed output stage has no ESC. The channel value is a duty cycle
+     * driven straight into a MOSFET gate, so a RESTING endpoint of 1000 is not
+     * "the stop" as it would be in microseconds -- it is 100% throttle, on a
+     * disarmed board, because what a disarmed board outputs is ChannelMin.
+     *
+     * Every path that writes these settings is a chance to get that wrong, and
+     * they do not look wrong: the GCS input wizard parks all outputs at 1000
+     * on entry precisely BECAUSE that is the safe stop for an ESC, and in
+     * doing so ran every motor on this airframe up to full. Teaching each
+     * client about brushed outputs one at a time does not converge -- the next
+     * new code path reintroduces it.
+     *
+     * So refuse it here instead, at the one place every update funnels
+     * through, whatever wrote it and whenever. Only the in-RAM working copy is
+     * clamped: the stored object is left exactly as the operator saved it, so
+     * nothing is silently rewritten behind their back, but nothing dangerous
+     * ever reaches a pin either.
+     *
+     * Max is untouched -- 1000 there is full throttle at full stick, which is
+     * the whole point. It is Min and Neutral, the values held at rest, that
+     * must be zero. Every output on such a board is a gate, so this applies to
+     * all channels rather than only those the mixer calls motors. */
+    {
+        bool clamped = false;
+
+        for (int i = 0; i < ACTUATORSETTINGS_CHANNELMIN_NUMELEM; i++) {
+            if (actuatorSettings.ChannelMin[i] > PIOS_ACTUATOR_BRUSHED_REST_MAX) {
+                actuatorSettings.ChannelMin[i] = 0;
+                clamped = true;
+            }
+            if (actuatorSettings.ChannelNeutral[i] > PIOS_ACTUATOR_BRUSHED_REST_MAX) {
+                actuatorSettings.ChannelNeutral[i] = 0;
+                clamped = true;
+            }
+        }
+        /* Latch rather than raise here: AlarmsClear() runs every loop and would
+         * erase it immediately. The loop re-asserts it from this flag. */
+        actuator_brushed_clamped = clamped;
+    }
+#endif /* PIOS_ACTUATOR_BRUSHED_OUTPUTS */
+
     spinWhileArmed = actuatorSettings.MotorsSpinWhileArmed == ACTUATORSETTINGS_MOTORSSPINWHILEARMED_TRUE;
     if (frameType == FRAME_TYPE_GROUND) {
         spinWhileArmed = false;
