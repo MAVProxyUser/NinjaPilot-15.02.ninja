@@ -153,9 +153,24 @@ bool ConnectionManager::connectDevice(DevListItem device)
      * "UDP: ESP32 <ip> (WiFi)" and never matches again. device.name is the
      * port path or the IP -- it identifies the thing itself and does not move
      * when a transport setting does. */
+    /* Remember device.displayName.
+     *
+     * Not getConName(): that is shortName() + ": " + displayName, and for the
+     * IP connection shortName() is "TCP" or "UDP" from a config flag, so one
+     * board's key moves when that setting is flipped.
+     *
+     * Not device.name either: the manually configured IP entry and an
+     * auto-discovered board are BOTH served by the same IPconnectionConnection
+     * and both carry the bare IP as their name, so that key cannot tell them
+     * apart -- it matched the plain UDP entry and the discovered ESP32 one was
+     * never selected, which is exactly the reported symptom.
+     *
+     * displayName differs between them ("192.168.0.139" vs "ESP32
+     * 192.168.0.139 (WiFi)") and does not depend on any transport setting. */
     QSettings settings;
     settings.setValue(QLatin1String("ConnectionManager/lastDevice"),
-                      connection_device.device.name);
+                      connection_device.device.displayName);
+    settings.sync();
 
     connect(m_connectionDevice.connection, SIGNAL(destroyed(QObject *)), this, SLOT(onConnectionDestroyed(QObject *)), Qt::QueuedConnection);
 
@@ -510,7 +525,7 @@ void ConnectionManager::updateConnectionDropdown()
             /* The last connection that actually worked wins, whatever bus it
              * was on. Checked before the USB rule so a remembered serial board
              * is not overridden by a USB device appearing later in the list. */
-            if (!m_ioDev && !lastDevice.isEmpty() && d.device.name == lastDevice) {
+            if (!m_ioDev && !lastDevice.isEmpty() && d.device.displayName == lastDevice) {
                 m_availableDevList->setCurrentIndex(m_availableDevList->count() - 1);
                 if (m_mainWindow->generalSettings()->autoConnect() && polling) {
                     qDebug() << "ConnectionManager: reconnecting to last device" << lastDevice;

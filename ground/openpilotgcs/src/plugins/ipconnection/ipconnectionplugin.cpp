@@ -198,9 +198,13 @@ QList <Core::IConnection::device> IPconnectionConnection::availableDevices()
     QStringList ips = m_discovered.keys();
     ips.sort();
     foreach(const QString &ip, ips) {
-        if (ip == m_config->HostName()) {
-            continue;   // already offered as the configured device
-        }
+        /* Deliberately NOT skipped when it equals the configured host. They are
+         * different entries with different behaviour: the discovered one forces
+         * UDP on port 9000 from what the board itself advertised, the
+         * configured one uses whatever the options page holds. Hiding the
+         * discovered entry because the IPs happen to match left the operator
+         * with only the manual entry and no way to pick the board the beacon
+         * had found. */
         device b;
         b.name = ip;
         b.displayName = QString("ESP32 %1 (WiFi)").arg(ip);
