@@ -28,6 +28,10 @@
 // The core of this plugin has been directly copied from the serial plugin and converted to work over a TCP link instead of a direct serial link
 
 #include "ipconnectionplugin.h"
+#include <QDateTime>
+#include <QHostAddress>
+#include <QTimer>
+#include <QUdpSocket>
 
 
 #include <extensionsystem/pluginmanager.h>
@@ -119,6 +123,17 @@ IPConnection *connection = 0;
 
 IPconnectionConnection::IPconnectionConnection()
 {
+    /* Listen for ESP32 discovery beacons. ShareAddress so this never fights
+     * tools/wifi_setup.py (or a second GCS) for the port -- a beacon listener
+     * that made other tools fail would be a poor trade for convenience. */
+    m_beaconSocket = new QUdpSocket(this);
+    if (m_beaconSocket->bind(9999, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
+        connect(m_beaconSocket, SIGNAL(readyRead()), this, SLOT(onBeaconDatagram()));
+    }
+    m_beaconExpiry = new QTimer(this);
+    connect(m_beaconExpiry, SIGNAL(timeout()), this, SLOT(expireBeacons()));
+    m_beaconExpiry->start(10000);
+
     ipSocket = NULL;
     // create all our objects
     m_config = new IPconnectionConfiguration("IP Network Telemetry", NULL, this);
@@ -169,10 +184,83 @@ QList <Core::IConnection::device> IPconnectionConnection::availableDevices()
     // we only have one "device" as defined by the configuration m_config
     list.append(d);
 
+    /* Boards heard announcing themselves on the LAN, newest first. Named so
+     * they are obviously not the manually configured entry. */
+    QStringList ips = m_discovered.keys();
+    ips.sort();
+    foreach(const QString &ip, ips) {
+        if (ip == m_config->HostName()) {
+            continue;   // already offered as the configured device
+        }
+        device b;
+        b.name = ip;
+        b.displayName = QString("ESP32 %1 (WiFi)").arg(ip);
+        list.append(b);
+    }
+
     return list;
 }
 
-QIODevice *IPconnectionConnection::openDevice(const QString &)
+/**
+ * @brief Handle a discovery beacon from an ESP32 board.
+ *
+ * Payload is "NINJAPILOT <ip>". The sender address is used rather than the
+ * address in the payload -- they agree in every normal case, and where they do
+ * not the one we actually received from is the one we can reach.
+ */
+void IPconnectionConnection::onBeaconDatagram()
+{
+    bool changed = false;
+
+    while (m_beaconSocket && m_beaconSocket->hasPendingDatagrams()) {
+        QByteArray buf;
+        QHostAddress sender;
+        buf.resize(m_beaconSocket->pendingDatagramSize());
+        m_beaconSocket->readDatagram(buf.data(), buf.size(), &sender);
+
+        if (!buf.startsWith("NINJAPILOT")) {
+            continue;
+        }
+        QString ip = sender.toString();
+        // strip any IPv4-mapped IPv6 prefix so the string matches what a user types
+        if (ip.startsWith("::ffff:")) {
+            ip = ip.mid(7);
+        }
+        if (!m_discovered.contains(ip)) {
+            changed = true;
+        }
+        m_discovered.insert(ip, QDateTime::currentDateTime());
+    }
+
+    if (changed) {
+        emit availableDevChanged(this);
+    }
+}
+
+/**
+ * @brief Drop boards that have stopped beaconing.
+ *
+ * Without this a board that was powered off keeps being offered, and picking it
+ * produces a connection timeout that looks like a firmware fault rather than an
+ * absent aircraft.
+ */
+void IPconnectionConnection::expireBeacons()
+{
+    const QDateTime cutoff = QDateTime::currentDateTime().addSecs(-30);
+    bool changed = false;
+
+    foreach(const QString &ip, m_discovered.keys()) {
+        if (m_discovered.value(ip) < cutoff) {
+            m_discovered.remove(ip);
+            changed = true;
+        }
+    }
+    if (changed) {
+        emit availableDevChanged(this);
+    }
+}
+
+QIODevice *IPconnectionConnection::openDevice(const QString &deviceName)
 {
     QString HostName;
     int Port;
@@ -183,6 +271,16 @@ QIODevice *IPconnectionConnection::openDevice(const QString &)
     HostName = m_config->HostName();
     Port     = m_config->Port();
     UseTCP   = m_config->UseTCP();
+
+    /* A discovered board overrides the configured host: the operator picked
+     * that entry in the dropdown, so connect to it and not to whatever the
+     * options page happens to hold. The ESP32 firmware serves UAVTalk on 9000
+     * (see pios_wifi.c WIFI_TCP_PORT), so default there rather than inheriting
+     * a port meant for a different target. */
+    if (!deviceName.isEmpty() && m_discovered.contains(deviceName)) {
+        HostName = deviceName;
+        Port     = 9000;
+    }
 
     if (ipSocket) {
         // Andrew: close any existing socket... this should never occur

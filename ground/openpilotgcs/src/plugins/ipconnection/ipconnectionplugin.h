@@ -38,6 +38,10 @@
 class QAbstractSocket;
 class QTcpSocket;
 class QUdpSocket;
+class QTimer;
+
+#include <QHash>
+#include <QDateTime>
 
 class IConnection;
 
@@ -71,6 +75,8 @@ public:
 
 protected slots:
     void onEnumerationChanged();
+    void onBeaconDatagram();
+    void expireBeacons();
 
 signals: // For the benefit of IPConnection
     void CreateSocket(QString HostName, int Port, bool UseTCP);
@@ -80,6 +86,21 @@ private:
     QAbstractSocket *ipSocket;
     IPconnectionConfiguration *m_config;
     IPconnectionOptionsPage *m_optionspage;
+
+    /* ESP32 board discovery.
+     *
+     * The ESP32 targets broadcast "NINJAPILOT <ip>" on UDP 9999 once they join
+     * a network, which is how tools/wifi_setup.py finds a board without any
+     * USB attached. Listening for the same beacon here means a board that has
+     * joined WiFi simply appears in the connection dropdown, instead of the
+     * operator having to read its IP off a serial console they cannot reach on
+     * this hardware and then type it into an options page.
+     *
+     * Entries expire: a board that has been powered off should stop being
+     * offered rather than sit there looking connectable. */
+    QUdpSocket *m_beaconSocket;
+    QHash<QString, QDateTime> m_discovered;   // ip -> last seen
+    QTimer *m_beaconExpiry;
     // QSettings* settings;
 };
 
