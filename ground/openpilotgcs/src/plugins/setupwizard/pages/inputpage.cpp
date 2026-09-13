@@ -62,6 +62,33 @@ void InputPage::initializePage()
         ui->ppmButton->setToolTip(why);
         ui->sbusButton->setToolTip(why);
     }
+
+    /* LiteWing has exactly two ways for sticks to arrive, and neither of them
+     * is a wire into a receiver pin: there is no PWM header, no S.Bus input
+     * and no hardware PPM (the RMT receiver picks up coupled noise on an
+     * unconnected pin and starves the gyro interrupt, so it is not built).
+     *
+     * What it does have is the GCS receiver riding the telemetry link -- WiFi
+     * UDP in flight, USB serial on the bench -- and a Spektrum satellite on
+     * IO15. The PPM button is reused for the former because the wizard has no
+     * separate notion of a link-borne receiver, so it is relabelled to say
+     * what it actually selects rather than implying a cable. */
+    if (getWizard()->getControllerType() == SetupWizard::CONTROLLER_LITEWING) {
+        const QString why = tr("Not present on LiteWing: no PWM header, no "
+                               "S.Bus input, and hardware PPM is not built.");
+        ui->pwmButton->setEnabled(false);
+        ui->sbusButton->setEnabled(false);
+        ui->pwmButton->setToolTip(why);
+        ui->sbusButton->setToolTip(why);
+
+        ui->ppmButton->setEnabled(true);
+        ui->ppmButton->setText(tr("Sticks over WiFi (GCS receiver)"));
+        ui->ppmButton->setToolTip(tr("Control from the GCS over the telemetry "
+                                     "link -- WiFi UDP in flight, USB serial on "
+                                     "the bench. No receiver hardware."));
+        ui->spectrumButton->setEnabled(true);
+        ui->spectrumButton->setToolTip(tr("Spektrum DSMX satellite on IO15."));
+    }
 }
 
 bool InputPage::validatePage()

@@ -409,6 +409,17 @@ void VehicleConfigurationHelper::applyActuatorConfiguration()
         bankMode     = ActuatorSettings::BANKMODE_ONESHOT125;
         escFrequence = ONESHOT_ESC_FREQUENCY;
         break;
+    case VehicleConfigurationSource::ESC_BRUSHED:
+        /* No ESC, so no frame rate and no pulse format. The outputs are an
+         * LEDC duty cycle at a fixed 24 kHz carrier; PIOS_Servo_SetHz() is a
+         * no-op on that backend and BankMode only means something to the MCPWM
+         * path. Leave BANKMODE_PWM as the least-wrong enum value the object
+         * can hold and do not invent a frequency -- the firmware ignores both,
+         * and writing a plausible number here would only mislead whoever reads
+         * the settings back. */
+        bankMode     = ActuatorSettings::BANKMODE_PWM;
+        escFrequence = LEGACY_ESC_FREQUENCY;
+        break;
     default:
         break;
     }

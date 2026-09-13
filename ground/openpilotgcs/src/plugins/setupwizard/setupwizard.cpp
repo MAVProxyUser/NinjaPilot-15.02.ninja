@@ -557,6 +557,23 @@ void SetupWizard::reboot() const
 {
     SetupWizard *wiz = const_cast<SetupWizard *>(this);
 
+    /* The uploader's reboot drives a PiOS bootloader over the link. The ESP32
+     * targets do not have one -- ESP-IDF's second-stage bootloader owns the
+     * boot path and pios_board_info_blob reports bl_rev 0x00 -- so the request
+     * cannot be answered and the wizard ends a fully successful run by
+     * reporting "reboot failed". That is worse than doing nothing: it tells
+     * the operator their configuration did not take when in fact every setting
+     * was written and saved.
+     *
+     * Nothing needs rebooting on these boards anyway. The settings the wizard
+     * writes are consumed live through UAVObject callbacks; only the STM32
+     * targets need a restart to re-init receiver hardware, which is why the
+     * input page already skips this for them. The final Save page did not. */
+    if (getControllerType() == CONTROLLER_ESP32 || getControllerType() == CONTROLLER_LITEWING) {
+        wiz->setRestartNeeded(false);
+        return;
+    }
+
     wiz->setWindowFlags(wiz->windowFlags() & ~Qt::WindowStaysOnTopHint);
 
     ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();

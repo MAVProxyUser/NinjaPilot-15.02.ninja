@@ -62,4 +62,21 @@ void VehiclePage::initializePage()
 {
     // ui->fixedwingButton->setEnabled(getWizard()->getControllerType() == SetupWizard::CONTROLLER_REVO ||
     // getWizard()->getControllerType() == SetupWizard::CONTROLLER_NANO);
+
+    /* LiteWing is a fixed airframe, not a controller you bolt to something.
+     * It is a 45 g brushed quad with four soldered motors and no servo outputs
+     * at all, so a fixed wing, a helicopter or a ground vehicle is not a
+     * configuration it can be put into -- offering them only invites writing a
+     * mixer the hardware cannot serve. */
+    if (getWizard()->getControllerType() == SetupWizard::CONTROLLER_LITEWING) {
+        const QString why = tr("LiteWing is a brushed quadcopter: four soldered "
+                               "motors, no servo outputs.");
+        ui->multirotorButton->setChecked(true);
+        ui->fixedwingButton->setEnabled(false);
+        ui->heliButton->setEnabled(false);
+        ui->surfaceButton->setEnabled(false);
+        ui->fixedwingButton->setToolTip(why);
+        ui->heliButton->setToolTip(why);
+        ui->surfaceButton->setToolTip(why);
+    }
 }

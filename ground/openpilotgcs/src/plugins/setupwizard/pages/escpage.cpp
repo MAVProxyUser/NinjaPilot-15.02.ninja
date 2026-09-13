@@ -53,7 +53,9 @@ bool EscPage::validatePage()
             getWizard()->setEscType(SetupWizard::ESC_RAPID);
         }
     } else if (ui->defaultESCButton->isChecked()) {
-        getWizard()->setEscType(SetupWizard::ESC_STANDARD);
+        getWizard()->setEscType(
+            getWizard()->getControllerType() == SetupWizard::CONTROLLER_LITEWING
+            ? SetupWizard::ESC_BRUSHED : SetupWizard::ESC_STANDARD);
     }
 
     return true;
@@ -68,6 +70,28 @@ void EscPage::initializePage()
     if (ui->oneshotESCButton->isChecked() && !enabled) {
         ui->oneshotESCButton->setChecked(false);
         ui->rapidESCButton->setChecked(true);
+    }
+
+    /* LiteWing has no ESC at all. The coreless motors hang off IRLML6344
+     * low-side MOSFETs and the flight code writes an LEDC duty cycle straight
+     * to the gates, so every option on this page -- Standard 50 Hz, Rapid
+     * 400 Hz, PWMSync, OneShot125 -- describes a pulse format for a device
+     * that is not fitted. Picking any of them writes a BankMode and an update
+     * rate the brushed backend ignores (PIOS_Servo_SetHz is a no-op there),
+     * so the page would look like it did something and quietly do nothing.
+     * Offer the truth instead, as the only choice. */
+    if (getWizard()->getControllerType() == SetupWizard::CONTROLLER_LITEWING) {
+        const QString why = tr("LiteWing has no ESC: the motors are driven "
+                               "directly from MOSFET gates.");
+        ui->defaultESCButton->setText(tr("Brushed - MOSFET gates, 24 kHz duty"));
+        ui->defaultESCButton->setToolTip(tr("Coreless motors driven straight from "
+                                            "IRLML6344 low-side MOSFETs. Channel "
+                                            "values are duty, 0..1000 = 0..100 %."));
+        ui->defaultESCButton->setChecked(true);
+        ui->rapidESCButton->setEnabled(false);
+        ui->oneshotESCButton->setEnabled(false);
+        ui->rapidESCButton->setToolTip(why);
+        ui->oneshotESCButton->setToolTip(why);
     }
 }
 

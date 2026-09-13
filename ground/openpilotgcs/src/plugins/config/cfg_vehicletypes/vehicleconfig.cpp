@@ -181,11 +181,14 @@ void VehicleConfig::updateChannelNames()
     /* LiteWing: four coreless motors on low-side MOSFETs. Named by the
      * schematic's own MOT_n nets, because on this board the silkscreen number
      * and the motor number are not the same thing. */
+    /* Physical corners are bench-confirmed, not inferred: each mixer row was
+     * driven in turn and the arm that moved was recorded. Naming them here is
+     * what lets someone check an output assignment without a spin test. */
     QStringList litewingPins;
-    litewingPins << "GPIO5 - MOT_1"
-                 << "GPIO6 - MOT_2"
-                 << "GPIO3 - MOT_3"
-                 << "GPIO4 - MOT_4";
+    litewingPins << "GPIO5 - MOT_1 (rear-left)"
+                 << "GPIO6 - MOT_2 (front-left)"
+                 << "GPIO3 - MOT_3 (front-right)"
+                 << "GPIO4 - MOT_4 (rear-right)";
 
     bool isRealposix = false;
     bool isEsp32     = false;

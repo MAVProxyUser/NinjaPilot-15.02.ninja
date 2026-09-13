@@ -475,11 +475,13 @@ void OutputChannelForm::updateChannelLabel()
         }
     }
     static const char *litewingPins[4] = { "GPIO5", "GPIO6", "GPIO3", "GPIO4" };
+    /* Corners bench-confirmed by driving each mixer row and watching which arm
+     * turned -- the PCB fixes the geometry but not which edge is the nose. */
     static const char *litewingPinDetail[4] = {
-        "GPIO5 = MOT_1, IRLML6344 low-side MOSFET, LEDC duty",
-        "GPIO6 = MOT_2, IRLML6344 low-side MOSFET, LEDC duty",
-        "GPIO3 = MOT_3, IRLML6344 low-side MOSFET, LEDC duty",
-        "GPIO4 = MOT_4, IRLML6344 low-side MOSFET, LEDC duty"
+        "GPIO5 = MOT_1, REAR-LEFT, IRLML6344 low-side MOSFET, LEDC duty",
+        "GPIO6 = MOT_2, FRONT-LEFT, IRLML6344 low-side MOSFET, LEDC duty",
+        "GPIO3 = MOT_3, FRONT-RIGHT, IRLML6344 low-side MOSFET, LEDC duty",
+        "GPIO4 = MOT_4, REAR-RIGHT, IRLML6344 low-side MOSFET, LEDC duty"
     };
     bool isLitewing = false;
     if (pm) {
