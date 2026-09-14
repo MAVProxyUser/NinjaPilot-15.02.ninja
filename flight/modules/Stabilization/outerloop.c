@@ -273,14 +273,14 @@ static void stabilizationOuterloopTask()
             }
         } else {
             switch (StabilizationStatusOuterLoopToArray(enabled)[t]) {
-#ifdef REVOLUTION
+#if defined(REVOLUTION) || defined(LITEWING)
             case STABILIZATIONSTATUS_OUTERLOOP_ALTITUDE:
                 rateDesiredAxis[t] = stabilizationAltitudeHold(stabilizationDesiredAxis[t], ALTITUDEHOLD, reinit);
                 break;
             case STABILIZATIONSTATUS_OUTERLOOP_ALTITUDEVARIO:
                 rateDesiredAxis[t] = stabilizationAltitudeHold(stabilizationDesiredAxis[t], ALTITUDEVARIO, reinit);
                 break;
-#endif /* REVOLUTION */
+#endif /* REVOLUTION || LITEWING */
             case STABILIZATIONSTATUS_OUTERLOOP_DIRECT:
             default:
                 rateDesiredAxis[t] = stabilizationDesiredAxis[t];

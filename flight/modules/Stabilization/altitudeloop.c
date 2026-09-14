@@ -45,7 +45,13 @@
 // Private constants
 
 
-#ifdef REVOLUTION
+/* REVOLUTION or LITEWING: the altitude outer loop needs a barometer and an
+ * estimator filling PositionState/VelocityState Down. Revolution gets those
+ * from the StateEstimation chain; LiteWing runs the CC complementary filter
+ * for attitude and modules/AltFilter for the vertical channel only, so it
+ * arrives at the same two objects by a different route. Nothing else in this
+ * file is Revolution-specific. */
+#if defined(REVOLUTION) || defined(LITEWING)
 
 #define UPDATE_EXPECTED   (1.0f / PIOS_SENSOR_RATE)
 #define UPDATE_MIN        1.0e-6f
@@ -326,4 +332,4 @@ static void VelocityStateUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
 }
 
 
-#endif /* ifdef REVOLUTION */
+#endif /* REVOLUTION || LITEWING */

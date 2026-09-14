@@ -114,7 +114,13 @@ int32_t StabilizationInitialize()
 
     stabilizationOuterloopInit();
     stabilizationInnerloopInit();
-#ifdef REVOLUTION
+/* REVOLUTION or LITEWING: the altitude outer loop needs a barometer and an
+ * estimator filling PositionState/VelocityState Down. Revolution gets those
+ * from the StateEstimation chain; LiteWing runs the CC complementary filter
+ * for attitude and modules/AltFilter for the vertical channel only, so it
+ * arrives at the same two objects by a different route. Nothing else in this
+ * file is Revolution-specific. */
+#if defined(REVOLUTION) || defined(LITEWING)
     stabilizationAltitudeloopInit();
 #endif
     pid_zero(&stabSettings.outerPids[0]);
