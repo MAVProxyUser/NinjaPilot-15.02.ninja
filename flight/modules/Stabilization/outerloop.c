@@ -112,23 +112,17 @@ static void stabilizationOuterloopTask()
     StabilizationDesiredGet(&stabilizationDesired);
     RateDesiredGet(&rateDesired);
     StabilizationStatusOuterLoopGet(&enabled);
-#ifdef SIMPOSIX
-    // AXES is 4 (stabilization.h) and the per-axis loop below iterates
-    // t=0..AXES-1, reaching t=3 (Thrust) for both arrays - but they were
-    // declared with only 3 elements (Roll/Pitch/Yaw), so every t=3 access
-    // (stabilizationAltitudeHold()'s input AND rateDesiredAxis[3]'s
-    // output) was out-of-bounds/undefined behavior, compiler-flagged
-    // (-Warray-bounds). Sized to AXES with Thrust included so the
-    // existing loop logic below works correctly within bounds, no other
-    // changes needed. Gated to SIMPOSIX pending independent verification
-    // against real hardware (see the rateDesired.Thrust assignment below,
-    // which depends on this being properly sized).
+    /* AXES is 4 (stabilization.h) and the per-axis loop below iterates
+     * t=0..AXES-1, so it reaches t=3 (Thrust). These arrays were declared
+     * with only three elements on every target except the simulator, which
+     * made each t=3 access -- stabilizationAltitudeHold()'s input AND
+     * rateDesiredAxis[3]'s output -- read and write one float past the end of
+     * a stack array, on the flight controller, every control cycle. That is
+     * undefined behaviour, not a style question, and the compiler flags it
+     * (-Warray-bounds). Sized to AXES with Thrust included on all targets.
+     */
     float stabilizationDesiredAxis[AXES] = {stabilizationDesired.Roll, stabilizationDesired.Pitch, stabilizationDesired.Yaw, stabilizationDesired.Thrust};
     float rateDesiredAxis[AXES] = {rateDesired.Roll, rateDesired.Pitch, rateDesired.Yaw, rateDesired.Thrust};
-#else
-    float stabilizationDesiredAxis[3] = {stabilizationDesired.Roll, stabilizationDesired.Pitch, stabilizationDesired.Yaw};
-    float rateDesiredAxis[3] = {rateDesired.Roll, rateDesired.Pitch, rateDesired.Yaw};
-#endif
     int t;
     float dT = PIOS_DELTATIME_GetAverageSeconds(&timeval);
 
@@ -294,52 +288,22 @@ static void stabilizationOuterloopTask()
     rateDesired.Pitch = rateDesiredAxis[1];
     rateDesired.Yaw = rateDesiredAxis[2];
 
-#ifdef SIMPOSIX
-    // The comment this replaces claimed "this per-axis loop only ever runs
-    // over t=0..2 (Roll/Pitch/Yaw)" - but AXES is 4 (stabilization.h), so
-    // the loop above DOES reach t=3 (Thrust), and its switch (line ~247)
-    // already computes rateDesiredAxis[3] correctly for every mode:
-    // stabilizationAltitudeHold()'s real PID output for
-    // ALTITUDEHOLD/ALTITUDEVARIO, or a raw passthrough for DIRECT/other
-    // modes (including CruiseControl, which isn't listed here and falls to
-    // default). Unconditionally copying stabilizationDesired.Thrust (the
-    // RAW, pre-outer-loop input) instead of rateDesiredAxis[3] discards
-    // whatever stabilizationAltitudeHold() just computed every single
-    // cycle - confirmed empirically: ActuatorDesired.Thrust stayed frozen
-    // bit-for-bit for the entire duration of an AltitudeHold-mode test,
-    // never once reflecting the PID's output. This was very likely an
-    // earlier fix (see git history / CLAUDE.md session notes) for Thrust
-    // being stuck at 0.0 during early Manual-mode-only testing - that
-    // symptom is real and this line does fix it for DIRECT/CruiseControl
-    // (where rateDesiredAxis[3] equals stabilizationDesired.Thrust anyway,
-    // so no behavior change there), but it silently broke
-    // ALTITUDEHOLD/ALTITUDEVARIO, which weren't exercised yet at the time.
-    // Matches the Roll/Pitch/Yaw pattern two lines above - trust the
-    // loop's per-mode switch instead of bypassing it. Gated to SIMPOSIX
-    // pending independent verification against real hardware.
-    {
-        static bool marker_printed = false;
-        if (!marker_printed) {
-            marker_printed = true;
-            PIOS_SHMLOG_Printf("[SIMPOSIX-IFDEF-MARKER] outerloop.c using rateDesired.Thrust=rateDesiredAxis[3] (%.4f), not stabilizationDesired.Thrust (%.4f)\n",
-                   (double)rateDesiredAxis[3], (double)stabilizationDesired.Thrust);
-            /* shmlog: no flush */
-        }
-    }
+    /* Trust the loop's per-mode switch rather than bypassing it.
+     *
+     * This used to copy stabilizationDesired.Thrust -- the RAW, pre-outer-loop
+     * stick input -- over whatever the switch above had just computed for
+     * t=3, which discarded stabilizationAltitudeHold()'s PID output on every
+     * cycle. Altitude hold therefore could not move the throttle at all on
+     * real hardware: confirmed in the air, the pilot flying the whole time on
+     * manual thrust with the mode selected.
+     *
+     * For every other thrust mode this changes nothing. DIRECT and
+     * CruiseControl fall to the switch's default case, which assigns
+     * rateDesiredAxis[3] = stabilizationDesiredAxis[3], i.e. exactly
+     * stabilizationDesired.Thrust. Only ALTITUDEHOLD/ALTITUDEVARIO differ,
+     * and only because they previously did nothing.
+     */
     rateDesired.Thrust = rateDesiredAxis[3];
-#else
-    // Thrust has no outer-loop PID of its own - every other axis falls
-    // through to a direct stabilizationDesired->rateDesired copy in
-    // OUTERLOOP_DIRECT above, but this per-axis loop only ever runs over
-    // t=0..2 (Roll/Pitch/Yaw), so that copy never happened for Thrust.
-    // Nothing else in the codebase writes RateDesired.Thrust, so it sat at
-    // its 0.0 default forever - Actuator's mixer reads ActuatorDesired.Thrust
-    // (which chains back to this), so no motor could ever respond to
-    // throttle. This is the same passthrough OUTERLOOP_DIRECT does, applied
-    // unconditionally since Thrust doesn't have Attitude/RattitudeWeakLeveling/etc
-    // outer-loop modes to begin with.
-    rateDesired.Thrust = stabilizationDesired.Thrust;
-#endif
 
     RateDesiredSet(&rateDesired);
     {
