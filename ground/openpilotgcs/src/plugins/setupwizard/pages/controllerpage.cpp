@@ -74,12 +74,27 @@ void ControllerPage::initializePage()
 
 bool ControllerPage::isComplete() const
 {
-    QString connName = m_connectionManager->getCurrentDevice().getConName();
-    bool isValidConnection = connName.startsWith("USB:", Qt::CaseInsensitive) ||
-                            connName.startsWith("Serial:", Qt::CaseInsensitive) ||
-                            // NinjaPilot: realposix telemeters over the network
-                            connName.startsWith("UDP:", Qt::CaseInsensitive) ||
-                            connName.startsWith("TCP:", Qt::CaseInsensitive);
+    /* Ask the TRANSPORT, not the label.
+     *
+     * This used to test the visible connection name for a "USB:"/"Serial:"/
+     * "UDP:"/"TCP:" prefix. That prefix is presentation: it is shortName() +
+     * ": " + displayName, and an entry whose displayName already identifies
+     * the board is now shown without it -- so a board discovered by the
+     * ESP32 beacon reads "ESP32 192.168.0.139 (WiFi)", matched none of those,
+     * and the Next button stayed disabled forever on a page that had
+     * correctly identified both the device and the board type.
+     *
+     * shortName() answers the question actually being asked -- is this a live
+     * link to hardware rather than a log replay -- and does not move when the
+     * dropdown's wording does. */
+    Core::IConnection *conn = m_connectionManager->getCurrentDevice().connection;
+    const QString transport = conn ? conn->shortName() : QString();
+    bool isValidConnection = transport.compare("USB", Qt::CaseInsensitive) == 0 ||
+                            transport.compare("Serial", Qt::CaseInsensitive) == 0 ||
+                            // NinjaPilot: realposix and the ESP32 boards
+                            // telemeter over the network
+                            transport.compare("UDP", Qt::CaseInsensitive) == 0 ||
+                            transport.compare("TCP", Qt::CaseInsensitive) == 0;
     return m_telemtryManager->isConnected() && ui->boardTypeCombo->currentIndex() > 0 && isValidConnection;
 }
 
