@@ -152,9 +152,19 @@ void SixPointCalibrationModel::start(bool calibrateAccel, bool calibrateMag)
 
     started();
 
-    // check if Homelocation is set
+    /* HomeLocation is required to calibrate the MAGNETOMETER, which is fitted
+     * against the local field vector Be -- that genuinely varies with where you
+     * are standing. The accelerometer is fitted against g_e, a scalar that
+     * ranges from about 9.78 to 9.83 over the whole planet, so demanding a home
+     * location for an accel-only calibration asks for a position fix to resolve
+     * half a percent.
+     *
+     * It also made accel calibration impossible on a board with no GPS, where
+     * HomeLocation is never Set: the operator is told to "set your home
+     * location and retry" with no way to do either. Require it only for the
+     * magnetometer, and fall back to standard gravity otherwise. */
     HomeLocation::DataFields homeLocationData = homeLocation->getData();
-    if (!homeLocationData.Set) {
+    if (!homeLocationData.Set && calibrateMag) {
         displayInstructions(tr("Home location not set, please set your home location and retry."), WizardModel::Warn);
         displayInstructions(tr("Aborting calibration!"), WizardModel::Failure);
         stopped();
@@ -540,7 +550,12 @@ void SixPointCalibrationModel::compute()
             az(i) = accel_fit_z[i];
         }
         OpenPilot::CalibrationUtils::EllipsoidCalibrationResult eres;
-        OpenPilot::CalibrationUtils::EllipsoidCalibration(&ax, &ay, &az, homeLocationData.g_e, &eres, true);
+        /* Standard gravity when there is no home location to read it from --
+         * see the note at the top of start(). The error this introduces is at
+         * most ~0.25%, an order of magnitude below the scale error the
+         * calibration exists to remove. */
+        float g_ref = homeLocationData.Set ? homeLocationData.g_e : 9.80665f;
+        OpenPilot::CalibrationUtils::EllipsoidCalibration(&ax, &ay, &az, g_ref, &eres, true);
         qDebug() << "Accel ellipsoid: scale(" << eres.Scale.coeff(0) << eres.Scale.coeff(1) << eres.Scale.coeff(2)
                  << ") bias(" << eres.Bias.coeff(0) << eres.Bias.coeff(1) << eres.Bias.coeff(2) << ")";
         accelGyroSettingsData.accel_scale[AccelGyroSettings::ACCEL_SCALE_X] = fabs(eres.Scale.coeff(0));
