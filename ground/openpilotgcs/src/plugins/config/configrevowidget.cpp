@@ -36,6 +36,7 @@
 
 #include <extensionsystem/pluginmanager.h>
 #include <coreplugin/generalsettings.h>
+#include <uavobjectutilmanager.h>
 
 #include "assertions.h"
 #include "calibration.h"
@@ -408,8 +409,38 @@ void ConfigRevoWidget::disableAllCalibrations()
     m_ui->thermalBiasStart->setEnabled(false);
 }
 
+/* Hide the calibrations this board's firmware does not read.
+ *
+ * The ESP32 targets (0x12xx Thing Plus, 0x13xx LiteWing) run the
+ * CopterControl complementary filter in modules/Attitude, not the Revo
+ * StateEstimation chain. That filter applies accel_bias, accel_scale,
+ * gyro_bias, gyro_scale, the gyro/accel temperature coefficients and
+ * BoardRotation -- but it never reads AttitudeSettings.BoardLevelTrim, and
+ * neither board carries a magnetometer.
+ *
+ * Leaving those two on offer is worse than useless: the procedure runs, the
+ * value is written, nothing consumes it, and the operator reasonably concludes
+ * the calibration did not take. Show only what the firmware acts on.
+ */
+void ConfigRevoWidget::applyBoardCapabilities()
+{
+    ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+    UAVObjectUtilManager *utilMngr     = pm->getObject<UAVObjectUtilManager>();
+
+    if (!utilMngr) {
+        return;
+    }
+    int model = utilMngr->getBoardModel();
+    bool ccFilterBoard = (model & 0xff00) == 0x1200 || (model & 0xff00) == 0x1300;
+
+    m_ui->magCalGroupBox->setVisible(!ccFilterBoard);
+    m_ui->boardLevelCalGroupBox->setVisible(!ccFilterBoard);
+}
+
 void ConfigRevoWidget::enableAllCalibrations()
 {
+    applyBoardCapabilities();
+
     // TODO this logic should not be here and should use a signal instead
     // need to check if ConfigTaskWidget has support for this kind of use cases
     if (m_accelCalibrationModel->dirty() || m_magCalibrationModel->dirty() || m_levelCalibrationModel->dirty()

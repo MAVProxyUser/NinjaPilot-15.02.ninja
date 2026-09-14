@@ -85,6 +85,7 @@ private slots:
 
     void disableAllCalibrations();
     void enableAllCalibrations();
+    void applyBoardCapabilities();
 
     void updateVisualHelp();
 
