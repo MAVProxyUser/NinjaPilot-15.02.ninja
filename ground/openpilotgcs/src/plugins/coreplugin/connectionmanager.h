@@ -105,7 +105,10 @@ public:
 
     void addWidget(QWidget *widget);
 
-    bool connectDevice(DevListItem device);
+    /* remember=false for a connection the GCS decided to make by itself as a
+     * fallback. Such a connection must not become the remembered device: it
+     * would overwrite the operator's actual choice with a default. */
+    bool connectDevice(DevListItem device, bool remember = true);
     bool disconnectDevice();
     void suspendPolling();
     void resumePolling();

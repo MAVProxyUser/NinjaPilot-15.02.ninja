@@ -108,7 +108,7 @@ void ConnectionManager::addWidget(QWidget *widget)
 /**
  *   Method called when the user clicks the "Connect" button
  */
-bool ConnectionManager::connectDevice(DevListItem device)
+bool ConnectionManager::connectDevice(DevListItem device, bool remember)
 {
     Q_UNUSED(device);
     QString deviceName = m_availableDevList->itemData(m_availableDevList->currentIndex(), Qt::ToolTipRole).toString();
@@ -167,10 +167,22 @@ bool ConnectionManager::connectDevice(DevListItem device)
      *
      * displayName differs between them ("192.168.0.139" vs "ESP32
      * 192.168.0.139 (WiFi)") and does not depend on any transport setting. */
-    QSettings settings;
-    settings.setValue(QLatin1String("ConnectionManager/lastDevice"),
-                      connection_device.device.displayName);
-    settings.sync();
+    /* Only for a connection the operator asked for. A fallback the GCS chose
+     * by itself must not be written here.
+     *
+     * A board found by the discovery beacon is not in the device list at
+     * startup -- the first beacon has not arrived yet -- so the restore below
+     * finds nothing, the fallback connects the manually configured entry
+     * instead, and this line then saved THAT as the remembered device. One
+     * launch was enough to erase the operator's choice permanently, and every
+     * later launch repeated it. The selection fix alone could not help: by the
+     * time the beacon arrived the setting it needed was already gone. */
+    if (remember) {
+        QSettings settings;
+        settings.setValue(QLatin1String("ConnectionManager/lastDevice"),
+                          connection_device.device.displayName);
+        settings.sync();
+    }
 
     connect(m_connectionDevice.connection, SIGNAL(destroyed(QObject *)), this, SLOT(onConnectionDestroyed(QObject *)), Qt::QueuedConnection);
 
@@ -599,19 +611,34 @@ void ConnectionManager::updateConnectionDropdown()
         // (any prefix of the entry as it appears in the Connections dropdown)
         // to have the GCS select and auto-connect that instead. Unset, the
         // behaviour is exactly as before: UDP.
+        /* We are in !restoredLast, so a non-empty lastDevice means the
+         * remembered device is not in the list -- not that there is nothing to
+         * remember. A board announced by the discovery beacon is absent for the
+         * first second or two after launch, exactly when this code runs. Select
+         * the default so the dropdown is not empty, but do NOT open it: doing so
+         * latched the wrong entry before the beacon was heard, and from then on
+         * the "keep the connected device selected" branch above pinned it.
+         *
+         * Nothing is stranded by waiting. The beacon brings us back here, the
+         * restore matches, and that branch takes the automatic connection. If
+         * the remembered board never appears -- powered off, new address -- the
+         * operator clicks Connect once and that choice is remembered instead. */
+        const bool awaitingRemembered = !lastDevice.isEmpty();
+
         for (int i = 0; i < m_availableDevList->count(); i++) {
             if (m_availableDevList->itemData(i, Qt::ToolTipRole).toString().startsWith(prefer)) {
                 m_availableDevList->setCurrentIndex(i);
                 // ... and connect to it by itself at launch, once. A manual
                 // disconnect afterwards stays disconnected.
-                if (!m_udpAutoConnectTried && polling) {
+                if (!m_udpAutoConnectTried && polling && !awaitingRemembered) {
                     // (the flag name predates the override; it just means
                     //  "we have already taken our one automatic attempt")
                     QString devName = m_availableDevList->itemData(i, Qt::ToolTipRole).toString();
                     foreach(DevListItem d, m_devList) {
                         if (d.getConName() == devName) {
                             m_udpAutoConnectTried = true;
-                            connectDevice(d);
+                            /* A default, not a choice -- must not be saved. */
+                            connectDevice(d, false);
                             break;
                         }
                     }
