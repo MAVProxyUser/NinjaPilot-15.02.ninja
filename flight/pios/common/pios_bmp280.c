@@ -261,6 +261,26 @@ static bool PIOS_BMP280_driver_poll(__attribute__((unused)) uintptr_t context)
         return false;
     }
 
+    /* Report "no new sample" rather than handing back the previous conversion.
+     *
+     * A polled consumer that feeds every successful poll to a filter must not
+     * be given the same conversion twice: the filter treats the repeat as
+     * independent evidence. The BMP280 has no data-ready bit -- STATUS only
+     * offers "measuring" and "im_update" -- so the test is whether both raw
+     * readings are bit-identical to the previous ones. Two genuinely distinct
+     * conversions agreeing to the last bit on BOTH channels is possible under
+     * heavy IIR, and costs nothing when it happens: the consumer simply skips
+     * one correction. */
+    static int32_t last_adc_P, last_adc_T;
+    static bool have_last;
+
+    if (have_last && adc_P == last_adc_P && adc_T == last_adc_T) {
+        return false;
+    }
+    last_adc_P = adc_P;
+    last_adc_T = adc_T;
+    have_last  = true;
+
     int32_t T = bmp280_compensate_T(adc_T);   /* must precede P: sets t_fine */
     uint32_t P = bmp280_compensate_P(adc_P);
 

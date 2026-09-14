@@ -74,6 +74,11 @@
 #define BMP388_ERR_CMD       (1 << 1)
 #define BMP388_ERR_CONF      (1 << 2)
 
+/* STATUS (datasheet 4.3.3). drdy_press is set when a conversion completes and
+ * cleared when the data registers are read, which is exactly the "is this
+ * sample new?" question a polled consumer needs answered. */
+#define BMP388_STATUS_DRDY_PRESS (1 << 5)
+
 #define BMP388_CALIB_LEN     21
 
 static int32_t i2c_id;
@@ -316,9 +321,27 @@ static bool PIOS_BMP388_driver_poll(__attribute__((unused)) uintptr_t context)
 {
     uint8_t buf[6];
 
+    /* Report "no new sample" rather than handing back the previous conversion.
+     *
+     * The consumer (modules/AltFilter) polls at a fixed 50 Hz and feeds every
+     * successful poll to a Kalman correction. Whenever the configured ODR is
+     * slower than that poll rate -- which is every setting above x8 on this
+     * part -- returning the same conversion twice makes the filter treat a
+     * repeat as independent evidence and shrink its covariance on information
+     * it never received. Gating on drdy_press costs one extra register read
+     * per poll and makes the quiet, slow configurations safe to use. */
+    uint8_t status;
+
+    if (PIOS_BMP388_Read(BMP388_REG_STATUS, &status, 1) != 0) {
+        return false;
+    }
+    if (!(status & BMP388_STATUS_DRDY_PRESS)) {
+        return false;
+    }
+
     /* NORMAL mode converts continuously, so there is nothing to command and
-     * nothing to wait for -- take the latest result. Unlike the BMP280 the
-     * data registers are LITTLE endian and pressure comes first. */
+     * nothing to wait for. Unlike the BMP280 the data registers are LITTLE
+     * endian and pressure comes first. Reading them clears drdy_press. */
     if (PIOS_BMP388_Read(BMP388_REG_DATA, buf, sizeof(buf)) != 0) {
         return false;
     }

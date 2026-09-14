@@ -72,6 +72,17 @@ TEST_MODE = os.environ.get("NINJAPILOT_TEST_MODE", "scripted")
 # published (the twin is a GPS-only experiment by design), and flying is
 # done pilot-style through the sticks (see wroom_pilot.py).
 WROOM = os.environ.get("NINJAPILOT_TARGET", "") == "wroom"
+# NINJAPILOT_TARGET=litewing drives the SIM_LITEWING twin of the ESP32-S3
+# brushed nano. Same pilot-in-the-loop stack as wroom, with one difference
+# that matters at the actuator boundary: LiteWing drives MOSFETs, not ESCs,
+# so its ActuatorSettings endpoints are 0..1000 TENTHS OF A PERCENT DUTY,
+# not 1000..2000 microseconds. Feeding those channel values through the
+# microsecond conversion below yields a negative fraction for every possible
+# command, clamps to zero, and the twin sits on the ground with the motors
+# stopped no matter what the flight code asks for.
+LITEWING = os.environ.get("NINJAPILOT_TARGET", "") == "litewing"
+# Both twins share the pilot-in-the-loop path and skip the Revo-only config.
+PILOT_TWIN = WROOM or LITEWING
 
 
 def _stab1_modes():
@@ -423,9 +434,11 @@ class VehicleState(object):
             self.mag_body = mag_body
             self.have_mag = True
 
-    def update_from_baro(self, baro_alt):
+    def update_from_baro(self, baro_alt, baro_pressure_pa=None):
         with self.lock:
             self.baro_alt = baro_alt
+            if baro_pressure_pa is not None:
+                self.baro_pressure_pa = baro_pressure_pa
             self.have_baro = True
 
     def snapshot(self):
@@ -443,7 +456,7 @@ class VehicleState(object):
 
     def baro_snapshot(self):
         with self.lock:
-            return (self.have_baro, self.baro_alt)
+            return (self.have_baro, self.baro_alt, getattr(self, "baro_pressure_pa", float("nan")))
 
     def pose_alt_climb(self):
         """(have_pose, altitude_up_m, climb_rate_up_mps) - both derived
@@ -578,7 +591,7 @@ def on_air_pressure(msg):
     # what BaroSensor.Altitude expects (same convention the old
     # meters_to_latlon()-based computation used).
     altitude = 44330.0 * (1.0 - (msg.pressure / 101325.0) ** (1.0 / 5.255))
-    state.update_from_baro(altitude)
+    state.update_from_baro(altitude, msg.pressure)
     now = time.time()
     # Unconditional (no 0.5s print-throttle) call counter - confirmed via a
     # real run that the THROTTLED [barodbg] print landed at an almost
@@ -3773,7 +3786,7 @@ def uavtalk_thread():
         # The wroom twin has no StateEstimation/filter chain - RevoSettings,
         # HomeLocation and AltitudeFilterSettings would land on objects
         # nothing reads. Skipped so the config story matches the board.
-        if not WROOM:
+        if not PILOT_TWIN:
             send_reliable("RevoSettings", bov.resolve_enum_values(db["RevoSettings"], bov.REVOSETTINGS_DEFAULTS))
             time.sleep(0.2)
             send_reliable("HomeLocation", bov.resolve_enum_values(db["HomeLocation"], home))
@@ -3794,7 +3807,10 @@ def uavtalk_thread():
         # The stock slow rate is slow BY DESIGN: real accel bias drifts
         # over minutes, and everything faster than that is real motion the
         # integrator needs to see.
-        if not WROOM:
+        # AltitudeFilterSettings belongs to the Revo chain's filteraltitude.c.
+        # The LiteWing twin's vertical channel is modules/AltFilter, which
+        # carries its own constants, so this object has no reader there either.
+        if not PILOT_TWIN:
             send_reliable("AltitudeFilterSettings", {
                 "AccelLowPassKp": 0.04, "AccelDriftKi": 0.0005,
                 "InitializationAccelDriftKi": 0.2, "BaroKp": 0.04,
@@ -4312,8 +4328,8 @@ def uavtalk_thread():
                  "pull_logs": pull_logs_only,
                  "autotune": autotune_test,
                  "intercept": intercept_test}
-        if WROOM:
-            # Pilot-in-the-loop modes for the ESP32 twin (no hold modes,
+        if PILOT_TWIN:
+            # Pilot-in-the-loop modes for the ESP32 twins (no hold modes,
             # no missions - the stack under test cannot fly those).
             import wroom_pilot
             wroom_pilot.bind(sys.modules[__name__])
@@ -4323,6 +4339,13 @@ def uavtalk_thread():
                           "wroom_flip": wroom_pilot.flip_test,
                           "wroom_oflip": wroom_pilot.onboard_flip_test,
                           "wroom_creep": wroom_pilot.creep_test})
+            # The LiteWing twin flies the same pilot manoeuvres; only the
+            # actuator units differ, and that is handled at the Gazebo
+            # boundary. Aliased rather than duplicated so the two twins
+            # cannot drift apart silently.
+            modes.update({"litewing_hover": wroom_pilot.hover_test,
+                          "litewing_sticks": wroom_pilot.sticks_test,
+                          "litewing_creep": wroom_pilot.creep_test})
         target = modes.get(TEST_MODE, run_test_sequence)
 
         def run_with_fc_logging():
@@ -4744,14 +4767,22 @@ _accel_send_count = [0, 0.0]  # [total sends, last debug print time]
 def publish_baro(client):
     if WROOM:
         return  # GPS-only twin: the board has no baro
-    have_baro, baro_alt = state.baro_snapshot()
+    # LiteWing DOES carry a barometer, and modules/AltFilter on that twin
+    # consumes BaroSensor, so this must keep publishing for it.
+    have_baro, baro_alt, baro_pa = state.baro_snapshot()
     if have_baro:
-        client.send_object("BaroSensor", {"Altitude": baro_alt, "Temperature": 25.0, "Pressure": 101.3})
+        # Pressure was hardcoded to 101.3 -- a constant, and in kPa where the
+        # object is documented in pascals. Only Altitude was ever real, so
+        # anything reading Pressure on the twin (a driver under test, a log
+        # comparison against a real flight) saw a flat line that looked like a
+        # stuck sensor. Send what Gazebo actually reported.
+        client.send_object("BaroSensor", {"Altitude": baro_alt, "Temperature": 25.0,
+                                          "Pressure": baro_pa})
 
 
 def publish_mag(client):
-    if WROOM:
-        return  # GPS-only twin: no mag consumer on this stack
+    if PILOT_TWIN:
+        return  # neither twin has a mag consumer on its stack
     have_mag, mag_body = state.mag_snapshot()
     if have_mag:
         client.send_object("MagSensor", {"x": mag_body[0], "y": mag_body[1], "z": mag_body[2], "temperature": 25.0})
@@ -4890,8 +4921,17 @@ def publish_motor_speeds(channels):
     # mixer's linear addition actually assumes.
     speeds = [0.0, 0.0, 0.0, 0.0]
     for ch_idx, rotor_idx in enumerate(CHANNEL_TO_ROTOR):
-        pwm = max(channels[ch_idx], MOTOR_FLOOR[ch_idx])
-        frac = max(0.0, min(1.0, (pwm - 1000.0 - MOTOR_DEADBAND[ch_idx]) / 1000.0))
+        if LITEWING:
+            # Brushed: the channel value IS the command, 0..1000 tenths of a
+            # percent duty. There is no 1000us pedestal to subtract and no
+            # ESC spool floor to hold -- a brushed motor at zero duty simply
+            # stops, which is why that target sets ChannelNeutral to 0.
+            # MOTOR_FLOOR is deliberately not applied: its 1000 default is a
+            # microsecond figure and would peg every channel to full duty.
+            frac = max(0.0, min(1.0, (channels[ch_idx] - MOTOR_DEADBAND[ch_idx]) / 1000.0))
+        else:
+            pwm = max(channels[ch_idx], MOTOR_FLOOR[ch_idx])
+            frac = max(0.0, min(1.0, (pwm - 1000.0 - MOTOR_DEADBAND[ch_idx]) / 1000.0))
         speeds[rotor_idx] = min(1.0, math.sqrt(frac * MOTOR_EFF[ch_idx]) * MOTOR_BOOST) * MOTOR_MAX_RAD_S
     msg = Actuators()
     msg.velocity.extend(speeds)
