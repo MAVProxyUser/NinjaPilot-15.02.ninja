@@ -46,6 +46,7 @@ public:
     ConfigStabilizationWidget(QWidget *parent = 0);
     ~ConfigStabilizationWidget();
     bool shouldObjectBeSaved(UAVObject *object);
+    static bool boardHasAltitudeHold(int model);
 
 private:
     Ui_StabilizationWidget *ui;

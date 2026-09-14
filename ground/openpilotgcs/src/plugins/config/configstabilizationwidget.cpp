@@ -618,8 +618,8 @@ void ConfigStabilizationWidget::onBoardConnected()
 
     Q_ASSERT(utilMngr);
     boardModel = utilMngr->getBoardModel();
-    // If Revolution board enable Althold tab, otherwise disable it
-    ui->AltitudeHold->setEnabled((boardModel & 0xff00) == 0x0900);
+    // Enable the Althold tab on boards that actually run the altitude loop.
+    ui->AltitudeHold->setEnabled(boardHasAltitudeHold(boardModel));
 }
 
 void ConfigStabilizationWidget::stabBankChanged(int index)
@@ -644,10 +644,22 @@ void ConfigStabilizationWidget::stabBankChanged(int index)
     setDirty(dirty);
 }
 
+/* Which boards run Stabilization/altitudeloop.c, and therefore have somewhere
+ * to put AltitudeHoldSettings. Writing that object to a board that does not
+ * know it produces an error rather than a gentle failure, which is why this is
+ * gated at all.
+ *
+ * 0x09xx Revolution, 0x13xx LiteWing. The flight-side guards are spelled
+ * "#if defined(REVOLUTION) || defined(LITEWING)"; keep this list in step with
+ * them. */
+bool ConfigStabilizationWidget::boardHasAltitudeHold(int model)
+{
+    return (model & 0xff00) == 0x0900 || (model & 0xff00) == 0x1300;
+}
+
 bool ConfigStabilizationWidget::shouldObjectBeSaved(UAVObject *object)
 {
-    // AltitudeHoldSettings should only be saved for Revolution board to avoid error.
-    if ((boardModel & 0xff00) != 0x0900) {
+    if (!boardHasAltitudeHold(boardModel)) {
         return dynamic_cast<AltitudeHoldSettings *>(object) == 0;
     } else {
         return true;

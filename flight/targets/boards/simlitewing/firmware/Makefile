@@ -70,10 +70,18 @@ MODULES += Flip
 # pack goes out as the beacon element bytes over UDP :9020 (pios_rid_sim.c).
 MODULES += RemoteID
 # Barometric altitude filter: publishes PositionState.Down / VelocityState.Down,
-# the only inputs Stabilization/altitudeloop.c was missing. altitudeloop itself
-# is already compiled (the Stabilization wildcard picks it up) and outerloop.c
-# already dispatches to it for the ALTITUDEHOLD / ALTITUDEVARIO thrust modes.
+# the inputs Stabilization/altitudeloop.c needs.
 MODULES += AltFilter
+
+# altitudeloop.c is picked up by the Stabilization wildcard, but that alone
+# achieved nothing: its entire body, and outerloop.c's dispatch to it, sat
+# behind #ifdef REVOLUTION, which this target does not define. The file
+# compiled to nothing and the ALTITUDEHOLD / ALTITUDEVARIO thrust modes were
+# silently unreachable here -- a comment in this Makefile claimed otherwise for
+# some time. Those guards are now
+# "#if defined(REVOLUTION) || defined(LITEWING)", so say so, exactly as the
+# ESP32 target does.
+CDEFS += -DLITEWING
 
 SRC += $(FLIGHTLIB)/notification.c
 SRC += $(FLIGHTLIB)/opendroneid/opendroneid.c
