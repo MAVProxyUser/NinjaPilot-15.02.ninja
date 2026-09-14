@@ -288,6 +288,23 @@ void IPconnectionConnection::expireBeacons()
     bool changed = false;
 
     foreach(const QString &ip, m_discovered.keys()) {
+        /* Never expire the board we are actually talking to.
+         *
+         * The firmware advertises only while nobody is connected
+         * (pios_wifi.c: "if (wifi.client < 0 && !wifi.udp_active)"), which is
+         * deliberate -- a broadcast every couple of seconds is not something
+         * to add to an in-flight network. The consequence here was severe: 30
+         * seconds after connecting, the entry aged out, ConnectionManager::
+         * updateConnectionList() found the in-use device missing from the
+         * availability list and called disconnectDevice(), and the GCS dropped
+         * the aircraft. It then fell back to the manually configured entry and
+         * never reconnected, because the one automatic attempt had been spent.
+         *
+         * Silence from a device we hold an open socket to is not evidence of
+         * absence; the open socket is evidence of presence. */
+        if (!m_openDeviceName.isEmpty() && ip == m_openDeviceName) {
+            continue;
+        }
         if (m_discovered.value(ip) < cutoff) {
             m_discovered.remove(ip);
             changed = true;
@@ -318,6 +335,10 @@ QIODevice *IPconnectionConnection::openDevice(const QString &deviceName)
     if (!deviceName.isEmpty() && m_discovered.contains(deviceName)) {
         HostName = deviceName;
         Port     = 9000;
+        /* Remember it so expireBeacons() leaves this entry alone: the board
+         * stops advertising the moment it has a peer, and aging out the device
+         * we are connected to made the GCS disconnect itself. */
+        m_openDeviceName = deviceName;
         /* Force UDP as well as host and port.
          *
          * Leaving the transport to whatever the options page happened to hold
@@ -357,6 +378,8 @@ QIODevice *IPconnectionConnection::openDevice(const QString &deviceName)
 
 void IPconnectionConnection::closeDevice(const QString &)
 {
+    /* Released: the entry may age out normally again from here. */
+    m_openDeviceName.clear();
     if (ipSocket) {
         ipConMutex.lock();
         emit CloseSocket(ipSocket);

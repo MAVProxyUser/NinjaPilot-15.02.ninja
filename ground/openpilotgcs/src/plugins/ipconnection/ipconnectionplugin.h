@@ -101,6 +101,7 @@ private:
     QUdpSocket *m_beaconSocket;
     QHash<QString, QDateTime> m_discovered;   // ip -> last seen
     QDateTime m_lastAnnounce;                 // last availableDevChanged we emitted
+    QString m_openDeviceName;                 // device currently opened, empty if none
     QTimer *m_beaconExpiry;
     // QSettings* settings;
 };
