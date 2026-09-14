@@ -42,6 +42,8 @@
 #include <altitudeholdstatus.h>
 #include <velocitystate.h>
 #include <positionstate.h>
+#include <mathmisc.h>
+#include <math.h>
 // Private constants
 
 
@@ -230,7 +232,6 @@ static void altitudeHoldTask(void)
         break;
     }
 
-#ifdef SIMPOSIX
     // Unlike PathFollower's PIDControlDown (pidcontroldown.cpp), which
     // explicitly bounds both its velocity setpoint (VerticalVelMax) and
     // its thrust output (boundf(v, ulow, uhigh) in GetDownCommand()),
@@ -245,8 +246,14 @@ static void altitudeHoldTask(void)
     // PathFollower's existing, working pattern. No equivalent
     // AltitudeHoldSettings field exists for these bounds (XML only has
     // AltitudePI/VelocityPI/CutThrustWhenZero/ThrustExp/ThrustRate), so
-    // these are hardcoded sanity limits, not settings-driven - gated to
-    // SIMPOSIX pending a decision on whether to add real settings fields.
+    // these are hardcoded sanity limits, not settings-driven.
+    //
+    // These clamps were SIMPOSIX-only, which left the real aircraft running
+    // the unbounded loop the measurements above condemn -- the simulator got
+    // the fix and the thing that can hurt someone did not. An unbounded thrust
+    // demand is not a tuning question, so they now apply everywhere. If a
+    // vehicle ever needs a different ceiling, that is an argument for adding a
+    // settings field, not for removing the bound.
     // 1.5 m/s matches VtolPathFollowerSettings.VerticalVelMax (gazebo_bridge.py) -
     // PositionHold inherits whatever velocity state Stabilized2/altitude-hold
     // leaves behind at the mode handoff (confirmed via PIDStatus trace: PathFollower's
@@ -254,9 +261,17 @@ static void altitudeHoldTask(void)
     // handoff, correctly slamming to max thrust in response) - keeping both
     // loops' velocity ceilings consistent limits how violent that handoff can be.
     const float ALTITUDEHOLD_MAX_VELOCITY = 1.5f; // m/s
+
+    /* A NaN anywhere upstream -- a barometer sample, an attitude quaternion,
+     * the estimator's own covariance -- propagates through the PID into the
+     * thrust demand, and every comparison against a NaN is false, so a bare
+     * boundf() passes it straight through. Catch it here and ask for no
+     * vertical motion rather than an undefined amount of it. */
+    if (isnan(altitudeHoldStatus.VelocityDesired)) {
+        altitudeHoldStatus.VelocityDesired = 0.0f;
+    }
     altitudeHoldStatus.VelocityDesired = boundf(altitudeHoldStatus.VelocityDesired,
                                                  -ALTITUDEHOLD_MAX_VELOCITY, ALTITUDEHOLD_MAX_VELOCITY);
-#endif
 
     AltitudeHoldStatusSet(&altitudeHoldStatus);
 
@@ -273,9 +288,15 @@ static void altitudeHoldTask(void)
     }
     break;
     }
-#ifdef SIMPOSIX
+    /* Same reasoning as the velocity bound above, and the more important of
+     * the two: this is what reaches the motors. Fall back to the thrust the
+     * aircraft was holding when the mode was entered -- zero would drop it out
+     * of the sky and full would fly it away, whereas the entry thrust was, by
+     * construction, roughly a hover. */
+    if (isnan(thrustDemand)) {
+        thrustDemand = startThrust;
+    }
     thrustDemand = boundf(thrustDemand, 0.0f, 1.0f);
-#endif
 
     xSemaphoreGive(altitudeMutex);
 
