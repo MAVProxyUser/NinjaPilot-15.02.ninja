@@ -516,6 +516,12 @@ void ConnectionManager::updateConnectionDropdown()
     QSettings settings;
     const QString lastDevice = settings.value(QLatin1String("ConnectionManager/lastDevice")).toString();
 
+    /* Computed before the loop because the remembered-device branch below
+     * needs it too. */
+    QByteArray preferEnv = qgetenv("NINJAPILOT_GCS_PREFER");
+    QString prefer = preferEnv.isEmpty() ? QString("UDP") : QString::fromLocal8Bit(preferEnv);
+    bool restoredLast = false;
+
     // add all the list again to the combobox
     foreach(DevListItem d, m_devList) {
         if (!d.getConName().contains("Nano") && !d.getConName().contains("Revolution")) { // ONLY cc3d or Atom supported. 
@@ -527,8 +533,20 @@ void ConnectionManager::updateConnectionDropdown()
              * is not overridden by a USB device appearing later in the list. */
             if (!m_ioDev && !lastDevice.isEmpty() && d.device.displayName == lastDevice) {
                 m_availableDevList->setCurrentIndex(m_availableDevList->count() - 1);
+                restoredLast = true;
                 if (m_mainWindow->generalSettings()->autoConnect() && polling) {
                     qDebug() << "ConnectionManager: reconnecting to last device" << lastDevice;
+                    connectDevice(d);
+                } else if (!m_udpAutoConnectTried && polling && d.getConName().startsWith(prefer)) {
+                    /* Take the one automatic launch connection the prefer
+                     * block below would have taken, but aim it at the device
+                     * that last worked instead of at whichever entry happens
+                     * to enumerate first. Gated on the prefer prefix so this
+                     * stays a network-only behaviour: opening a serial port
+                     * resets the board attached to it, which must not happen
+                     * unasked at startup. */
+                    qDebug() << "ConnectionManager: opening last device" << lastDevice;
+                    m_udpAutoConnectTried = true;
                     connectDevice(d);
                 }
                 continue;
@@ -555,7 +573,13 @@ void ConnectionManager::updateConnectionDropdown()
                 m_availableDevList->setCurrentIndex(i);
             }
         }
-    } else {
+    } else if (!restoredLast) {
+        /* Only when nothing was remembered. This block selects the FIRST entry
+         * whose name starts with the prefer prefix, and both the manually
+         * configured IP entry and a discovered board render as "UDP: ...", so
+         * running it after a successful restore silently threw the restore
+         * away and auto-connected the wrong one of the two -- which is exactly
+         * the "it never sticks, it is always the other UDP" symptom. */
         // NinjaPilot: the flight controller is usually a network device (UDP
         // telemetry to the OSD32MP1), so an idle GCS offers that first rather
         // than a serial port.
@@ -566,9 +590,6 @@ void ConnectionManager::updateConnectionDropdown()
         // (any prefix of the entry as it appears in the Connections dropdown)
         // to have the GCS select and auto-connect that instead. Unset, the
         // behaviour is exactly as before: UDP.
-        QByteArray preferEnv = qgetenv("NINJAPILOT_GCS_PREFER");
-        QString prefer = preferEnv.isEmpty() ? QString("UDP") : QString::fromLocal8Bit(preferEnv);
-
         for (int i = 0; i < m_availableDevList->count(); i++) {
             if (m_availableDevList->itemData(i, Qt::ToolTipRole).toString().startsWith(prefer)) {
                 m_availableDevList->setCurrentIndex(i);
