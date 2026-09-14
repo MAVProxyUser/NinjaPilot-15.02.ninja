@@ -62,6 +62,9 @@ public:
         if (connection == NULL) {
             return "";
         }
+        if (device.selfNamed) {
+            return device.displayName;
+        }
         return connection->shortName() + ": " + device.displayName;
     }
 

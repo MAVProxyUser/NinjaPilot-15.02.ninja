@@ -537,14 +537,20 @@ void ConnectionManager::updateConnectionDropdown()
                 if (m_mainWindow->generalSettings()->autoConnect() && polling) {
                     qDebug() << "ConnectionManager: reconnecting to last device" << lastDevice;
                     connectDevice(d);
-                } else if (!m_udpAutoConnectTried && polling && d.getConName().startsWith(prefer)) {
+                } else if (!m_udpAutoConnectTried && polling && d.connection
+                           && (d.connection->shortName() == QLatin1String("UDP")
+                               || d.connection->shortName() == QLatin1String("TCP"))) {
                     /* Take the one automatic launch connection the prefer
                      * block below would have taken, but aim it at the device
                      * that last worked instead of at whichever entry happens
-                     * to enumerate first. Gated on the prefer prefix so this
-                     * stays a network-only behaviour: opening a serial port
-                     * resets the board attached to it, which must not happen
-                     * unasked at startup. */
+                     * to enumerate first.
+                     *
+                     * Gated on the transport rather than on the visible name:
+                     * a discovered board is shown without a "UDP: " prefix, so
+                     * a name test would skip exactly the entry this is for.
+                     * Network only, because opening a serial port resets the
+                     * board behind it and that must not happen unasked at
+                     * startup. */
                     qDebug() << "ConnectionManager: opening last device" << lastDevice;
                     m_udpAutoConnectTried = true;
                     connectDevice(d);
@@ -575,11 +581,14 @@ void ConnectionManager::updateConnectionDropdown()
         }
     } else if (!restoredLast) {
         /* Only when nothing was remembered. This block selects the FIRST entry
-         * whose name starts with the prefer prefix, and both the manually
-         * configured IP entry and a discovered board render as "UDP: ...", so
-         * running it after a successful restore silently threw the restore
-         * away and auto-connected the wrong one of the two -- which is exactly
-         * the "it never sticks, it is always the other UDP" symptom. */
+         * whose name starts with the prefer prefix. Running it after a
+         * successful restore silently threw the restore away: a discovered
+         * board used to render as "UDP: ESP32 ..." just like the manually
+         * configured entry beside it, the manual one enumerates first, and so
+         * the board found by the beacon was selected and then immediately
+         * deselected every single time. Discovered boards no longer carry the
+         * prefix, but the override is wrong regardless of how they are
+         * labelled -- a remembered choice outranks a default. */
         // NinjaPilot: the flight controller is usually a network device (UDP
         // telemetry to the OSD32MP1), so an idle GCS offers that first rather
         // than a serial port.

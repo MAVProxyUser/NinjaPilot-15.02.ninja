@@ -208,6 +208,11 @@ QList <Core::IConnection::device> IPconnectionConnection::availableDevices()
         device b;
         b.name = ip;
         b.displayName = QString("ESP32 %1 (WiFi)").arg(ip);
+        /* No "UDP: " in front of this one. The transport is an implementation
+         * detail of an entry that already says what the board is and how it
+         * was found, and the prefix only made it harder to tell apart from the
+         * manually configured entry beside it. */
+        b.selfNamed   = true;
         list.append(b);
     }
 

@@ -50,6 +50,10 @@ public:
     struct device {
         QString name;
         QString displayName;
+        /* displayName already identifies the board on its own, so the
+         * connection's shortName() must not be prepended to it. Set by
+         * connections that discover a board and name it themselves. */
+        bool selfNamed = false;
         bool operator==(device i)
         {
             return this->name == i.name;
