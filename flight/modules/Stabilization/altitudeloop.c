@@ -68,7 +68,15 @@
 // for the full investigation.
 #define CBTASK_PRIORITY   CALLBACK_TASK_ALTITUDEHOLD
 
+/* See the AltFilter note: overridable so a board whose ABI needs more can say
+ * so. This one is latent rather than obvious -- the callback only runs once an
+ * altitude-hold thrust mode is selected, so a too-small stack here waits until
+ * the first time someone actually asks the aircraft to hold altitude. */
+#ifdef PIOS_ALTITUDEHOLD_STACK_SIZE
+#define STACK_SIZE_BYTES  PIOS_ALTITUDEHOLD_STACK_SIZE
+#else
 #define STACK_SIZE_BYTES  512
+#endif
 // Private types
 
 // Private variables

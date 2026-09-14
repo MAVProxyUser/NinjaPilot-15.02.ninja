@@ -66,7 +66,17 @@
 #include <math.h>
 #include <string.h>
 
+/* Overridable per board. Xtensa's windowed ABI spills register windows to the
+ * stack and IDF's library calls are far hungrier than the STM32 ones, so the
+ * stock size overflows there -- and it fails by missing the canary and
+ * corrupting the scheduler rather than by naming this task. Every other module
+ * on that target already takes an override for exactly this reason; this one
+ * did not, which is what made it the culprit and invisible at the same time. */
+#ifdef PIOS_ALTFILTER_STACK_SIZE
+#define STACK_SIZE_BYTES PIOS_ALTFILTER_STACK_SIZE
+#else
 #define STACK_SIZE_BYTES 1536
+#endif
 #define TASK_PRIORITY    (tskIDLE_PRIORITY + 1)
 #define LOOP_MS          20                  /* 50 Hz: a baro is not fast    */
 #define DT               (LOOP_MS / 1000.0f)
