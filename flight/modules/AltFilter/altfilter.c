@@ -60,10 +60,12 @@
 #include <positionstate.h>
 #include <velocitystate.h>
 #include <flightstatus.h>
+#include <revosettings.h>
 #include <CoordinateConversions.h>
 #include <pios_sensors.h>
 #include <pios_constants.h>
 #include <math.h>
+#include <mathmisc.h>
 #include <string.h>
 
 /* Overridable per board. Xtensa's windowed ABI spills register windows to the
@@ -112,15 +114,20 @@ static float baroRef;                  /* baro altitude at first fix, so Down
 static const PIOS_SENSORS_Instance *baroInstance;
 
 static void AltFilterTask(void *parameters);
+static void BaroCorrectionUpdatedCb(UAVObjEvent *ev);
 
 int32_t AltFilterInitialize(void)
 {
     BaroSensorInitialize();
+    RevoSettingsInitialize();
     AccelStateInitialize();
     AttitudeStateInitialize();
     PositionStateInitialize();
     VelocityStateInitialize();
     FlightStatusInitialize();
+
+    RevoSettingsConnectCallback(&BaroCorrectionUpdatedCb);
+    BaroCorrectionUpdatedCb(NULL);
     altFilterEnabled = true;
     return 0;
 }
@@ -230,6 +237,42 @@ static void kfCorrectBaro(float downMeas)
     P[2][0] -= K2 * p00; P[2][1] -= K2 * p01; P[2][2] -= K2 * p02;
 }
 
+/* Barometer temperature correction.
+ *
+ * These parts keep a residual temperature coefficient after their own internal
+ * compensation -- roughly 0.5-1 Pa/degC, i.e. 4-8 cm of altitude per degC --
+ * and a board self-heats about 10 degC between a cold boot and a hover. That
+ * drift dominates every other error in the altitude channel: the sensor's
+ * sample-to-sample noise measures under 4 cm in flight while the thermal term
+ * is tens of centimetres.
+ *
+ * The GCS already characterises it. Its thermal calibration cools the board
+ * and logs the warm-up, fitting a cubic of pressure against temperature for
+ * the barometer in the SAME sweep that produces the gyro and accel
+ * coefficients, and writes it to RevoSettings. Nothing on this target read it,
+ * because the polynomial is applied in modules/Sensors (the Revo chain) and
+ * this board runs the CC complementary filter instead. Same maths as
+ * sensors.c:529-535, applied where this target actually reads its barometer.
+ */
+static RevoSettingsBaroTempCorrectionPolynomialData baroCorrection;
+static RevoSettingsBaroTempCorrectionExtentData baroCorrectionExtent;
+static volatile bool baro_temp_correction_enabled;
+
+static void BaroCorrectionUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
+{
+    RevoSettingsBaroTempCorrectionPolynomialGet(&baroCorrection);
+    RevoSettingsBaroTempCorrectionExtentGet(&baroCorrectionExtent);
+    /* Enabled only when a calibration actually exists: an all-zero polynomial
+     * or a degenerate extent means the procedure was never run, and the
+     * correction must then be exactly nothing rather than nearly nothing. */
+    baro_temp_correction_enabled =
+        (baroCorrectionExtent.max - baroCorrectionExtent.min > 0.1f &&
+         (fabsf(baroCorrection.a) > 1e-9f ||
+          fabsf(baroCorrection.b) > 1e-9f ||
+          fabsf(baroCorrection.c) > 1e-9f ||
+          fabsf(baroCorrection.d) > 1e-9f));
+}
+
 /* If a barometer is registered with PIOS_SENSORS, poll it and publish
  * BaroSensor. Returns true if we produced a sample this pass. */
 static bool pollRegisteredBaro(void)
@@ -251,6 +294,15 @@ static bool pollRegisteredBaro(void)
     baroInstance->driver->fetch(&s, sizeof(s), baroInstance->context);
 
     /* s.sample is PASCALS -- see the units note in pios_bmp280.c. */
+    if (baro_temp_correction_enabled) {
+        /* pressure bias = a + b*t + c*t^2 + d*t^3, with the temperature held
+         * to the calibrated range at either end rather than extrapolating a
+         * cubic past the data that produced it. */
+        float ctemp = boundf(s.temperature, baroCorrectionExtent.max, baroCorrectionExtent.min);
+        s.sample -= baroCorrection.a
+                    + ((baroCorrection.d * ctemp + baroCorrection.c) * ctemp + baroCorrection.b) * ctemp;
+    }
+
     float altitude = 44330.0f
                      * (1.0f - powf(s.sample / PIOS_CONST_MKS_STD_ATMOSPHERE_F, (1.0f / 5.255f)));
 
