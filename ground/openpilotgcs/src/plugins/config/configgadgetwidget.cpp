@@ -202,8 +202,18 @@ void ConfigGadgetWidget::onAutopilotConnect()
         /* Idempotent: this is now called on every FirmwareIAPObj update, and
          * rebuilding the tabs each time would throw away whatever the operator
          * was doing in them. Only act when the answer actually changes, and
-         * never act on 0 -- that is "not known yet", not a board. */
+         * never act on 0 -- that is "not known yet", not a board.
+         *
+         * Emit before returning. This function ends with
+         * emit autopilotConnected(), which is how every config widget learns to
+         * enable itself and populate its bindings. Returning early skipped it,
+         * so the tabs stayed dead -- the arming dropdown came up empty and
+         * unselectable -- and on a reconnect, where the board is already
+         * applied, EVERY call took the early path and the whole config UI never
+         * came alive at all. The guard is about not rebuilding tabs; it was
+         * never meant to suppress the connected signal. */
         if (board == 0 || board == m_appliedBoard) {
+            emit autopilotConnected();
             return;
         }
         m_appliedBoard = board;
