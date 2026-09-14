@@ -82,7 +82,20 @@
 #define DT               (LOOP_MS / 1000.0f)
 
 /* Same constants filteraltitude.c uses, and for the reasons documented there. */
-#define BARO_NOISE_VAR_M2      0.25f   /* ~0.5 m std dev                      */
+/* Measured, not assumed. A bench sweep of the fitted BMP388 (see
+ * firmware/baro_sweep.c) puts its sample-to-sample noise at 0.8 cm of
+ * altitude; the BMP280 alternative measures 1.7 cm. 0.25 here claimed 50 cm --
+ * off by a factor of about forty -- which made the filter almost ignore its
+ * best sensor and ride accelerometer integration instead, and accelerometer
+ * integration drifts.
+ *
+ * 3 cm sigma rather than 0.8: the residual temperature coefficient of these
+ * parts is roughly 0.5-1 Pa/degC, i.e. 4-8 cm per degC, and the board
+ * self-heats about 10 degC between a cold boot and a hover. That thermal term
+ * dominates the white noise by an order of magnitude, so the honest
+ * measurement uncertainty is set by it, not by the datasheet noise figure.
+ */
+#define BARO_NOISE_VAR_M2      0.0009f /* 3 cm std dev                        */
 #define ACCEL_NOISE_VAR_MPS2SQ 1.0f    /* unmodelled acceleration             */
 #define BIAS_NOISE_VAR_MPS2SQ  1e-7f   /* accel bias random walk, per second  */
 
