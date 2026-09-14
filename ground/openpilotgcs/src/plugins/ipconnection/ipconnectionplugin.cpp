@@ -250,7 +250,27 @@ void IPconnectionConnection::onBeaconDatagram()
         m_discovered.insert(ip, QDateTime::currentDateTime());
     }
 
-    if (changed) {
+    /* Announce on the rising edge, and then keep announcing at a low rate for
+     * as long as boards are being heard.
+     *
+     * Edge-only was wrong. The socket listens continuously, but a board is
+     * only ever "new" once, so exactly one availableDevChanged was emitted per
+     * board for as long as it kept beaconing. If that single signal did not
+     * result in the dropdown being rebuilt -- it arrives during plugin load,
+     * where ConnectionManager::devChanged() defers it, and anything that loses
+     * it there loses it for good -- the board stayed invisible until its
+     * 30-second expiry, despite beacons arriving every second and a half.
+     *
+     * Presence is a level, not an edge, so treat it as one. Re-announcing
+     * costs a dropdown rebuild, which already happens on every serial poll,
+     * and it self-heals from a missed notification within ANNOUNCE_SECS. */
+    const int ANNOUNCE_SECS = 5;
+    const QDateTime now = QDateTime::currentDateTime();
+
+    if (changed
+        || (!m_discovered.isEmpty()
+            && (m_lastAnnounce.isNull() || m_lastAnnounce.secsTo(now) >= ANNOUNCE_SECS))) {
+        m_lastAnnounce = now;
         emit availableDevChanged(this);
     }
 }

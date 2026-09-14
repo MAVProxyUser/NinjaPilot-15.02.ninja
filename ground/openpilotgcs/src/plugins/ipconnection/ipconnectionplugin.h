@@ -100,6 +100,7 @@ private:
      * offered rather than sit there looking connectable. */
     QUdpSocket *m_beaconSocket;
     QHash<QString, QDateTime> m_discovered;   // ip -> last seen
+    QDateTime m_lastAnnounce;                 // last availableDevChanged we emitted
     QTimer *m_beaconExpiry;
     // QSettings* settings;
 };
