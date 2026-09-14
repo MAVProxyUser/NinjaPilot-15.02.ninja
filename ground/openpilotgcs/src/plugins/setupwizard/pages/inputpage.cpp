@@ -26,6 +26,8 @@
  */
 
 #include "inputpage.h"
+#include "uavdataobject.h"
+#include <QMessageBox>
 #include "ui_inputpage.h"
 #include "setupwizard.h"
 #include "extensionsystem/pluginmanager.h"
@@ -45,8 +47,50 @@ InputPage::~InputPage()
     delete ui;
 }
 
+/**
+ * @brief Pre-select the input the board is ACTUALLY configured for.
+ *
+ * A wizard page that opens with nothing selected invites Next being clicked
+ * through, and leaves the operator guessing what they are about to apply.
+ * Reading ManualControlSettings means the highlighted option is what the board
+ * is doing right now, so Next is a confirmation rather than a silent choice.
+ */
+void InputPage::preselectFromBoard()
+{
+    ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+
+    if (!pm) {
+        return;
+    }
+    UAVObjectManager *objMngr = pm->getObject<UAVObjectManager>();
+    if (!objMngr) {
+        return;
+    }
+    UAVDataObject *mcs = dynamic_cast<UAVDataObject *>(objMngr->getObject("ManualControlSettings"));
+    if (!mcs) {
+        return;
+    }
+    UAVObjectField *groups = mcs->getField("ChannelGroups");
+    if (!groups) {
+        return;
+    }
+
+    const QString g = groups->getValue(1).toString();   // Roll's group
+    if (g.contains("DSM")) {
+        ui->spectrumButton->setChecked(true);
+    } else if (g.contains("GCS") || g.contains("PPM")) {
+        ui->ppmButton->setChecked(true);
+    } else if (g.contains("SBUS") || g.contains("S.Bus")) {
+        ui->sbusButton->setChecked(true);
+    } else if (g.contains("PWM")) {
+        ui->pwmButton->setChecked(true);
+    }
+}
+
 void InputPage::initializePage()
 {
+    preselectFromBoard();
+
     /* The ESP32 Thing Plus target has exactly one receiver input: a
      * Spektrum satellite on the pin silkscreened RX1. Offering PWM, PPM or
      * S.Bus here would write a configuration the firmware cannot serve. */
@@ -102,7 +146,14 @@ bool InputPage::validatePage()
     } else if (ui->spectrumButton->isChecked()) {
         getWizard()->setInputType(SetupWizard::INPUT_DSM);
     } else {
-        getWizard()->setInputType(SetupWizard::INPUT_PWM);
+        /* Nothing selected. This used to fall through to INPUT_PWM, which
+         * silently configured a receiver the operator never chose -- and on a
+         * board with no PWM header at all, one that cannot work. Clicking Next
+         * without choosing is a mistake, not a vote for the first option, so
+         * say so and stay on the page. */
+        QMessageBox::information(this, tr("Select an input type"),
+                                 tr("Choose how the receiver connects before continuing."));
+        return false;
     }
     getWizard()->setRestartNeeded(getWizard()->isRestartNeeded() || restartNeeded(getWizard()->getInputType()));
 

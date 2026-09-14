@@ -30,9 +30,12 @@
 #include "setupwizard.h"
 #include "connectiondiagram.h"
 
+#include <QAbstractButton>
+#include <QApplication>
+
 SummaryPage::SummaryPage(SetupWizard *wizard, QWidget *parent) :
     AbstractWizardPage(wizard, parent),
-    ui(new Ui::SummaryPage)
+    ui(new Ui::SummaryPage), m_saving(false)
 {
     ui->setupUi(this);
     connect(ui->illustrationButton, SIGNAL(clicked()), this, SLOT(showDiagram()));
@@ -45,11 +48,34 @@ SummaryPage::~SummaryPage()
 
 bool SummaryPage::validatePage()
 {
+    // setupVehicle() below spins a nested QEventLoop per object while it waits
+    // for each transaction to complete. That loop delivers mouse events, so a
+    // second click on Next re-enters this function and starts another save on
+    // top of the one still running. Refuse to re-enter, and take the buttons
+    // away for the duration the way every other long-running page here does.
+    if (m_saving) {
+        return false;
+    }
+    m_saving = true;
+    enableButtons(false);
+
     // Save settings so far.
     VehicleConfigurationHelper helper(getWizard());
 
     helper.setupVehicle(false);
+
+    enableButtons(true);
+    m_saving = false;
     return true;
+}
+
+void SummaryPage::enableButtons(bool enable)
+{
+    getWizard()->button(QWizard::NextButton)->setEnabled(enable);
+    getWizard()->button(QWizard::CancelButton)->setEnabled(enable);
+    getWizard()->button(QWizard::BackButton)->setEnabled(enable);
+    getWizard()->button(QWizard::CustomButton1)->setEnabled(enable);
+    QApplication::processEvents();
 }
 
 void SummaryPage::initializePage()

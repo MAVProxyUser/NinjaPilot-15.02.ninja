@@ -45,6 +45,8 @@ public:
 
 private:
     Ui::SummaryPage *ui;
+    bool m_saving;
+    void enableButtons(bool enable);
 
 private slots:
     void showDiagram();

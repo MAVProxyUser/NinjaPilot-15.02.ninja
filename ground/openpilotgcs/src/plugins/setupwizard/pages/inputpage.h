@@ -42,6 +42,7 @@ public:
     ~InputPage();
     bool validatePage();
     void initializePage();
+    void preselectFromBoard();
 
 private:
     bool restartNeeded(VehicleConfigurationSource::INPUT_TYPE selectedType);
