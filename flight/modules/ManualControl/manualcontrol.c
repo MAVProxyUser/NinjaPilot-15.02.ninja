@@ -41,6 +41,9 @@
 #include <flightmodesettings.h>
 #include <flightstatus.h>
 #include <systemsettings.h>
+#ifndef PIOS_EXCLUDE_ADVANCED_FEATURES
+#include <revosettings.h>
+#endif
 #include <stabilizationdesired.h>
 #include <callbackinfo.h>
 #include <stabilizationsettings.h>
@@ -143,6 +146,17 @@ int32_t ManualControlStart()
     // Whenever the configuration changes, make sure it is safe to fly
     SystemSettingsConnectCallback(configurationUpdatedCb);
     ManualControlSettingsConnectCallback(configurationUpdatedCb);
+#ifndef PIOS_EXCLUDE_ADVANCED_FEATURES
+    /* configuration_check() reads RevoSettings.FusionAlgorithm to decide
+     * whether the selected fusion can navigate, which gates every GPS-assisted
+     * flight mode position. RevoSettings is still on its defaults when this
+     * runs -- it is loaded from storage afterwards -- so the first check sees
+     * "not nav capable" and raises SystemConfiguration Critical, which
+     * armhandler treats as arm-blocking. Without this callback nothing ever
+     * re-ran the check, so a correctly configured board simply refused to arm
+     * with no indication that the fusion setting was the reason. */
+    RevoSettingsConnectCallback(configurationUpdatedCb);
+#endif
     ManualControlCommandConnectCallback(commandUpdatedCb);
 
     // clear alarms

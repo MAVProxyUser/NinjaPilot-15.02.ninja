@@ -39,6 +39,9 @@
 #include <stabilizationsettings.h>
 #include <systemalarms.h>
 #include <positionstate.h>
+#ifndef PIOS_EXCLUDE_ADVANCED_FEATURES
+#include <revosettings.h>
+#endif
 #include <taskinfo.h>
 
 // a number of useful macros
@@ -70,8 +73,36 @@ int32_t configuration_check()
     const struct pios_board_info *bdinfo = &pios_board_info_blob;
     bool coptercontrol     = bdinfo->board_type == 0x04;
 
-    // Classify navigation capability
+    // Classify navigation capability.
+    //
+    // This was hardcoded false, which meant ADDSEVERITY(navCapableFusion)
+    // below could never pass and ANY flight mode position with GPS assist
+    // raised SystemConfiguration Critical -- which armhandler treats as
+    // arm-blocking. The board was therefore unable to arm the moment a
+    // GPSAssist position was configured, with nothing naming the fusion
+    // algorithm as the reason.
+    //
+    // Derive it from the fusion actually selected: only the chains that carry
+    // a GPS position solution can support assisted or navigated flight.
+    // Targets without RevoSettings (the CopterControl-class ones, which have
+    // no StateEstimation at all) keep the old answer, which is correct there.
+    // NB: gate on PIOS_EXCLUDE_ADVANCED_FEATURES, which CopterControl defines.
+    // Do NOT #ifdef on REVOSETTINGS_FUSIONALGORITHM_* -- those are enum
+    // values, not macros, so such a test is silently always false and quietly
+    // selects the wrong branch.
+#ifndef PIOS_EXCLUDE_ADVANCED_FEATURES
+    /* uint8_t, NOT the ...Options enum type: the generated accessor is
+     * RevoSettingsFusionAlgorithmGet(uint8_t *) and writes exactly one byte.
+     * Passing a 4-byte enum leaves three bytes of stack garbage above it, and
+     * every comparison below then fails against a value like 1070402563. */
+    uint8_t fusionAlgorithm;
+    RevoSettingsFusionAlgorithmGet(&fusionAlgorithm);
+    const bool navCapableFusion =
+        (fusionAlgorithm == REVOSETTINGS_FUSIONALGORITHM_GPSNAVIGATIONINS13
+         || fusionAlgorithm == REVOSETTINGS_FUSIONALGORITHM_COMPLEMENTARYMAGGPSOUTDOOR);
+#else
     const bool navCapableFusion = false;
+#endif
 
     // Classify airframe type
     bool multirotor = (GetCurrentFrameType() == FRAME_TYPE_MULTIROTOR);
