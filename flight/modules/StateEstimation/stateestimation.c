@@ -63,7 +63,16 @@
 #include "CoordinateConversions.h"
 
 // Private constants
+// Floor for the callback task's stack: StateEstimationInitialize() takes the
+// max of this and every filter's own request (filterekf.c asks 2048). Those
+// are all CopterControl numbers, and the EKF's float matrix work does not fit
+// them once Xtensa's windowed ABI is spilling register windows -- so raise the
+// floor here rather than editing each filter.
+#ifndef PIOS_STATEESTIMATION_STACK_SIZE
 #define STACK_SIZE_BYTES        256
+#else
+#define STACK_SIZE_BYTES        PIOS_STATEESTIMATION_STACK_SIZE
+#endif
 #define CALLBACK_PRIORITY       CALLBACK_PRIORITY_REGULAR
 // Moved off CALLBACK_TASK_FLIGHTCONTROL onto its own dedicated task - see
 // pios_callbackscheduler.h's comment on CALLBACK_TASK_STATEESTIMATION for

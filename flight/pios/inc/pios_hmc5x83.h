@@ -49,6 +49,9 @@
 #define PIOS_HMC5x83_DATAOUT_YMSB_REG   0x07
 #define PIOS_HMC5x83_DATAOUT_YLSB_REG   0x08
 #define PIOS_HMC5x83_DATAOUT_STATUS_REG 0x09
+/* Status register bit 0: RDY, set when a new measurement is in the data
+ * registers and cleared when they are read. */
+#define PIOS_HMC5x83_STATUS_RDY         0x01
 #define PIOS_HMC5x83_DATAOUT_IDA_REG    0x0A
 #define PIOS_HMC5x83_DATAOUT_IDB_REG    0x0B
 #define PIOS_HMC5x83_DATAOUT_IDC_REG    0x0C

@@ -431,7 +431,22 @@ void ConfigRevoWidget::applyBoardCapabilities()
         return;
     }
     int model = utilMngr->getBoardModel();
-    bool ccFilterBoard = (model & 0xff00) == 0x1200 || (model & 0xff00) == 0x1300;
+
+    /* 0x12xx (ESP32-WROOM) still runs the standalone complementary filter in
+     * modules/Attitude and carries no magnetometer, so both of these would be
+     * dead controls there: nothing consumes AttitudeSettings.BoardLevelTrim,
+     * and there is no mag to calibrate.
+     *
+     * 0x13xx (LiteWing) is NOT in that position any more and must not be
+     * lumped in with it:
+     *   - it has an HMC5883L on I2C1, so mag calibration is required, not
+     *     merely available -- filtermag.c scores the field against
+     *     HomeLocation.Be and GPS heading depends on it;
+     *   - it now runs modules/Sensors + StateEstimation, and sensors.c DOES
+     *     apply BoardLevelTrim (see its settingsUpdatedCb), which the old
+     *     modules/Attitude never did.
+     * Both groups are live there. */
+    bool ccFilterBoard = (model & 0xff00) == 0x1200;
 
     m_ui->magCalGroupBox->setVisible(!ccFilterBoard);
     m_ui->boardLevelCalGroupBox->setVisible(!ccFilterBoard);

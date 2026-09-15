@@ -154,6 +154,10 @@ static const float CoeffFile[91][6] = {
 
 static WMMtype_Ellipsoid *Ellip = NULL;
 static WMMtype_MagneticModel *MagneticModel = NULL;
+/* Last date these coefficients are good for. WMM sets are issued for a five
+ * year window from their epoch; this one is epoch 2010.0. */
+#define WMM_VALID_UNTIL 2015.0f
+
 static float decimal_date;
 
 /**************************************************************************************
@@ -193,6 +197,8 @@ int WMM_Initialize()
     // Really, Really needs to be read from a file - out of date in 2015 at latest
     MagneticModel->EditionDate = 0.0f; /* OP change. Originally 5.7863328170559505e-307, truncates to 0.0f */
     MagneticModel->epoch = 2010.0f;
+    /* Keep WMM_VALID_UNTIL (see WMM_DateToYear) in step with these
+     * coefficients whenever they are refreshed. */
     sprintf(MagneticModel->ModelName, "WMM-2010");
 
     return 0; // OK
@@ -271,9 +277,12 @@ int WMM_GetMagVector(float Lat, float Lon, float AltEllipsoid, uint16_t Month, u
         if (WMM_Geomag(CoordSpherical, CoordGeodetic, GeoMagneticElements) < 0) {
             returned = -9; // error
         } else { // set the returned values
-            B[0] = GeoMagneticElements->X;
-            B[1] = GeoMagneticElements->Y;
-            B[2] = GeoMagneticElements->Z;
+            /* Scale here, while GeoMagneticElements is still allocated. The
+             * conversion used to be done after the frees below, reading back
+             * through the dangling pointer. */
+            B[0] = GeoMagneticElements->X * 1e-2f; // nT -> milligauss
+            B[1] = GeoMagneticElements->Y * 1e-2f;
+            B[2] = GeoMagneticElements->Z * 1e-2f;
         }
     }
 
@@ -302,9 +311,19 @@ int WMM_GetMagVector(float Lat, float Lon, float AltEllipsoid, uint16_t Month, u
         Ellip = NULL;
     }
 
-    B[0] = GeoMagneticElements->X * 1e-2f;
-    B[1] = GeoMagneticElements->Y * 1e-2f;
-    B[2] = GeoMagneticElements->Z * 1e-2f;
+    /* NOTE: B is deliberately NOT written here any more.
+     *
+     * This is where the nT->milligauss conversion used to happen -- after
+     * GeoMagneticElements had already been FREE()d a few lines above. Reading
+     * the freed block returned whatever the allocator left behind: zeros on a
+     * host build, about -1.7e36 on the ESP32. Either way HomeLocation.Be was
+     * junk while WMM_GetMagVector() reported success, which pinned
+     * SYSTEMALARMS_ALARM_MAGNETOMETER at Critical (filtermag.c scores every
+     * sample against Be) and blocked arming, on a completely healthy GPS fix.
+     *
+     * The scaling now happens in the success branch above, and B is written
+     * only when the computation actually succeeded -- which is what the
+     * negative return codes have always promised. */
 
     return returned;
 }
@@ -1272,6 +1291,30 @@ int WMM_DateToYear(uint16_t month, uint16_t day, uint16_t year)
     temp += day;
 
     decimal_date = year + (temp - 1) / (365.0f + ExtraDay);
+
+    /* Clamp into the coefficient set's validity window.
+     *
+     * These are WMM-2010 coefficients (see WMM_Initialize: epoch 2010.0,
+     * "valid until 2015"), and the only date validation above is on month and
+     * day -- the year was never range-checked. A present-day date therefore
+     * sails straight through and the secular-variation term
+     * (decimal_date - epoch) is extrapolated sixteen years and counting past
+     * the data that supports it. Measured at 40.1N 83.1W the model still
+     * returns a physical answer when extrapolated, so this is an accuracy
+     * issue rather than a correctness one -- the garbage Be seen during
+     * bring-up was a separate use-after-free at the end of
+     * WMM_GetMagVector(), not this.
+     *
+     * Clamping costs the secular drift between the clamp and today: declination
+     * moves on the order of 0.1-0.2 deg/year, so about 1-2 deg here. That is
+     * well inside what six-point mag calibration and the filter's own tolerance
+     * absorb, and it is enormously better than a diverged answer.
+     *
+     * The real fix is to ship current coefficients; until then this keeps the
+     * output physical and the failure mode visible in one place. */
+    if (decimal_date > WMM_VALID_UNTIL) {
+        decimal_date = WMM_VALID_UNTIL;
+    }
 
     return 0; // OK
 }

@@ -53,7 +53,14 @@
 #include <vtolpathfollowersettings.h>
 
 // Private constants
+// CopterControl Cortex-M3 number; Xtensa's windowed ABI spills register
+// windows to the stack on every call. Same override as Attitude,
+// Stabilization, Telemetry, GPS, Sensors and StateEstimation.
+#ifndef PIOS_PATHPLANNER_STACK_SIZE
 #define STACK_SIZE_BYTES            1024
+#else
+#define STACK_SIZE_BYTES            PIOS_PATHPLANNER_STACK_SIZE
+#endif
 #define TASK_PRIORITY               CALLBACK_TASK_NAVIGATION
 #define MAX_QUEUE_SIZE              2
 #define PATH_PLANNER_UPDATE_RATE_MS 100 // can be slow, since we listen to status updates as well

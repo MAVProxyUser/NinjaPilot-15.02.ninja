@@ -47,8 +47,13 @@ def main():
         print("SKIP: no GCS binary at", GCS)
         return 0
 
-    subprocess.run(["pkill", "-9", "-f", "MacOS/NinjaPilotGCS"], capture_output=True)
-    time.sleep(3)
+    # Ask it to quit rather than SIGKILL: a -9 here once left the user's GCS
+    # config half-written (scope curves lost, system-health diagram showing
+    # "Unknown"). Fall back to a kill only if it will not go.
+    subprocess.run(["osascript", "-e", 'quit app "NinjaPilotGCS"'], capture_output=True)
+    time.sleep(4)
+    subprocess.run(["pkill", "-f", "MacOS/NinjaPilotGCS"], capture_output=True)
+    time.sleep(2)
     env = dict(os.environ)
     env["NINJAPILOT_GCS_AUTOMATION"] = "1"
     log = open(os.path.join(os.environ.get("TMPDIR", "/tmp"), "gcs_wizard_test.log"), "wb")
@@ -84,7 +89,9 @@ def main():
 
         c.do(CANCEL, "Press")   # never leave it somewhere that writes settings
     finally:
-        subprocess.run(["pkill", "-9", "-f", "MacOS/NinjaPilotGCS"], capture_output=True)
+        subprocess.run(["osascript", "-e", 'quit app "NinjaPilotGCS"'], capture_output=True)
+        time.sleep(4)
+        subprocess.run(["pkill", "-f", "MacOS/NinjaPilotGCS"], capture_output=True)
 
     for f in failures:
         print("FAIL ", f)

@@ -100,7 +100,14 @@ extern "C" {
 
 #define PF_IDLE_UPDATE_RATE_MS 100
 
+// CopterControl Cortex-M3 number; Xtensa's windowed ABI spills register
+// windows to the stack on every call. Same override as Attitude,
+// Stabilization, Telemetry, GPS, Sensors and StateEstimation.
+#ifndef PIOS_PATHFOLLOWER_STACK_SIZE
 #define STACK_SIZE_BYTES       2048
+#else
+#define STACK_SIZE_BYTES       PIOS_PATHFOLLOWER_STACK_SIZE
+#endif
 
 
 // Private types

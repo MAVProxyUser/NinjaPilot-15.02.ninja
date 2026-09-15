@@ -163,6 +163,11 @@ int SetupWizard::nextId() const
             case CONTROLLER_REVO:
             case CONTROLLER_REALPOSIX:
             case CONTROLLER_NANO:
+            /* LiteWing has a GPS header (UART1) and, since the StateEstimation
+             * + PathFollower work, the navigation chain to use it. It needs
+             * this page like any other Revo-class board; it was skipped back
+             * when the board had no GPS at all. */
+            case CONTROLLER_LITEWING:
                 return PAGE_GPS;
 
             default:
@@ -176,6 +181,7 @@ int SetupWizard::nextId() const
         case CONTROLLER_REVO:
         case CONTROLLER_REALPOSIX:
         case CONTROLLER_NANO:
+        case CONTROLLER_LITEWING:
             return PAGE_GPS;
 
         default:

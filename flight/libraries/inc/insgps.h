@@ -76,7 +76,7 @@ void MagVelBaroCorrection(float mag_data[3], float Vel[3], float BaroAlt);
 void FullCorrection(float mag_data[3], float Pos[3], float Vel[3],
                     float BaroAlt);
 void GpsBaroCorrection(float Pos[3], float Vel[3], float BaroAlt);
-void GpsMagCorrection(float mag_data[3], float Pos[3], float Vel[2]);
+void GpsMagCorrection(float mag_data[3], float Pos[3], float Vel[3]);
 void VelBaroCorrection(float Vel[3], float BaroAlt);
 
 uint16_t ins_get_num_states();

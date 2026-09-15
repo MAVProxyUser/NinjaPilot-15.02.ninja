@@ -165,7 +165,17 @@ uint8_t PIOS_TASK_MONITOR_GetIdlePercentage()
     uint8_t running_time_percentage = 0;
 
     /* Generate idle time percentage stats */
+#if defined(USE_ESP32)
+    /* SMP: xTaskGetIdleTaskHandle() returns the idle task of whichever core
+     * the CALLER is on, so this figure silently follows systemmod around. The
+     * flight stack is pinned to core 1 (see the affinity table in
+     * pios_esp32.h), and core 1 is what SystemStats.CPULoad and the
+     * CPUOverload alarm are supposed to describe -- ask for that core by name
+     * rather than inheriting whichever one happens to be reading it. */
+    running_time_percentage = uxTaskGetRunTime(xTaskGetIdleTaskHandleForCore(1)) / deltaTime;
+#else
     running_time_percentage = uxTaskGetRunTime(xTaskGetIdleTaskHandle()) / deltaTime;
+#endif
     xSemaphoreGiveRecursive(mLock);
     return running_time_percentage;
 

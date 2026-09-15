@@ -69,7 +69,15 @@
 #include <string.h>
 
 // Private constants
+// CopterControl Cortex-M3 number. Xtensa's windowed ABI spills register
+// windows to the stack on every call, and this task drives the PIOS_SENSORS
+// drivers (I2C/SPI transfers, float scaling) on top of that -- see the same
+// override on Attitude, Stabilization, Telemetry and GPS.
+#ifndef PIOS_SENSORS_STACK_SIZE
 #define STACK_SIZE_BYTES         1000
+#else
+#define STACK_SIZE_BYTES         PIOS_SENSORS_STACK_SIZE
+#endif
 #define TASK_PRIORITY            (tskIDLE_PRIORITY + 3)
 
 #define MAX_SENSORS_PER_INSTANCE 2

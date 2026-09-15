@@ -300,7 +300,26 @@ bool PIOS_HMC5x83_NewDataAvailable(pios_hmc5x83_dev_t handler)
 {
     pios_hmc5x83_dev_data_t *dev = dev_validate(handler);
 
+#ifdef PIOS_HMC5X83_HAS_GPIOS
     return dev->data_ready;
+#else
+    /* No DRDY line on this board, so nothing ever sets data_ready -- it is
+     * written true only by PIOS_HMC5x83_IRQHandler(). Ask the part instead:
+     * it reports the same edge in its status register, which is how a driver
+     * advertising is_polled = true is supposed to behave when the optional
+     * interrupt is absent. Without this the sensor registers, passes
+     * PIOS_SENSORS_Test(), and then silently never yields a sample.
+     *
+     * The read is one byte per poll on a bus the barometer already shares;
+     * the alternative is a fifth wire to the module's DRDY pad. */
+    uint8_t status = 0;
+
+    if (dev->cfg->Driver->Read(handler, PIOS_HMC5x83_DATAOUT_STATUS_REG,
+                               &status, sizeof(status)) != 0) {
+        return false;
+    }
+    return (status & PIOS_HMC5x83_STATUS_RDY) != 0;
+#endif
 }
 
 /**

@@ -64,6 +64,7 @@ static void updateHwSettings();
 
 #ifdef PIOS_GPS_SETS_HOMELOCATION
 static void setHomeLocation(GPSPositionSensorData *gpsData);
+static void homeLocationUpdatedCb(UAVObjEvent *ev);
 static float GravityAccel(float latitude, float longitude, float altitude);
 #endif
 
@@ -104,6 +105,16 @@ void updateGpsSettings(UAVObjEvent *ev);
 
 #ifndef GPS_READ_BUFFER
 #define GPS_READ_BUFFER            128
+#endif
+
+// Same treatment as Attitude/Stabilization/Telemetry: the sizes above are
+// CopterControl Cortex-M3 numbers, and Xtensa's windowed ABI spills register
+// windows to the stack on every call, so 580 bytes does not survive one pass
+// through the NMEA parser. It does not fail as a clean overflow either -- the
+// canary is missed and the scheduler's ready list is corrupted instead.
+#ifdef PIOS_GPS_STACK_SIZE
+#undef STACK_SIZE_BYTES
+#define STACK_SIZE_BYTES           PIOS_GPS_STACK_SIZE
 #endif
 
 #define TASK_PRIORITY              (tskIDLE_PRIORITY + 1)
@@ -199,6 +210,10 @@ int32_t GPSInitialize(void)
 #endif
 #if defined(PIOS_GPS_SETS_HOMELOCATION)
         HomeLocationInitialize();
+        /* Fill in Be for a hand-entered home, and re-check the stored one at
+         * boot -- see homeLocationUpdatedCb(). */
+        HomeLocationConnectCallback(&homeLocationUpdatedCb);
+        homeLocationUpdatedCb(NULL);
 #endif
         updateHwSettings();
     }
@@ -419,6 +434,99 @@ static float GravityAccel(float latitude, __attribute__((unused)) float longitud
 
 // ****************
 
+/*
+ * Fill in HomeLocation.Be for a home point that was entered by hand.
+ *
+ * Be is the earth's magnetic field vector at home, and filtermag.c scores
+ * every magnetometer sample against it -- with Be = {0,0,0} the deviation is
+ * enormous, so SYSTEMALARMS_ALARM_MAGNETOMETER sits at Critical and
+ * armhandler.c refuses to arm. Nothing else in the system can produce that
+ * vector: the GCS carries no World Magnetic Model, so libraries/WorldMagModel.c
+ * running here is the only source of it, and stock code only reaches it from
+ * setHomeLocation() behind a GPS fix. A board that cannot see sky therefore had
+ * no way to obtain a usable home at all.
+ *
+ * So: whenever HomeLocation is written with a position but no field vector,
+ * compute the vector for that position and store it. That makes the GCS's
+ * existing HomeLocation widget sufficient on its own, and the saved value then
+ * persists in NVS until a real fix replaces it.
+ *
+ * The date matters only for secular variation, which moves declination by a
+ * fraction of a degree per year, so the firmware build date is a perfectly good
+ * stand-in when there is no GPS time yet.
+ */
+static void homeLocationUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
+{
+    static bool reentry = false;
+    HomeLocationData home;
+
+    if (reentry) {
+        return; /* our own HomeLocationSet() below comes back through here */
+    }
+
+    HomeLocationGet(&home);
+
+    if (home.Set != HOMELOCATION_SET_TRUE) {
+        return;
+    }
+    /* Recompute when the stored vector is missing OR not physically possible.
+     * Treating "present but absurd" as "needs computing" is what lets a board
+     * recover from having stored a bad one rather than carrying it forever --
+     * WMM_GetMagVector() used to return exactly that (a freed-pointer read).
+     *
+     * UNITS: Be is MILLIGAUSS, not nanotesla. Earth's field is 22000-67000 nT
+     * = 220-670 mGa, so the band below is 100-1000 mGa. Getting this wrong is
+     * not harmless: bounds in nT are never satisfied by a correct value, so
+     * every callback recomputed and re-Set HomeLocation, and since the Set
+     * retriggers this same callback that ran at 106 updates/second. */
+    float be_sq = home.Be[0] * home.Be[0] + home.Be[1] * home.Be[1]
+                  + home.Be[2] * home.Be[2];
+    bool be_ok  = isfinite(be_sq) && be_sq > (100.0f * 100.0f)
+                  && be_sq < (1000.0f * 1000.0f);
+
+    if (be_ok) {
+        return; /* already has a plausible field vector - leave it alone */
+    }
+    if (home.Latitude == 0 && home.Longitude == 0) {
+        return; /* no position to compute from */
+    }
+
+    uint16_t year = 0;
+    uint8_t month = 0, day = 0;
+    GPSTimeData gps;
+
+    GPSTimeGet(&gps);
+    if (gps.Year >= 2000) {
+        year  = gps.Year;
+        month = gps.Month;
+        day   = gps.Day;
+    } else {
+        /* __DATE__ is "Mmm dd yyyy". */
+        static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+        const char *bd = __DATE__;
+        for (int i = 0; i < 12; i++) {
+            if (bd[0] == months[i * 3] && bd[1] == months[i * 3 + 1]
+                && bd[2] == months[i * 3 + 2]) {
+                month = (uint8_t)(i + 1);
+                break;
+            }
+        }
+        day  = (uint8_t)((bd[4] == ' ' ? 0 : (bd[4] - '0') * 10) + (bd[5] - '0'));
+        year = (uint16_t)((bd[7] - '0') * 1000 + (bd[8] - '0') * 100
+                          + (bd[9] - '0') * 10 + (bd[10] - '0'));
+    }
+
+    float LLA[3] = { home.Latitude / 10e6f, home.Longitude / 10e6f, home.Altitude };
+
+    if (WMM_GetMagVector(LLA[0], LLA[1], LLA[2], month, day, year, &home.Be[0]) == 0) {
+        home.g_e = GravityAccel(LLA[0], LLA[1], LLA[2]);
+        reentry  = true;
+        HomeLocationSet(&home);
+        reentry  = false;
+        UAVObjSave(HomeLocationHandle(), 0);
+    }
+}
+
 static void setHomeLocation(GPSPositionSensorData *gpsData)
 {
     HomeLocationData home;
@@ -447,6 +555,26 @@ static void setHomeLocation(GPSPositionSensorData *gpsData)
             home.g_e = GravityAccel(LLA[0], LLA[1], LLA[2]);
             home.Set = HOMELOCATION_SET_TRUE;
             HomeLocationSet(&home);
+
+            /* Persist it. HomeLocation is settings="true", but HomeLocationSet()
+             * only touches RAM -- stock behaviour loses the home point on every
+             * power cycle, and on a board that may not see 7 satellites again
+             * indoors that means starting from nothing each time.
+             *
+             * Saving here keeps the last GPS-derived home in storage, so the
+             * GCS (and the setup wizard) still have a valid HomeLocation.Be to
+             * work from when there is no current fix -- filtermag.c scores the
+             * magnetometer against exactly that vector, so without it the mag
+             * alarm stays Critical and blocks arming.
+             *
+             * This runs once per unset->set transition, not per fix, so it is
+             * not a write-cycle concern. A newer fix replaces it whenever
+             * HomeLocation.Set goes back to FALSE (the GCS "clear" button, or
+             * a fresh setup). */
+            if (UAVObjSave(HomeLocationHandle(), 0) != 0) {
+                /* Storage refused it -- the in-RAM home is still good for this
+                 * power cycle, so carry on rather than failing the fix. */
+            }
         }
     }
 }

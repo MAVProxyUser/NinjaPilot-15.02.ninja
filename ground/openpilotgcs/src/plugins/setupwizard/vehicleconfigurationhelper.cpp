@@ -227,18 +227,42 @@ void VehicleConfigurationHelper::applyHardwareConfiguration()
              * module option to configure - deliberately write nothing. */
         } else if (m_configSource->getGpsType() != VehicleConfigurationSource::GPS_DISABLED) {
             data.OptionalModules[HwSettings::OPTIONALMODULES_GPS] = 1;
-            data.GPSSpeed = HwSettings::GPSSPEED_57600;
 
-            if (m_configSource->getInputType() == VehicleConfigurationSource::INPUT_SBUS) {
-                data.RM_FlexiPort = HwSettings::RM_FLEXIPORT_GPS;
+            if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_LITEWING) {
+                /* LiteWing's GPS is soldered to UART1, not to a selectable
+                 * Revo port, so there is no RM_MainPort/RM_FlexiPort choice to
+                 * make here -- writing one would only describe hardware this
+                 * board does not have.
+                 *
+                 * The speed is NOT cosmetic: modules/GPS reads HwSettings.GPSSpeed
+                 * at init and calls PIOS_COM_ChangeBaud() with it, so the stock
+                 * 57600 below would actively retune the UART away from the
+                 * 115200 the fitted u-blox M10 talks, and the link would go
+                 * quiet with no obvious cause. */
+                data.GPSSpeed = HwSettings::GPSSPEED_115200;
             } else {
-                data.RM_MainPort = HwSettings::RM_MAINPORT_GPS;
+                data.GPSSpeed = HwSettings::GPSSPEED_57600;
+
+                if (m_configSource->getInputType() == VehicleConfigurationSource::INPUT_SBUS) {
+                    data.RM_FlexiPort = HwSettings::RM_FLEXIPORT_GPS;
+                } else {
+                    data.RM_MainPort = HwSettings::RM_MAINPORT_GPS;
+                }
             }
 
             GPSSettings *gpsSettings = GPSSettings::GetInstance(m_uavoManager);
             Q_ASSERT(gpsSettings);
             GPSSettings::DataFields gpsData = gpsSettings->getData();
-            gpsData.UbxAutoConfig = GPSSettings::UBXAUTOCONFIG_DISABLED;
+            /* Leave UbxAutoConfig alone on LiteWing. Its fitted u-blox M10
+             * leaves the factory emitting UBX and NMEA interleaved, and
+             * ubx_autoconfig is what silences the NMEA and sets the nav rate;
+             * the board is compiled with that state machine in (no
+             * PIOS_GPS_MINIMAL). Forcing DISABLED here would quietly undo a
+             * working receiver setup. Other boards keep the stock meaning of
+             * "U-Blox Based" = generic module, do not reconfigure it. */
+            if (m_configSource->getControllerType() != VehicleConfigurationSource::CONTROLLER_LITEWING) {
+                gpsData.UbxAutoConfig = GPSSettings::UBXAUTOCONFIG_DISABLED;
+            }
 
             switch (m_configSource->getGpsType()) {
             case VehicleConfigurationSource::GPS_NMEA:
