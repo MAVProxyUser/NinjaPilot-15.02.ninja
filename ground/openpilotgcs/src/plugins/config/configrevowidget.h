@@ -34,6 +34,7 @@
 #include "uavobject.h"
 #include "calibration/thermal/thermalcalibrationmodel.h"
 #include "calibration/sixpointcalibrationmodel.h"
+#include "calibration/magcalibrationmodel.h"
 #include "calibration/levelcalibrationmodel.h"
 #include "calibration/gyrobiascalibrationmodel.h"
 
@@ -55,7 +56,7 @@ public:
 
 private:
     OpenPilot::SixPointCalibrationModel *m_accelCalibrationModel;
-    OpenPilot::SixPointCalibrationModel *m_magCalibrationModel;
+    OpenPilot::MagCalibrationModel *m_magCalibrationModel;
     OpenPilot::LevelCalibrationModel *m_levelCalibrationModel;
     OpenPilot::GyroBiasCalibrationModel *m_gyroBiasCalibrationModel;
     OpenPilot::ThermalCalibrationModel *m_thermalCalibrationModel;
@@ -67,6 +68,13 @@ private:
     bool isBoardRotationStored;
 
 private slots:
+    /** Mag "Finish & Save": compute the fit AND persist it on its own, so a
+     * completed calibration cannot be lost by closing the page or by a later
+     * calibration failing. The bottom Save still writes everything; models
+     * that were never run leave their existing values untouched, because each
+     * model's save() is a no-op unless it is dirty. */
+    void magFinishAndSave();
+
     void storeAndClearBoardRotation();
     void recallBoardRotation();
     void displayVisualHelp(QString elementID);

@@ -122,9 +122,20 @@ ConfigRevoWidget::ConfigRevoWidget(QWidget *parent) :
     m_ui->accelSavePos->setEnabled(false);
 
     // mag calibration
-    m_magCalibrationModel = new OpenPilot::SixPointCalibrationModel(this);
+    /* Free-rotation fit, not six-point. Six discrete orientations is the bare
+     * minimum to fit a 3-DOF offset and each has to be held square by hand;
+     * rolling the vehicle continuously gives hundreds of samples spread over
+     * the sphere, and reports a residual and radius so the result can be
+     * judged rather than assumed. The accelerometer keeps the six-point model
+     * -- it genuinely needs discrete known orientations. */
+    m_magCalibrationModel = new OpenPilot::MagCalibrationModel(this);
     connect(m_ui->magStart, SIGNAL(clicked()), m_magCalibrationModel, SLOT(magStart()));
-    connect(m_ui->magSavePos, SIGNAL(clicked()), m_magCalibrationModel, SLOT(savePositionData()));
+    /* The old "Save Position" button becomes "finish now and fit with what we
+     * have" -- useful when coverage is already good. */
+    connect(m_ui->magSavePos, SIGNAL(clicked()), this, SLOT(magFinishAndSave()));
+    /* "Save Position" is six-point vocabulary -- there are no positions in a
+     * free-rotation fit. Relabel it for what it now does. */
+    m_ui->magSavePos->setText(tr("Finish && Save"));
 
     connect(m_magCalibrationModel, SIGNAL(started()), this, SLOT(disableAllCalibrations()));
     connect(m_magCalibrationModel, SIGNAL(stopped()), this, SLOT(enableAllCalibrations()));
@@ -468,4 +479,15 @@ void ConfigRevoWidget::enableAllCalibrations()
     m_ui->boardLevelStart->setEnabled(true);
     m_ui->gyroBiasStart->setEnabled(true);
     m_ui->thermalBiasStart->setEnabled(true);
+}
+
+void ConfigRevoWidget::magFinishAndSave()
+{
+    m_magCalibrationModel->finish();
+    if (!m_magCalibrationModel->dirty()) {
+        // finish() rejected the fit -- nothing worth persisting.
+        return;
+    }
+    m_magCalibrationModel->save();
+    saveObjectToSD(RevoCalibration::GetInstance(getObjectManager()));
 }

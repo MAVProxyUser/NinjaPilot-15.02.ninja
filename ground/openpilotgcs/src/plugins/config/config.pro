@@ -49,6 +49,7 @@ HEADERS += \
     calibration/gyrobiascalibrationmodel.h \
     calibration/calibrationuiutils.h \
     calibration/sixpointcalibrationmodel.h \
+    calibration/magcalibrationmodel.h \
     calibration/thermal/thermalcalibration.h \
     calibration/thermal/thermalcalibrationhelper.h \
     calibration/thermal/thermalcalibrationmodel.h \
@@ -92,6 +93,7 @@ SOURCES += \
     calibration/levelcalibrationmodel.cpp \
     calibration/gyrobiascalibrationmodel.cpp \
     calibration/sixpointcalibrationmodel.cpp \
+    calibration/magcalibrationmodel.cpp \
     calibration/thermal/thermalcalibration.cpp \
     calibration/thermal/thermalcalibrationhelper.cpp \
     calibration/thermal/thermalcalibrationmodel.cpp \
