@@ -286,16 +286,20 @@ void PIOS_Board_ServoSetHz(const uint16_t *hz, uint8_t banks)
 #ifndef CUBE_BOOT_STOP
 #define CUBE_BOOT_STOP 0
 #endif
-#if CUBE_BOOT_STOP
+#if CUBE_BOOT_STOP || defined(CUBE_MARKS)
 /* Reset into the ArduPilot bootloader and make it stay there (RTC BKP0R
  * magic): the bootloader's own USB device appearing is the observable. */
+static void cube_bl_reset(void) __attribute__((noreturn));
 static void cube_bl_reset(void)
 {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
     PWR_BackupAccessCmd(ENABLE);
     RTC_WriteBackupRegister(RTC_BKP_DR0, 0xB0070001);
     NVIC_SystemReset();
+    for (;;) {}
 }
+#endif
+#if CUBE_BOOT_STOP
 void CUBE_BootStage(uint32_t n)
 {
     if (CUBE_BOOT_STOP == n) {
@@ -316,6 +320,12 @@ void CUBE_BootStage(__attribute__((unused)) uint32_t n) {}
  */
 #ifdef CUBE_MARKS
 #define CUBE_MARK_BASE 0x080FFF00u
+/* slot 26 = an event has been recorded; catchers stay quiet after that so a
+ * boot loop cannot smear the record */
+static bool cube_recorded(void)
+{
+    return *(volatile uint32_t *)(CUBE_MARK_BASE + 4u * 26u) == 0u;
+}
 void CUBE_Mark(uint32_t slot)
 {
     if (slot >= 64) {
@@ -331,13 +341,15 @@ void cube_fault_c(uint32_t *sp, uint32_t slot)
 {
     uint32_t pc  = sp[6];
     uint32_t off = (pc - 0x08004000u) >> 1;
+    if (cube_recorded()) { for (;;) {} }
+    CUBE_Mark(26);
     CUBE_Mark(slot);
     for (uint32_t j = 0; j < 19; j++) {
         if (off & (1u << j)) {
             CUBE_Mark(40 + j);
         }
     }
-    for (;;) {}
+    cube_bl_reset(); /* park in the bootloader: the marks then describe exactly one event */
 }
 #define CUBE_FAULT(name, slot) \
     void name(void) __attribute__((naked)); \
@@ -347,6 +359,117 @@ CUBE_FAULT(MemManage_Handler, 29)
 CUBE_FAULT(BusFault_Handler, 29)
 CUBE_FAULT(UsageFault_Handler, 29)
 #define CUBE_MARK(n) CUBE_Mark(n)
+/* configASSERT reporter (CUBE_ASSERTS): slot 27 = an assert fired, file class in
+ * slots 59..60 (0 other, 1 list.c, 2 tasks.c, 3 queue.c), line in slots 40..56,
+ * slot 57 = fired from an exception handler; then wait for the watchdog. */
+void CUBE_AssertHook(const char *file, int line)
+{
+    static bool done;
+    if (done) {
+        for (;;) {}
+    }
+    done = true;
+    const char *b = file;
+    for (const char *p = file; *p; p++) {
+        if (*p == '/') { b = p + 1; }
+    }
+    uint32_t cls = 0;
+    if (b[0] == 'l' && b[1] == 'i') { cls = 1; } else if (b[0] == 't' && b[1] == 'a') { cls = 2; } else if (b[0] == 'q') { cls = 3; }
+    CUBE_Mark(27);
+    for (uint32_t j = 0; j < 17; j++) {
+        if ((uint32_t)line & (1u << j)) { CUBE_Mark(40 + j); }
+    }
+    for (uint32_t j = 0; j < 2; j++) {
+        if (cls & (1u << j)) { CUBE_Mark(59 + j); }
+    }
+    if (__get_IPSR() != 0) { CUBE_Mark(57); }
+    cube_bl_reset();
+}
+/* Double-insertion catcher (list.c hook): owner task name chars 0,1,last in
+ * slots 40..57, slot 58 = re-inserted into the same list, slot 30 = capture. */
+void CUBE_ListHook(void *item, void *list, void *ra)
+{
+    static bool done;
+    (void)ra;
+    if (done || xTaskGetTickCount() < 3000) {
+        return;
+    }
+    done = true;
+    ListItem_t *it = (ListItem_t *)item;
+    void *owner = it->pvOwner;
+    uint32_t enc = 0;
+    if (owner && ((uint32_t)owner >= 0x10000000u) && ((uint32_t)owner < 0x20030000u)) {
+        const char *n = pcTaskGetName((TaskHandle_t)owner);
+        uint32_t len = strlen(n);
+        enc = ((uint32_t)n[0] & 0x3F) | (((uint32_t)n[len > 1 ? 1 : 0] & 0x3F) << 6) | (((uint32_t)n[len ? len - 1 : 0] & 0x3F) << 12);
+    }
+    CUBE_Mark(30);
+    for (uint32_t j = 0; j < 18; j++) {
+        if (enc & (1u << j)) { CUBE_Mark(40 + j); }
+    }
+    if ((void *)it->pxContainer == list) { CUBE_Mark(58); }
+}
+/*
+ * Stuck-tick catcher: TIM6 at NVIC priority 0 (above everything the kernel
+ * masks) fires every 100 ms.  When the kernel tick has not advanced for two
+ * periods the CPU is stuck with SysTick masked - a spinning interrupt
+ * handler or a critical section - and the interrupted context's PC
+ * (slots 40..58) and exception number (bits 0..4 -> 59..63, bit 5 -> 27,
+ * bit 6 -> 30; 0 = thread mode) are recorded, slot 29 marks the capture.
+ */
+void cube_tim6_c(uint32_t *frame) __attribute__((used, noinline));
+void cube_tim6_c(uint32_t *frame)
+{
+    static uint32_t last_tick, stuck;
+    static bool done;
+    TIM_ClearITPendingBit(TIM6, TIM_IT_Update);
+    uint32_t t = xTaskGetTickCountFromISR();
+    if (t == last_tick) {
+        stuck++;
+    } else {
+        stuck = 0;
+        last_tick = t;
+    }
+    if (stuck == 2 && !done && t > 3000) {
+        done = true;
+        uint32_t pc = frame[6];
+        uint32_t ipsr = frame[7] & 0x1FFu;
+        if (cube_recorded()) { return; }
+        CUBE_Mark(26);
+        CUBE_Mark(29);
+        if (pc >= 0x08004000u && pc < 0x080C0000u) {
+            uint32_t off = (pc - 0x08004000u) >> 1;
+            for (uint32_t j = 0; j < 19; j++) {
+                if (off & (1u << j)) { CUBE_Mark(40 + j); }
+            }
+        }
+        for (uint32_t j = 0; j < 5; j++) {
+            if (ipsr & (1u << j)) { CUBE_Mark(59 + j); }
+        }
+        if (ipsr & 0x20u) { CUBE_Mark(27); }
+        if (ipsr & 0x40u) { CUBE_Mark(30); }
+    }
+}
+void TIM6_DAC_IRQHandler(void) __attribute__((naked));
+void TIM6_DAC_IRQHandler(void)
+{
+    __asm volatile ("tst lr, #4\n\t" "ite eq\n\t" "mrseq r0, msp\n\t" "mrsne r0, psp\n\t" "b cube_tim6_c");
+}
+static void cube_tim6_start(void)
+{
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM6, ENABLE);
+    TIM_TimeBaseInitTypeDef tb;
+    TIM_TimeBaseStructInit(&tb);
+    tb.TIM_Prescaler     = (PIOS_PERIPHERAL_APB1_CLOCK / 10000) - 1; /* 10 kHz */
+    tb.TIM_Period        = 1000 - 1;                                  /* 100 ms */
+    tb.TIM_CounterMode   = TIM_CounterMode_Up;
+    TIM_TimeBaseInit(TIM6, &tb);
+    TIM_ClearITPendingBit(TIM6, TIM_IT_Update);
+    TIM_ITConfig(TIM6, TIM_IT_Update, ENABLE);
+    NVIC_InitTypeDef nv = { .NVIC_IRQChannel = TIM6_DAC_IRQn, .NVIC_IRQChannelPreemptionPriority = 0, .NVIC_IRQChannelSubPriority = 0, .NVIC_IRQChannelCmd = ENABLE };
+    NVIC_Init(&nv);
+    TIM_Cmd(TIM6, ENABLE);
+}
 /* Hang catcher: when the watchdog flags stop changing for 200 ms the board is
  * about to be reset by the IWDG.  Record which flags had been kicked
  * (slots 59..63), slot 29, and the interrupted task's PC (slots 40..58). */
@@ -400,7 +523,7 @@ void PIOS_Board_Init(void)
 #endif /* PIOS_INCLUDE_LED */
     CUBE_STAGE(103);
     CUBE_MARK(1);
-#ifdef CUBE_MARKS
+#if defined(CUBE_MARKS) && !defined(CUBE_NO_RESETCAUSE)
     {
         /* reset cause of this boot (slots 36..39) */
         uint32_t csr = RCC->CSR;
@@ -819,6 +942,9 @@ void PIOS_Board_Init(void)
 #if defined(PIOS_INCLUDE_MS5611_SPI)
     PIOS_MS5611_SPI_Init(&pios_ms5611_cfg, pios_spi_sensors_id, CUBE_SPI1_SLAVE_MS5611);
     PIOS_MS5611_Register();
+#endif
+#ifdef CUBE_MARKS
+    cube_tim6_start();
 #endif
 }
 

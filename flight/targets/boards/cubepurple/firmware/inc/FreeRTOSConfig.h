@@ -32,7 +32,19 @@
 #define configUSE_PREEMPTION                         1
 #define configUSE_IDLE_HOOK                          1
 #define configUSE_MALLOC_FAILED_HOOK                 1
+/* GCC 13 at -O2 hoists xListEnd.pxNext out of xTaskResumeAll's pending-ready
+ * drain loop under strict aliasing when the list end is a MiniListItem_t
+ * (stores through ListItem_t pointers are assumed not to touch it).  With two
+ * tasks pending at once the loop then never terminates and the watchdog
+ * fires.  The kernel's documented remedy: */
+#define configUSE_MINI_LIST_ITEM                     0
 #ifdef CUBE_MARKS /* bring-up aid: see pios_board.c */
+#ifdef CUBE_ASSERTS
+/* kernel assertions + list integrity bytes, reported through the flash markers */
+#define configUSE_LIST_DATA_INTEGRITY_CHECK_BYTES    1
+extern void CUBE_AssertHook(const char *file, int line);
+#define configASSERT(x) do { if (!(x)) { CUBE_AssertHook(__FILE__, __LINE__); } } while (0)
+#endif
 #define configUSE_TICK_HOOK                          1
 #else
 #define configUSE_TICK_HOOK                          0

@@ -171,8 +171,10 @@
 #define PIOS_STABILIZATION_STACK_SIZE  800
 
 #define PIOS_SYSTEM_STACK_SIZE         1536
-/* #define PIOS_TELEM_STACK_SIZE          1024 */
+/* PIOS_TELEM_STACK_SIZE lives in pios_board.h */
 #define PIOS_EVENTDISPATCHER_STACK_SIZE 256
+/* GCC 13: the callback scheduler tasks need more than the 190 bytes measured with GCC 4 */
+#define PIOS_CALLBACKSCHEDULER_TASK_STACK 512
 
 /* This can't be too high to stop eventdispatcher thread overflowing */
 #define PIOS_EVENTDISAPTCHER_QUEUE     10

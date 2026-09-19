@@ -34,11 +34,16 @@ make line, replace it:
   100/101/102 in main, 1..9 through `PIOS_Board_Init`).  The bootloader's
   own USB device appearing and staying is the signal, so this works before
   the firmware's USB exists.
-* `-DCUBE_MARKS=1` programs progress markers into spare internal flash at
+* `-DCUBE_MARKS=1` programs progress markers (single-shot: slot 26 says a
+  record exists, later boots stay quiet) into spare internal flash at
   0x080FFF00 (one word per slot): boot progress, reset cause (slots 36-39),
   a fault handler that records the faulting PC (slot 29/30 + 40-58), and a
   tick-hook hang catcher that fires when the watchdog flags stop changing
-  for 200 ms (slot 29, kicked flags in 59-63, interrupted PC in 40-58).
+  for 200 ms (slot 29, kicked flags in 59-63, interrupted PC in 40-58), and
+  a TIM6 catcher at NVIC priority 0 that fires when the kernel tick stops
+  advancing, i.e. the CPU is stuck with SysTick masked (slot 29, PC in
+  40-58, interrupted exception number in 59-63 + 27/30).  `-DCUBE_ASSERTS=1`
+  on top routes `configASSERT` (and list integrity bytes) into the markers.
   `tools/blcrc.py fw.apj --cycle --solve` asks the bootloader for the
   flash CRC and solves the slots from it (the CRC is linear over GF(2)).
   The bootloader erases the region on every flash.
@@ -50,6 +55,14 @@ make line, replace it:
   pending.  `_main` (stm32f4xx/startup.c) now switches to the vector-table
   main stack first thing; `main()` here stops SysTick and clears every NVIC
   enable/pending bit before the kernel starts.
+* GCC 13 miscompiles the FreeRTOS V11 kernel's pending-ready drain loop in
+  `xTaskResumeAll` under strict aliasing when the list end is a mini list
+  item: the head pointer is hoisted out of the loop, so with two tasks made
+  ready while the scheduler was suspended (a telemetry connect burst does
+  it) the loop never terminates inside its critical section and the
+  watchdog resets the board 20-100 s later, always right after a GCS
+  connect/disconnect.  `configUSE_MINI_LIST_ITEM 0` (the kernel's documented
+  remedy) plus `-fno-strict-aliasing` for this GCC-4-era code base.
 * 192 KB SRAM needs `HEAP_SUPPORT_LARGE`: msheap's default 15-bit block
   sizes cannot describe the heap, its "heap too large" assertion is a no-op,
   and the first allocation from the main heap bus-faulted.

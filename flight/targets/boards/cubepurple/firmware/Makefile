@@ -72,6 +72,10 @@ CDEFS += -DFS_BANK_BASE=$(FS_BANK_BASE) -DFS_BANK_SIZE=$(FS_BANK_SIZE)
 
 # Misc options
 CFLAGS += -ffast-math
+# This code base predates GCC's strict-aliasing optimisations; GCC 13 miscompiled
+# the kernel's list handling under them (see FreeRTOSConfig.h).
+CFLAGS += -fno-strict-aliasing
+CPPFLAGS += -fno-strict-aliasing
 # GCC 13 warns about pointers into the packed UAVObject structs, which this
 # tree has always used; the ESP32/posix builds do not build with -Werror here.
 CFLAGS += -Wno-address-of-packed-member
