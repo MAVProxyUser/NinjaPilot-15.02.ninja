@@ -451,7 +451,11 @@ int32_t PIOS_INVENSENSE_Init(pios_invensense_t *handle, uint32_t spi_id,
     }
     *handle = (pios_invensense_t)dev;
 
-    xTaskCreate(PIOS_INVENSENSE_ReaderTask, "imuRd", 256, dev, tskIDLE_PRIORITY + 4, &dev->reader);
+    /* Device-driver priority: the deferred read stands in for the ISR, and
+     * anything slower than the sensors task's one-period timeout (the EKF
+     * callback at +6, telemetry at +7) between the data-ready edge and this
+     * read costs a sensor reset. */
+    xTaskCreate(PIOS_INVENSENSE_ReaderTask, "imuRd", 256, dev, tskIDLE_PRIORITY + 7, &dev->reader);
 
     if (cfg->exti_cfg != NULL) {
         if (PIOS_EXTI_Init(cfg->exti_cfg) != 0) {

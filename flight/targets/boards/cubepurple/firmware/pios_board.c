@@ -404,10 +404,18 @@ void PIOS_Board_Init(void)
     {
         /* reset cause of this boot (slots 36..39) */
         uint32_t csr = RCC->CSR;
-        if (csr & RCC_CSR_WDGRSTF) { CUBE_Mark(36); }
-        if (csr & RCC_CSR_SFTRSTF) { CUBE_Mark(37); }
-        if (csr & RCC_CSR_PADRSTF) { CUBE_Mark(38); }
-        if (csr & RCC_CSR_PORRSTF) { CUBE_Mark(39); }
+        /* The flags are sticky.  Record only boots that follow something
+         * other than the power-up, so a later self-reset stands out, and
+         * clear them so each boot reports its own cause. */
+        if (csr & RCC_CSR_PORRSTF) {
+            CUBE_Mark(39);
+        } else {
+            if (csr & RCC_CSR_WDGRSTF) { CUBE_Mark(36); }
+            if (csr & RCC_CSR_SFTRSTF) { CUBE_Mark(37); }
+            if (csr & RCC_CSR_PADRSTF) { CUBE_Mark(38); }
+            if (csr & RCC_CSR_BORRSTF) { CUBE_Mark(27); }
+        }
+        RCC_ClearFlag();
     }
 #endif
 #if CUBE_BOOT_STOP == 104
