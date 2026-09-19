@@ -163,7 +163,6 @@ int SetupWizard::nextId() const
             switch (getControllerType()) {
             case CONTROLLER_REVO:
             case CONTROLLER_CUBE:
-        case CONTROLLER_CUBE:
             case CONTROLLER_REALPOSIX:
             case CONTROLLER_NANO:
             /* LiteWing has a GPS header (UART1) and, since the StateEstimation
