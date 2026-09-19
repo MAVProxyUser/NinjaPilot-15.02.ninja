@@ -278,6 +278,80 @@ void PIOS_Board_ServoSetHz(const uint16_t *hz, uint8_t banks)
 #endif
 }
 
+/*
+ * Bring-up aid: CUBE_BOOT_STOP=N brings USB up as early as possible and halts
+ * the init sequence at stage N with the LED blinking, so a board that does
+ * not enumerate can be bisected without a console.  0 (default) = off.
+ */
+#ifndef CUBE_BOOT_STOP
+#define CUBE_BOOT_STOP 0
+#endif
+#if CUBE_BOOT_STOP
+/* Reset into the ArduPilot bootloader and make it stay there (RTC BKP0R
+ * magic): the bootloader's own USB device appearing is the observable. */
+static void cube_bl_reset(void)
+{
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
+    PWR_BackupAccessCmd(ENABLE);
+    RTC_WriteBackupRegister(RTC_BKP_DR0, 0xB0070001);
+    NVIC_SystemReset();
+}
+void CUBE_BootStage(uint32_t n)
+{
+    if (CUBE_BOOT_STOP == n) {
+        cube_bl_reset();
+    }
+}
+#define CUBE_STAGE(n) CUBE_BootStage(n)
+#else
+void CUBE_BootStage(__attribute__((unused)) uint32_t n) {}
+#define CUBE_STAGE(n) do { } while (0)
+#endif
+
+
+/*
+ * Bring-up aid #2: CUBE_MARKS.  Progress markers are single words programmed
+ * to zero in the (erased) top of internal flash; the ArduPilot bootloader's
+ * GET_CRC then reveals which were reached, without any working USB.
+ */
+#ifdef CUBE_MARKS
+#define CUBE_MARK_BASE 0x080FFF00u
+void CUBE_Mark(uint32_t slot)
+{
+    if (slot >= 64) {
+        return;
+    }
+    FLASH_Unlock();
+    FLASH_ClearFlag(FLASH_FLAG_EOP | FLASH_FLAG_OPERR | FLASH_FLAG_WRPERR | FLASH_FLAG_PGAERR | FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR);
+    FLASH_ProgramWord(CUBE_MARK_BASE + 4u * slot, 0);
+    FLASH_Lock();
+}
+void cube_fault_c(uint32_t *sp, uint32_t slot) __attribute__((used, noinline, noreturn));
+void cube_fault_c(uint32_t *sp, uint32_t slot)
+{
+    uint32_t pc  = sp[6];
+    uint32_t off = (pc - 0x08004000u) >> 1;
+    CUBE_Mark(slot);
+    for (uint32_t j = 0; j < 19; j++) {
+        if (off & (1u << j)) {
+            CUBE_Mark(40 + j);
+        }
+    }
+    for (;;) {}
+}
+#define CUBE_FAULT(name, slot) \
+    void name(void) __attribute__((naked)); \
+    void name(void) { __asm volatile ("tst lr, #4\n\t" "ite eq\n\t" "mrseq r0, msp\n\t" "mrsne r0, psp\n\t" "mov r1, #" #slot "\n\t" "b cube_fault_c"); }
+CUBE_FAULT(HardFault_Handler, 30)
+CUBE_FAULT(MemManage_Handler, 29)
+CUBE_FAULT(BusFault_Handler, 29)
+CUBE_FAULT(UsageFault_Handler, 29)
+#define CUBE_MARK(n) CUBE_Mark(n)
+#else
+void CUBE_Mark(__attribute__((unused)) uint32_t slot) {}
+#define CUBE_MARK(n) do { } while (0)
+#endif
+
 /**
  * PIOS_Board_Init()
  * initializes all the core subsystems on this specific hardware
@@ -292,11 +366,18 @@ void PIOS_Board_Init(void)
     PIOS_Assert(led_cfg);
     PIOS_LED_Init(led_cfg);
 #endif /* PIOS_INCLUDE_LED */
+    CUBE_STAGE(103);
+    CUBE_MARK(1);
+#if CUBE_BOOT_STOP == 104
+    if (!pvPortMalloc(80)) { cube_bl_reset(); }
+#endif
 
 #ifdef PIOS_INCLUDE_INSTRUMENTATION
     PIOS_Instrumentation_Init(PIOS_INSTRUMENTATION_MAX_COUNTERS);
 #endif
 
+    CUBE_STAGE(1);
+    CUBE_MARK(5);
     /* Power rails: sensors 3.3 V (high = on) and peripheral 5 V (low = on),
      * and every SPI chip select this firmware does not drive parked high. */
     GPIO_SetBits(pios_cube_vdd_sensors_en.gpio, pios_cube_vdd_sensors_en.init.GPIO_Pin);
@@ -308,14 +389,20 @@ void PIOS_Board_Init(void)
         GPIO_Init(pios_cube_parked_cs[i].gpio, (GPIO_InitTypeDef *)&pios_cube_parked_cs[i].init);
     }
 
+    CUBE_STAGE(2);
+    CUBE_MARK(6);
     /* Set up the SPI interfaces to the sensors and the FRAM */
     if (PIOS_SPI_Init(&pios_spi_sensors_id, &pios_spi_sensors_cfg)) {
         PIOS_DEBUG_Assert(0);
     }
+    CUBE_MARK(14);
     if (PIOS_SPI_Init(&pios_spi_fram_id, &pios_spi_fram_cfg)) {
         PIOS_DEBUG_Assert(0);
     }
+    CUBE_MARK(15);
 
+    CUBE_STAGE(3);
+    CUBE_MARK(7);
 #if defined(PIOS_INCLUDE_FLASH)
     bool fs_mounted = false;
 #if defined(PIOS_INCLUDE_FLASH_FRAM)
@@ -344,6 +431,8 @@ void PIOS_Board_Init(void)
     }
 #endif /* PIOS_INCLUDE_FLASH */
 
+    CUBE_STAGE(4);
+    CUBE_MARK(8);
 #if defined(PIOS_INCLUDE_RTC)
     PIOS_RTC_Init(&pios_rtc_main_cfg);
 #endif
@@ -360,10 +449,14 @@ void PIOS_Board_Init(void)
         PIOS_IAP_WriteBootCmd(2, 0);
     }
 
+    CUBE_STAGE(5);
+    CUBE_MARK(9);
 #ifdef PIOS_INCLUDE_WDG
     PIOS_WDG_Init();
 #endif
 
+    CUBE_STAGE(6);
+    CUBE_MARK(10);
     /* Initialize the task monitor */
     if (PIOS_TASK_MONITOR_Initialize(TASKINFO_RUNNING_NUMELEM)) {
         PIOS_Assert(0);
@@ -376,11 +469,15 @@ void PIOS_Board_Init(void)
     EventDispatcherInitialize();
     UAVObjInitialize();
 
+    CUBE_STAGE(7);
+    CUBE_MARK(11);
     HwSettingsInitialize();
 
     /* Initialize the alarms library */
     AlarmsInitialize();
 
+    CUBE_STAGE(8);
+    CUBE_MARK(12);
     PIOS_TIM_InitClock(&tim_1_cfg);
     PIOS_TIM_InitClock(&tim_4_cfg);
 
@@ -394,6 +491,8 @@ void PIOS_Board_Init(void)
         AlarmsSet(SYSTEMALARMS_ALARM_BOOTFAULT, SYSTEMALARMS_ALARM_CRITICAL);
     }
 
+    CUBE_STAGE(9);
+    CUBE_MARK(13);
 #if defined(PIOS_INCLUDE_USB)
     /* Initialize board specific USB data */
     PIOS_USB_BOARD_DATA_Init();

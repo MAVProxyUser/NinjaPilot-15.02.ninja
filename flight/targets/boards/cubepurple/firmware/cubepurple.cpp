@@ -61,6 +61,9 @@ void OP_ADC_NotifyChange(uint32_t pin, uint32_t pin_value);
 
 /* Prototype of PIOS_Board_Init() function */
 extern void PIOS_Board_Init(void);
+/* Bring-up aid, see pios_board.c (CUBE_BOOT_STOP) */
+extern void CUBE_BootStage(uint32_t n);
+extern void CUBE_Mark(uint32_t slot);
 extern void Stack_Change(void);
 static void Stack_Change_Weak() __attribute__((weakref("Stack_Change")));
 
@@ -89,12 +92,31 @@ int main()
 {
     int result;
 
+    CUBE_BootStage(100);
+    CUBE_Mark(22);
+    /*
+     * This board arrives here from the ArduPilot bootloader, not an OpenPilot
+     * one: its USB, UART and timer interrupts can still be enabled and pending
+     * in the NVIC.  They would fire into drivers that are not set up yet the
+     * moment the scheduler enables interrupts, so quiesce everything first.
+     */
+    SysTick->CTRL = 0;
+    for (unsigned i = 0; i < sizeof(NVIC->ICER) / sizeof(NVIC->ICER[0]); i++) {
+        NVIC->ICER[i] = 0xFFFFFFFF;
+        NVIC->ICPR[i] = 0xFFFFFFFF;
+    }
+    SCB->ICSR = SCB_ICSR_PENDSVCLR_Msk | SCB_ICSR_PENDSTCLR_Msk;
+    __DSB();
+    __ISB();
     /* NOTE: Do NOT modify the following start-up sequence */
     /* Any new initialization functions should be added in OpenPilotInit() */
     vPortInitialiseBlocks();
+    CUBE_Mark(23);
 
     /* Brings up System using CMSIS functions, enables the LEDs. */
     PIOS_SYS_Init();
+    CUBE_BootStage(101);
+    CUBE_Mark(24);
 
     /* For Revolution we use a FreeRTOS task to bring up the system so we can */
     /* always rely on FreeRTOS primitive */
@@ -102,6 +124,7 @@ int main()
                          INIT_TASK_STACK, NULL, INIT_TASK_PRIORITY,
                          &initTaskHandle);
     PIOS_Assert(result == pdPASS);
+    CUBE_Mark(25);
 
     /* Start the FreeRTOS scheduler */
     vTaskStartScheduler();
@@ -124,11 +147,15 @@ int main()
  */
 void initTask(__attribute__((unused)) void *parameters)
 {
+    CUBE_BootStage(102);
+    CUBE_Mark(0);
     /* board driver init */
     PIOS_Board_Init();
 
+    CUBE_Mark(20);
     /* Initialize modules */
     MODULE_INITIALISE_ALL;
+    CUBE_Mark(21);
 
     /* terminate this task */
     vTaskDelete(NULL);

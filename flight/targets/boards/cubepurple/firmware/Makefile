@@ -58,6 +58,15 @@ CDEFS += -DUSE_INPUT_LPF -DUSE_GIMBAL_LPF -DUSE_GIMBAL_FF
 # Some diagnostics
 CDEFS += -DDIAG_TASKS
 
+# Bring-up knobs from the command line, e.g. CUBE_CDEFS=-DCUBE_BOOT_STOP=3
+CDEFS += $(CUBE_CDEFS)
+
+# The F427 has 192 KB of SRAM: the msheap allocator's default 15-bit block
+# sizes (4-byte units) cannot describe a heap that large, and its "heap too
+# large" assertion is silent, so the free list is corrupt from the start and
+# the first allocation from the main heap bus-faults.  Widen the markers.
+CDEFS += -DHEAP_SUPPORT_LARGE
+
 # Fallback settings bank in internal flash (board-info.mk)
 CDEFS += -DFS_BANK_BASE=$(FS_BANK_BASE) -DFS_BANK_SIZE=$(FS_BANK_SIZE)
 
