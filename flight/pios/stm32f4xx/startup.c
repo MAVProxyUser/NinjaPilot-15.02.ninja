@@ -64,6 +64,22 @@ struct cm3_vectors {
  */
 void _main(void)
 {
+    /*
+     * Run on the main stack named in the vector table, whichever stack the
+     * code that branched here was using.  A hardware reset arrives that way
+     * already; a foreign bootloader (ArduPilot's, on the Cube) calls the
+     * entry point from a thread running on its process stack, which lies
+     * inside our SRAM and gets trampled by our own .data/.bss/heap set-up.
+     */
+    asm volatile (
+        "ldr   r0, =cpu_vectors\n\t" /* first word: initial stack pointer */
+        "ldr   r0, [r0]\n\t"
+        "msr   msp, r0\n\t"
+        "movs  r0, #0\n\t"           /* CONTROL: privileged, use MSP */
+        "msr   control, r0\n\t"
+        "isb\n\t"
+        ::: "r0", "memory");
+
     // load the stack base for the current stack before we attempt to branch to any function
     // that might bounds-check the stack
     asm volatile ("mov r10, %0" : : "r" (&irq_stack[0]) :);

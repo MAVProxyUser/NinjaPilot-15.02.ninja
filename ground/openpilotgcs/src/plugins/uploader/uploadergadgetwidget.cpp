@@ -570,10 +570,14 @@ void UploaderGadgetWidget::systemReboot()
          * firmware answers the IAP reset sequence with a plain restart.
          * Send the three commands, then wait for telemetry to return
          * instead of hunting for a DFU device that will never appear
-         * (which is what put "Reboot failed!" on every wizard save). */
+         * (which is what put "Reboot failed!" on every wizard save).
+         *
+         * Cube Purple (0x0C): same story.  The IAP request resets the board
+         * into its ArduPilot bootloader, which is not a DFU device and boots
+         * the firmware again by itself a few seconds later. */
         ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
         UAVObjectUtilManager *utilMngr     = pm->getObject<UAVObjectUtilManager>();
-        if (utilMngr && (utilMngr->getBoardModel() & 0xff00) == 0x1200) {
+        if (utilMngr && (((utilMngr->getBoardModel() & 0xff00) == 0x1200) || ((utilMngr->getBoardModel() & 0xff00) == 0x0C00))) {
             UAVObjectManager *objManager = pm->getObject<UAVObjectManager>();
             UAVObject *fwIAP = dynamic_cast<UAVDataObject *>(objManager->getObject("FirmwareIAPObj"));
             foreach(quint16 cmd, QList<quint16>() << 1122 << 2233 << 3344) {

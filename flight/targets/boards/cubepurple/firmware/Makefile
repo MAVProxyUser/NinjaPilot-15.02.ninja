@@ -79,9 +79,6 @@ CPPFLAGS += -Wno-address-of-packed-member
 # GCC 13 vs the untouched F4 PiOS/CMSIS files (noreturn aliases in startup.c,
 # indentation in ST's system file)
 CFLAGS += -Wno-missing-attributes -Wno-misleading-indentation -Wno-attributes
-# this tree writes double constants in the shared libraries (the posix and
-# ESP32 builds do not carry -Wunsuffixed-float-constants)
-CONLYFLAGS += -Wno-unsuffixed-float-constants
 # GCC 13 sees the quaternion passed as &q1 and objects to the 16-byte access
 CFLAGS += -Wno-stringop-overflow -Wno-stringop-overread
 CPPFLAGS += -Wno-stringop-overflow -Wno-stringop-overread
@@ -130,6 +127,11 @@ endif
 
 include $(ROOT_DIR)/make/apps-defs.mk
 include $(ROOT_DIR)/make/common-defs.mk
+
+# This tree writes double constants in the shared libraries (the posix and
+# ESP32 builds do not carry -Wunsuffixed-float-constants).  apps-defs.mk turns
+# the warning on, so the override has to come after it to win.
+CONLYFLAGS += -Wno-unsuffixed-float-constants
 
 # The Cube boots through its ArduPilot bootloader: link at FW_BANK_BASE with
 # the board-info blob inline (see link_stm32f4xx_apj_sections.ld), and wrap

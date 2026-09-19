@@ -347,6 +347,38 @@ CUBE_FAULT(MemManage_Handler, 29)
 CUBE_FAULT(BusFault_Handler, 29)
 CUBE_FAULT(UsageFault_Handler, 29)
 #define CUBE_MARK(n) CUBE_Mark(n)
+/* Hang catcher: when the watchdog flags stop changing for 200 ms the board is
+ * about to be reset by the IWDG.  Record which flags had been kicked
+ * (slots 59..63), slot 29, and the interrupted task's PC (slots 40..58). */
+void vApplicationTickHook(void)
+{
+    static uint16_t last_flags;
+    static uint32_t same;
+    static bool captured;
+    uint16_t f = PIOS_WDG_GetActiveFlags();
+    if (f == last_flags) {
+        same++;
+    } else {
+        same = 0;
+        last_flags = f;
+    }
+    /* arm 3 s after boot: nothing kicks the flags while the drivers initialise */
+    if (same == 200 && !captured && xTaskGetTickCount() > 3000) {
+        captured = true;
+        uint32_t *frame = (uint32_t *)__get_PSP();
+        uint32_t pc = frame[6];
+        for (uint32_t i = 0; i < 5; i++) {
+            if (f & (1u << i)) { CUBE_Mark(59 + i); }
+        }
+        CUBE_Mark(29);
+        if (pc >= 0x08004000u && pc < 0x080C0000u) {
+            uint32_t off = (pc - 0x08004000u) >> 1;
+            for (uint32_t j = 0; j < 19; j++) {
+                if (off & (1u << j)) { CUBE_Mark(40 + j); }
+            }
+        }
+    }
+}
 #else
 void CUBE_Mark(__attribute__((unused)) uint32_t slot) {}
 #define CUBE_MARK(n) do { } while (0)
@@ -368,6 +400,16 @@ void PIOS_Board_Init(void)
 #endif /* PIOS_INCLUDE_LED */
     CUBE_STAGE(103);
     CUBE_MARK(1);
+#ifdef CUBE_MARKS
+    {
+        /* reset cause of this boot (slots 36..39) */
+        uint32_t csr = RCC->CSR;
+        if (csr & RCC_CSR_WDGRSTF) { CUBE_Mark(36); }
+        if (csr & RCC_CSR_SFTRSTF) { CUBE_Mark(37); }
+        if (csr & RCC_CSR_PADRSTF) { CUBE_Mark(38); }
+        if (csr & RCC_CSR_PORRSTF) { CUBE_Mark(39); }
+    }
+#endif
 #if CUBE_BOOT_STOP == 104
     if (!pvPortMalloc(80)) { cube_bl_reset(); }
 #endif
@@ -453,6 +495,15 @@ void PIOS_Board_Init(void)
     CUBE_MARK(9);
 #ifdef PIOS_INCLUDE_WDG
     PIOS_WDG_Init();
+#endif
+#if defined(CUBE_MARKS) && defined(PIOS_INCLUDE_WDG)
+    {
+        /* which watchdog flags had been kicked when the previous run died (slots 59..63) */
+        uint16_t f = PIOS_WDG_GetBootupFlags();
+        for (uint32_t i = 0; i < 5; i++) {
+            if (f & (1u << i)) { CUBE_Mark(59 + i); }
+        }
+    }
 #endif
 
     CUBE_STAGE(6);

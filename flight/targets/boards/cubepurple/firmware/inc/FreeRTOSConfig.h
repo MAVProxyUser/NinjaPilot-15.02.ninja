@@ -32,7 +32,11 @@
 #define configUSE_PREEMPTION                         1
 #define configUSE_IDLE_HOOK                          1
 #define configUSE_MALLOC_FAILED_HOOK                 1
+#ifdef CUBE_MARKS /* bring-up aid: see pios_board.c */
+#define configUSE_TICK_HOOK                          1
+#else
 #define configUSE_TICK_HOOK                          0
+#endif
 #define configUSE_TRACE_FACILITY                     0
 #define configUSE_16_BIT_TICKS                       0
 #define configIDLE_SHOULD_YIELD                      0
@@ -58,6 +62,7 @@
 
 #define INCLUDE_vTaskPrioritySet                     1
 #define INCLUDE_uxTaskPriorityGet                    1
+#define INCLUDE_eTaskGetState                        1
 #define INCLUDE_vTaskDelete                          1
 #define INCLUDE_vTaskCleanUpResources                1
 #define INCLUDE_vTaskSuspend                         1
