@@ -185,6 +185,54 @@ void VehicleConfigurationHelper::applyHardwareConfiguration()
          * over WiFi or the USB serial console. There are no CC_/RM_ port
          * muxes on this board, so there is nothing to write here. */
         break;
+    case VehicleConfigurationSource::CONTROLLER_CUBE:
+    {
+        /* Cube Purple: RC IN, TELEM1/2 and the GPS connector are fixed
+         * hardware, described by the "RV" (full-size Revolution) settings.
+         * The IO co-processor decodes PPM, S.Bus and DSM on RC IN and the
+         * firmware serves them all as the PWM group, so every input type
+         * lands on the same port. */
+        data.RV_RcvrPort      = HwSettings::RV_RCVRPORT_PWM;
+        data.RV_TelemetryPort = HwSettings::RV_TELEMETRYPORT_TELEMETRY;
+        data.RV_AuxPort       = HwSettings::RV_AUXPORT_DISABLED;
+        data.RV_GPSPort       = HwSettings::RV_GPSPORT_GPS;
+        if (m_configSource->getGpsType() != VehicleConfigurationSource::GPS_DISABLED &&
+            m_configSource->getGpsType() != VehicleConfigurationSource::GPS_DRONECAN) {
+            data.OptionalModules[HwSettings::OPTIONALMODULES_GPS] = 1;
+            data.GPSSpeed = HwSettings::GPSSPEED_57600;
+            GPSSettings *gpsSettings = GPSSettings::GetInstance(m_uavoManager);
+            Q_ASSERT(gpsSettings);
+            GPSSettings::DataFields gpsData = gpsSettings->getData();
+            gpsData.UbxAutoConfig = GPSSettings::UBXAUTOCONFIG_DISABLED;
+            switch (m_configSource->getGpsType()) {
+            case VehicleConfigurationSource::GPS_NMEA:
+                gpsData.DataProtocol = GPSSettings::DATAPROTOCOL_NMEA;
+                break;
+            case VehicleConfigurationSource::GPS_UBX:
+                gpsData.DataProtocol = GPSSettings::DATAPROTOCOL_UBX;
+                break;
+            case VehicleConfigurationSource::GPS_PLATINUM:
+            {
+                gpsData.DataProtocol  = GPSSettings::DATAPROTOCOL_UBX;
+                gpsData.UbxAutoConfig = GPSSettings::UBXAUTOCONFIG_CONFIGURE;
+                AuxMagSettings *magSettings = AuxMagSettings::GetInstance(m_uavoManager);
+                Q_ASSERT(magSettings);
+                AuxMagSettings::DataFields magsData = magSettings->getData();
+                magsData.Usage = AuxMagSettings::USAGE_AUXONLY;
+                magSettings->setData(magsData);
+                addModifiedObject(magSettings, tr("Writing External Mag sensor settings"));
+                break;
+            }
+            default:
+                break;
+            }
+            gpsSettings->setData(gpsData);
+            addModifiedObject(gpsSettings, tr("Writing GPS sensor settings"));
+        } else {
+            data.OptionalModules[HwSettings::OPTIONALMODULES_GPS] = 0;
+        }
+        break;
+    }
     case VehicleConfigurationSource::CONTROLLER_REVO:
     case VehicleConfigurationSource::CONTROLLER_REALPOSIX:
     case VehicleConfigurationSource::CONTROLLER_NANO:
@@ -918,6 +966,10 @@ void VehicleConfigurationHelper::applyManualControlDefaults()
          * numbers, reversals and endpoints belong to the user's RC
          * calibration and survive the wizard untouched. */
         channelType = ManualControlSettings::CHANNELGROUPS_DSMMAINPORT;
+    } else if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_CUBE) {
+        /* Whatever is plugged into the Cube's RC IN (PPM, S.Bus, DSM) is
+         * decoded by the IO co-processor and served as the PWM group. */
+        channelType = ManualControlSettings::CHANNELGROUPS_PWM;
     } else if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REALPOSIX) {
         /* Every receiver on this board arrives through the PPM channel
          * group - the UDP network receiver registers there by design

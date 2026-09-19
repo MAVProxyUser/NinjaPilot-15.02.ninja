@@ -196,6 +196,10 @@ bool InputPage::restartNeeded(VehicleConfigurationSource::INPUT_TYPE selectedTyp
          * nothing a reboot would re-init. */
         return false;
 
+    case SetupWizard::CONTROLLER_CUBE:
+        /* The IO co-processor decodes every receiver type on RC IN and the
+         * firmware serves it as one group: no port to flip, no reboot. */
+        return false;
     case SetupWizard::CONTROLLER_REVO:
     case SetupWizard::CONTROLLER_REALPOSIX:
     case SetupWizard::CONTROLLER_DISCOVERYF4:

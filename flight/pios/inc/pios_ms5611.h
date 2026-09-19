@@ -55,6 +55,7 @@ enum pios_ms5611_osr {
 
 /* Public Functions */
 extern void PIOS_MS5611_Init(const struct pios_ms5611_cfg *cfg, int32_t i2c_device);
+extern void PIOS_MS5611_SPI_Init(const struct pios_ms5611_cfg *cfg, uint32_t spi_id, uint32_t slave_num);
 extern const PIOS_SENSORS_Driver PIOS_MS5611_Driver;
 void PIOS_MS5611_Register();
 

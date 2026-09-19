@@ -171,6 +171,9 @@ SetupWizard::CONTROLLER_TYPE ControllerPage::getControllerType()
 
     case 0x0904:
         return SetupWizard::CONTROLLER_DISCOVERYF4;
+    case 0x0C01:
+        /* CubePilot Cube Purple (FMUv3) running the cubepurple firmware */
+        return SetupWizard::CONTROLLER_CUBE;
 
     default:
         return SetupWizard::CONTROLLER_UNKNOWN;
@@ -196,6 +199,7 @@ void ControllerPage::setupBoardTypes()
     ui->boardTypeCombo->addItem(tr("NinjaPilot LiteWing (ESP32-S3)"), SetupWizard::CONTROLLER_LITEWING);
     ui->boardTypeCombo->addItem(tr("OpenPilot OPLink Radio Modem"), SetupWizard::CONTROLLER_OPLINK);
     ui->boardTypeCombo->addItem(tr("OpenPilot DiscoveryF4"), SetupWizard::CONTROLLER_DISCOVERYF4);
+    ui->boardTypeCombo->addItem(tr("CubePilot Cube Purple"), SetupWizard::CONTROLLER_CUBE);
 }
 
 void ControllerPage::setControllerType(SetupWizard::CONTROLLER_TYPE type)

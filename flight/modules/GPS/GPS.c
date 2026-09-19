@@ -64,7 +64,7 @@ static void updateHwSettings();
 
 #ifdef PIOS_GPS_SETS_HOMELOCATION
 static void setHomeLocation(GPSPositionSensorData *gpsData);
-static void homeLocationUpdatedCb(UAVObjEvent *ev);
+static void __attribute__((unused)) homeLocationUpdatedCb(UAVObjEvent *ev);
 static float GravityAccel(float latitude, float longitude, float altitude);
 #endif
 

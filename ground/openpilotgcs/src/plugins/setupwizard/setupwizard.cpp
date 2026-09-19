@@ -97,6 +97,7 @@ int SetupWizard::nextId() const
         case CONTROLLER_CC:
         case CONTROLLER_CC3D:
         case CONTROLLER_REVO:
+        case CONTROLLER_CUBE:
         case CONTROLLER_REALPOSIX:
         case CONTROLLER_ESP32:
         case CONTROLLER_LITEWING:
@@ -161,6 +162,8 @@ int SetupWizard::nextId() const
         } else {
             switch (getControllerType()) {
             case CONTROLLER_REVO:
+            case CONTROLLER_CUBE:
+        case CONTROLLER_CUBE:
             case CONTROLLER_REALPOSIX:
             case CONTROLLER_NANO:
             /* LiteWing has a GPS header (UART1) and, since the StateEstimation
@@ -179,6 +182,7 @@ int SetupWizard::nextId() const
     {
         switch (getControllerType()) {
         case CONTROLLER_REVO:
+        case CONTROLLER_CUBE:
         case CONTROLLER_REALPOSIX:
         case CONTROLLER_NANO:
         case CONTROLLER_LITEWING:
@@ -266,6 +270,7 @@ int SetupWizard::nextId() const
         case CONTROLLER_CC:
         case CONTROLLER_CC3D:
         case CONTROLLER_REVO:
+        case CONTROLLER_CUBE:
         case CONTROLLER_REALPOSIX:
         case CONTROLLER_ESP32:
         case CONTROLLER_LITEWING:
@@ -307,6 +312,9 @@ QString SetupWizard::getSummaryText()
         break;
     case CONTROLLER_REVO:
         summary.append(tr("OpenPilot Revolution"));
+        break;
+    case CONTROLLER_CUBE:
+        summary.append(tr("CubePilot Cube Purple"));
         break;
     case CONTROLLER_REALPOSIX:
         summary.append(tr("NinjaPilot RealPosix (OSD32MP1)"));
@@ -482,7 +490,7 @@ QString SetupWizard::getSummaryText()
     }
 
     // Show GPS Type
-    if (getControllerType() == CONTROLLER_REVO || getControllerType() == CONTROLLER_REALPOSIX || getControllerType() == CONTROLLER_NANO) {
+    if (getControllerType() == CONTROLLER_REVO || getControllerType() == CONTROLLER_CUBE || getControllerType() == CONTROLLER_REALPOSIX || getControllerType() == CONTROLLER_NANO) {
         summary.append("<br>");
         summary.append("<b>").append(tr("GPS type: ")).append("</b>");
         switch (getGpsType()) {
@@ -504,7 +512,7 @@ QString SetupWizard::getSummaryText()
     }
 
     // Show Airspeed sensor type
-    if ((getControllerType() == CONTROLLER_REVO || getControllerType() == CONTROLLER_REALPOSIX || getControllerType() == CONTROLLER_NANO) && getVehicleType() == VEHICLE_FIXEDWING) {
+    if ((getControllerType() == CONTROLLER_REVO || getControllerType() == CONTROLLER_CUBE || getControllerType() == CONTROLLER_REALPOSIX || getControllerType() == CONTROLLER_NANO) && getVehicleType() == VEHICLE_FIXEDWING) {
         summary.append("<br>");
         summary.append("<b>").append(tr("Airspeed Sensor: ")).append("</b>");
         switch (getAirspeedType()) {

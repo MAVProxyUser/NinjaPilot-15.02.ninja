@@ -51,6 +51,10 @@ public:
             return QString("Revolution");
 
             break;
+        case 0x0C01:
+            // CubePilot Cube Purple (FMUv3) with the cubepurple firmware
+            return QString("CubePilot Cube Purple");
+
         case 0x0904:
             return QString("DiscoveryF4");
 

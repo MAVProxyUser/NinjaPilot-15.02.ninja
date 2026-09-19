@@ -825,6 +825,20 @@ static bool set_channel(uint8_t mixer_channel, uint16_t value)
     return true;
 }
 #else
+/*
+ * Boards whose outputs are not all this MCU's timer channels (an IO
+ * co-processor drives some) take the value here first.  The defaults take
+ * nothing, so every other board keeps using PIOS_Servo directly.
+ */
+bool __attribute__((weak)) PIOS_Board_ServoSet(uint8_t channel, uint16_t value)
+{
+    (void)channel; (void)value;
+    return false;
+}
+void __attribute__((weak)) PIOS_Board_ServoSetHz(const uint16_t *hz, uint8_t banks)
+{
+    (void)hz; (void)banks;
+}
 static bool set_channel(uint8_t mixer_channel, uint16_t value)
 {
 #ifdef PIOS_ACTUATOR_BRUSHED_OUTPUTS
@@ -884,7 +898,9 @@ static bool set_channel(uint8_t mixer_channel, uint16_t value)
             PIOS_Servo_Set(actuatorSettings.ChannelAddr[mixer_channel], value / ACTUATOR_ONESHOT125_PULSE_SCALE);
             break;
         default:
-            PIOS_Servo_Set(actuatorSettings.ChannelAddr[mixer_channel], value);
+            if (!PIOS_Board_ServoSet(actuatorSettings.ChannelAddr[mixer_channel], value)) {
+                PIOS_Servo_Set(actuatorSettings.ChannelAddr[mixer_channel], value);
+            }
             break;
         }
         return true;
