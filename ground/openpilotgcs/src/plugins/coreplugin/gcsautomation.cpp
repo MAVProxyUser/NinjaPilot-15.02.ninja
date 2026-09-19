@@ -5,6 +5,7 @@
 #include "coreconstants.h"
 
 #include <QTcpServer>
+#include <QPointer>
 #include <QTcpSocket>
 #include <QHostAddress>
 #include <QJsonDocument>
@@ -246,9 +247,13 @@ void GcsAutomationServer::onNewConnection()
 
 void GcsAutomationServer::onReadyRead()
 {
-    QTcpSocket *s = qobject_cast<QTcpSocket *>(sender());
+    /* A "do" can run a nested event loop for a long time (the wizard's Save
+     * page, a reboot dialog).  If the client gives up meanwhile, its socket
+     * is disconnected and deleteLater'd inside that loop, so hold it through
+     * a QPointer and check it again before replying. */
+    QPointer<QTcpSocket> s = qobject_cast<QTcpSocket *>(sender());
     if (!s) return;
-    while (s->canReadLine()) {
+    while (s && s->canReadLine()) {
         QByteArray line = s->readLine().trimmed();
         if (line.isEmpty()) continue;
         QJsonParseError perr;
@@ -259,6 +264,7 @@ void GcsAutomationServer::onReadyRead()
         } else {
             reply = dispatch(doc.object());
         }
+        if (!s) return; /* client went away during the command */
         s->write(QJsonDocument(reply).toJson(QJsonDocument::Compact));
         s->write("\n");
         s->flush();
