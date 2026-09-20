@@ -9,13 +9,14 @@ real pose topic (same ground-truth source used elsewhere in this session, not
 the bridge's own self-reported state) and checks position/attitude are back
 at the model's spawned rest pose before exiting 0.
 """
+import os
 import sys
 import time
 from gz.transport13 import Node
 from gz.msgs10.pose_v_pb2 import Pose_V
 
 WORLD = "quadcopter"
-MODEL = "x3"
+MODEL = os.environ.get("NINJAPILOT_GZ_MODEL", "x3")
 # model.sdf spawns at <pose>0 0 0.053302 0 0 0</pose> - small XY tolerance
 # for float noise, generous Z tolerance since resting height varies slightly
 # with collision settling.

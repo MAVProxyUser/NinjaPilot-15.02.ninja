@@ -40,11 +40,29 @@
 
 // Private constants
 
+// Interceptor mode: stick fraction killed around centre, rest rescaled to fill [-1,1]. Without this a resting thumb's
+// centering noise (or the exact instant the mode hands the stick back at end of transition) creeps the held roll/pitch/heading
+// setpoint; with it the hand-over and the whole cruise phase read as dead-centre-is-dead-centre, same as any other stick mode.
+#define INTERCEPTOR_STICK_DEADBAND 0.03f
+
 // Private types
 
 // Private functions
 static float applyExpo(float value, float expo);
+static float applyDeadband(float value, float deadband);
 
+// Rescale-after-cut deadband (same shape as plans.c's normalizeDeadband): kills |value| < deadband, then stretches the
+// remainder back to fill [-1,1] so full stick still reaches full authority.
+static float applyDeadband(float value, float deadband)
+{
+    if (value > deadband) {
+        return (value - deadband) / (1.0f - deadband);
+    }
+    if (value < -deadband) {
+        return (value + deadband) / (1.0f - deadband);
+    }
+    return 0.0f;
+}
 
 static float applyExpo(float value, float expo)
 {
@@ -149,6 +167,7 @@ void stabilizedHandler(bool newinit)
         (stab_settings[0] == STABILIZATIONDESIRED_STABILIZATIONMODE_RATTITUDE) ? cmd.Roll * stabSettings.RollMax :
         (stab_settings[0] == STABILIZATIONDESIRED_STABILIZATIONMODE_RELAYRATE) ? cmd.Roll * stabSettings.ManualRate.Roll :
         (stab_settings[0] == STABILIZATIONDESIRED_STABILIZATIONMODE_RELAYATTITUDE) ? cmd.Roll * stabSettings.RollMax :
+        (stab_settings[0] == STABILIZATIONDESIRED_STABILIZATIONMODE_INTERCEPTOR) ? applyDeadband(cmd.Roll, INTERCEPTOR_STICK_DEADBAND) * stabSettings.RollMax :
         0; // this is an invalid mode
 
     stabilization.Pitch =
@@ -162,6 +181,7 @@ void stabilizedHandler(bool newinit)
         (stab_settings[1] == STABILIZATIONDESIRED_STABILIZATIONMODE_RATTITUDE) ? cmd.Pitch * stabSettings.PitchMax :
         (stab_settings[1] == STABILIZATIONDESIRED_STABILIZATIONMODE_RELAYRATE) ? cmd.Pitch * stabSettings.ManualRate.Pitch :
         (stab_settings[1] == STABILIZATIONDESIRED_STABILIZATIONMODE_RELAYATTITUDE) ? cmd.Pitch * stabSettings.PitchMax :
+        (stab_settings[1] == STABILIZATIONDESIRED_STABILIZATIONMODE_INTERCEPTOR) ? applyDeadband(cmd.Pitch, INTERCEPTOR_STICK_DEADBAND) * stabSettings.PitchMax :
         0; // this is an invalid mode
 
     // TOOD: Add assumption about order of stabilization desired and manual control stabilization mode fields having same order
@@ -185,6 +205,7 @@ void stabilizedHandler(bool newinit)
             (stab_settings[2] == STABILIZATIONDESIRED_STABILIZATIONMODE_RATTITUDE) ? cmd.Yaw * stabSettings.YawMax :
             (stab_settings[2] == STABILIZATIONDESIRED_STABILIZATIONMODE_RELAYRATE) ? cmd.Yaw * stabSettings.ManualRate.Yaw :
             (stab_settings[2] == STABILIZATIONDESIRED_STABILIZATIONMODE_RELAYATTITUDE) ? cmd.Yaw * stabSettings.YawMax :
+            (stab_settings[2] == STABILIZATIONDESIRED_STABILIZATIONMODE_INTERCEPTOR) ? applyDeadband(cmd.Yaw, INTERCEPTOR_STICK_DEADBAND) * stabSettings.ManualRate.Yaw :
             0; // this is an invalid mode
     }
 

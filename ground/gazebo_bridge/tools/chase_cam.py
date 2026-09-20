@@ -34,7 +34,7 @@ from gz.msgs10.pose_v_pb2 import Pose_V
 from gz.msgs10.twist_pb2 import Twist
 
 WORLD = "quadcopter"
-MODEL = "x3"
+MODEL = os.environ.get("NINJAPILOT_GZ_MODEL", "x3")
 # UNIQUE name AND topic per session. gz's create service auto-renames a
 # duplicate model instead of failing, so re-running with a fixed name
 # quietly accumulates rigs - and every one of their cameras publishes

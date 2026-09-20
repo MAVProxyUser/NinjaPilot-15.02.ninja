@@ -42,6 +42,29 @@
 	<field name="CruiseControlInvertedThrustReversing" units="" type="enum" elements="1" options="Unreversed,Reversed" defaultvalue="Unreversed"/>
 	<field name="CruiseControlInvertedPowerOutput"     units="" type="enum" elements="1" options="Zero,Normal,Boosted" defaultvalue="Zero"/>
 
+	<!-- Interceptor mode (tail-sitter transition for the Interceptor): the switch position runs the whole sequence itself.
+	     CLIMB: level hover attitude at InterceptorClimbThrust for InterceptorClimbTime seconds, sticks ignored.
+	     TRANSITION: pitch setpoint ramps at InterceptorTransitionRate deg/s to InterceptorCruisePitch; thrust follows
+	     InterceptorHoverThrust/cos(pitch offset), the vertical-equilibrium curve - a FEEDFORWARD ESTIMATE, not exact
+	     (see InterceptorHoverThrust's own comment for why it is not trimmed/forced to any one calibrated value).
+	     CRUISE: sticks live - roll/pitch are earth-bound angles about the cruise attitude (Rattitude blend into rates at large
+	     deflection), yaw stick slews the held heading, throttle takes over once the stick passes through the auto value -
+	     from there, ground-side closed-loop climb-rate trim (wroom_pilot.ClimbTrim) is what actually holds altitude;
+	     this feedforward only has to be close enough not to ground-strike or balloon before that hand-over completes.
+	     InterceptorCruiseThrust is UNUSED by this feedforward as of 2026-09-19 (see TRANSITION_THEORY.md #8: forcing the
+	     curve through one calibrated (angle, thrust) point broke every other angle) - kept only so a manual/no-climb-trim
+	     flight still has a throttle stick reference value to cross for hand-over capture. -->
+	<field name="InterceptorClimbTime" units="s" type="float" elements="1" defaultvalue="3.0"/>
+	<field name="InterceptorClimbThrust" units="" type="float" elements="1" defaultvalue="0.75"/>
+	<field name="InterceptorTransitionRate" units="deg/s" type="float" elements="1" defaultvalue="15"/>
+	<field name="InterceptorCruisePitch" units="deg" type="float" elements="1" defaultvalue="-45"/>
+	<field name="InterceptorCruiseThrust" units="" type="float" elements="1" defaultvalue="0.85"/>
+	<!-- TRUE level-hover-thrust reference (measured 2026-09-19 on the Gazebo interceptor model + NINJAPILOT_MOTOR_BOOST=0.55:
+	     the settle-phase log reads thr=0.635) - deliberately separate from InterceptorClimbThrust, which is ABOVE hover on
+	     purpose (it is what makes the CLIMB phase climb). This is the ONLY anchor for the TRANSITION/CRUISE thrust curve -
+	     no per-angle trim on top of it, because trimming to force an exact match at one chosen cruise angle is what broke
+	     every other angle the first two times this was tried (see TRANSITION_THEORY.md #8). -->
+	<field name="InterceptorHoverThrust" units="" type="float" elements="1" defaultvalue="0.65"/>
 	<field name="LowThrottleZeroIntegral" units="" type="enum" elements="1" options="FALSE,TRUE" defaultvalue="TRUE"/>
 
 	<field name="ScaleToAirspeed" units="m/s" type="float" elements="1" defaultvalue="0"/>

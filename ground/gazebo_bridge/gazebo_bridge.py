@@ -108,6 +108,23 @@ def _fms_values(armed):
         # (Stabilized6, Rate/Rate/Rate by default) keeps the ground-
         # piloted flip alive for A/B comparison - also on Bank2.
         fms["Stabilization2Settings"] = ["Attitude", "Attitude", "AxisLock", "Manual"]
+    if WROOM and TEST_MODE in ("wroom_transition", "wroom_shape", "wroom_rollstep", "wroom_speedcorridor", "wroom_reengage"):
+        # Switch position 2 (Stabilized3) is the Interceptor's tail-sitter transition mode: the firmware's own
+        # Interceptor outer loop climbs, pitches over and hands the sticks back (flight/modules/Stabilization/outerloop.c).
+        # wroom_shape (shape_test) engages this same switch position on every leg - missing it here left the mode
+        # config on its stock Attitude/Attitude/Rate/Manual default (no interceptor thrust schedule, no pitch-over
+        # at all) while the pilot script's own throttle/roll/pitch went right on assuming interceptor mode was live:
+        # a frozen open-loop MANUAL throttle for the several seconds it took the pilot to notice, at whatever thrust
+        # happened to be captured when the leg began - the whole first star mission (2026-09-19) free-fell on leg 1
+        # from exactly this, looking for all the world like a control failure when the mode was never even engaged.
+        fms["Stabilization3Settings"] = ["Interceptor", "Interceptor", "Interceptor", "Interceptor"]
+    if WROOM and TEST_MODE == "wroom_rattitude":
+        # Switch position 5 (Stabilized6) repurposed for this test only, same pattern as Interceptor's position-2
+        # override above - no stock switch position ships Rattitude on Roll/Pitch, so an A/B against Attitude
+        # (position 0) needs one carved out. Yaw stays Rate (Rattitude only has a defined meaning against a bounded
+        # angle axis; yaw in hover is already Rate-only everywhere in this config) and Thrust stays Manual so the
+        # test's own throttle handling is unaffected by the mode switch.
+        fms["Stabilization6Settings"] = ["Rattitude", "Rattitude", "Rate", "Manual"]
     return fms
 # NINJAPILOT_MISSION=star flies ONLY the 5-point star at 8m + land -
 # a ~90s iteration loop for corner/yaw tuning instead of the 4.5min
@@ -132,7 +149,12 @@ HOME_LONGITUDE = -122.4194
 HOME_ALTITUDE = 30.0
 
 GAZEBO_WORLD = "quadcopter"
-GAZEBO_MODEL = "x3"
+# NINJAPILOT_GZ_MODEL selects which Gazebo vehicle this bridge flies. "x3" (default) is the stock quadcopter_ninjapilot.sdf
+# airframe with its historical "X3" topic namespace and scrambled rotor slots. Any other value (e.g. "interceptor", the 2.1x
+# ESP-BLAST interceptor from HamzasWetDream/gazebo) is taken literally: model name == topic namespace, and its rotors are expected to
+# be numbered in the firmware's QuadX channel order (CHANNEL_TO_ROTOR identity) unless NINJAPILOT_CHANNEL_TO_ROTOR says otherwise.
+GAZEBO_MODEL = os.environ.get("NINJAPILOT_GZ_MODEL", "x3")
+GZ_NS = "X3" if GAZEBO_MODEL == "x3" else GAZEBO_MODEL
 
 # ---------------- INTERCEPT TEST ----------------
 # A slow object crossing the farm diagonally, passing over the vehicle so it
@@ -272,12 +294,12 @@ _last_accel_g = [1.0]    # |specific force| in g, from the vehicle's own IMU
 _peak_accel_g = [1.0]
 _contact_hit = [None]    # wall-clock of the PHYSICS ENGINE's own contact report
 POSE_TOPIC = "/world/%s/pose/info" % GAZEBO_WORLD
-IMU_TOPIC = "/X3/imu"
-NAVSAT_TOPIC = "/X3/navsat"
-MAGNETOMETER_TOPIC = "/X3/magnetometer"
-AIR_PRESSURE_TOPIC = "/X3/air_pressure"
-MOTOR_TOPIC = "/X3/gazebo/command/motor_speed"
-MOTOR_MAX_RAD_S = 800.0  # matches quadcopter.sdf's maxRotVelocity per rotor
+IMU_TOPIC = "/%s/imu" % GZ_NS
+NAVSAT_TOPIC = "/%s/navsat" % GZ_NS
+MAGNETOMETER_TOPIC = "/%s/magnetometer" % GZ_NS
+AIR_PRESSURE_TOPIC = "/%s/air_pressure" % GZ_NS
+MOTOR_TOPIC = "/%s/gazebo/command/motor_speed" % GZ_NS
+MOTOR_MAX_RAD_S = float(os.environ.get("NINJAPILOT_MOTOR_MAX_RAD_S", "800.0"))  # matches the world's maxRotVelocity per rotor (800 for x3 and interceptor)
 
 UDP_HOST = "127.0.0.1"
 UDP_PORT = 9000
@@ -962,7 +984,18 @@ def wait_with_crash_check(duration, label):
 
 
 FEET_TO_M = 0.3048
-HOVER_THRUST = 0.68  # X3 hover point - see run_test_sequence's own comment on the 14.9N/21.9N math
+# 0.68 is the stock "X3" test vehicle's hover point (see run_test_sequence's own comment on the 14.9N/21.9N math) -
+# NOT valid for the custom "interceptor" airframe, whose true equilibrium was measured empirically at ~0.20-0.25
+# (wroom_pilot.thrprobe_test, an open-loop throttle ladder with no PID in the loop: 0.20 produced zero climb,
+# 0.25 produced a still-accelerating +1.2 m/s by 3s). Pilot.THR_MIN defaulting to 0.45 - already ~2x the real
+# interceptor hover point - meant the plain-hover altitude controller could never command less thrust than
+# roughly double what the airframe needs, so ANY approach to a target altitude from below, or any overshoot past
+# it, was unrecoverable: climb pinned near +8-12 m/s at the floor, blowing through hard ceilings that had been sized
+# assuming a well-behaved controller. This silently affected every WROOM test that spent real time in plain hover
+# (hover_test, sticks_test, rth_test, and the takeoff/settle prelude of every interceptor test) - masked mostly by
+# short dwell times before interceptor mode's own separately, correctly-tuned closed-loop thrust took over.
+# NINJAPILOT_HOVER_THRUST overrides this per-run without disturbing the stock X3 default other callers may still rely on.
+HOVER_THRUST = float(os.environ.get("NINJAPILOT_HOVER_THRUST", "0.68"))
 
 
 def _wait_for_vertical_settle(mode_label, timeout=7.0):
@@ -4144,13 +4177,34 @@ def uavtalk_thread():
             "ScaleToAirspeed": 0, "ScaleToAirspeedLimits": [0.05, 3],
             "FlightModeAssistMap": ["None"] * 6,
             # Wroom: switch position 1 (the flip slot) pulls its gains from
-            # Bank2; everything else stays on Bank1. The bank mirror is
-            # re-copied from the mapped bank on every mode change, so the
-            # flip rates apply the instant the mode switches - and hover's
-            # rates come back the instant it switches home.
-            "FlightModeMap": (["Bank1", "Bank2", "Bank1", "Bank1", "Bank1", "Bank2"]
+            # Bank2; position 2 (Stabilized3, the interceptor transition
+            # switch) pulls from Bank3 - a SEPARATE gain set from hover's
+            # Bank1, per TRANSITION_THEORY.md #6.5 ("a second stabilization
+            # bank... selected by mode, so hover and forward gains live side
+            # by side"). Bank3 is seeded identical to Bank1 below until real
+            # cruise-flight data justifies changing it - the plumbing is
+            # what matters now, not invented numbers. Everything else stays
+            # on Bank1. The bank mirror is re-copied from the mapped bank on
+            # every mode change, so each regime's rates apply the instant
+            # the switch moves.
+            "FlightModeMap": (["Bank1", "Bank2", "Bank3", "Bank1", "Bank1", "Bank2"]
                               if WROOM else ["Bank1"] * 6),
         }
+        # Interceptor (Interceptor transition) settings: pack() sends any field it is not given as 0, which would make the mode
+        # command zero thrust. Same env vars wroom_pilot.transition_test reads, so the pilot and the firmware agree.
+        # 0.65/0.75 were measured 2026-09-19 on THIS Gazebo model WITH NINJAPILOT_MOTOR_BOOST=0.55 set (see
+        # InterceptorHoverThrust's own comment in stabilizationsettings.xml) - they are only correct alongside that
+        # motor boost. Running without it (MOTOR_BOOST defaults to 1.0, full power) makes the same throttle command
+        # roughly 3x too powerful and produces an uncontrolled climb that looks like a control-law bug but is really
+        # a missing env var (see INTERCEPTOR_FLIGHT_LOG.md section 14 for the full misdiagnosis-and-fix story).
+        stab_settings.update({
+            "InterceptorClimbTime":       float(os.environ.get("NINJAPILOT_INTERCEPTOR_CLIMB_TIME", "3.0")),
+            "InterceptorClimbThrust":     float(os.environ.get("NINJAPILOT_INTERCEPTOR_CLIMB_THRUST", "0.75")),
+            "InterceptorTransitionRate":  float(os.environ.get("NINJAPILOT_INTERCEPTOR_TRANSITION_RATE", "15")),
+            "InterceptorCruisePitch":     float(os.environ.get("NINJAPILOT_INTERCEPTOR_CRUISE_PITCH", "-45")),
+            "InterceptorCruiseThrust":    float(os.environ.get("NINJAPILOT_INTERCEPTOR_CRUISE_THRUST", "0.8")),
+            "InterceptorHoverThrust":     float(os.environ.get("NINJAPILOT_INTERCEPTOR_HOVER_THRUST", "0.65")),
+        })
         send_reliable("StabilizationSettings", bov.resolve_enum_values(db["StabilizationSettings"], stab_settings))
         time.sleep(0.2)
         # StabilizationBank is the actual "currently active" gains
@@ -4317,6 +4371,39 @@ def uavtalk_thread():
             # slam at flip entry. Do not re-try without separating the two.
             send_reliable("StabilizationSettingsBank2", bov.resolve_enum_values(db["StabilizationSettingsBank2"], flip_bank))
             time.sleep(0.2)
+            # Bank3 = the INTERCEPTOR bank (switch position 2 via FlightModeMap). Identical to Bank1 for now - a copy, not
+            # a placeholder value set - because outerloop.c's interceptor state machine currently reads the SAME
+            # stabSettings.outerPids / stabBank the Attitude outer loop uses, and the 2026-09-19 sim run (wroom_int01)
+            # showed real overshoot on that shared tune: commanded -45 deg cruise pitch, measured -51.6 deg min (6.6 deg
+            # overshoot) during TRANSITION, plus a slow ~4 deg peak-to-peak pitch settle over the first several seconds of
+            # CRUISE. That is exactly the failure TRANSITION_THEORY.md predicted for sharing hover's PID across a regime
+            # with different effective damping (accelerating body, changing dynamic pressure) - the fix is a Bank3 RollPI/
+            # PitchPI (and possibly RollMax/PitchMax, which also cap the interceptor CRUISE stick-blend authority) tuned
+            # against forward-flight sweep data, not a change made here without that data.
+            # NINJAPILOT_BANK3_ROLL_P/_PITCH_P/_ROLL_I/_PITCH_I: optional override for exactly that data-driven tune,
+            # once it exists (wroom_pilot.hoverstep_test vs rollstep_test, 2026-09-19: identical 0.30 stick, hover
+            # settles flat at ~14.7 deg, cruise on Bank1's copied gains overshoots to ~20.7 deg then drifts to
+            # ~18.4 - never holding flat). Left unset, Bank3 stays byte-identical to Bank1 (the safe default this
+            # comment has always described).
+            # P-only tried first (rs04, ROLL_P 2.5->1.8): made the rise SLOWER but not smaller - still climbing at
+            # t=5.3s, ending HIGHER (21.5 deg) than the P=2.5 baseline's peak (20.7 deg), just later. That is not
+            # what a P-overshoot fix looks like; it looks like the loop chasing a persistent bias a P-only structure
+            # (stock RollPI/PitchPI I-term is 0 on every bank) cannot reject by definition. Hence the I-term knobs.
+            bank3 = dict(stab_bank)
+            _b3_roll_p = os.environ.get("NINJAPILOT_BANK3_ROLL_P")
+            _b3_roll_i = os.environ.get("NINJAPILOT_BANK3_ROLL_I")
+            if _b3_roll_p is not None or _b3_roll_i is not None:
+                bank3["RollPI"] = [float(_b3_roll_p) if _b3_roll_p is not None else stab_bank["RollPI"][0],
+                                    float(_b3_roll_i) if _b3_roll_i is not None else stab_bank["RollPI"][1],
+                                    stab_bank["RollPI"][2]]
+            _b3_pitch_p = os.environ.get("NINJAPILOT_BANK3_PITCH_P")
+            _b3_pitch_i = os.environ.get("NINJAPILOT_BANK3_PITCH_I")
+            if _b3_pitch_p is not None or _b3_pitch_i is not None:
+                bank3["PitchPI"] = [float(_b3_pitch_p) if _b3_pitch_p is not None else stab_bank["PitchPI"][0],
+                                     float(_b3_pitch_i) if _b3_pitch_i is not None else stab_bank["PitchPI"][1],
+                                     stab_bank["PitchPI"][2]]
+            send_reliable("StabilizationSettingsBank3", bov.resolve_enum_values(db["StabilizationSettingsBank3"], bank3))
+            time.sleep(0.2)
 
     def on_connected():
         send_config()
@@ -4334,10 +4421,19 @@ def uavtalk_thread():
             import wroom_pilot
             wroom_pilot.bind(sys.modules[__name__])
             modes.update({"wroom_hover": wroom_pilot.hover_test,
+                          "wroom_thrprobe": wroom_pilot.thrprobe_test,
                           "wroom_sticks": wroom_pilot.sticks_test,
                           "wroom_rth": wroom_pilot.rth_test,
                           "wroom_flip": wroom_pilot.flip_test,
                           "wroom_oflip": wroom_pilot.onboard_flip_test,
+                          "wroom_transition": wroom_pilot.transition_test,
+                          "wroom_shape": wroom_pilot.shape_test,
+                          "wroom_cruisecontrol": wroom_pilot.cruisecontrol_test,
+                          "wroom_rollstep": wroom_pilot.rollstep_test,
+                          "wroom_hoverstep": wroom_pilot.hoverstep_test,
+                          "wroom_speedcorridor": wroom_pilot.speedcorridor_test,
+                          "wroom_reengage": wroom_pilot.reengage_test,
+                          "wroom_rattitude": wroom_pilot.rattitude_test,
                           "wroom_creep": wroom_pilot.creep_test})
             # The LiteWing twin flies the same pilot manoeuvres; only the
             # actuator units differ, and that is handled at the Gazebo
@@ -4881,7 +4977,8 @@ gz_motor_pub = None
 # +pitch on motors 1&2 lifts the DROPPED nose by thrusting under it,
 # so motors 1&2 being the FRONT pair is the consistent geometry, on the
 # sim and on the real board alike.
-CHANNEL_TO_ROTOR = [2, 0, 3, 1]
+_C2R_DEFAULT = "2,0,3,1" if GAZEBO_MODEL == "x3" else "0,1,2,3"
+CHANNEL_TO_ROTOR = [int(x) for x in os.environ.get("NINJAPILOT_CHANNEL_TO_ROTOR", _C2R_DEFAULT).split(",")]
 
 # NINJAPILOT_MOTOR_EFF="1.0,0.9,1.0,1.0": per-CHANNEL thrust efficiency,
 # for reproducing real-airframe asymmetries in the sim. The sim's default

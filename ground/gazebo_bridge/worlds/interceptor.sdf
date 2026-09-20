@@ -1,0 +1,670 @@
+<?xml version="1.0" ?>
+<!-- interceptor.sdf: quadcopter_ninjapilot.sdf with the X3 replaced by the Interceptor (HamzasWetDream/gazebo/models/interceptor).
+     Sensor and motor topics are /interceptor/*; run the bridge with NINJAPILOT_GZ_MODEL=interceptor. World name stays 'quadcopter'.
+     Motor constants: 2207 2400KV / 5.1" tri-blade on 4S, 11.8 N at the bridge's 800 rad/s command ceiling. Hover for the 0.87 kg craft is
+     ~18% thrust; NINJAPILOT_MOTOR_BOOST=0.55 tames it to a ~60% hover point for first flights. -->
+<!--
+  Multicopter motor plugin demo
+
+  Send commands to go straight up:
+
+      gz topic -t /interceptor/gazebo/command/motor_speed --msgtype gz.msgs.Actuators -p 'velocity:[700, 700, 700, 700]'
+
+  And to turn off propellers:
+
+      gz topic -t /interceptor/gazebo/command/motor_speed --msgtype gz.msgs.Actuators -p 'velocity:[0, 0, 0, 0]'
+
+-->
+<sdf version="1.6">
+  <world name="quadcopter">
+    <!-- Matches gazebo_bridge.py's HOME_LATITUDE/HOME_LONGITUDE/HOME_ALTITUDE
+         so the navsat sensor's lat/lon/alt output lines up with the
+         HomeLocation UAVObject the bridge sends over UAVTalk - without
+         this, world-origin (0,0,0) would report as (0,0,0) lat/lon
+         instead of this reference point. -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>37.7749</latitude_deg>
+      <longitude_deg>-122.4194</longitude_deg>
+      <elevation>30.0</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+    <!-- Matches gazebo_bridge.py's/board_orientation_viz.py's HOMELOCATION_DEFAULTS
+         Be=[26000,400,40000] nT in NED (North,East,Down) - converted to
+         Tesla in this world's ENU frame (East,North,Up) so the real
+         gz-sim-magnetometer-system plugin's body-frame reading is derived
+         from the vehicle's own authoritative orientation, not a Python-side
+         quaternion rotation of a separately-tracked reference (see
+         CLAUDE.md/session notes: a mismatch there was slowly driving
+         filtercf.c's mag_err/gyroBias[2] and causing spurious yaw torque). -->
+    <magnetic_field>0.0000004 0.000026 -0.00004</magnetic_field>
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin
+      filename="gz-sim-physics-system"
+      name="gz::sim::systems::Physics">
+    </plugin>
+    <plugin
+      filename="gz-sim-scene-broadcaster-system"
+      name="gz::sim::systems::SceneBroadcaster">
+    </plugin>
+    <plugin
+      filename="gz-sim-user-commands-system"
+      name="gz::sim::systems::UserCommands">
+    </plugin>
+    <plugin
+      filename="gz-sim-sensors-system"
+      name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <!-- Contact sensing must be a WORLD system, not a model plugin. Declared
+         on the model it loads silently and publishes nothing, which is how
+         the intercept test ended up detecting collisions by sampling the
+         distance between two objects at 20Hz - and aliasing straight over
+         them. Closing at ~2-3 m/s, consecutive samples are 10-15cm apart,
+         so a real strike (IMU peaked at 4.0g) can be recorded as a 0.58m
+         miss. This gives the physics engine's own verdict at full rate. -->
+    <plugin filename="gz-sim-contact-system"
+            name="gz::sim::systems::Contact"/>
+    <plugin
+      filename="gz-sim-imu-system"
+      name="gz::sim::systems::Imu">
+    </plugin>
+    <plugin
+      filename="gz-sim-navsat-system"
+      name="gz::sim::systems::NavSat">
+    </plugin>
+    <plugin
+      filename="gz-sim-magnetometer-system"
+      name="gz::sim::systems::Magnetometer">
+    </plugin>
+    <plugin
+      filename="gz-sim-air-pressure-system"
+      name="gz::sim::systems::AirPressure">
+    </plugin>
+    <!-- Wind. Driven from the GUI's wind sliders, which publish
+         gz.msgs.Wind on /world/quadcopter/wind/. The sin/noise shaping from
+         gz's own wind demo is deliberately omitted: a test needs the wind it
+         asked for, repeatably, not a randomly gusting one. Links must also
+         declare <enable_wind> for the force to be applied to them. -->
+    <plugin
+      filename="gz-sim-wind-effects-system"
+      name="gz::sim::systems::WindEffects">
+      <force_approximation_scaling_factor>1</force_approximation_scaling_factor>
+    </plugin>
+
+
+
+    <!-- Gazebo's DEFAULT gui.config verbatim, plus our Wind panel.
+         Declaring <gui> REPLACES the defaults rather than adding to them:
+         a hand-written short list silently dropped MarkerManager and took
+         the flight trails with it. -->
+    <gui fullscreen="0">
+      <plugin filename="MinimalScene" name="3D View">
+  <gz-gui>
+    <title>3D View</title>
+    <property type="bool" key="showTitleBar">false</property>
+    <property type="string" key="state">docked</property>
+  </gz-gui>
+
+  <engine>ogre2</engine>
+  <scene>scene</scene>
+  <ambient_light>0.4 0.4 0.4</ambient_light>
+  <background_color>0.8 0.8 0.8</background_color>
+  <!-- WHOLE-FARM OVERVIEW, barn toward the top of the screen.
+       ENU: x=East, y=North, z=Up. The action spans roughly N/E -34 (target
+       spawn) to +20 (the barn), so the camera sits ~75m SOUTH and 60m up,
+       yawed +90deg to look NORTH - which puts the barn at the top of the
+       frame and the target's inbound run coming toward the viewer. Pitch
+       0.60 rad is atan(55/80), i.e. aimed at the middle of that span.
+       The previous -6 0 6 was a close-in pad view: fine for takeoff, useless
+       for watching a 50m engagement. -->
+  <camera_pose>-5 -75 60 0 0.60 1.5708</camera_pose>
+</plugin>
+
+<!-- Plugins that add functionality to the scene -->
+<plugin filename="EntityContextMenuPlugin" name="Entity context menu">
+  <gz-gui>
+    <property key="state" type="string">floating</property>
+    <property key="width" type="double">5</property>
+    <property key="height" type="double">5</property>
+    <property key="showTitleBar" type="bool">false</property>
+  </gz-gui>
+</plugin>
+<plugin filename="GzSceneManager" name="Scene Manager">
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="width" type="double">5</property>
+    <property key="height" type="double">5</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+  </gz-gui>
+</plugin>
+<plugin filename="InteractiveViewControl" name="Interactive view control">
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="width" type="double">5</property>
+    <property key="height" type="double">5</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+  </gz-gui>
+</plugin>
+<plugin filename="CameraTracking" name="Camera Tracking">
+      <!-- Chase cam settings are kept, but following is NOT armed at startup.
+           gz-rendering's camera stores a single followOffset and eases the
+           camera toward target+offset every frame (BaseCamera::SetFollowOffset
+           / followPGain), so while follow is active it rewrites the camera
+           pose continuously - a manual scroll-wheel zoom is undone on the
+           next frame, which is the "snaps back to the original view" effect.
+           There is no stock setting that keeps continuous follow AND honours
+           manual zoom; the two are the same control.
+
+           Note the follow is armed by the BRIDGE, not by this file - it calls
+           the /gui/follow service on startup (gazebo_bridge.py, gui_follow()).
+           Set NINJAPILOT_GUI_FOLLOW=0 to leave the camera free, or turn the
+           chase cam on by hand with right-click on the vehicle -> Follow. The
+           offset and gain below are what either path uses. -->
+      <follow_offset>-14 -14 9</follow_offset>
+      <follow_pgain>0.008</follow_pgain>
+      <follow_worldframe>true</follow_worldframe>
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="width" type="double">5</property>
+    <property key="height" type="double">5</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+  </gz-gui>
+</plugin>
+<plugin filename="MarkerManager" name="Marker manager">
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="width" type="double">5</property>
+    <property key="height" type="double">5</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+  </gz-gui>
+</plugin>
+<plugin filename="SelectEntities" name="Select Entities">
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="width" type="double">5</property>
+    <property key="height" type="double">5</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+  </gz-gui>
+</plugin>
+
+<plugin filename="Spawn" name="Spawn Entities">
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="width" type="double">5</property>
+    <property key="height" type="double">5</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+  </gz-gui>
+</plugin>
+
+<plugin filename="VisualizationCapabilities" name="Visualization Capabilities">
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="width" type="double">5</property>
+    <property key="height" type="double">5</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+  </gz-gui>
+</plugin>
+
+<!-- World control -->
+<plugin filename="WorldControl" name="World control">
+  <gz-gui>
+    <title>World control</title>
+    <property type="bool" key="showTitleBar">false</property>
+    <property type="bool" key="resizable">false</property>
+    <property type="double" key="height">72</property>
+    <property type="double" key="z">1</property>
+
+    <property type="string" key="state">floating</property>
+    <anchors target="3D View">
+      <line own="left" target="left"/>
+      <line own="bottom" target="bottom"/>
+    </anchors>
+  </gz-gui>
+
+  <play_pause>true</play_pause>
+  <step>true</step>
+  <start_paused>true</start_paused>
+  <use_event>true</use_event>
+
+</plugin>
+
+<!-- World statistics -->
+<plugin filename="WorldStats" name="World stats">
+  <gz-gui>
+    <title>World stats</title>
+    <property type="bool" key="showTitleBar">false</property>
+    <property type="bool" key="resizable">false</property>
+    <property type="double" key="height">110</property>
+    <property type="double" key="width">290</property>
+    <property type="double" key="z">1</property>
+
+    <property type="string" key="state">floating</property>
+    <anchors target="3D View">
+      <line own="right" target="right"/>
+      <line own="bottom" target="bottom"/>
+    </anchors>
+  </gz-gui>
+
+  <sim_time>true</sim_time>
+  <real_time>true</real_time>
+  <real_time_factor>true</real_time_factor>
+  <iterations>true</iterations>
+</plugin>
+
+<!-- Insert simple shapes -->
+<plugin filename="Shapes" name="Shapes">
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="x" type="double">0</property>
+    <property key="y" type="double">0</property>
+    <property key="width" type="double">300</property>
+    <property key="height" type="double">50</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+    <property key="cardBackground" type="string">#666666</property>
+  </gz-gui>
+</plugin>
+
+<!-- Insert lights -->
+<plugin filename="Lights" name="Lights">
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="x" type="double">300</property>
+    <property key="y" type="double">0</property>
+    <property key="width" type="double">150</property>
+    <property key="height" type="double">50</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+    <property key="cardBackground" type="string">#666666</property>
+  </gz-gui>
+</plugin>
+
+<!-- Translate / rotate -->
+<plugin filename="TransformControl" name="Transform control">
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="x" type="double">0</property>
+    <property key="y" type="double">50</property>
+    <property key="width" type="double">250</property>
+    <property key="height" type="double">50</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+    <property key="cardBackground" type="string">#777777</property>
+  </gz-gui>
+</plugin>
+
+<!-- Screenshot -->
+<plugin filename="Screenshot" name="Screenshot">
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="x" type="double">250</property>
+    <property key="y" type="double">50</property>
+    <property key="width" type="double">50</property>
+    <property key="height" type="double">50</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+    <property key="cardBackground" type="string">#777777</property>
+  </gz-gui>
+</plugin>
+
+<!-- Copy/Paste -->
+<plugin filename="CopyPaste" name="CopyPaste">
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="x" type="double">300</property>
+    <property key="y" type="double">50</property>
+    <property key="width" type="double">100</property>
+    <property key="height" type="double">50</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+    <property key="cardBackground" type="string">#777777</property>
+  </gz-gui>
+</plugin>
+
+<!-- Inspector -->
+
+<!-- Entity tree -->
+    <!-- Wind panel (gui_plugins/WindControl). FLOATING and small: docked,
+         it expands to fill the window and hides the 3D view. -->
+    <plugin filename="WindControl" name="Wind">
+      <gz-gui>
+        <title>Wind</title>
+        <property type="bool" key="showTitleBar">true</property>
+        <property type="bool" key="resizable">true</property>
+        <property type="double" key="width">330</property>
+        <property type="double" key="height">210</property>
+        <property type="string" key="state">floating</property>
+        <anchors target="3D View">
+          <line own="right" target="right"/>
+          <line own="top" target="top"/>
+        </anchors>
+      </gz-gui>
+      <topic>/world/quadcopter/wind</topic>
+    </plugin>
+
+    <!-- GPS noise panel, anchored LEFT of the wind panel. Publishes the
+         requested sigmas on /ninjapilot/gps_noise; the bridge applies them
+         when it synthesises GPSPositionSensor/GPSVelocitySensor, because
+         that is where the flight controller's GPS actually comes from. -->
+    <plugin filename="GpsNoise" name="GPS noise">
+      <gz-gui>
+        <title>GPS noise</title>
+        <property type="bool" key="showTitleBar">true</property>
+        <property type="bool" key="resizable">true</property>
+        <property type="double" key="width">330</property>
+        <property type="double" key="height">210</property>
+        <property type="string" key="state">floating</property>
+        <anchors target="Wind">
+          <line own="right" target="left"/>
+          <line own="top" target="top"/>
+        </anchors>
+      </gz-gui>
+      <topic>/ninjapilot/gps_noise</topic>
+    </plugin>
+
+    <!-- ============ FPV CAMERA VIEWS ==============================
+         The three airframe cameras, stacked in the BOTTOM-RIGHT corner,
+         bottom to top: Down, FPV 45deg, Up.
+
+         TWO RULES, both learned by getting them wrong:
+
+         1. <anchors target="X"> resolves against a panel whose plugin
+            name="X" AND <title>X</title> MATCH. With name="cam_down" but
+            title "Down (VPS)", the target never resolved and the panels
+            floated wherever Qt put them. The stock Wind/GPS panels work
+            precisely because their name and title are identical - copy
+            that pattern, and keep the two in step when renaming.
+
+         2. Declaration order is load-bearing: a target must already be
+            declared when referenced, so the bottom panel comes first and
+            each one above follows. Reordering the stack means editing both
+            the order AND the anchor targets.
+
+         These use our own CameraView plugin, not gz-gui's ImageDisplay.
+         ImageDisplay renders a permanent "Subscribed to: <topic>" banner
+         whose string is compiled into libImageDisplay.dylib's QML resource
+         - there is no config key to hide it, and topic_picker only swaps it
+         for a topic combo box, which is just different chrome. On a 300x225
+         panel that banner takes a third of the view, three times over.
+         CameraView draws the image and nothing else. Build it with the
+         wind/GPS panels: gui_plugins/WindControl.
+
+         The cameras DO render. An earlier note here claimed they were
+         blank on macOS - that was measured with the server running ALONE.
+         `gz sim -s` only renders once a GUI client has brought up a
+         context; with both up, frames carry real scene content. -->
+
+    <plugin filename="CameraView" name="Down">
+      <gz-gui>
+        <title>Down</title>
+        <property type="bool" key="showTitleBar">true</property>
+        <property type="bool" key="resizable">true</property>
+        <property type="double" key="width">300</property>
+        <property type="double" key="height">225</property>
+        <property type="string" key="state">floating</property>
+        <anchors target="3D View">
+          <line own="bottom" target="bottom"/>
+          <line own="right" target="right"/>
+        </anchors>
+      </gz-gui>
+      <topic>/interceptor/cam_tail/image</topic>
+    </plugin>
+
+    <plugin filename="CameraView" name="FPV 45deg">
+      <gz-gui>
+        <title>FPV 45deg</title>
+        <property type="bool" key="showTitleBar">true</property>
+        <property type="bool" key="resizable">true</property>
+        <property type="double" key="width">300</property>
+        <property type="double" key="height">225</property>
+        <property type="string" key="state">floating</property>
+        <anchors target="Down">
+          <line own="bottom" target="top"/>
+          <line own="right" target="right"/>
+        </anchors>
+      </gz-gui>
+      <topic>/interceptor/cam_nose/image</topic>
+    </plugin>
+
+    <plugin filename="CameraView" name="Up">
+      <gz-gui>
+        <title>Up</title>
+        <property type="bool" key="showTitleBar">true</property>
+        <property type="bool" key="resizable">true</property>
+        <property type="double" key="width">300</property>
+        <property type="double" key="height">225</property>
+        <property type="string" key="state">floating</property>
+        <anchors target="FPV 45deg">
+          <line own="bottom" target="top"/>
+          <line own="right" target="right"/>
+        </anchors>
+      </gz-gui>
+      <topic>/interceptor/cam_nose/image</topic>
+    </plugin>
+
+    </gui>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <!-- 0 0 10 -> 0 0 900. For a DIRECTIONAL light the position is
+           physically meaningless: only <direction> affects illumination,
+           because the rays are parallel and infinitely distant by
+           definition. The pose only decides where the GUI draws the light's
+           gizmo - the small green marker that was hovering 10m over the
+           pad, in the middle of every view. gz-sim's GzSceneManager creates
+           that visual for every light ENTITY and there is no SDF switch to
+           suppress it, so parking the light at 900m puts the gizmo out of
+           frame while the lighting, shadows and every camera image stay
+           bit-identical. Do NOT copy this to a point or spot light, where
+           position is real. -->
+      <pose>0 0 900 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <!-- Scene as the CAMERA SENSORS see it. The <scene> element near the
+         top of this file belongs to the GUI's MinimalScene plugin and
+         styles only the interactive 3D view; sensor rendering never reads
+         it, which is why camera frames were a flat grey field while the GUI
+         looked fine.
+
+         <sky> is gz-sim's built-in procedural sky - a skybox and a sun
+         disc, drawn once per frame at effectively no cost (it is
+         background geometry with no lighting or physics contribution). It
+         replaces the uniform background colour that filled most of any
+         upward-looking frame. -->
+    <scene>
+      <ambient>0.6 0.6 0.6 1</ambient>
+      <background>0.55 0.72 0.92 1</background>
+      <shadows>true</shadows>
+      <!-- NO <sky> HERE, deliberately. gz-sim's procedural sky brings its own
+           sun, and this world already declares a directional light named
+           "sun" - with both present the sky's sun animates and every shadow
+           in the scene sweeps around the property as it moves. The blue
+           <background> gives camera frames a sky-coloured field (the actual
+           complaint that started this) without a second light source. -->
+    </scene>
+
+    <!-- Grass to the horizon, so the farm reads as the centrepiece of a
+         landscape instead of a mesh floating in the void.
+
+         It is a RING, not a plane under the farm: four quads running from
+         the farm's measured XY boundary (X -61.6..58.4, Y -73.7..86.3, from
+         the COLLADA vertices with node transforms and the model pose
+         applied) out to +/-1km. Because it never overlaps the farm mesh it
+         can sit at ground level. The first attempt was a single large plane
+         UNDERNEATH the farm, which punched up through the scene's own
+         textured grass wherever the terrain dips - the farm's Z range is
+         -5.09..13.09, so "just below the field" and "below the whole mesh"
+         are 5m apart and there is no depth that works for both.
+
+         The texture is cropped from the farm's OWN baked atlas and
+         mirror-tiled to be seamless, so the horizon matches the centrepiece.
+         UVs follow world position (repeat every 8m), which also means no
+         seam between the four quads.
+
+         Cost: 4 quads, one 512x512 texture, no collision, no physics, no
+         shadow casting. -->
+    <include>
+      <uri>model://grass_horizon</uri>
+    </include>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+        </collision>
+        <!-- Collision only, no visual. The farm mesh supplies the ground the
+             eye sees, and its field surface is offset to sit at z=0; a grey
+             100x100 plane drawn at the same height would z-fight with it and
+             hide the scene. The plane is KEPT for collision so takeoff and
+             landing still happen against a guaranteed-flat, guaranteed-level
+             floor rather than against triangle edges - physics behaviour is
+             unchanged from every run before this world swap. -->
+      </link>
+    </model>
+
+
+    <!-- ================= SCENERY =================
+         Clearpath Robotics' agricultural world (cpr_agriculture_gazebo),
+         ported from Gazebo Classic. It replaced a handful of hand-built
+         primitives (three cone-trees, a box hangar, a tower, a windsock)
+         that read as placeholders from the air.
+
+         The port was cheap because the upstream scene is ONE baked COLLADA
+         mesh with no Classic plugins attached - see
+         models/agriculture_world/model.config. The model is offset so its
+         open field, not its farmyard, sits under the mission envelope; the
+         reasoning is in models/agriculture_world/model.sdf.
+
+         Physics, wind, GPS noise, the GUI panels and the vehicle model are
+         all untouched by this swap. -->
+    <include>
+      <uri>model://agriculture_world</uri>
+    </include>
+
+    <include>
+      <uri>
+        model://interceptor
+      </uri>
+      <!-- Spawn facing TRUE NORTH (world is ENU: +Y = north, so ENU yaw
+           +90deg points body-forward at +Y). Without this the model's
+           zero-rotation spawn faces +X = EAST, and the bridge's
+           measure-Be-at-spawn convention then defines yaw=0 as east while
+           the GPS/NED frame uses true north - a standing ~90deg yaw frame
+           error, invisible to attitude leveling and baro-hold but fatal
+           to PathFollower (every NED correction rotated ~90deg before
+           becoming roll/pitch = lateral spiral divergence, observed
+           across three PositionHold gain sets). Facing north makes
+           body-frame-at-spawn genuinely equal NED, so the measured-Be
+           yaw reference and the GPS frame agree by construction. -->
+      <pose>0 0 0.094 0 0 1.5707963</pose>
+      <plugin
+        filename="gz-sim-multicopter-motor-model-system"
+        name="gz::sim::systems::MulticopterMotorModel">
+        <robotNamespace>interceptor</robotNamespace>
+        <jointName>interceptor/rotor_0_joint</jointName>
+        <linkName>interceptor/rotor_0</linkName>
+        <turningDirection>cw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>800.0</maxRotVelocity>
+        <motorConstant>1.84e-05</motorConstant>
+        <momentConstant>0.012</momentConstant>
+        <commandSubTopic>gazebo/command/motor_speed</commandSubTopic>
+        <actuator_number>0</actuator_number>
+        <rotorDragCoefficient>3.0e-05</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+        <motorSpeedPubTopic>motor_speed/0</motorSpeedPubTopic>
+        <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+        <motorType>velocity</motorType>
+      </plugin>
+      <plugin
+        filename="gz-sim-multicopter-motor-model-system"
+        name="gz::sim::systems::MulticopterMotorModel">
+        <robotNamespace>interceptor</robotNamespace>
+        <jointName>interceptor/rotor_1_joint</jointName>
+        <linkName>interceptor/rotor_1</linkName>
+        <turningDirection>ccw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>800.0</maxRotVelocity>
+        <motorConstant>1.84e-05</motorConstant>
+        <momentConstant>0.012</momentConstant>
+        <commandSubTopic>gazebo/command/motor_speed</commandSubTopic>
+        <actuator_number>1</actuator_number>
+        <rotorDragCoefficient>3.0e-05</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+        <motorSpeedPubTopic>motor_speed/1</motorSpeedPubTopic>
+        <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+        <motorType>velocity</motorType>
+      </plugin>
+      <plugin
+        filename="gz-sim-multicopter-motor-model-system"
+        name="gz::sim::systems::MulticopterMotorModel">
+        <robotNamespace>interceptor</robotNamespace>
+        <jointName>interceptor/rotor_2_joint</jointName>
+        <linkName>interceptor/rotor_2</linkName>
+        <turningDirection>cw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>800.0</maxRotVelocity>
+        <motorConstant>1.84e-05</motorConstant>
+        <momentConstant>0.012</momentConstant>
+        <commandSubTopic>gazebo/command/motor_speed</commandSubTopic>
+        <actuator_number>2</actuator_number>
+        <rotorDragCoefficient>3.0e-05</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+        <motorSpeedPubTopic>motor_speed/2</motorSpeedPubTopic>
+        <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+        <motorType>velocity</motorType>
+      </plugin>
+      <plugin
+        filename="gz-sim-multicopter-motor-model-system"
+        name="gz::sim::systems::MulticopterMotorModel">
+        <robotNamespace>interceptor</robotNamespace>
+        <jointName>interceptor/rotor_3_joint</jointName>
+        <linkName>interceptor/rotor_3</linkName>
+        <turningDirection>ccw</turningDirection>
+        <timeConstantUp>0.0125</timeConstantUp>
+        <timeConstantDown>0.025</timeConstantDown>
+        <maxRotVelocity>800.0</maxRotVelocity>
+        <motorConstant>1.84e-05</motorConstant>
+        <momentConstant>0.012</momentConstant>
+        <commandSubTopic>gazebo/command/motor_speed</commandSubTopic>
+        <actuator_number>3</actuator_number>
+        <rotorDragCoefficient>3.0e-05</rotorDragCoefficient>
+        <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+        <motorSpeedPubTopic>motor_speed/3</motorSpeedPubTopic>
+        <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+        <motorType>velocity</motorType>
+      </plugin>
+    </include>
+  </world>
+</sdf>

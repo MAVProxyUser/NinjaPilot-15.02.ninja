@@ -195,6 +195,12 @@ static void StabilizationDesiredUpdatedCb(__attribute__((unused)) UAVObjEvent *e
             StabilizationStatusOuterLoopToArray(status.OuterLoop)[t] = STABILIZATIONSTATUS_OUTERLOOP_DIRECT;
             StabilizationStatusInnerLoopToArray(status.InnerLoop)[t] = STABILIZATIONSTATUS_INNERLOOP_CRUISECONTROL;
             break;
+        case STABILIZATIONDESIRED_STABILIZATIONMODE_INTERCEPTOR:
+            // outer loop runs the transition state machine and quaternion attitude error; roll/pitch/yaw feed the plain rate loop,
+            // thrust passes straight through (the outer loop already wrote the auto/captured thrust into RateDesired.Thrust)
+            StabilizationStatusOuterLoopToArray(status.OuterLoop)[t] = STABILIZATIONSTATUS_OUTERLOOP_INTERCEPTOR;
+            StabilizationStatusInnerLoopToArray(status.InnerLoop)[t] = (t == 3) ? STABILIZATIONSTATUS_INNERLOOP_DIRECT : STABILIZATIONSTATUS_INNERLOOP_RATE;
+            break;
         }
     }
     StabilizationStatusSet(&status);

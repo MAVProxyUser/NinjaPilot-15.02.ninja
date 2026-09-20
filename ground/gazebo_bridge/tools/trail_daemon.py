@@ -98,7 +98,7 @@ def main():
 
     def on_pose(msg):
         for p in msg.pose:
-            if p.name.lower() == "x3":
+            if p.name.lower() == os.environ.get("NINJAPILOT_GZ_MODEL", "x3").lower():
                 state["drone"] = gazebo_pos_to_ned(
                     (p.position.x, p.position.y, p.position.z))
             elif p.name == "target_ball":

@@ -58,12 +58,15 @@ sleep 3
     NINJAPILOT_FCWD="$FCWD" NINJAPILOT_WROOM_FLIPS="${NINJAPILOT_WROOM_FLIPS:-1}" \
     "$HERE/venv/bin/python3" -u gazebo_bridge.py > "$LOG" 2>&1 & )
 
-# 5. Bounded wait for the run to complete.
-for _ in $(seq 1 80); do
+# 5. Bounded wait for the run to complete. NINJAPILOT_RUN_TIMEOUT_S raises this for multi-leg missions (shape_test's
+# star/oval can run several minutes across 5+ legs, each with its own climb/transition/cruise/recover) - 240s was
+# sized for a single hover/sticks/transition run and cut a real, in-progress star mission off mid-flight (2026-09-19).
+WAIT_ITERS=$(( ${NINJAPILOT_RUN_TIMEOUT_S:-240} / 3 ))
+for _ in $(seq 1 "$WAIT_ITERS"); do
     grep -q "run complete" "$LOG" 2>/dev/null && break
     sleep 3
 done
-grep -q "run complete" "$LOG" 2>/dev/null || echo "!!! TIMEOUT after ~240s - run did not finish"
+grep -q "run complete" "$LOG" 2>/dev/null || echo "!!! TIMEOUT after ~$((WAIT_ITERS * 3))s - run did not finish"
 pkill -f gazebo_bridge.py >/dev/null 2>&1 || true
 pkill -f fw_simwroom.elf  >/dev/null 2>&1 || true
 

@@ -1,10 +1,11 @@
+import os
 import math, time, sys
 import gz.transport13 as transport
 from gz.msgs10.pose_v_pb2 import Pose_V
 samples = []
 def on_pose(msg):
     for p in msg.pose:
-        if p.name == "x3":
+        if p.name == os.environ.get("NINJAPILOT_GZ_MODEL", "x3"):
             q = (p.orientation.w, p.orientation.x, p.orientation.y, p.orientation.z)
             # ENU yaw
             siny = 2*(q[0]*q[3]+q[1]*q[2]); cosy = 1-2*(q[2]*q[2]+q[3]*q[3])

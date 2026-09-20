@@ -19,6 +19,7 @@ usage:
     ball_detect.py                     - live, prints bearings as it sees them
     ball_detect.py --once <topic>      - single frame, for checking thresholds
 """
+import os
 import math
 import sys
 import time
@@ -70,7 +71,7 @@ def main():
     import gz.transport13 as gzt
     from gz.msgs10.image_pb2 import Image
 
-    topic = "/X3/cam_up/image"
+    topic = "/X3/cam_up/image" if os.environ.get("NINJAPILOT_GZ_MODEL", "x3") == "x3" else "/%s/cam_nose/image" % os.environ["NINJAPILOT_GZ_MODEL"]
     hfov = 1.9198622            # cam_up, 110 deg
     if "--once" in sys.argv:
         i = sys.argv.index("--once")
