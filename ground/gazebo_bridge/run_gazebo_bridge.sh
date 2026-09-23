@@ -65,14 +65,21 @@ trap cleanup EXIT INT TERM
 # two separate processes: a headless server driving the actual simulation,
 # and a GUI client that just renders whatever the server is doing.
 echo "Starting Gazebo server with $WORLD ..."
-# --headless-rendering: camera sensors make the server open a visible
-# "OgreWindow (0)_0" render window on macOS. This keeps the context
-# offscreen - verified the cameras still publish real frames with it.
+# NO --headless-rendering (2026-09-23, see maybe_restart_gazebo.sh's own
+# longer note): this flag was originally added on the theory that camera
+# sensors would otherwise open a visible "OgreWindow (0)_0" on macOS, and
+# was believed fixed because frames still arrived. They did arrive - just
+# byte-for-byte identical forever, regardless of vehicle attitude. Proved
+# with an isolated script (no bridge code, no GUI) that teleported the
+# model through six orientations via set_pose: WITH the flag, 1 unique MD5
+# across 800 frames; WITHOUT it, 128 distinct MD5s across 186 frames,
+# tracking each pose change. Dropping it did not reproduce any visible
+# window on this gz-sim version.
 # Redirect the server's output to a KNOWN path. It was previously left on the
 # terminal, so analyze_run.sh's third log defaulted to a stale empty
 # /tmp/gzserver.log and the "physics/plugin complaints" leg of the three-log
 # rule was silently absent from every run.
-gz sim -s -r --headless-rendering "$WORLD" > "${TMPDIR:-/tmp}/gzserver.log" 2>&1 &
+gz sim -s -r "$WORLD" > "${TMPDIR:-/tmp}/gzserver.log" 2>&1 &
 GZ_SERVER_PID=$!
 sleep 6
 

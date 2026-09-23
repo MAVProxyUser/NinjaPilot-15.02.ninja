@@ -170,6 +170,33 @@ static void interceptor_enter(const AttitudeStateData *a)
 static void interceptor_run(float dT, float yaw_stick_rate, float actual_roll_deg)
 {
     interceptor.t_phase += dT;
+
+    /* GROUND-COMMANDED STEERING NOW RAMPS IN FROM ENGAGEMENT, NOT FROM CRUISE (2026-09-20, real
+     * user-caught design flaw, not a physical constraint): this used to live inside the CRUISE
+     * case only, meaning live_frac - and therefore ALL ground-commanded roll/pitch/yaw correction,
+     * since the blend at the call site (rpy_desired[t] = .._off + live_frac*stabilizationDesiredAxis[t])
+     * already runs every phase unconditionally - stayed pinned at exactly 0.0 for the entire CLIMB
+     * and TRANSITION duration (climb_s+transition_s, ~6-7s at typical settings). During CLIMB the
+     * vehicle is near-hover under mostly-vertical thrust - exactly the regime where banking/yawing
+     * costs the least - so there was never a physical reason to withhold steering there; it was an
+     * accident of where this one increment happened to be written, not a deliberate design choice.
+     * The real-world cost was severe: any ground-side guidance had to pre-compute a single aim
+     * point BEFORE engaging and then fly blind on it for the whole climb+transition, with no way to
+     * correct for an inbound target's own motion or any error in predicting how long that blind
+     * window would actually last. Ramping live_frac from t=0 (bounded to 1.0 well before CRUISE
+     * even starts, given INTERCEPTOR_LIVE_BLEND_TIME=0.8s << a typical few-second ClimbTime) means
+     * the ground side can track a moving target continuously from the moment interceptor mode
+     * engages, the same way any other guided phase of flight does - closing the actual gap this
+     * bug caused, not working around it with more precomputation. Still fades in over
+     * INTERCEPTOR_LIVE_BLEND_TIME rather than snapping to 1.0, for the same reason it always did:
+     * flicking the switch mid-stick-input should not itself be a disturbance the rate loop has to
+     * fight. Yaw's own psi_ref integration moves out of the CRUISE-only case for the identical
+     * reason - it was the other half of "sticks are live," gated by the same accident. */
+    interceptor.live_frac = boundf(interceptor.live_frac + dT / INTERCEPTOR_LIVE_BLEND_TIME, 0.0f, 1.0f);
+    interceptor.psi_ref  += yaw_stick_rate * dT;
+    while (interceptor.psi_ref > 180.0f) { interceptor.psi_ref -= 360.0f; }
+    while (interceptor.psi_ref < -180.0f) { interceptor.psi_ref += 360.0f; }
+
     switch (interceptor.phase) {
     case INTERCEPTOR_CLIMB:
     {
@@ -205,10 +232,6 @@ static void interceptor_run(float dT, float yaw_stick_rate, float actual_roll_de
         interceptor.roll_off    = 0.0f;
         interceptor.theta_off   = stabSettings.settings.InterceptorCruisePitch;
         interceptor.thrust_auto = interceptor_level_thrust(interceptor.theta_off, actual_roll_deg);
-        interceptor.live_frac   = boundf(interceptor.live_frac + dT / INTERCEPTOR_LIVE_BLEND_TIME, 0.0f, 1.0f);
-        interceptor.psi_ref    += yaw_stick_rate * dT;
-        while (interceptor.psi_ref > 180.0f) { interceptor.psi_ref -= 360.0f; }
-        while (interceptor.psi_ref < -180.0f) { interceptor.psi_ref += 360.0f; }
         break;
     }
 }

@@ -1,0 +1,53 @@
+Subscribed to /world/quadcopter/pose/info, /interceptor/imu, /interceptor/navsat, publishing motor commands on /interceptor/gazebo/command/motor_speed
+HomeLocation: 37.774900, -122.419400, 30.0m
+Verbose per-object/per-sample debug prints: off (set NINJAPILOT_VERBOSE=1 to enable)
+[link] connected to flight side
+[test] HomeLocation.Be set from WORLD field (NED, plugin units): 26520.8944 408.0138 40801.3760
+[fclog] on-board logging enabled (OnlyWhenArmed), 22/22 objects marked for logging
+[intercept] waiting for link + config to settle...
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] attitude estimator ready (Attitude alarm OK for 1s)
+[intercept] forcing a state-estimator reinit before arming (see PositionState divergence note)
+[intercept] vehicle COLD on the pad; releasing the target
+[intercept] spawn target_ball at N=-34.0 E=-34.0 alt=11.0m -> ok=True
+[intercept] contact sensor subscribed: /world/quadcopter/model/target_ball/link/link/sensor/ball_contact/contact
+[vision] watching track_up (/X3/cam_track_up/image)
+[vision] watching track_45 (/X3/cam_track_45/image)
+[intercept] target underway: 1.2 m/s, velocity N=+0.85 E=+0.85 climb=+0.00
+[intercept] watching for inbound within 46m...
+[intercept] *** CONTACT DETECTED at 45.9m - SCRAMBLE ***
+[test] waiting for vertical velocity to settle before liftoff...
+[test] vertical velocity wait ended: settled=True vel_down=-0.001
+[test] switching to liftoff
+[test] climbing to 1.50m via liftoff (real AltitudeVario)...
+[test] centering thrust stick: reached=True alt=0.642 climb_rate=1.720 - real AltitudeHold PID takes over
+[intercept] airborne 11.9s after detection - engaging intercept immediately
+[intercept] *** TARGET KNOCKED DOWN ***
+[intercept] *** GAZEBO CONTACT *** t+12.0s sep=0.42m
+[intercept] track -> /var/folders/6x/y8cxh51j0xbfk12fhtw6k43c0000gn/T/batch1_seed1_track.json
+[intercept] disarming
+[intercept] target released to free-fall physics as target_ball_debris -> ok=True
+Exception in thread Thread-51 (run_with_fc_logging):
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kfinisterre/Desktop/OP Revo Redux/NinjaPilot-15.02.ninja/ground/gazebo_bridge/gazebo_bridge.py", line 4815, in run_with_fc_logging
+    target()
+    ~~~~~~^^
+  File "/Users/kfinisterre/Desktop/OP Revo Redux/NinjaPilot-15.02.ninja/ground/gazebo_bridge/gazebo_bridge.py", line 2619, in intercept_test
+    _intercept_run(node, client)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/Users/kfinisterre/Desktop/OP Revo Redux/NinjaPilot-15.02.ninja/ground/gazebo_bridge/gazebo_bridge.py", line 3145, in _intercept_run
+    print(f"[vision]   in-frame frames {vis_state['frames']}, "
+                                        ~~~~~~~~~^^^^^^^^^^
+KeyError: 'frames'

@@ -12,6 +12,25 @@ BR="$(cd "$(dirname "$0")" && pwd)"
 SCRATCH="${TMPDIR:-/tmp}"
 LOG="$SCRATCH/${LABEL}.log"
 
+# Every 25 runs (shared counter with run_wroom.sh): full gz-sim restart - see
+# maybe_restart_gazebo.sh's own comment for why.
+HERE="$BR"
+# shellcheck source=maybe_restart_gazebo.sh
+source "$HERE/maybe_restart_gazebo.sh"
+
+# gazebo_bridge.py's MOTOR_BOOST defaults to 1.0 (full, un-boosted rated power)
+# when this is unset - see INTERCEPTOR_FLIGHT_LOG.md section 14: every
+# InterceptorHoverThrust/InterceptorClimbThrust constant in
+# stabilizationsettings.xml was measured with this at 0.55, and flying without
+# it makes the same commanded thrust ~2-3x too powerful (looks exactly like a
+# runaway control-law bug - pinned/aggressive commands, altitude blowing
+# through any target/ceiling). run_wroom.sh and run_star.sh callers have been
+# passing this by hand every time; this script never got that habit, so every
+# intercept_test run to date flew unboosted. Defaulted here so it can't be
+# silently dropped again, still overridable via the environment.
+: "${NINJAPILOT_MOTOR_BOOST:=0.55}"
+export NINJAPILOT_MOTOR_BOOST
+
 pkill -f gazebo_bridge.py 2>/dev/null
 pkill -f fw_simposix 2>/dev/null
 for _ in $(seq 1 20); do pgrep -f fw_simposix >/dev/null || break; sleep 0.5; done
@@ -100,7 +119,10 @@ for _ in $(seq 1 90); do
     # because the settle wait loops unboundedly when the gz server has gone
     # stale after hours of spawn/remove cycles. The fix for the CAUSE is a
     # server restart; this guard just stops the harness paying full price.
-    if [ "$(grep -c 'waiting for attitude estimator' "$LOG" 2>/dev/null || echo 0)" -gt 20 ]; then
+    # grep -c already prints "0" (and exits 1) on no match, so `|| echo 0` doubled up into
+    # "0\n0" and broke the numeric test every cycle with no matches yet (i.e. almost always) -
+    # harmless (the poll loop just kept going) but noisy on every run's stderr.
+    if [ "$(grep -c 'waiting for attitude estimator' "$LOG" 2>/dev/null)" -gt 20 ]; then
         echo "!!! ESTIMATOR STUCK (never initialised) - aborting run early."
         echo "!!! The gz server is likely stale - restart run_gazebo_bridge.sh."
         break
@@ -112,6 +134,48 @@ for _ in $(seq 1 90); do
     sleep 3
 done
 grep -q "intercept_test: " "$LOG" 2>/dev/null || echo "!!! TIMEOUT - no verdict after ~270s"
+
+# GUI SCREENSHOT, same as run_wroom.sh's step 5.5 and for the same reason
+# (direct user request: a screenshot per attempt to see how/why it failed).
+# run_intercept.sh never had this - captured here, before disarm/cleanup
+# touches the scene, tagged from the real GAZEBO CONTACT / closest-separation
+# lines rather than the overall PASS/FAIL wrapper (a hit whose post-hit
+# landing runs long must not look identical to an outright miss).
+if [ "${NINJAPILOT_GUI_SCREENSHOT:-1}" != "0" ]; then
+    SHOT_DIR="$HERE/logs/screenshots"
+    mkdir -p "$SHOT_DIR"
+    SHOT_TMP="$SCRATCH/gz_screenshot_tmp_${LABEL}"
+    mkdir -p "$SHOT_TMP"
+    if gz service -s /gui/screenshot --reqtype gz.msgs.StringMsg --reptype gz.msgs.Boolean \
+        --timeout 3000 --req "data: \"$SHOT_TMP\"" >/dev/null 2>&1; then
+        SHOT_RAW=""
+        for _ in $(seq 1 10); do
+            SHOT_RAW=$(ls -t "$SHOT_TMP"/*.png 2>/dev/null | head -1)
+            [ -n "$SHOT_RAW" ] && break
+            sleep 0.3
+        done
+        if [ -n "${SHOT_RAW:-}" ]; then
+            if grep -q "GAZEBO CONTACT" "$LOG" 2>/dev/null; then
+                INTERCEPT_TAG="HIT"
+            elif grep -q "intercept_test: PARTIAL" "$LOG" 2>/dev/null; then
+                INTERCEPT_TAG="PARTIAL"
+            elif grep -q "intercept_test: CRASH" "$LOG" 2>/dev/null; then
+                INTERCEPT_TAG="CRASH"
+            elif grep -q "intercept_test: FAIL" "$LOG" 2>/dev/null; then
+                INTERCEPT_TAG="MISS"
+            else
+                INTERCEPT_TAG="UNKNOWN"
+            fi
+            SHOT_DEST="$SHOT_DIR/${LABEL}_${INTERCEPT_TAG}_$(date +%Y%m%d_%H%M%S).png"
+            mv "$SHOT_RAW" "$SHOT_DEST" && echo "[intercept] GUI screenshot: $SHOT_DEST"
+        else
+            echo "!!! GUI screenshot: service reported success but no file appeared in $SHOT_TMP"
+        fi
+    else
+        echo "!!! GUI screenshot: /gui/screenshot service call failed (is the gz sim GUI running?)"
+    fi
+    rm -rf "$SHOT_TMP"
+fi
 
 # The verdict is written before the disarm completes; give it a moment, then
 # stop the bridge and the firmware so the next run starts clean.

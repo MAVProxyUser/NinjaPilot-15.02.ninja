@@ -108,7 +108,7 @@ def _fms_values(armed):
         # (Stabilized6, Rate/Rate/Rate by default) keeps the ground-
         # piloted flip alive for A/B comparison - also on Bank2.
         fms["Stabilization2Settings"] = ["Attitude", "Attitude", "AxisLock", "Manual"]
-    if WROOM and TEST_MODE in ("wroom_transition", "wroom_shape", "wroom_rollstep", "wroom_speedcorridor", "wroom_reengage"):
+    if WROOM and TEST_MODE in ("wroom_transition", "wroom_shape", "wroom_rollstep", "wroom_speedcorridor", "wroom_reengage", "wroom_intercept"):
         # Switch position 2 (Stabilized3) is the Interceptor's tail-sitter transition mode: the firmware's own
         # Interceptor outer loop climbs, pitches over and hands the sticks back (flight/modules/Stabilization/outerloop.c).
         # wroom_shape (shape_test) engages this same switch position on every leg - missing it here left the mode
@@ -138,6 +138,7 @@ from gz.msgs10.imu_pb2 import IMU
 from gz.msgs10.navsat_pb2 import NavSat
 from gz.msgs10.magnetometer_pb2 import Magnetometer
 from gz.msgs10.fluid_pressure_pb2 import FluidPressure
+from gz.msgs10.image_pb2 import Image
 
 GRAV = 9.81
 
@@ -173,6 +174,77 @@ TARGET_SPEED       = float(os.environ.get("NINJAPILOT_TARGET_SPEED", "1.2"))
 TARGET_ALT         = 11.0   # m above the pad - above the 8m mission altitude
 TARGET_START       = (-34.0, -34.0)   # N, E: one corner
 TARGET_END         = (34.0, 34.0)     # N, E: the opposite corner, via overhead
+TARGET_CLIMB_MPS   = 0.0    # m/s, +up: the target's own vertical speed component (its "angle of
+                            # attack" on the engagement - 0 by default, matches every prior run in
+                            # this project exactly). Set by randomize_target_track() below.
+
+# NINJAPILOT_TARGET_RANDOMIZE=1 (2026-09-20, user request: "work on randomizing the orange ball
+# arrival angle, location, AoA, and speed so we can test the interceptor logic"): randomizes the
+# target's approach bearing, its closest-approach point relative to the pad, its climb/dive angle,
+# and its speed, every time spawn_target() runs. Off by default - every existing test (the proven
+# 0.41m Revo hit, the WROOM first-pass hit streak) keeps running the exact fixed geometry it was
+# validated against unless this is explicitly turned on.
+TARGET_RANDOMIZE   = os.environ.get("NINJAPILOT_TARGET_RANDOMIZE", "0") == "1"
+TARGET_RAND_SEED   = os.environ.get("NINJAPILOT_TARGET_SEED")   # unset = a fresh random seed,
+                                                                 # logged either way for repro
+TARGET_RAND_SPEED_MIN = float(os.environ.get("NINJAPILOT_TARGET_SPEED_MIN", "1.0"))
+TARGET_RAND_SPEED_MAX = float(os.environ.get("NINJAPILOT_TARGET_SPEED_MAX", "4.0"))
+TARGET_RAND_AOA_MAX_DEG = float(os.environ.get("NINJAPILOT_TARGET_AOA_MAX_DEG", "15.0"))
+TARGET_RAND_MISS_MAX_M = float(os.environ.get("NINJAPILOT_TARGET_MISS_MAX_M", "12.0"))
+TARGET_RAND_LEG_M = float(os.environ.get("NINJAPILOT_TARGET_LEG_M", "50.0"))   # half-length of the
+                            # straight track either side of its closest-approach point - long enough
+                            # to clear DETECT_RANGE (46m) on the inbound leg with room to spare
+
+
+def randomize_target_track(rng=None):
+    """Pick a fresh random arrival bearing, closest-approach point, climb/dive angle, and speed
+    for the target, and set TARGET_START/TARGET_END/TARGET_SPEED/TARGET_CLIMB_MPS from them -
+    called once per spawn_target() when TARGET_RANDOMIZE is on. Geometry: a straight track of
+    total length 2*TARGET_RAND_LEG_M, centred on a point within TARGET_RAND_MISS_MAX_M of the pad
+    (0,0) - not necessarily an exact pass overhead, so guidance sees a genuine range of engagement
+    geometries, not just head-on - oriented along a uniformly random bearing. Speed and the
+    vertical (climb/dive, this ball's stand-in for "angle of attack" on the engagement) angle are
+    both drawn independently and uniformly within their configured ranges.
+
+    A seed is always logged, whether supplied via NINJAPILOT_TARGET_SEED or freshly drawn, so any
+    specific engagement geometry that turns up a real guidance bug can be reproduced exactly by
+    re-running with that same seed."""
+    global TARGET_START, TARGET_END, TARGET_SPEED, TARGET_CLIMB_MPS
+    if rng is None:
+        seed = TARGET_RAND_SEED
+        if seed is None:
+            seed = random.randrange(2**31)
+        else:
+            seed = int(seed)
+        rng = random.Random(seed)
+    else:
+        seed = "shared"
+
+    bearing_deg = rng.uniform(0.0, 360.0)
+    bearing_rad = math.radians(bearing_deg)
+    dn, de = math.cos(bearing_rad), math.sin(bearing_rad)   # unit vector, N/E, direction of travel
+
+    miss_m = rng.uniform(0.0, TARGET_RAND_MISS_MAX_M)
+    miss_bearing_rad = math.radians(rng.uniform(0.0, 360.0))
+    closest_n = miss_m * math.cos(miss_bearing_rad)
+    closest_e = miss_m * math.sin(miss_bearing_rad)
+
+    speed = rng.uniform(TARGET_RAND_SPEED_MIN, TARGET_RAND_SPEED_MAX)
+    aoa_deg = rng.uniform(-TARGET_RAND_AOA_MAX_DEG, TARGET_RAND_AOA_MAX_DEG)
+    aoa_rad = math.radians(aoa_deg)
+    horiz_speed = speed * math.cos(aoa_rad)
+    climb_mps = speed * math.sin(aoa_rad)
+
+    TARGET_START = (closest_n - TARGET_RAND_LEG_M * dn, closest_e - TARGET_RAND_LEG_M * de)
+    TARGET_END = (closest_n + TARGET_RAND_LEG_M * dn, closest_e + TARGET_RAND_LEG_M * de)
+    TARGET_SPEED = horiz_speed
+    TARGET_CLIMB_MPS = climb_mps
+
+    print(f"[intercept] target track randomized (seed={seed}): bearing={bearing_deg:.0f}deg "
+          f"closest_approach={miss_m:.1f}m speed={speed:.2f}m/s AoA={aoa_deg:+.1f}deg "
+          f"(horiz={horiz_speed:.2f}m/s climb={climb_mps:+.2f}m/s) "
+          f"start=({TARGET_START[0]:.1f},{TARGET_START[1]:.1f}) "
+          f"end=({TARGET_END[0]:.1f},{TARGET_END[1]:.1f})", flush=True)
 # 2.2 -> 4.5 m/s. The whole failure mode has been "could not get there in
 # time": against a 1.2 m/s object a 2.2 m/s cap gives barely 1 m/s of closure,
 # which is why the intercept point sat far downrange and the two looked like
@@ -285,6 +357,99 @@ TARGET_TURN_AT     = float(os.environ.get("NINJAPILOT_TURN_AT", "5.0"))
 TARGET_TURN_DEG    = float(os.environ.get("NINJAPILOT_TURN_DEG", "55.0"))
 
 _target_state = [None]   # (t, (N,E,D)) newest ground-truth target pose
+
+# REAL camera-based ball detection (2026-09-23, direct user request: "wait till there is a visual in
+# FOV of the ball, then attempt to keep the ball in the FOV of the RGB camera" - the ball is already
+# warm enough for cam_thermal too, see spawn_target()'s own gz-sim-thermal-system plugin comment).
+# Deliberately NOT a geometric recreation of the camera's real mounting transform (model.sdf's own
+# comment: "both looking out of the nose along body +z... pose -0.009/0.016, 0, 0.209/0.206, pitch
+# -90 deg" - a real, nontrivial transform) - instead this runs the SAME simple RGB-dominant-pixel rule
+# tools/ball_detect.py already validated as a standalone diagnostic, live, on every real rendered
+# frame, so "is the ball in FOV" is answered by Gazebo's own renderer (which already knows the exact
+# camera transform), not a second, error-prone reimplementation of it.
+_camera_ball_state = [None]   # (t, u, v, npix, w, h) of the most recent RGB detection, or None
+
+
+def _find_ball_in_frame(buf, w, h):
+    """Centroid of red-dominant pixels - identical rule to tools/ball_detect.py's own find_ball()
+    (kept in sync deliberately; see that file's own docstring for why this rule and why no OpenCV
+    dependency). Returns (u, v, npix) or None."""
+    su = sv = n = 0
+    stride = 4
+    for y in range(0, h, stride):
+        row = y * w * 3
+        for x in range(0, w, stride):
+            i = row + x * 3
+            r = buf[i]
+            g = buf[i + 1]
+            b = buf[i + 2]
+            if r > 110 and r > g * 2 and r > b * 2:
+                su += x
+                sv += y
+                n += 1
+    if n < 3:
+        return None
+    return (su / n, sv / n, n)
+
+
+_camera_ball_pending = [None]   # (data, width, height) - latest UNPROCESSED frame, or None
+_camera_ball_worker_busy = [False]
+
+
+def on_cam_rgb_image(msg):
+    # FIXED (2026-09-23, real, reproduced hang - not a hypothetical risk): the first version ran
+    # _find_ball_in_frame() (a ~16,000-iteration Python pixel scan at up to 20Hz) DIRECTLY in this
+    # gz-transport delivery callback. This is the exact hazard tools/ball_detect.py's own docstring
+    # already named ("this runs in the same process that feeds sensors to the firmware, and CLAUDE.md
+    # records what happens when that thread gets starved - the vehicle flew into the ground") - and
+    # it reproduced immediately: the very next full intercept run after this was wired in timed out at
+    # 240s (every prior run this whole session completed comfortably well under that). This callback
+    # must stay cheap. The actual pixel scan now runs on a SEPARATE worker thread that processes the
+    # LATEST frame only, dropping any frame that arrives while it's still busy (never queuing a
+    # backlog - a slow consumer must never make this callback itself slow, or the hazard just moves
+    # instead of clearing).
+    if not msg.data:
+        return
+    _camera_ball_pending[0] = (msg.data, msg.width, msg.height)
+    if not _camera_ball_worker_busy[0]:
+        _camera_ball_worker_busy[0] = True
+        threading.Thread(target=_camera_ball_worker, daemon=True).start()
+
+
+def _camera_ball_worker():
+    try:
+        while True:
+            pending = _camera_ball_pending[0]
+            _camera_ball_pending[0] = None
+            if pending is None:
+                return
+            data, w, h = pending
+            hit = _find_ball_in_frame(data, w, h)
+            if hit is not None:
+                u, v, npix = hit
+                _camera_ball_state[0] = (time.time(), u, v, npix, w, h)
+    finally:
+        _camera_ball_worker_busy[0] = False
+
+
+def get_camera_ball_bearing(max_age_s=0.3):
+    """(az_deg, el_deg, npix) if the ball was seen in the REAL rendered RGB frame within the last
+    `max_age_s` seconds, else None - "currently visible," not "was ever visible." Bearing is in the
+    CAMERA's own frame (pinhole projection from the real horizontal_fov, model.sdf: cam_rgb is
+    1.2043 rad / 69 deg, 640x400) - a direction, not a world/body-frame bearing, since converting to
+    those would need the real camera-mount transform this whole approach was built to avoid
+    reimplementing (see _camera_ball_state's own module comment)."""
+    st = _camera_ball_state[0]
+    if st is None:
+        return None
+    t, u, v, npix, w, h = st
+    if time.time() - t > max_age_s:
+        return None
+    hfov = 1.2043   # cam_rgb's real horizontal_fov, model.sdf - see _camera_ball_state's own comment
+    fx = (w / 2.0) / math.tan(hfov / 2.0)
+    az = math.degrees(math.atan2(u - w / 2.0, fx))
+    el = math.degrees(math.atan2(-(v - h / 2.0), fx))
+    return (az, el, npix)
 _last_accel_g = [1.0]    # |specific force| in g, from the vehicle's own IMU
 # PEAK-HOLD companion. The IMU callback runs at 250Hz; the intercept loop
 # reads at ~19Hz, so a collision impulse a few samples wide fell BETWEEN
@@ -688,6 +853,15 @@ class ControlState(object):
         self.roll = 0.0
         self.pitch = 0.0
         self.yaw = 0.0
+        # Cross-thread request for a single StabilizationSettings field update mid-flight (2026-09-23,
+        # direct user request: adapt InterceptorClimbTime per engagement using the now-precise
+        # _solve_intercept_lead() altitude, rather than a fixed constant set once at connection time).
+        # (field_name, value) or None. Same pattern as request_estimator_reset above: set from
+        # wroom_pilot.py (a different thread than the one that owns the UAVTalk `client`), consumed and
+        # cleared by uavtalk_thread()'s own main loop, which is the only thread allowed to touch
+        # `client` - see push_stabilization_update()'s own docstring for the full reasoning, especially
+        # the whole-object UAVTalk write hazard this is careful to avoid.
+        self.pending_stab_update = None
 
     def gcs_channels(self):
         throttle_us = int(round(1000 + self.throttle * 1000))
@@ -702,6 +876,30 @@ class ControlState(object):
 
 
 control = ControlState()
+
+
+def push_stabilization_update(field, value):
+    """Request a single StabilizationSettings field be updated mid-flight (2026-09-23), e.g.
+    InterceptorClimbTime, adapted per engagement from wroom_pilot.py's _solve_intercept_lead() altitude
+    solve instead of staying fixed at whatever was configured once at connection time.
+
+    Callable from any thread (wroom_pilot.py's test functions run on a different thread than the one
+    that owns the UAVTalk `client` inside uavtalk_thread()) - this only sets a plain attribute on the
+    module-level `control` object, the same cross-thread-request pattern
+    control.request_estimator_reset already establishes elsewhere in this file. The actual send happens
+    inside uavtalk_thread()'s own main loop, the only place that may touch `client`.
+
+    SAFETY: UAVTalk object writes are WHOLE-OBJECT (send_config()'s own stab_settings comment: "pack()
+    sends any field it is not given as 0") - sending just {field: value} would zero every OTHER
+    StabilizationSettings field (RollMax, all the Vbar/CruiseControl/AxisLock tuning, the other
+    Interceptor* fields, everything) and could produce a real, dangerous mid-flight control loss. This
+    function therefore only ever REQUESTS a field name/value pair; uavtalk_thread()'s consumer is
+    responsible for merging it into the last FULL settings dict actually sent (cached there for exactly
+    this reason) before resending - never sending a bare partial dict itself. If no full settings have
+    been sent yet (e.g. called before send_config() has run), the request is silently dropped by the
+    consumer rather than risking a partial-object send - callers should not rely on a first-ever engagement
+    (before any config lands) picking this up."""
+    control.pending_stab_update = (field, value)
 
 
 class FCState(object):
@@ -2175,6 +2373,8 @@ def spawn_target(node):
     """
     from gz.msgs10.entity_factory_pb2 import EntityFactory
     from gz.msgs10.boolean_pb2 import Boolean
+    if TARGET_RANDOMIZE:
+        randomize_target_track()
     n, e = TARGET_START
     gx, gy, gz_ = ned_to_gazebo_pos((n, e, -TARGET_ALT))
     sdf = f"""<?xml version="1.0"?>
@@ -2188,12 +2388,20 @@ def spawn_target(node):
                  <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
       </inertial>
       <collision name="c"><geometry><sphere><radius>0.25</radius></sphere></geometry></collision>
+      <!-- Warm, so it actually stands out on cam_thermal - the whole point of a thermal camera on an
+           interceptor is picking the target out from the background. Per-visual gz-sim-thermal-system
+           plugin, not a bare <temperature> on the link - this SDF version doesn't recognize the latter
+           (confirmed: it warns "not defined in SDF" and silently ignores it). Matches gz-sim8's own
+           reference usage (worlds/thermal_camera.sdf). -->
       <visual name="v">
         <geometry><sphere><radius>0.25</radius></sphere></geometry>
         <material>
           <ambient>1 0.15 0.05 1</ambient><diffuse>1 0.25 0.05 1</diffuse>
           <emissive>0.5 0.05 0 1</emissive>
         </material>
+        <plugin filename="gz-sim-thermal-system" name="gz::sim::systems::Thermal">
+          <temperature>310.0</temperature>
+        </plugin>
       </visual>
       <sensor name="ball_contact" type="contact">
         <always_on>1</always_on><update_rate>200</update_rate>
@@ -2237,6 +2445,85 @@ def spawn_target(node):
     return ok
 
 
+def release_target_to_gravity(node):
+    """Physically release the target ball into real free-fall physics at the instant of a
+    genuine Gazebo contact, instead of letting VelocityControl keep puppeting it through the
+    strike completely unmoved (2026-09-20, user request: "make the ball respond to being hit
+    in a reasonable fashion - equal and opposite reaction, then subject to gravity").
+
+    spawn_target()'s ball is deliberately kinematic (`<gravity>false</gravity>`, velocity
+    forced every physics step by gz-sim-velocity-control-system) so it flies a clean,
+    predictable track before the hit - exactly wrong for what should happen AFTER a hit.
+    There is no service in this gz-sim version to hot-swap an entity's plugins or set an
+    initial velocity at spawn (checked EntityFactory's own fields - no velocity field exists,
+    and ApplyLinkWrench needs a system plugin this world does not load), so this removes the
+    kinematic ball and spawns a plain dynamic sphere (no VelocityControl, gravity enabled) at
+    its last known pose. The interceptor is almost always still physically overlapping the
+    ball at the instant a contact sensor first fires (it takes several more physics ticks to
+    fully pass through a 0.5m-diameter sphere at any realistic closing speed), so Gazebo's own
+    contact solver computes the actual momentum-conserving reaction automatically on the very
+    next tick or two - a REAL equal-and-opposite response, not a hand-coded bounce - and
+    gravity takes over from there regardless. Runs once per engagement (idempotent via the
+    caller's own _contact_hit gate)."""
+    from gz.msgs10.entity_factory_pb2 import EntityFactory
+    from gz.msgs10.boolean_pb2 import Boolean
+    from gz.msgs10.entity_pb2 import Entity
+
+    st = _target_state[0]
+    if st is None:
+        print("[intercept] release_target_to_gravity: no target pose known - skipping", flush=True)
+        return
+    _, ned_pos = st
+    gx, gy, gz_ = ned_to_gazebo_pos(ned_pos)
+
+    ent = Entity()
+    ent.name = TARGET_MODEL
+    ent.type = Entity.MODEL
+    # 3000ms + one retry on create, not the 1000ms/no-retry first tried: the very first live test
+    # (wroom_icept28) logged "ok=False" on create. remove/create round trips elsewhere in this file
+    # (spawn_target's own retry loop) already needed retries under ordinary load; this call has
+    # the added handicap of running from ON_CONTACT'S OWN CALLBACK, which gz-transport delivers on
+    # a subscription thread, not the main flight-loop thread these other calls run from - a
+    # blocking request from inside a message callback is more likely to contend with the
+    # transport layer's own delivery machinery than the same call made from the main thread.
+    node.request(f"/world/{GAZEBO_WORLD}/remove", ent, Entity, Boolean, 3000)
+
+    # A different name, not TARGET_MODEL again - reusing the same name races the old entity's
+    # (not-synchronous) teardown, a real, already-documented failure mode elsewhere in this file
+    # (spawn_target's own retry loop exists because of it). The debris body never needs to be
+    # found by that name again, so there's no reason to risk the collision.
+    debris_name = f"{TARGET_MODEL}_debris"
+    sdf = f"""<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="{debris_name}">
+    <pose>{gx} {gy} {gz_} 0 0 0</pose>
+    <link name="link">
+      <inertial><mass>0.15</mass>
+        <inertia><ixx>0.00375</ixx><iyy>0.00375</iyy><izz>0.00375</izz>
+                 <ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+      </inertial>
+      <collision name="c"><geometry><sphere><radius>0.25</radius></sphere></geometry></collision>
+      <visual name="v">
+        <geometry><sphere><radius>0.25</radius></sphere></geometry>
+        <material>
+          <ambient>1 0.15 0.05 1</ambient><diffuse>1 0.25 0.05 1</diffuse>
+          <emissive>0.5 0.05 0 1</emissive>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>"""
+    req = EntityFactory()
+    req.sdf = sdf
+    ok = False
+    for attempt in range(3):
+        ok, rep = node.request(f"/world/{GAZEBO_WORLD}/create", req, EntityFactory, Boolean, 3000)
+        if ok and rep.data:
+            break
+        time.sleep(0.3 * (attempt + 1))
+    print(f"[intercept] target released to free-fall physics as {debris_name} -> ok={ok}", flush=True)
+
+
 def subscribe_contact(node):
     """The physics engine's own collision verdict.
 
@@ -2259,6 +2546,14 @@ def subscribe_contact(node):
             names = (c.collision1.name or "") + " " + (c.collision2.name or "")
             if GAZEBO_MODEL in names:
                 _contact_hit[0] = time.time()
+                # Off the subscription-delivery thread, not inline: on_contact runs on
+                # gz-transport's own callback thread, and release_target_to_gravity makes
+                # blocking node.request() calls (remove + create) that need that same
+                # transport layer to send/receive - calling them inline risks exactly the
+                # kind of contention/timeout the first live test hit (create came back
+                # ok=False). A plain daemon thread decouples the two.
+                threading.Thread(target=release_target_to_gravity, args=(node,),
+                                  daemon=True).start()
                 return
 
     topic = (f"/world/{GAZEBO_WORLD}/model/{TARGET_MODEL}"
@@ -2279,11 +2574,13 @@ def drive_target(node):
     dn, de = n1 - n0, e1 - e0
     L = math.hypot(dn, de)
     vn, ve = TARGET_SPEED * dn / L, TARGET_SPEED * de / L
-    # NED velocity -> Gazebo ENU: x=East, y=North, z=Up
+    # NED velocity -> Gazebo ENU: x=East, y=North, z=Up. TARGET_CLIMB_MPS is already +up (its own
+    # comment), so it maps straight across with no sign flip - only the horizontal components are
+    # NED-to-ENU swapped.
     tw = Twist()
     tw.linear.x = ve
     tw.linear.y = vn
-    tw.linear.z = 0.0
+    tw.linear.z = TARGET_CLIMB_MPS
     pub = node.advertise(f"/model/{TARGET_MODEL}/cmd_vel", Twist)
     # gz-transport discovery is asynchronous: publishing immediately after
     # advertise sends into the void, because the VelocityControl plugin has
@@ -2295,8 +2592,10 @@ def drive_target(node):
         pub.publish(tw)
         time.sleep(0.1)
     print(f"[intercept] target underway: {TARGET_SPEED:.1f} m/s, "
-          f"velocity N={vn:+.2f} E={ve:+.2f}")
-    return (vn, ve, 0.0), pub, tw
+          f"velocity N={vn:+.2f} E={ve:+.2f} climb={TARGET_CLIMB_MPS:+.2f}")
+    # velocity tuple stays NED (down positive), matching every other velocity in this codebase -
+    # only this function's own Twist message (Gazebo's wire format) is ENU/up-positive.
+    return (vn, ve, -TARGET_CLIMB_MPS), pub, tw
 
 
 def intercept_test():
@@ -2386,6 +2685,36 @@ def _intercept_run(node, client):
     time.sleep(3.0)
     if not wait_for_attitude_ok():
         return
+
+    # reset_estimator() forces filteraltitude.c to actually reinitialize (toggling FusionAlgorithm,
+    # not just re-arming - see that function's own docstring) rather than inherit whatever
+    # PositionState.Down/VelocityState.Down it's currently holding. This project has already
+    # confirmed, by direct evidence, that this estimator can DIVERGE and get stuck (a real run held
+    # PositionState.Down at -5.444m, motionless, for an entire 10s hold while ground truth showed the
+    # vehicle stationary on the pad) - and separately confirmed a runaway climb to 116m ground-truth
+    # altitude from the SAME divergence class, just drifting the other direction. The intercept
+    # engagement observed here (climbs straight through the target's 11m altitude with no leveling,
+    # confirmed on TWO separate runs including one with a from-scratch thrust-calibration change that
+    # made it WORSE not better) is the same symptom. RULED OUT (2026-09-20, NINJAPILOT_VERBOSE=1
+    # [posdbg] PositionState trace compared against ground truth): the estimator is NOT diverged here -
+    # it correctly reports the real, ongoing climb (matched ground truth's ~1.4m/s average climb rate
+    # through the whole engagement). Kept anyway (cheap, and proven necessary for OTHER symptoms
+    # elsewhere in this file), but it is not the fix for this bug. reset_estimator still runs.
+    print("[intercept] forcing a state-estimator reinit before arming (see PositionState divergence note)")
+    reset_estimator()
+
+    # ALTITUDE OVERSHOOT DURING INTERCEPT - not yet fixed. Two black-box interventions tried and
+    # BOTH measured worse than doing nothing - see TRANSITION_THEORY.md's intercept section for the
+    # full record (ThrustLimits.Neutral=0.18: 7.3m miss -> 29m; VerticalPosP=0.0: -> 25m in 2.1s at an
+    # 11+ m/s climb rate, faster than either other config). That second result runs directly against
+    # the code-reading hypothesis that VerticalPosP's correction_vector[2] term was ADDING excess
+    # climb on top of path_intercept's own bounded feed-forward (cmd[2]) - removing it should have
+    # REDUCED the climb, and instead it got worse, meaning either pid_apply's sign convention or the
+    # interaction between the two terms is not what a static read of pidcontroldown.cpp/paths.c
+    # suggested. Left at the unmodified default (nothing sent here) rather than guessing a third
+    # value blind - a real fix needs firmware-side instrumentation (print cmd[2] and the PID output
+    # separately, inside path_intercept/ControlPositionWithPath, rebuild, retest), not another
+    # black-box settings guess. Do not repeat this pattern without that instrumentation in hand.
 
     # ---- SCRAMBLE, not standing patrol -------------------------------------
     # The target flies FIRST, with the vehicle cold on the pad. Nothing arms
@@ -2711,6 +3040,17 @@ def _intercept_run(node, client):
                              time.time() - t0,
                              "" if fp_hit[0] else " - aborting, no stern chase"))
                     if not fp_hit[0]:
+                        # Cleanup below just disarms (mode_position=0, armed=False) with no landing
+                        # sequence - the vehicle free-falls from wherever it was at the moment of the
+                        # miss. There's no recovery/retry logic yet (that's separate future work), so
+                        # for now just freeze the world the instant we give up on the pass instead of
+                        # letting it visibly crash while everything else winds down.
+                        from gz.msgs10.world_control_pb2 import WorldControl
+                        from gz.msgs10.boolean_pb2 import Boolean
+                        pause_req = WorldControl()
+                        pause_req.pause = True
+                        node.request(f"/world/{GAZEBO_WORLD}/control", pause_req,
+                                     WorldControl, Boolean, 2000)
                         break
         # Slot 6 is the COMMANDED AIM POINT - the lag-compensated PathDesired
         # .End actually sent to the firmware. Without it "planned vs flown"
@@ -3749,6 +4089,10 @@ def uavtalk_thread():
         "last_request_ts": None, "samples": [], "last_value": None,
         "last_change_ts": None, "change_intervals": [],
     }
+    # Cache of the last FULL StabilizationSettings dict actually sent (2026-09-23, see
+    # push_stabilization_update()'s own docstring for why a full cache, not a partial send, is
+    # required) - populated once send_config() below builds and sends the real one.
+    last_stab_settings = {"value": None}
 
     def send_reliable(name, values):
         # client.send_object() is a single fire-and-forget UDP datagram
@@ -4206,6 +4550,7 @@ def uavtalk_thread():
             "InterceptorHoverThrust":     float(os.environ.get("NINJAPILOT_INTERCEPTOR_HOVER_THRUST", "0.65")),
         })
         send_reliable("StabilizationSettings", bov.resolve_enum_values(db["StabilizationSettings"], stab_settings))
+        last_stab_settings["value"] = dict(stab_settings)   # see push_stabilization_update()'s docstring
         time.sleep(0.2)
         # StabilizationBank is the actual "currently active" gains
         # stabSettings.stabBank reads at runtime (flight/modules/Stabilization/
@@ -4431,6 +4776,8 @@ def uavtalk_thread():
                           "wroom_cruisecontrol": wroom_pilot.cruisecontrol_test,
                           "wroom_rollstep": wroom_pilot.rollstep_test,
                           "wroom_hoverstep": wroom_pilot.hoverstep_test,
+                          "wroom_yawauth": wroom_pilot.yaw_authority_test,
+                          "wroom_intercept": wroom_pilot.intercept_test,
                           "wroom_speedcorridor": wroom_pilot.speedcorridor_test,
                           "wroom_reengage": wroom_pilot.reengage_test,
                           "wroom_rattitude": wroom_pilot.rattitude_test,
@@ -4514,6 +4861,14 @@ def uavtalk_thread():
         elif objdef.name == "StabilizationDesired":
             if VERBOSE:
                 print(f"[dbg] t={ts:.2f} StabilizationDesired.Thrust =", decoded["Thrust"], "Mode =", decoded["StabilizationMode"])
+        elif objdef.name == "RateDesired":
+            if VERBOSE:
+                # outerloop.c's ACTUAL applied output (rateDesired.Thrust = interceptor.thrust_auto
+                # while !thrust_captured, or the captured stick otherwise) - not what was commanded
+                # (StabilizationDesired.Thrust, above). The gap between these two during interceptor
+                # mode's climb/transition/cruise is exactly what TRANSITION_THEORY.md section 13's
+                # altitude bug needs measured directly, not guessed from the ground side.
+                print(f"[icptdbg] t={ts:.2f} RateDesired rpy=({decoded['Roll']:.2f},{decoded['Pitch']:.2f},{decoded['Yaw']:.2f}) Thrust={decoded['Thrust']:.3f}")
         elif objdef.name == "AttitudeState":
             if VERBOSE:
                 print(f"[dbg] t={ts:.2f} AttitudeState(estimated) rpy=", decoded["Roll"], decoded["Pitch"], decoded["Yaw"])
@@ -4660,6 +5015,26 @@ def uavtalk_thread():
                         fms["FlightModePosition"] = _fms_position_override[0]
                     send_reliable("FlightModeSettings", bov.resolve_enum_values(db["FlightModeSettings"], fms))
                     last_arm_state["armed"] = control.armed
+
+                if control.pending_stab_update is not None:
+                    # See push_stabilization_update()'s own docstring for the full reasoning - most
+                    # importantly why this merges into the last FULL settings dict rather than ever
+                    # sending the requested (field, value) pair alone (a partial StabilizationSettings
+                    # write would zero every other field, a real, dangerous mid-flight control loss, not
+                    # a hypothetical one - see send_config()'s own "pack() sends any field it is not
+                    # given as 0" comment).
+                    field, value = control.pending_stab_update
+                    if last_stab_settings["value"] is not None:
+                        updated = dict(last_stab_settings["value"])
+                        updated[field] = value
+                        send_reliable("StabilizationSettings",
+                                      bov.resolve_enum_values(db["StabilizationSettings"], updated))
+                        last_stab_settings["value"] = updated
+                    else:
+                        print("[bridge] pending_stab_update dropped: no full StabilizationSettings "
+                              "sent yet to merge into (see push_stabilization_update's own docstring)",
+                              flush=True)
+                    control.pending_stab_update = None
 
                 if control.request_estimator_reset:
                     # See reset_estimator()'s docstring - caller is
@@ -5044,6 +5419,11 @@ def main():
     node.subscribe(NavSat, NAVSAT_TOPIC, on_navsat)
     node.subscribe(Magnetometer, MAGNETOMETER_TOPIC, on_mag)
     node.subscribe(FluidPressure, AIR_PRESSURE_TOPIC, on_air_pressure)
+    # cam_rgb only exists on the "interceptor" model (model.sdf) - the stock X3 test vehicle has no
+    # camera at all, so this is skipped there rather than subscribing to a topic that will never
+    # publish (harmless either way in gz-transport, but this is honest about why).
+    if GAZEBO_MODEL != "x3":
+        node.subscribe(Image, "/%s/cam_rgb/image" % GZ_NS, on_cam_rgb_image)
     gz_motor_pub = node.advertise(MOTOR_TOPIC, Actuators)
 
     print("Subscribed to %s, %s, %s, publishing motor commands on %s" % (POSE_TOPIC, IMU_TOPIC, NAVSAT_TOPIC, MOTOR_TOPIC))

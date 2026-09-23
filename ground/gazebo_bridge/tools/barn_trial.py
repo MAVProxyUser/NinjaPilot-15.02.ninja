@@ -58,8 +58,13 @@ def restart_server(why):
     time.sleep(4)
     env = (f'export GZ_SIM_RESOURCE_PATH="{BR}/models"; '
            f'export GZ_GUI_PLUGIN_PATH="{BR}/gui_plugins/WindControl/build"; ')
+    # NO --headless-rendering: this flag renders a real offscreen context
+    # that initializes once and never re-renders on later ticks, producing
+    # camera frames that arrive on schedule but are byte-for-byte identical
+    # forever regardless of vehicle attitude. See maybe_restart_gazebo.sh
+    # for the isolated proof (2026-09-23).
     subprocess.Popen(
-        env + f'cd "{BR}" && nohup gz sim -s -r --headless-rendering '
+        env + f'cd "{BR}" && nohup gz sim -s -r '
         f'worlds/quadcopter_ninjapilot.sdf > "{SC}/gzserver.log" 2>&1 &',
         shell=True)
     time.sleep(9)

@@ -35,6 +35,7 @@ tools/wroom_report.py turns into the planned-vs-flown picture.
 import csv
 import math
 import os
+import threading
 import time
 
 gb = None  # the live gazebo_bridge module, injected via bind()
@@ -988,13 +989,26 @@ class ClimbTrim(object):
     not walk the whole hover-to-cruise distance.
     """
     RATE_KP = 0.35
-    MAX_CLIMB = 1.0
-    MAX_DESCENT = 1.0
+    # Overridable (2026-09-21, see TRANSITION_THEORY.md section 19): seed 4 of the visual-lock/
+    # altitude-tracking regression closed to 1.3m horizontally before flying past, still missing on
+    # 3D distance - even with section 19's target-altitude-tracking fix mechanically working (altitude
+    # visibly moved the correct direction), a genuinely fast-diving target in a ~2s CRUISE-to-closest-
+    # approach window can accumulate more vertical error than a 1.0 m/s cap can erase in time. Default
+    # unchanged so cruisecontrol_test/speedcorridor_test/etc. (all tuned against 1.0) are unaffected.
+    MAX_CLIMB = float(os.environ.get("NINJAPILOT_CLIMBTRIM_MAX_RATE", "1.0"))
+    MAX_DESCENT = float(os.environ.get("NINJAPILOT_CLIMBTRIM_MAX_RATE", "1.0"))
     THR_PER_MPS = 0.15
     TRIM_KI = 0.08
     TRIM_MAX = 0.35
     THR_MIN, THR_MAX = 0.10, 0.98
-    THR_SLEW = 0.6
+    # Overridable (2026-09-21, see TRANSITION_THEORY.md section 19's rate-cap experiment): raising
+    # MAX_CLIMB/MAX_DESCENT alone did NOT improve seed 4 (0.7-1.3m horizontal near-miss regardless of
+    # 1x/2x/3x rate cap) - a real negative result that argues the DESIRED rate isn't the bottleneck.
+    # This slew limit governs how fast the THROTTLE ITSELF can move regardless of how large the desired
+    # rate error is - a real candidate for the actual bottleneck the rate-cap experiment couldn't have
+    # found, since raising MAX_DESCENT changes the TARGET, not how fast thrust can get there. Default
+    # unchanged so other callers (cruisecontrol_test, speedcorridor_test) are unaffected.
+    THR_SLEW = float(os.environ.get("NINJAPILOT_CLIMBTRIM_THR_SLEW", "0.6"))
     CLIMB_LPF = 0.5
 
     def __init__(self, base_thrust, target_alt):
@@ -1201,9 +1215,20 @@ def _oval_waypoints(semi_major, semi_minor, n_points=12):
              semi_minor * math.sin(math.radians(360.0 / n_points * k))) for k in range(n_points + 1)]
 
 
-def _turn_to_heading(pilot, target_heading_deg, hold_n, hold_e, hold_alt, timeout=10.0, hold_settle_s=2.5):
+def _turn_to_heading(pilot, target_heading_deg, hold_n, hold_e, hold_alt, timeout=10.0, hold_settle_s=2.5,
+                      tolerance_deg=6.0):
     """Hover in place (GPS position hold) while yawing to face target_heading_deg, THEN KEEP holding
     it - actively, stick-corrected - for hold_settle_s more seconds before returning.
+
+    tolerance_deg (2026-09-20): shape_test's own callers are fine with the original 6 deg default -
+    a corner-to-corner star/oval leg is long enough that a few degrees of residual heading error is
+    lost in the noise. intercept_test() is not: found via [pndbg] instrumentation that a real
+    engagement's ~3.8m residual near-miss (repeatable across 3 separate runs on the same seed, after
+    the blind-window lead fix eliminated the much larger original overshoot) tracked almost exactly
+    to `range * sin(6 deg)` for this airframe's typical ~35-40m engagement distance - i.e. the OLD
+    fixed 6 deg tolerance itself, not the lead calculation, was the last real source of the residual
+    miss. Exposed as a parameter rather than just lowering the shared default so shape_test's own
+    proven, already-validated behavior is untouched.
 
     The settle time used to be a separate plain pilot.fly_until() call with the yaw stick left at
     whatever _turn_to_heading last set it to (neutral). That is the bug that put a ~20 deg heading
@@ -1239,9 +1264,9 @@ def _turn_to_heading(pilot, target_heading_deg, hold_n, hold_e, hold_alt, timeou
             pilot.rec.row("turn" if reached_at is None else "leg_settle", n, e, alt, vn, ve, climb)
         if not pilot.check_safety():
             return False
-        if reached_at is None and abs(err) < 6.0:
+        if reached_at is None and abs(err) < tolerance_deg:
             reached_at = now
-        elif reached_at is not None and abs(err) >= 6.0:
+        elif reached_at is not None and abs(err) >= tolerance_deg:
             reached_at = None   # drifted back out of tolerance during the hold - keep correcting, restart the hold clock
         time.sleep(dt)
 
@@ -1442,6 +1467,1112 @@ def _fly_interceptor_leg(pilot, tgt_n, tgt_e, staging_alt, cruise_pitch, cruise_
     if status != "arrived":
         print("[wroom] leg: %s, %.1fm from target (%.1f,%.1f)" % (status, dist, tgt_n, tgt_e), flush=True)
     return status
+
+
+# Real, measured, repeatable altitude excursion above `staging_alt` at the moment CRUISE begins -
+# independent of guidance law, cruise_pitch=-45, seen identically across every wroom_icept run this
+# session (cruise-entry alt lands at ~39.5-40m from a 30m staging_alt). Shared by intercept_test()
+# (spawns/drives the target at staging_alt + this, instead of at staging_alt) and _fly_intercept_leg()
+# (ClimbTrim's own hold target below, matched to the same value) - see intercept_test()'s own comment
+# on gb.TARGET_ALT for the full story of why this exists.
+_INTERCEPT_TRANSITION_OVERSHOOT_M = 9.5
+
+# ADAPTIVE CLIMB DURATION (2026-09-23, direct user instruction to build the plumbing this file's own
+# section 22.5 had scoped but deferred): sections 19-22's whole altitude-tracking history kept
+# correcting a vertical gap REACTIVELY, during CRUISE - the one phase with the least time budget left,
+# since horizontal (bank-based) closing finishes faster than vertical (throttle-based) closing can (the
+# precise mechanism section 22.4 confirmed identically on three separate seeds). Climb duration is the
+# lever that already, directly, controls how much altitude the interceptor gains BEFORE cruise even
+# starts - adapting it per engagement, using _solve_intercept_lead()'s own precise predicted altitude,
+# means cruise can start already close to where the target will be, instead of always starting from the
+# SAME fixed ~9.5m overshoot regardless of what this specific engagement actually needs.
+#
+# _CLIMB_ADAPTIVE_RATE_MPS: the CLIMB PHASE'S OWN average climb rate (not the combined climb+transition
+# overshoot rate) - measured directly from this session's own traces (e.g. 30.05->32.4m over the ~2.1s
+# climb_s=3.0 phase covers before transition begins), used to back out how much of the DEFAULT 9.5m
+# total overshoot is attributable to climb duration itself vs. transition's own (climb_s-independent)
+# pitch-over dynamics, so a NEW climb_s can be solved for a NEW desired overshoot with the same simple
+# linear model, not a second guessed constant.
+_CLIMB_ADAPTIVE_RATE_MPS = float(os.environ.get("NINJAPILOT_CLIMB_ADAPTIVE_RATE_MPS", "1.3"))
+_CLIMB_ADAPTIVE_DEFAULT_CLIMB_S = 3.0   # the climb_s _INTERCEPT_TRANSITION_OVERSHOOT_M was measured at
+_CLIMB_ADAPTIVE_TRANSITION_FIXED_M = (_INTERCEPT_TRANSITION_OVERSHOOT_M
+                                       - _CLIMB_ADAPTIVE_RATE_MPS * _CLIMB_ADAPTIVE_DEFAULT_CLIMB_S)
+# Conservative bounds (2026-09-23): only the DEFAULT climb_s=3.0 has been extensively validated this
+# session - clamped to a modest range around it rather than an untested extreme, pending real
+# measurement of how far this can safely be pushed either way.
+_CLIMB_ADAPTIVE_MIN_S = float(os.environ.get("NINJAPILOT_CLIMB_ADAPTIVE_MIN_S", "1.5"))
+_CLIMB_ADAPTIVE_MAX_S = float(os.environ.get("NINJAPILOT_CLIMB_ADAPTIVE_MAX_S", "5.0"))
+
+
+def _solve_adaptive_climb_s(desired_overshoot_m):
+    """Solve for the climb_s that should leave the interceptor's post-transition altitude closest to
+    `staging_alt + desired_overshoot_m`, using the linear model described in the module comment above.
+    Clamped to a conservative, only-modestly-different-from-the-validated-default range."""
+    raw_climb_s = (desired_overshoot_m - _CLIMB_ADAPTIVE_TRANSITION_FIXED_M) / max(_CLIMB_ADAPTIVE_RATE_MPS, 0.1)
+    return max(_CLIMB_ADAPTIVE_MIN_S, min(_CLIMB_ADAPTIVE_MAX_S, raw_climb_s))
+
+
+# Ported from flight/libraries/paths.c's path_intercept() - the SAME guidance structure the Revo
+# target's onboard PathFollower flies, not a second invented algorithm (2026-09-20 correction: an
+# earlier version of this steering law used gb.lead_solution(), which its own docstring says is a
+# "DISPLAY ONLY" trail mirror that "must never become something the flight code depends on" - using
+# it as real guidance was itself part of the bug. This block replaces that with the real algorithm).
+# WROOM has no onboard PathFollower to run this in C, so the ground side has to do the job the
+# firmware does for Revo - the two should differ only by SETTINGS (vmax, endgame distance scaled for
+# this airframe's cruise speed), not by using a different guidance approach.
+#
+# What's ported: constant-bearing steering (cancel the target's cross-line-of-sight velocity, spend
+# the remaining speed budget closing range - the actual collision condition, not "point at the
+# target") with an ENDGAME short-horizon lead once close (pure constant-bearing is ill-conditioned as
+# range->0), plus a rate limit on how fast the commanded DIRECTION may swing per tick - exactly the
+# mechanism paths.c uses to stop "a jittery tracker from overloading the airframe", which is the
+# in-code term for precisely what caused the earlier overshoot (10.0m -> 22.9m in ~1s, the aim
+# direction swinging faster than steering could track it).
+#
+# What's deliberately NOT ported: paths.c's "speed" logic (loiter/full-effort easing and the removed
+# terminal-deceleration taper) - this airframe has no independent forward-speed axis in cruise, speed
+# is a function of cruise_pitch, already fixed before the leg starts. That is an actuation-reality
+# difference (this airframe cannot vary cruise speed the way an omnidirectional multirotor can), not
+# a guidance-algorithm difference; the constant-bearing/endgame-lead/rate-limit steering above is
+# reused exactly. INTERCEPT_ENDGAME_DIST (4.0m in paths.c) was tuned for the Revo target's ~2.2 m/s
+# vmax against a 1.2 m/s object - initially scaled here by the SAME time-to-endgame (4.0/2.2 =~ 1.8s)
+# at this airframe's own cruise_speed. That value (endgame triggering at ~10.9m for a 6 m/s cruise)
+# measurably did not give enough time to correct: wroom_rollstep (2026-09-20, run at this same -45 deg
+# cruise pitch) measured only ~9 deg/s average achievable ground-track change at a held 0.30 stick,
+# degrading further as roll saturates near 19 deg past t=2s - correcting a typical 30-40 deg residual
+# needs ~4-5s, not the ~1.8s the Revo-derived scaling provided. Re-derived from THIS airframe's own
+# measured turn authority instead of the reference vehicle's time-to-endgame: ~4.5s, chosen to give one
+# real correction opportunity for a mid-size heading error rather than none.
+_INTERCEPT_ENDGAME_TIME_S = 4.5            # re-derived from this airframe's measured turn-rate (see
+                                            # above), not paths.c's 4.0/2.2 Revo-scaled value
+_INTERCEPT_ENDGAME_LEAD_K = 1.0            # paths.c INTERCEPT_ENDGAME_LEAD_K
+_INTERCEPT_LAG_COMP_S = 0.0                 # paths.c INTERCEPT_LAG_COMP_S. TRIED 1.0 (2026-09-20),
+                                            # reasoning from wroom_icept12's measured ~1s bank-response
+                                            # delay at the endgame boundary - RESULT: WORSE, not better
+                                            # (wroom_icept13: closed to only 12.0m, vs 9.9m at 0.0, then
+                                            # diverged to 25.3m vs 23.6m). Reverted. See
+                                            # TRANSITION_THEORY.md section 13 - the overshoot at this
+                                            # airframe's cruise speed looks like a genuine turn-authority
+                                            # limit, not a lead-time tuning gap, and guessing a third
+                                            # value without a principled reason is exactly the pattern
+                                            # to stop doing.
+_INTERCEPT_ENDGAME_MAX_LEAD_S = _INTERCEPT_ENDGAME_TIME_S   # REAL BUG, found by direct user
+                                            # feedback ("not leading hard enough") - paths.c's 2.5s cap
+                                            # is a non-binding safety value for ITS OWN 1.8s endgame
+                                            # window (4.0m / 2.2 m/s), never meant to be a meaningful
+                                            # constraint. Copied verbatim here without checking it
+                                            # against the RE-DERIVED 4.5s endgame window: at endgame
+                                            # entry (rng=endgame_dist), t_lead = rng/vmax = 4.5s, but was
+                                            # being silently clamped to 2.5s - flat, under-scaled lead for
+                                            # the entire upper half of the endgame (27m down to ~15m at
+                                            # 6 m/s), only behaving as designed inside 15m. Tying this cap
+                                            # to the endgame time itself (rather than a separately-chosen
+                                            # constant) means it can never again silently under-cut
+                                            # whatever endgame window is actually configured.
+_INTERCEPT_MAX_TURN_RATE_DEG_S = 60.0      # paths.c INTERCEPT_MAX_TURN_RATE
+
+
+def _solve_intercept_lead(n0, e0, alt0, tn0, te0, talt0, tvn, tve, tvalt, blind_s, cruise_speed, iters=8):
+    """Solve for the FULL intercept time T (not just the blind-window duration) and the target's exact
+    predicted 3D position at that moment - the fix for a real, direct user correction (2026-09-21):
+    "if you'd lead properly, set a proper predictive angle for takeoff, then transition into forward
+    flight there is ZERO reason to not nail the intercept" - and a real gap this file's own prior
+    one-shot aim had: it extrapolated the target only to the END of the blind window (climb+transition
+    duration), then aimed the nose at THAT point - not at the target's position at the moment of ACTUAL
+    intercept, which is LATER still (by however long cruise then takes to close the remaining
+    distance). That remaining gap was never fed back into the aim at all - the initial heading was
+    computed as if the intercept happened the instant cruise began, when a real, still-open cruise
+    closing time (often several more seconds, comparable to or longer than the blind window itself)
+    remained.
+
+    Model: the interceptor makes ~zero net horizontal progress during `blind_s` (climb+transition -
+    consistent with every trace this session has logged, roll/PN correction aside), then closes the
+    remaining distance at a constant `cruise_speed` (this airframe's own real cruise speed, not the
+    Dubins-vehicle constant-speed-from-t=0 model the referenced papers assume - a deliberate, honest
+    adaptation to what this specific two-phase VTOL-to-cruise vehicle actually does, not a claim that a
+    Dubins vehicle's own math applies unmodified). Solved by fixed-point iteration - the same
+    root-finding spirit as Zheng & Chen 2021's own bisection/polynomial approach, adapted to this
+    vehicle's speed profile instead of solving their quartic directly: each iteration's predicted
+    intercept time refines the NEXT iteration's target extrapolation, converging quickly since target
+    speed is always less than cruise_speed (this project's own established assumption, matching
+    `path_intercept()`'s speed-ratio requirement) - a contraction mapping, not a guess-and-hope loop.
+
+    Returns (T, lead_n, lead_e, lead_alt) - T is the total time from now until intercept; the lead point
+    is the target's real predicted 3D position at exactly that moment, using its own known-constant
+    velocity (fully known in this simulation, not estimated - see the user's own "you KNOW the heading
+    of the ball, and its speed at ALL times" correction elsewhere this session)."""
+    t_total = blind_s + 5.0   # initial guess, refined below
+    for _ in range(iters):
+        lead_n = tn0 + tvn * t_total
+        lead_e = te0 + tve * t_total
+        dist = math.hypot(lead_n - n0, lead_e - e0)
+        cruise_time_needed = dist / max(cruise_speed, 0.1)
+        t_total = blind_s + cruise_time_needed
+    lead_n = tn0 + tvn * t_total
+    lead_e = te0 + tve * t_total
+    lead_alt = talt0 + tvalt * t_total
+    return t_total, lead_n, lead_e, lead_alt
+
+
+def _intercept_bearing_deg(n, e, tn, te, tvn, tve, vmax, last_heading_deg, dt):
+    """One tick of paths.c's path_intercept() direction logic (2D - this leg doesn't steer
+    altitude), returning a heading in degrees, already rate-limited against last_heading_deg.
+    last_heading_deg=None on the first call (no limiting yet, matching paths.c's `haveLast`)."""
+    Rn, Re = tn - n, te - e
+    rng = math.hypot(Rn, Re)
+    if rng < 1e-3:
+        return last_heading_deg if last_heading_deg is not None else 0.0
+    un, ue = Rn / rng, Re / rng
+    endgame_dist = vmax * _INTERCEPT_ENDGAME_TIME_S
+    if rng < endgame_dist:
+        t_lead = min((rng / vmax) * _INTERCEPT_ENDGAME_LEAD_K + _INTERCEPT_LAG_COMP_S,
+                     _INTERCEPT_ENDGAME_MAX_LEAD_S)
+        ln, le = Rn + tvn * t_lead, Re + tve * t_lead
+        ll = math.hypot(ln, le)
+        dn, de = (ln / ll, le / ll) if ll > 1e-3 else (un, ue)
+    else:
+        vt_along = tvn * un + tve * ue
+        vperp_n, vperp_e = tvn - vt_along * un, tve - vt_along * ue
+        vperp_mag = math.hypot(vperp_n, vperp_e)
+        if vperp_mag >= vmax:
+            bn, be = vperp_n, vperp_e   # unwinnable cross-range geometry - see paths.c comment
+        else:
+            closing = math.sqrt(max(vmax * vmax - vperp_mag * vperp_mag, 0.0))
+            bn, be = vperp_n + closing * un, vperp_e + closing * ue
+        bl = math.hypot(bn, be)
+        dn, de = (bn / bl, be / bl) if bl > 1e-3 else (un, ue)
+    heading = math.degrees(math.atan2(de, dn))
+    if last_heading_deg is not None:
+        max_step = _INTERCEPT_MAX_TURN_RATE_DEG_S * dt
+        step = _heading_error(heading, last_heading_deg)
+        if abs(step) > max_step:
+            heading = last_heading_deg + math.copysign(max_step, step)
+    return heading
+
+
+# Proportional Navigation (2026-09-20, user-supplied references: Zheng & Chen 2021 "Time-Optimal
+# Guidance for Intercepting Moving Targets" - the optimal law for a constant-speed, bounded-turn-rate
+# (Dubins) vehicle is bang-bang CURVATURE control, not a soft heading-error correction to a recomputed
+# aim point; Yoon 2008 "Relative Circular Navigation Guidance" - a real-time curvature-feedback law
+# that closes the loop on line-of-sight geometry directly. Both point at the same structural fix: this
+# airframe in cruise IS a constant-speed, bank-to-turn-rate vehicle (not an omnidirectional platform
+# path_intercept()'s constant-bearing law implicitly assumes), and the right control variable is a
+# commanded TURN RATE driven by the LOS rotation rate, not a snapshot bearing tracked by a P+I stick
+# law. This is classical PN, `turn_rate_cmd = N * los_rate` - since this test doesn't need a specific
+# impact angle (RCNG's extra feature over plain PN), full RCNG's added complexity isn't needed.
+#
+# _intercept_bearing_deg() (above) is kept for the one-time pre-engagement/retry re-aim (a rough initial
+# heading before the pitch-over, not a continuous control law) - PN replaces it as the actual CRUISE
+# steering law below, since PN's whole point is closing the loop on LOS rate continuously, not chasing
+# a periodically-recomputed target heading through a second, separate heading-error P+I stage.
+_PN_GAIN_N = float(os.environ.get("NINJAPILOT_PN_GAIN_N", "8.0"))
+                                 # classical PN navigation constant. 4.0 (textbook-standard 3-5 range)
+                                 # measured (wroom_icept20, 2026-09-20) real, stable, but weak: commanded
+                                 # bank never exceeded ~6 deg (the stick clamp is +-0.45, equivalent to
+                                 # ~28 deg - most of the available authority went unused), and the closest
+                                 # approach (7.4m, this session's best) still diverged afterward rather
+                                 # than converging. Raised to use more of the margin the range-floor fix
+                                 # already made safe, not a blind guess - this airframe's real weak/slow
+                                 # turn authority (measured ~9 deg/s, section 13) is exactly the case
+                                 # classical guidance texts note needs a HIGHER N to compensate for slow
+                                 # actuator response, not a lower one.
+_PN_BANK_PER_STICK_DEG = 19.0 / 0.30   # measured directly: wroom_rollstep's own 0.30-stick -> ~19 deg
+                                        # steady bank at this cruise pitch - not an assumed/guessed
+                                        # stick-to-angle scale
+
+
+_PN_RANGE_FLOOR_M = 5.0          # real, reproduced failure (wroom_icept19, 2026-09-20): LOS_rate's
+                                  # R^2 denominator blows up as R->0 for ANY nonzero cross-track relative
+                                  # velocity, regardless of how small the actual miss distance is - a
+                                  # textbook PN pathology, not a gain-tuning mistake. Tripped a real tumble
+                                  # (roll -51 deg, safety cutoff) at ~9.4m range. Standard practical fix:
+                                  # floor the range used in the denominator so LOS_rate stays bounded at
+                                  # close range instead of diverging, same idea as terminal-guidance laws
+                                  # that switch strategy or cap gain inside some minimum range.
+
+
+_pn_debug_last_print = [0.0]
+
+
+def _intercept_pn_roll(n, e, vn, ve, tn, te, tvn, tve, vfwd, dist=None):
+    """Command roll stick via classical Proportional Navigation: turn_rate_cmd = N * LOS_rate,
+    converted to a bank angle via the standard coordinated-turn relation (bank = atan(V*turn_rate/g)),
+    then to a stick fraction via this airframe's own measured bank-per-stick calibration. LOS_rate is
+    computed directly from relative position/velocity (the textbook 2D cross-product form), not
+    finite-differenced, so it is exact every tick rather than lagging by one sample. The R^2 denominator
+    is floored at _PN_RANGE_FLOOR_M to prevent the classic close-range LOS-rate blowup (see that
+    constant's own comment) - a real, reproduced tumble, not a hypothetical concern."""
+    Rn, Re = tn - n, te - e
+    r2_raw = Rn * Rn + Re * Re
+    r2 = max(r2_raw, _PN_RANGE_FLOOR_M * _PN_RANGE_FLOOR_M)
+    Vrn, Vre = tvn - vn, tve - ve   # relative velocity, target minus pursuer
+    los_rate = (Rn * Vre - Re * Vrn) / r2   # rad/s: LOS line's own rotation rate
+    turn_rate_cmd = _PN_GAIN_N * los_rate
+    bank_rad = math.atan2(max(vfwd, 1.0) * turn_rate_cmd, 9.81)
+    bank_deg = math.degrees(bank_rad)
+    stick = max(-0.45, min(0.45, bank_deg / _PN_BANK_PER_STICK_DEG))
+    if os.environ.get("NINJAPILOT_VERBOSE") == "1":
+        now = time.time()
+        if now - _pn_debug_last_print[0] > 0.5:
+            _pn_debug_last_print[0] = now
+            print("[wroom] pndbg dist=%.2f los_rate=%+7.4f rad/s turn_rate_cmd=%+7.4f bank_deg=%+6.1f "
+                  "(pre-clamp) stick=%+.3f floored=%s"
+                  % (dist if dist is not None else -1.0, los_rate, turn_rate_cmd, bank_deg, stick,
+                     r2_raw < _PN_RANGE_FLOOR_M * _PN_RANGE_FLOOR_M), flush=True)
+    return stick
+
+
+# EXACT-LEAD-POINT STEERING - a direct, testable answer to a fair challenge (2026-09-21): "how the
+# f*** are you missing when you have full numbers for both objects? the interceptor and the ball!"
+# Correct and sharp - this sim has PERFECT state for both vehicles, no sensor noise, no estimation lag.
+# PN was chosen deliberately (see the section above this one, from the Zheng & Chen / Yoon papers) as
+# the right control variable for a bank-to-turn vehicle - but it is still a FEEDBACK law that reacts to
+# current relative geometry rather than explicitly using the target's known-constant velocity to solve
+# the intercept directly. With perfect state and a non-maneuvering target, the intercept point and time
+# ARE exactly solvable (this file already does exactly that solve, `_intercept_bearing_deg` - the
+# quadratic closing-speed lead-point math ported from paths.c's path_intercept()) - it's just only ever
+# called ONCE, for the pre-engagement aim, then abandoned in favor of PN for everything after. This
+# steers by that SAME exact solve, called every tick with the real current state (a continuously
+# updated lead point, not a stale one-shot guess), converted to bank via a plain heading-error P
+# controller - not a claim that this is definitely better than PN, a real, honest, run-the-numbers
+# comparison of the two on the same seeds. `NINJAPILOT_GUIDANCE_LAW=exact` selects this in place of PN;
+# default stays "pn" (unchanged behavior) until the comparison says otherwise.
+_EXACT_HEADING_KP = float(os.environ.get("NINJAPILOT_EXACT_HEADING_KP", "1.0"))
+                            # deg of bank per deg of heading error, clamped below - a plain P law, the
+                            # same shape _turn_to_heading already uses (err/45.0-style), not tuned yet.
+_EXACT_MAX_BANK_DEG = float(os.environ.get("NINJAPILOT_EXACT_MAX_BANK_DEG", "35.0"))
+
+_exact_last_heading = [None]
+_exact_debug_last_print = [0.0]
+
+
+def _intercept_exact_roll(n, e, vn, ve, tn, te, tvn, tve, vfwd, dist=None, dt=0.05):
+    """Command roll stick by aiming directly at the exact, continuously-recomputed intercept point
+    (`_intercept_bearing_deg`'s own quadratic lead-point solve, called every tick instead of once) via a
+    plain heading-error P controller - see the module comment above for what this tests and why."""
+    heading = _intercept_bearing_deg(n, e, tn, te, tvn, tve, max(vfwd, 1.0), _exact_last_heading[0], dt)
+    _exact_last_heading[0] = heading
+    # FIXED (2026-09-21, first version caused wild +-35 deg bank chattering during CLIMB, confirmed via
+    # [exactdbg]): atan2(ve, vn) is numerically meaningless noise at near-zero horizontal speed, which
+    # is exactly the climb-phase regime. `_fly_interceptor_leg` already established the right guarded
+    # pattern for this same problem (line ~1363 in this file) - reuse it rather than inventing a
+    # different threshold.
+    own_heading = math.degrees(math.atan2(ve, vn)) if vfwd > 1.5 else gb.fc_state.yaw
+    err = _heading_error(heading, own_heading)
+    bank_deg = max(-_EXACT_MAX_BANK_DEG, min(_EXACT_MAX_BANK_DEG, _EXACT_HEADING_KP * err))
+    stick = max(-0.45, min(0.45, bank_deg / _PN_BANK_PER_STICK_DEG))
+    if os.environ.get("NINJAPILOT_VERBOSE") == "1":
+        now = time.time()
+        if now - _exact_debug_last_print[0] > 0.5:
+            _exact_debug_last_print[0] = now
+            print("[wroom] exactdbg dist=%.2f lead_heading=%+6.1f own_heading=%+6.1f err=%+6.1f "
+                  "bank_deg=%+6.1f stick=%+.3f"
+                  % (dist if dist is not None else -1.0, heading, own_heading, err, bank_deg, stick),
+                  flush=True)
+    return stick
+
+
+def _intercept_roll(n, e, vn, ve, tn, te, tvn, tve, vfwd, dist=None, dt=0.05):
+    """Selects between PN (default) and the exact-lead-point alternative via NINJAPILOT_GUIDANCE_LAW,
+    so both `_fly_intercept_leg` call sites (climb and cruise) stay in sync with one switch."""
+    if os.environ.get("NINJAPILOT_GUIDANCE_LAW", "pn") == "exact":
+        return _intercept_exact_roll(n, e, vn, ve, tn, te, tvn, tve, vfwd, dist=dist, dt=dt)
+    return _intercept_pn_roll(n, e, vn, ve, tn, te, tvn, tve, vfwd, dist=dist)
+
+
+# CONTINUOUS CLIMB-PITCH-TOWARD-TARGET (2026-09-21, direct user correction while watching a live run:
+# "you still aren't transitioning until you are ABOVE the incursion drone path... just fly at a 45
+# degree angle pre-transition toward the incoming orange ball"; "you made a weird non-organic path...
+# not a real world logical way to get from path A to path B with a spline curve"). Root cause: firmware
+# outerloop.c's INTERCEPTOR_CLIMB case computes `theta_off` ENTIRELY internally - a fade from
+# whatever attitude the vehicle had at engagement down to LEVEL (0 deg) over INTERCEPTOR_ENTRY_BLEND_TIME,
+# then holds level for the rest of ClimbTime - with no knowledge of where the target actually is. This
+# file's own `_fly_intercept_leg` then hardcoded `gb.control.pitch = 0.0` on top of that during climb,
+# reasoning (2026-09-20) that "the pitch-over schedule is the firmware's own, not something to fight
+# from the ground side" - true for the FIRMWARE's internal theta_off, but ground pitch is not a fight
+# with it: `rpy_desired[PITCH] = theta_off + live_frac * stabilizationDesiredAxis[PITCH]` (outerloop.c)
+# is a straight ADDITION, and live_frac has ramped to 1.0 well before climb ends since the 2026-09-20
+# live-steer fix. Sending 0.0 there was a leftover, unexamined assumption, not a real constraint -
+# exactly the pattern of "a false constraint" this whole session has repeatedly found (see the
+# live_frac fix itself, and the blind-window-lead work before it). The result before this fix: the
+# vehicle climbed near-VERTICALLY for the whole ClimbTime while only correcting bearing (roll), then
+# pitched over sharply once TRANSITION began - a vertical segment followed by a separate flat dive, not
+# a continuously curving path toward the target, and if the interceptor's climb happens to carry it
+# above the target's actual altitude before that dive starts, the dive can fly it clean over the top
+# ("shanks it").
+#
+# FIRST ATTEMPT AT THIS FIX WAS WRONG (2026-09-21, caught by the user from a live screenshot the SAME
+# morning: "the take off was almost completely vertical NOT angled toward the target intercept" - and
+# they were right, confirmed directly from the log: pitch peaked at 6-8 deg then fell back, invisible
+# against a 90-degree vertical-to-dive range). The original version below commanded pitch proportional
+# to the LOS ELEVATION ANGLE to the target's current position - mathematically guaranteed to be shallow
+# at a normal ~30-40m engagement range with only a few meters of altitude difference (this project's own
+# design keeps interceptor and target roughly co-altitude, see gb.TARGET_ALT), regardless of how far
+# away the target is horizontally. That is the wrong quantity: the user asked for a real forward LEAN
+# toward the target (closing horizontal distance during climb, not just aiming level thrust at a
+# shallow-looking point), not a small correction toward however the geometry happens to look at range.
+#
+# Fix: ramp pitch toward a real FRACTION of `cruise_pitch` (the eventual dive angle transition/cruise
+# already uses) over the climb duration, the same way TRANSITION's own firmware schedule ramps theta_off
+# from 0 to the full `cruise_pitch` - just starting that ramp during CLIMB instead of waiting for
+# TRANSITION to begin it. This makes climb and dive one continuously-steepening arc (climb ends already
+# leaning NINJAPILOT_CLIMB_PITCH_FRAC of the way toward cruise attitude; TRANSITION's own schedule then
+# carries it the rest of the way) instead of two disconnected regimes - the literal "45 degree angle
+# pre-transition" and "spline curve, not vertical-then-flat" the user asked for. Time-ramped (not
+# geometry-driven): this is a deliberate simplification, not a hidden bug - a straight time ramp is
+# exactly what TRANSITION's own proven schedule already is, and is far more predictable to reason about
+# and validate than a geometry term that (as this section's own history shows) can look reasonable and
+# still be numerically wrong at the ranges this actually runs at.
+_CLIMB_PITCH_FRAC = float(os.environ.get("NINJAPILOT_CLIMB_PITCH_FRAC", "0.6"))
+                            # 60% of cruise_pitch by the end of climb (e.g. -27 deg of a -45 deg
+                            # cruise_pitch default) - a real, visible lean, not the full angle: some
+                            # margin is kept for TRANSITION's own schedule to still do recognizable work,
+                            # and to leave headroom against InterceptorClimbThrust's real (unmeasured
+                            # against a large added ground tilt) vertical-lift margin - see this file's
+                            # own thrprobe_test/ClimbTrim history on how easily an assumed thrust margin
+                            # turns out to be wrong when actually measured.
+
+
+_CLIMB_ALT_BIAS_DEG_PER_M = float(os.environ.get("NINJAPILOT_CLIMB_ALT_BIAS_PER_M", "1.5"))
+_CLIMB_ALT_BIAS_MAX_DEG = float(os.environ.get("NINJAPILOT_CLIMB_ALT_BIAS_MAX_DEG", "15.0"))
+
+
+def _intercept_climb_pitch(elapsed_climb_s, climb_s, cruise_pitch, alt, tgt_alt_predicted):
+    """Ramp pitch toward `_CLIMB_PITCH_FRAC * cruise_pitch` over the climb duration (a real,
+    aerodynamically-grounded forward lean - see the module comment above for why this replaced the
+    original elevation-angle version) PLUS a bias toward the target's predicted altitude at intercept.
+
+    `tgt_alt_predicted` (2026-09-22, direct user correction: "if you'd lead properly... there is ZERO
+    reason to not nail the intercept") is now the PRECISELY SOLVED altitude from
+    `_solve_intercept_lead()` - the target's real predicted position at the actual, self-consistently-
+    solved intercept time, computed ONCE before takeoff-turn, not re-estimated reactively every tick off
+    a fluctuating "time left" guess (the prior version of this function did that, per its own now-
+    superseded docstring history - see git blame / TRANSITION_THEORY.md section 21 for that story). This
+    keeps the time-ramp (a real, aerodynamically-grounded forward lean - section 21.1) and biases it
+    toward the ONE precomputed answer, in the spirit of the referenced Zheng & Chen 2021 paper this
+    session was supposed to be applying all along: solve the intercept geometry exactly once, then trust
+    it, rather than soft-correct forever."""
+    ramp = min(1.0, elapsed_climb_s / max(climb_s, 0.1))
+    base_deg = cruise_pitch * _CLIMB_PITCH_FRAC * ramp
+    alt_gap = tgt_alt_predicted - alt   # + = target predicted above the interceptor's current altitude
+    bias_deg = max(-_CLIMB_ALT_BIAS_MAX_DEG, min(_CLIMB_ALT_BIAS_MAX_DEG, alt_gap * _CLIMB_ALT_BIAS_DEG_PER_M))
+    target_deg = base_deg + bias_deg
+    return max(-0.45, min(0.45, target_deg / _PN_BANK_PER_STICK_DEG))
+
+
+# VISUAL-LOCK / MATCHED-PURSUIT REFRAMING (2026-09-20, user's own proposed mission concept): "the goal
+# of the intercept should be to try to obtain a visual of the orange ball in the cameras, and clearly
+# be maintaining that visual because you are matching speed, heading, etc. to converge at a near future
+# point" - i.e. success as a SUSTAINED, CONVERGING visual track, not solely a precise kinematic
+# collision distance. Motivated directly by section 17's finding that 3 of 4 randomized crossing
+# geometries never reach hit_dist=1.5m even with every guidance/firmware fix tried, apparently due to a
+# genuine turn-rate/closing-speed limit rather than a remaining bug - this asks whether those same
+# "misses" are nonetheless functionally successful engagements by a visual-pursuit standard, which may
+# be the more honest fit for what this airframe (fast fixed-wing cruise, weak/slow turn authority) can
+# actually deliver against a maneuvering target.
+#
+# No camera sensor is modeled in this world, so this is a geometric proxy: the interceptor's own
+# horizontal velocity vector stands in for its camera boresight (a fair proxy in cruise - this airframe
+# flies nose-first, unlike a hover-capable quad that could point a gimbal independent of travel
+# direction), checked against a configurable cone half-angle and max range - exactly what a real
+# fixed-camera FOV gate reduces to. ADDITIVE, not a replacement: `_fly_intercept_leg`'s existing
+# hit_dist/diverging/stalled/timeout scoring is untouched; this only adds a second, alternate way for a
+# leg_cruise attempt to end in "visual_lock" status, so every existing regression result in sections
+# 14-17 remains exactly reproducible.
+_VISUAL_FOV_DEG = float(os.environ.get("NINJAPILOT_VISUAL_FOV_DEG", "40.0"))
+                                  # total cone angle (not half-angle) - +-20 deg off boresight, a
+                                  # plausible narrow-ish stabilized gimbal/FPV camera FOV, not a guess
+                                  # at a specific real lens.
+_VISUAL_MAX_RANGE_M = float(os.environ.get("NINJAPILOT_VISUAL_MAX_RANGE_M", "60.0"))
+                                  # deliberately >= gb.DETECT_RANGE (46m) so a lock can in principle be
+                                  # acquired as early as detection itself, not artificially capped
+                                  # tighter than the range this guidance already operates at.
+_VISUAL_LOCK_HOLD_S = float(os.environ.get("NINJAPILOT_VISUAL_LOCK_HOLD_S", "2.5"))
+                                  # "clearly be maintaining that visual" - a single in-FOV tick is not a
+                                  # track, it is a flash. 2.5s (well over half of PN's own DIVERGE_WINDOW_S
+                                  # in _fly_intercept_leg) is long enough that a lock surviving it reflects
+                                  # real, sustained geometry, not a lucky instantaneous crossing of the cone.
+_VISUAL_CONVERGE_MARGIN_M = float(os.environ.get("NINJAPILOT_VISUAL_CONVERGE_MARGIN_M", "2.0"))
+                                  # "converge at a near future point" is the whole point of the
+                                  # reframing - a stable stand-off that never closes range is not a
+                                  # pursuit, it's formation flying alongside an unrelated track. Requires
+                                  # range at lock-hold-satisfied to be at least this much LESS than range
+                                  # at lock start, or the hold does not count as a genuine intercept.
+
+_fov_debug_last_print = [0.0]
+_yaw_debug_last_print = [0.0]
+
+
+def _visual_lock_check(n, e, vn, ve, tn, te):
+    """'Is the target ball currently in the interceptor's camera frame' - tries REAL image-based
+    detection first (2026-09-23, direct user request: "wait till there is a visual in FOV of the ball,
+    then attempt to keep the ball in the FOV of the RGB camera"), falling back to the geometric proxy
+    this function used before. `gb.get_camera_ball_bearing()` runs the same red-dominant-pixel rule
+    tools/ball_detect.py already validated, live, on every real rendered `/interceptor/cam_rgb/image`
+    frame.
+
+    THE FALLBACK IS LOAD-BEARING, NOT DECORATIVE (2026-09-23): built the real path, then discovered -
+    by literally saving and looking at camera frames mid-flight, not guessing - that the camera's
+    rendered view is uniform empty sky through an ENTIRE successful engagement, climb through the
+    actual hit, never once showing ground or target. This is a real, pre-existing bug in the camera's
+    body-mount transform (model.sdf: "both looking out of the nose along body +z... pitch -90 deg" -
+    predates tonight, this is just the first code that ever actually read the feed and noticed), not
+    something introduced tonight and not a detection-rule problem (confirmed with a second,
+    independent, standalone watcher process - 899 frames, 0 hits, during a run that closed to 1.07m).
+    Until that mounting bug is found and fixed, real detection will simply never fire - falling back
+    keeps the visual-lock/matched-pursuit criterion (section 18) working exactly as before rather than
+    silently regressing every seed that used to pass it. Once the mounting bug is fixed, real
+    detections will simply start winning over the fallback automatically - no further change needed
+    here.
+    Returns (in_fov, angle_off_boresight_deg, horiz_range_m)."""
+    horiz_range = math.hypot(tn - n, te - e)
+    real = gb.get_camera_ball_bearing()
+    if real is not None:
+        az_deg, _el_deg, _npix = real
+        in_fov = horiz_range <= _VISUAL_MAX_RANGE_M   # sanity cap - the camera's own far-clip is 300m,
+                                                       # much further than a tactically meaningful "lock"
+        return in_fov, az_deg, horiz_range
+    own_heading = math.degrees(math.atan2(ve, vn)) if math.hypot(vn, ve) > 1.5 else gb.fc_state.yaw
+    bearing_to_tgt = math.degrees(math.atan2(te - e, tn - n))
+    angle_off = _heading_error(bearing_to_tgt, own_heading)
+    in_fov = abs(angle_off) <= _VISUAL_FOV_DEG / 2.0 and horiz_range <= _VISUAL_MAX_RANGE_M
+    return in_fov, angle_off, horiz_range
+
+
+def _fly_intercept_leg(pilot, get_target, staging_alt, cruise_pitch, cruise_thr,
+                        climb_s, rate, cruise_speed, hit_dist=1.5, max_leg_s=30.0, lead_alt=None):
+    """The long-range half of mode-adaptive intercept guidance: the SAME climb->transition->cruise
+    mechanics as _fly_interceptor_leg (copied, not rewritten - see that function's own extensive
+    tuning history), but steered every tick by _intercept_bearing_deg() - a direct port of
+    path_intercept()'s own constant-bearing/endgame-lead/rate-limited guidance (see that function's
+    docstring for what's ported and why) - instead of a fixed waypoint. This is the piece the
+    existing intercept guidance never had: a way to use this airframe's actual fast-cruise capability
+    against a moving target, instead of being limited to the ~1.5-2.6 m/s hover-translate speed the
+    Revo intercept test was built and tuned around.
+
+    get_target() must return (tgt_n, tgt_e, tgt_vn, tgt_ve) in the same NED frame as pilot.nav(), or
+    None if the target is currently untracked (steering holds its last command that tick rather than
+    guessing). "arrived" means within hit_dist of the TARGET's real position, not the lead point -
+    the lead point is where to aim, not where a hit is scored.
+
+    See TRANSITION_THEORY.md section 12 for why this exists and what it does not yet do: the target's
+    altitude is not tracked (ClimbTrim holds `staging_alt` throughout - fine if the target is roughly
+    level with the interceptor, wrong otherwise), and there is no retry-from-real-position logic on a
+    miss yet (that is the natural next step, reusing shape_test's own retry pattern)."""
+    hover_thr = gb.control.throttle
+    gb.control.mode_position = 2
+    pilot.tilt_check = False
+    transition_s = abs(cruise_pitch) / max(rate, 1.0)
+    t0 = time.time()
+    phase = "leg_climb"
+    trim = None
+    status = "timeout"
+    last_log = 0.0
+    cruise_dist0 = None
+    cruise_t0 = None
+    dist_hist = []
+    # CLOSEST-APPROACH INSTRUMENTATION (2026-09-21, see TRANSITION_THEORY.md section 19's "Update, same
+    # night": raising ClimbTrim's rate cap 2x/3x did NOT monotonically improve seed 4's outcome, which
+    # argues against a simple closing-rate limit but was only inferable from the once-a-second summary
+    # print plus separate 0.5s-cadence [fovdbg] horizontal-only range - never the same tick, and never
+    # the actual vertical component. This records the TRUE minimum 3D distance and its horizontal/
+    # vertical split every tick (not just once a second), independent of hit/diverge/stall/lock
+    # decisions, so the next run of a near-miss seed answers directly whether the residual gap at
+    # closest approach is horizontal, vertical, or both - instead of requiring another guess-and-test
+    # cycle like this one.
+    closest = {"dist": 1e9, "t": 0.0, "horiz": 0.0, "vert": 0.0}
+    DIVERGE_WINDOW_S = 4.0
+    DIVERGE_MARGIN_M = 3.0
+    STALL_WINDOW_S = 12.0
+    STALL_MIN_PROGRESS_FRAC = 0.10
+    last_tgt = None   # last known (tn, te, tvn, tve) - held over a momentary tracking gap
+    dist = 1e9
+    lock_start_t = None      # visual-lock/matched-pursuit tracking - see _visual_lock_check's own
+    lock_start_dist = None   # module-level comment for what this reframing is and why
+    while time.time() - t0 < max_leg_s:
+        now = time.time()
+        elapsed = now - t0
+        ok, n, e, alt, vn, ve, climb = pilot.nav()
+        if phase in ("leg_climb", "leg_transition"):
+            # REAL STEERING DURING CLIMB/TRANSITION (2026-09-20, firmware fix: outerloop.c's
+            # live_frac now ramps from engagement, not from CRUISE - see that file's own comment on
+            # interceptor_run() for the full story). Before this fix, the firmware hard-ignored
+            # roll/pitch/yaw for the entire climb+transition duration regardless of what was sent
+            # here, so intercept_test() had to pre-compute a single aim point and fly blind on it
+            # for ~7-10s with no way to correct for a moving target or for its own timing estimate
+            # being wrong - the actual root cause of this whole session's crossing-geometry misses.
+            # Now that the firmware listens from t=0 (ramping to full authority over
+            # INTERCEPTOR_LIVE_BLEND_TIME, ~0.8s), send the SAME PN correction used in cruise here
+            # too, continuously tracking the target's real current position instead of a
+            # precomputed prediction. Throttle stays at hover_thr (still firmware-ignored until
+            # CRUISE captures it - unrelated to this fix, thrust capture was deliberately left
+            # CRUISE-only).
+            gb.control.throttle = hover_thr
+            tstate = get_target()
+            if tstate is not None:
+                last_tgt = tstate
+            if last_tgt is not None:
+                tn, te, tgt_alt, tvn, tve, tgt_valt = last_tgt
+                vfwd = math.hypot(vn, ve)
+                gb.control.roll = _intercept_roll(n, e, vn, ve, tn, te, tvn, tve, vfwd)
+                # CONTINUOUS PITCH DURING CLIMB (2026-09-21, see _intercept_climb_pitch's own module
+                # comment for the full story, including the first, WRONG version of this fix - direct
+                # user correction while watching a live miss): CLIMB only, not TRANSITION, where
+                # firmware's own theta_off is already actively ramping through its own large intentional
+                # dive. `elapsed` is time since this LEG started, which is also time-in-climb-phase
+                # since leg_climb is always the first phase (t0 marks the leg's own start).
+                # `time_to_cruise`: remaining time until CRUISE actually begins, for predicting the
+                # target's real altitude at that moment (see _intercept_climb_pitch's own comment).
+                if phase == "leg_climb":
+                    # PRECISE, PRE-SOLVED lead altitude (2026-09-22, direct user correction: "if you'd
+                    # lead properly... there is ZERO reason to not nail the intercept" - see
+                    # _solve_intercept_lead's own docstring). Falls back to the OLD reactive per-tick
+                    # estimate only if the caller didn't pass one (defensive - `intercept_test()`
+                    # always does now).
+                    if lead_alt is not None:
+                        tgt_alt_predicted = lead_alt
+                    else:
+                        time_to_cruise = max((climb_s - elapsed) + transition_s + 1.0, 0.1)
+                        tgt_alt_predicted = tgt_alt + tgt_valt * time_to_cruise
+                    # Ablation switch (2026-09-21, TRANSITION_THEORY.md section 20.5 item 1, same
+                    # reasoning as NINJAPILOT_CLIMB_YAW_ENABLE above): default on (1), debugging knob.
+                    if os.environ.get("NINJAPILOT_CLIMB_PITCH_ENABLE", "1") == "1":
+                        gb.control.pitch = _intercept_climb_pitch(elapsed, climb_s, cruise_pitch, alt,
+                                                                   tgt_alt_predicted)
+                    else:
+                        gb.control.pitch = 0.0
+                    # CONTINUOUS YAW ("corkscrew") DURING CLIMB (2026-09-21, direct user correction:
+                    # "'stop and turn to face a precomputed bearing' is dumb considering how this
+                    # aircraft is built. It can literally corkscrew itself in the air... yaw is a
+                    # spline curve and maybe a twist on the way to the point of interest"). Firmware's
+                    # own interceptor_heading() already couples yaw and roll for this airframe's turns
+                    # (`Yaw - sin(pitch)*Roll`, outerloop.c) - bank-and-twist together IS the designed
+                    # turn mechanism, not something layered on top of it. psi_ref (the quadshot's own
+                    # heading reference) used to be set ONCE, before climb even starts, by the
+                    # separate blocking `_turn_to_heading()` call, then left frozen for the rest of the
+                    # engagement while only roll did any further correcting. Now nudged continuously
+                    # toward the target's REAL current bearing throughout climb too - `yaw_stick_rate`
+                    # already integrates into psi_ref unconditionally from t=0 (the live_frac fix), so
+                    # this was reachable, just never used. NOT calibrated against a measured
+                    # interceptor-mode yaw-rate constant (no equivalent of `_PN_BANK_PER_STICK_DEG` or
+                    # a "yawstep"-under-Interceptor test exists yet, unlike roll/pitch above) -
+                    # deliberately conservative (small P-gain, tight clamp) and logged every tick via
+                    # [yawdbg] so the first live run doubles as that missing measurement, honest about
+                    # not yet being validated the way roll and pitch now are.
+                    bearing_to_tgt = math.degrees(math.atan2(te - e, tn - n))
+                    yaw_err = _heading_error(bearing_to_tgt, gb.fc_state.yaw)
+                    # Ablation switch (2026-09-21, TRANSITION_THEORY.md section 20.5 item 1): lets a
+                    # regression-hunt run isolate this yaw term from the pitch term above without
+                    # another edit. Default on (1) - this is a debugging knob, not a tuning default.
+                    if os.environ.get("NINJAPILOT_CLIMB_YAW_ENABLE", "1") == "1":
+                        gb.control.yaw = max(-0.20, min(0.20, yaw_err / 90.0))
+                    else:
+                        gb.control.yaw = 0.0
+                    if os.environ.get("NINJAPILOT_VERBOSE") == "1":
+                        now_yaw = time.time()
+                        if now_yaw - _yaw_debug_last_print[0] > 0.5:
+                            _yaw_debug_last_print[0] = now_yaw
+                            print("[wroom] yawdbg fc_yaw=%+6.1f bearing=%+6.1f err=%+6.1f stick=%+.3f"
+                                  % (gb.fc_state.yaw, bearing_to_tgt, yaw_err, gb.control.yaw), flush=True)
+                else:
+                    gb.control.pitch = 0.0
+                    gb.control.yaw = 0.0
+            else:
+                gb.control.roll = 0.0
+                gb.control.pitch = 0.0
+                gb.control.yaw = 0.0
+        if phase == "leg_climb":
+            if elapsed >= climb_s:
+                phase, t_phase0 = "leg_transition", now
+        elif phase == "leg_transition":
+            if now - t_phase0 >= transition_s + 1.0:
+                phase = "leg_cruise"
+                gb.control.throttle = cruise_thr
+                # Hold at the altitude the transition ACTUALLY, LIVE reaches (the real `alt` read this
+                # same tick), not a computed staging_alt+constant - see intercept_test()'s own comment on
+                # _INTERCEPT_TRANSITION_OVERSHOOT_M for why forcing a descent back to staging_alt is
+                # wrong (fights a real, repeatable climb overshoot this airframe cannot correct within an
+                # engagement's own time budget - this session's actual dominant miss factor, measured
+                # directly via [pndbg], not a horizontal-steering problem). Self-measuring here (rather
+                # than trusting the same fixed constant twice) means this holds correctly even if the real
+                # overshoot varies run to run or if cruise_pitch/climb_s/rate/staging_alt ever change -
+                # gb.TARGET_ALT still uses the constant (the target has to be spawned/moving well before
+                # this point, so it can't self-measure the same way), so this refinement narrows, rather
+                # than eliminates, how far apart the two can drift.
+                trim = ClimbTrim(cruise_thr, alt)
+        else:  # leg_cruise: steer via Proportional Navigation (_intercept_pn_roll), recomputed every tick
+            dt = 0.05
+            tstate = get_target()
+            if tstate is not None:
+                last_tgt = tstate
+            if last_tgt is None:
+                time.sleep(dt)
+                continue
+            tn, te, talt, tvn, tve, _tgt_valt = last_tgt
+            # TARGET-ALTITUDE TRACKING (2026-09-21, found via [fovdbg] on seed 4 of the visual-lock
+            # regression - see TRANSITION_THEORY.md section 18.3): ClimbTrim was built to hold the
+            # interceptor's OWN post-transition altitude, frozen once at CRUISE entry (see that
+            # assignment's own comment above) - a fine approximation ONLY if the target stays at
+            # that same altitude for the whole engagement. A target with any nonzero AoA (climbing or
+            # diving) does not: seed 4's real trace closed to 1.0m HORIZONTALLY (tighter than the one
+            # confirmed hit) with the target still centered in the FOV, then still missed on 3D
+            # distance and flew past - because ClimbTrim kept holding its stale CRUISE-entry snapshot
+            # while the (AoA=-13.9 deg, i.e. diving) target had actually descended meaningfully by
+            # then. Re-targeting every tick to the target's REAL, CURRENT altitude (already tracked
+            # right above for horizontal guidance) closes this gap the same way PN already closes the
+            # horizontal one - ClimbTrim's own docstring already frames it as "a GUIDANCE-layer fix,
+            # exactly where the wroom stack already does all its position/altitude closure", so this
+            # is that same idea, just no longer frozen at one instant.
+            if trim is not None:
+                trim.target_alt = talt
+            gb.control.throttle = trim.update(alt, climb, dt) if trim else cruise_thr
+            # 3D distance for scoring/divergence/stall (a purely horizontal check let a real ~11m
+            # vertical miss get reported as "arrived" once - see TRANSITION_THEORY.md section 12).
+            # Steering itself stays 2D - bearing is inherently a horizontal-plane concept here, since
+            # this leg does not steer altitude (ClimbTrim owns that separately).
+            dist = math.sqrt((tn - n) ** 2 + (te - e) ** 2 + (talt - alt) ** 2)
+            if dist < closest["dist"]:
+                closest["dist"] = dist
+                closest["t"] = elapsed
+                closest["horiz"] = math.hypot(tn - n, te - e)
+                closest["vert"] = talt - alt   # signed: positive = target ABOVE the interceptor
+            vfwd = math.hypot(vn, ve)
+            # Proportional Navigation (2026-09-20, see _intercept_pn_roll's own docstring for the
+            # references and reasoning) - commands roll DIRECTLY from LOS rotation rate via a
+            # coordinated-turn conversion, replacing the old bearing-to-a-recomputed-aim-point plus a
+            # SEPARATE heading-error P+I stage. That old approach chased a snapshot target heading
+            # through its own P+I integrator on TOP OF path_intercept()'s own lead/rate-limit logic -
+            # two control stages fighting the same job. PN closes the loop on the LOS rate directly, the
+            # textbook right variable for a constant-speed, bank-to-turn vehicle.
+            gb.control.roll = _intercept_roll(n, e, vn, ve, tn, te, tvn, tve, vfwd, dist=dist)
+            # ADAPTIVE CRUISE-PITCH SHALLOWING - TRIED AND REVERTED (2026-09-21, see
+            # TRANSITION_THEORY.md section 22 for the full story). Hypothesis: shallowing the dive would
+            # give ClimbTrim's throttle loop more real authority to close a persistent vertical gap.
+            # Tested on seed 4 (the hard case this was built for): no improvement, vertical gap got
+            # marginally WORSE (6.02m vs 5.5-5.9m) despite pitch shallowing to -33/-35 deg. Tested on
+            # seed 3 (a previously reliable hit, 6 consecutive clean hits this session): a REAL
+            # regression - roll grew to 33 deg, throttle crashed toward THR_MIN (0.76 -> 0.22), and
+            # altitude CLIMBED anyway (37.97 -> 42.64m) while the bias kept increasing trying to correct
+            # a "target below" gap it was making worse, not better. This is the SAME nonlinear
+            # aerodynamic signature the throttle-slew experiment already found (section 20.4): at this
+            # cruise speed/attitude regime, reducing dive angle OR reducing thrust both tend to INCREASE
+            # net altitude, not decrease it - a real physical effect no linear ClimbTrim-style model
+            # will fix, and this session's second independent confirmation of it. Reverted to the plain
+            # `gb.control.pitch = 0.0` this file used throughout every one of its actual hits.
+            gb.control.pitch = 0.0
+            # VISUAL-LOCK / MATCHED-PURSUIT (2026-09-20, user's reframing - see _visual_lock_check's
+            # own module-level comment): tracked ADDITIVELY alongside the existing hit_dist scoring
+            # below, not instead of it - a sustained, converging visual track is a SEPARATE way this
+            # attempt can end in success, checked after the (stronger) kinematic hit_dist check so an
+            # actual hit is never downgraded to a mere lock.
+            in_fov, ang_off, horiz_range = _visual_lock_check(n, e, vn, ve, tn, te)
+            if in_fov:
+                if lock_start_t is None:
+                    lock_start_t, lock_start_dist = now, dist
+            else:
+                lock_start_t, lock_start_dist = None, None
+            if os.environ.get("NINJAPILOT_VERBOSE") == "1":
+                now_fov = time.time()
+                if now_fov - _fov_debug_last_print[0] > 0.5:
+                    _fov_debug_last_print[0] = now_fov
+                    print("[wroom] fovdbg in_fov=%s angle_off=%+6.1f range=%6.1f lock_s=%.1f"
+                          % (in_fov, ang_off, horiz_range,
+                             (now - lock_start_t) if lock_start_t is not None else 0.0), flush=True)
+            if cruise_dist0 is None:
+                cruise_dist0, cruise_t0 = dist, now
+                dist_hist = [(now, dist)]
+            if dist < hit_dist:
+                status = "arrived"
+                break
+            if (lock_start_t is not None and now - lock_start_t >= _VISUAL_LOCK_HOLD_S
+                    and lock_start_dist - dist >= _VISUAL_CONVERGE_MARGIN_M):
+                print("[wroom] intercept leg_cruise: VISUAL LOCK sustained %.1fs, converged %.1fm -> "
+                      "%.1fm (matched-pursuit criterion met - user's reframing, see wroom_pilot.py's "
+                      "own comment on _visual_lock_check)"
+                      % (now - lock_start_t, lock_start_dist, dist), flush=True)
+                status = "visual_lock"
+                break
+            dist_hist.append((now, dist))
+            dist_hist = [(t, d) for t, d in dist_hist if now - t <= DIVERGE_WINDOW_S]
+            if now - dist_hist[0][0] >= DIVERGE_WINDOW_S - 0.5 and dist > dist_hist[0][1] + DIVERGE_MARGIN_M:
+                print("[wroom] intercept leg_cruise: DIVERGING - dist %.1fm now vs %.1fm %.1fs ago - aborting"
+                      % (dist, dist_hist[0][1], now - dist_hist[0][0]), flush=True)
+                status = "diverging"
+                break
+            if now - cruise_t0 >= STALL_WINDOW_S:
+                progress = (cruise_dist0 - dist) / max(cruise_dist0, 1.0)
+                if progress < STALL_MIN_PROGRESS_FRAC:
+                    print("[wroom] intercept leg_cruise: STALLED - only %.0f%% closed in %.0fs - aborting"
+                          % (progress * 100.0, now - cruise_t0), flush=True)
+                    status = "stalled"
+                    break
+                cruise_dist0, cruise_t0 = dist, now
+        if ok:
+            pilot.rec.row(phase, n, e, alt, vn, ve, climb)
+        if not pilot.check_safety():
+            return "safety", dist
+        r, p, y = truth_rpy()
+        if abs(r) > 50.0:
+            print("[wroom] SAFETY: intercept leg roll=%.0f deg exceeds 50 - cutting throttle, disarming" % r, flush=True)
+            gb.control.throttle = 0.0
+            gb.control.roll = gb.control.pitch = gb.control.yaw = 0.0
+            gb.control.armed = False
+            pilot.fail_reason = "intercept leg tumbled: roll %.0f deg" % r
+            return "safety", dist
+        if now - last_log > 1.0:
+            last_log = now
+            print("[wroom] intercept %-14s t=%5.1f alt=%5.2f roll=%6.1f pitch=%6.1f dist=%6.1f thr=%.2f"
+                  % (phase, elapsed, alt, r, p, dist, gb.control.throttle), flush=True)
+        time.sleep(0.05)
+    if closest["dist"] < 1e9:
+        print("[wroom] intercept closest approach: 3d=%.2fm horiz=%.2fm vert=%+.2fm (target %s "
+              "interceptor) at t=%.1fs"
+              % (closest["dist"], closest["horiz"], closest["vert"],
+                 "above" if closest["vert"] > 0 else "below", closest["t"]), flush=True)
+    gb.control.mode_position = 0
+    gb.control.roll = gb.control.pitch = 0.0
+    gb.control.throttle = hover_thr
+    pilot.tilt_check = True
+    ok_recover, rn, re_, ralt, _rvn, _rve, _rclimb = pilot.nav()
+    if ok_recover:
+        pilot.fly_until(6.0, staging_alt, tgt_n=rn, tgt_e=re_, label="intercept_recover")
+    return status, dist
+
+
+def intercept_test():
+    """NINJAPILOT_TEST_MODE=wroom_intercept: intercept a moving target using THIS airframe's actual
+    fast-cruise capability for long-range closure, not the Revo-target intercept_test's hover-only
+    ~1.5-2.6 m/s translate (that guidance was built and proven on a different, slower-cruise reference
+    airframe - see TRANSITION_THEORY.md section 12). Reuses gazebo_bridge's own proven target-spawn/
+    tracking/lead-solution code (gb.spawn_target/drive_target/lead_solution - the same math already
+    validated on the Revo target) rather than inventing new guidance, and _fly_intercept_leg's climb/
+    transition/cruise mechanics (copied from the star/oval mission's own proven _fly_interceptor_leg)
+    rather than a new flight-control path.
+
+    NOT yet mode-adaptive by range/speed (always engages interceptor mode once detected) - a hover-
+    translate terminal phase for short-range/slow targets is the one open item from TRANSITION_THEORY.md
+    section 13 this does not yet cover. Retry-from-real-position on a miss IS now covered (2026-09-20),
+    reusing shape_test's own proven pattern (re-aim from the vehicle's REAL position, not a fictitious
+    intended one - see that function's own comment on how skipping this once cost a 174m/277m miss)."""
+    pilot = _start("wroom_intercept")
+    if pilot is None:
+        return
+    import gz.transport13 as gztransport
+    node = gztransport.Node()
+
+    # 30m default, matching shape_test's own staging altitude - NOT the Revo intercept test's 11m
+    # (that number is sized for a slow hover-translate engagement close to the pad; a real
+    # interceptor-mode climb+transition was only ever validated at ~30m+ elsewhere in this project,
+    # and a first pass at this default (11) never got the vehicle more than ~0.3m off the ground
+    # during transition/cruise - staged too low for this maneuver, not a steering bug).
+    staging_alt = float(os.environ.get("NINJAPILOT_INTERCEPT_ALT", "30"))
+    cruise_pitch = float(os.environ.get("NINJAPILOT_INTERCEPTOR_CRUISE_PITCH", "-45"))
+    hover_thrust = float(os.environ.get("NINJAPILOT_INTERCEPTOR_HOVER_THRUST", "0.65"))
+    cruise_thr = interceptor_level_thrust(hover_thrust, cruise_pitch)
+    climb_s = float(os.environ.get("NINJAPILOT_INTERCEPTOR_CLIMB_TIME", "3.0"))
+    rate = float(os.environ.get("NINJAPILOT_INTERCEPTOR_TRANSITION_RATE", "15"))
+    # This airframe's own measured cruise speed range (4-13 m/s, TRANSITION_THEORY.md section 2) - NOT
+    # the Revo intercept test's INTERCEPT_SPEED=2.6, which is sized for a hover-only reference quad and
+    # would throw away the entire point of engaging interceptor mode at all.
+    cruise_speed = float(os.environ.get("NINJAPILOT_INTERCEPT_SPEED", "6.0"))
+    pilot.CEILING_M = staging_alt + 20.0
+
+    # BLIND-WINDOW LEAD (2026-09-20, found via [pndbg] on a randomized-geometry regression - see
+    # TRANSITION_THEORY.md section 16/17): outerloop.c's own interceptor.live_frac is zero for the
+    # entire CLIMB+TRANSITION duration (it only starts ramping once phase==CRUISE), meaning NO
+    # steering correction of any kind reaches the airframe from the moment _turn_to_heading hands
+    # off until cruise actually begins - roughly climb_s+transition_s+1.0 (7.0s at the defaults)
+    # PLUS _turn_to_heading's own yaw+settle time (not knowable in advance, since it depends on how
+    # far this very bearing calculation turns out to be from the vehicle's current heading -
+    # estimated, not measured, at a fixed padding below). The FIXED-geometry validation set (section
+    # 14's 6-hit streak) never exposed this: a near-zero-closest-approach collision course has an
+    # aim direction that barely changes over 7-10s, so a stale one-shot aim happened to stay valid.
+    # Any genuine crossing geometry (every randomized trial in section 16, closest-approach 0.9-8.9m)
+    # does NOT have that property - the correct aim direction evolves meaningfully over the blind
+    # window, and aiming at the target's CURRENT position/velocity (as this code did before) leaves
+    # the vehicle badly mis-aimed by the time it can finally steer, confirmed directly: the very
+    # first post-cruise [pndbg] tick in a reproduced failure showed los_rate=-1.33 rad/s (~76 deg/s)
+    # - already a near-unrecoverable sweep rate before any correction had a chance to act. Fix:
+    # extrapolate the target's position forward by the estimated blind-window duration (using its
+    # own known constant velocity - the same physics `_intercept_bearing_deg`'s endgame lead already
+    # relies on) before computing the initial aim, so the vehicle enters cruise already pointed
+    # close to where the target will actually be, not where it was when the decision was made.
+    _TURN_TO_HEADING_ESTIMATE_S = float(os.environ.get("NINJAPILOT_TURN_ESTIMATE_S", "3.0"))
+    pre_cruise_blind_s = climb_s + abs(cruise_pitch) / max(rate, 1.0) + 1.0 + _TURN_TO_HEADING_ESTIMATE_S
+
+    # SPAWN AND START DRIVING THE TARGET BEFORE TAKEOFF (2026-09-23, direct user finding from watching
+    # the live GUI trail: "the ball starts traversing the screen AFTER the interceptor launches. Talk
+    # about the dumbest mistake ever" - confirmed directly from trail_daemon's own log, not just a
+    # visual impression: `flown=78 target=0 ... ball=no` lines showed the interceptor's own trail
+    # already well underway before the ball model even existed in the world). Root cause: this block
+    # used to run AFTER `pilot.takeoff()`+settle, so the target was spawned only once the interceptor
+    # was already airborne and holding - backwards for what this is supposed to represent (an
+    # incoming threat already inbound while the interceptor scrambles), not a fundamental miss cause
+    # (detection is a real-time distance check regardless of spawn order) but a real scenario-realism
+    # bug worth fixing on its own terms. Moved to BEFORE takeoff. The target's own velocity command
+    # needs to keep being republished for it to keep moving (the same `_pub.publish(_tw)` the
+    # detection-wait loop below already does every tick) - a background thread covers the
+    # takeoff+settle window this block now precedes, stopping cleanly once the detection-wait loop's
+    # own per-tick publish takes over, so there is never a gap OR a double-publish race.
+    #
+    # REAL ROOT CAUSE of this session's persistent ~7-10m "miss" ceiling, found 2026-09-20 by adding
+    # [pndbg] diagnostics: at closest approach, horizontal separation was only ~2.7m (PN's own steering
+    # working fine) while the ALTITUDE gap was ~7m - the interceptor was 7+ meters ABOVE the target the
+    # entire cruise, not off to the side. Climb+transition consistently overshoots staging_alt by a
+    # repeatable ~9.5-10m before cruise even starts (measured directly: cruise entry alt lands at
+    # ~39.5-40m from a 30m staging_alt, across every single guidance law tried this session - not a
+    # fluke of any one steering approach). `ClimbTrim` (this function's own docstring) is a throttle-only
+    # closed loop; at this pitch/speed its real achievable descent rate is far slower than the ~1 m/s its
+    # own math assumes (aerodynamic lift from forward airspeed fights the throttle reduction), so closing
+    # a 9-10m altitude hole takes far longer than an engagement's own divergence/stall/timeout window
+    # allows - every "miss" this session was mostly this gap never closing in time, not a horizontal
+    # steering failure. Fix: spawn/drive the target at the altitude the interceptor actually settles at
+    # after transition (measured directly, not guessed), not at the nominal staging_alt - this removes
+    # the need for ClimbTrim to correct a large hole at all, letting the (already working) horizontal
+    # guidance actually convert its own convergence into a real hit. ClimbTrim's OWN hold target is
+    # matched to the same altitude below (_fly_intercept_leg), not left at raw staging_alt, or it would
+    # fight to descend AWAY from the (now correctly relocated) target instead of holding at it.
+    gb.TARGET_ALT = staging_alt + _INTERCEPT_TRANSITION_OVERSHOOT_M
+    if not gb.spawn_target(node):
+        print("[wroom] intercept: FAIL - could not spawn target", flush=True)
+        _finish(pilot, "FAIL - could not spawn target")
+        return
+    # Real Gazebo contact -> real physics response (2026-09-20, user request): without this, a
+    # hit ball just keeps flying its programmed track forever, untouched. gb.subscribe_contact()
+    # was already built for the Revo path (_intercept_run) but this WROOM path never called it,
+    # relying only on a software distance check to score "arrived" - which still works for
+    # scoring, but the ball itself never physically reacted. subscribe_contact()'s own callback
+    # calls gb.release_target_to_gravity() on the real sensor's first report, swapping the
+    # kinematic ball for a free (gravity-on, no velocity control) dynamic body at that pose -
+    # real physics then computes the actual equal-and-opposite reaction (the interceptor is
+    # still overlapping it at that instant) and gravity takes over from there.
+    gb.subscribe_contact(node)
+    time.sleep(0.5)
+    tvel, _pub, _tw = gb.drive_target(node)
+    print("[wroom] intercept: target spawned and moving - now taking off", flush=True)
+    _target_drive_stop = threading.Event()
+
+    def _keep_driving_target():
+        while not _target_drive_stop.is_set():
+            _pub.publish(_tw)
+            time.sleep(0.1)
+    threading.Thread(target=_keep_driving_target, daemon=True).start()
+
+    ok = pilot.takeoff(staging_alt, timeout=60.0)
+    if ok:
+        ok = pilot.fly_until(3.0, staging_alt, tgt_n=0.0, tgt_e=0.0, label="settle")
+    _target_drive_stop.set()   # hand off to the detection-wait loop's own per-tick publish below
+    if not ok:
+        _finish(pilot, "FAIL - %s" % (pilot.fail_reason or "did not get airborne"))
+        return
+
+    def get_target():
+        st = gb._target_state[0]
+        if st is None:
+            return None
+        _, tned = st
+        # 6th element added (2026-09-21, direct user correction: "you KNOW the heading of the ball,
+        # and its speed at ALL times... just assume you always have perfect tracking" - the target's
+        # real vertical velocity was already known (gb.TARGET_CLIMB_MPS, real and constant per engagement,
+        # not estimated) but this tuple discarded it. tvel[2] is NED-down (drive_target()'s own
+        # convention); negated back to +up to match talt's own +up sign here.
+        return (tned[0], tned[1], -tned[2], tvel[0], tvel[1], -tvel[2])
+
+    print("[wroom] intercept: watching for inbound within %.0fm..." % gb.DETECT_RANGE, flush=True)
+    # Real, reproduced bug (2026-09-20): this loop used to only READ pilot.nav() and never called
+    # pilot.tick()/anything that commands the vehicle - it just left whatever stick values `settle`
+    # last set frozen for up to 60s while watching for the target. That is flying blind, the exact
+    # thing this project's own steering loops elsewhere refuse to do (see _fly_interceptor_leg's
+    # continuous divergence/stall checks). It happened to go unnoticed while detection was fast in
+    # earlier runs; the run where detection took ~48s crashed hard (30m -> 0.2m, pitch 73 deg) with
+    # a 50s gap of zero logged control activity right before the tilt-over trip. Fixed by holding
+    # position/altitude with pilot.tick() every iteration, exactly like every other wait loop here.
+    ok0, hold_n, hold_e, _hold_alt, _hvn, _hve, _hclimb = pilot.nav()
+    if not ok0:
+        _finish(pilot, "FAIL - lost nav before detection wait")
+        return
+    t_watch = time.time()
+    detected = False
+    # Real visual-acquisition logging (2026-09-23, direct user request - see _visual_lock_check's own
+    # docstring for the real camera-detection plumbing this reuses): does NOT gate engagement - this
+    # airframe holds a fixed attitude during the passive detection wait rather than actively scanning,
+    # so requiring real visual to trigger the engagement itself could hang indefinitely for any
+    # geometry that doesn't happen to cross this camera's ~69 deg FOV during that hold. Distance-based
+    # detection stays the actual trigger (a reasonable stand-in for "a cueing sensor with its own,
+    # wider field of regard" - a radar/RWR cue, not the terminal camera). This just reports the honest
+    # answer to "did we actually SEE it (not just get cued to it) before engaging" for every run.
+    visual_acquired_at = [None]
+    while time.time() - t_watch < 60.0:
+        _pub.publish(_tw)
+        if not pilot.tick(staging_alt, tgt_n=hold_n, tgt_e=hold_e, dt=0.1):
+            _finish(pilot, "FAIL - %s" % (pilot.fail_reason or "safety trip during detection wait"))
+            return
+        ok2, n, e, alt, _vn, _ve, _climb = pilot.nav()
+        if visual_acquired_at[0] is None and gb.get_camera_ball_bearing() is not None:
+            visual_acquired_at[0] = time.time() - t_watch
+            print("[wroom] intercept: real camera visual acquired at t=%.1fs into detection wait"
+                  % visual_acquired_at[0], flush=True)
+        tstate = get_target()
+        if ok2 and tstate is not None:
+            d = math.hypot(tstate[0] - n, tstate[1] - e)
+            if d < gb.DETECT_RANGE:
+                print("[wroom] intercept: *** CONTACT DETECTED at %.1fm - engaging interceptor mode "
+                      "(real visual %s) ***"
+                      % (d, ("acquired at t=%.1fs" % visual_acquired_at[0]) if visual_acquired_at[0]
+                         is not None else "NOT yet acquired"), flush=True)
+                detected = True
+                break
+        time.sleep(0.1)
+    if not detected:
+        print("[wroom] intercept: FAIL - target never came within detection range", flush=True)
+        _finish(pilot, "FAIL - no detection")
+        return
+
+    # max_leg_s raised 30 -> 60: the first working run (2026-09-20) was still closing steadily
+    # (32.5m -> 16.1m, ~0.76 m/s net) when it timed out at 30s, not diverging or stalling - it just
+    # needed more time, not a different steering law.
+    max_leg_s = float(os.environ.get("NINJAPILOT_INTERCEPT_MAX_LEG_S", "60.0"))
+
+    # RETRY-FROM-REAL-POSITION, ported from shape_test's own proven pattern (2026-09-20): a miss
+    # (diverging/stalled/timeout) re-attacks from wherever the vehicle actually ended up, re-aimed at
+    # the target's CURRENT (moved) position - not the original engagement geometry, and not a fictitious
+    # "should have arrived" position. shape_test's own comment on this exact pattern: skipping it once
+    # cost a 174m miss on leg 2 and a 277m miss on leg 3 of one star mission, in a straight line, because
+    # the retry started from where the vehicle was SUPPOSED to be rather than where it REALLY was.
+    # "safety" (a tumble/disarm) is not retried - there is no vehicle left in a state worth re-aiming.
+    # Temporarily forced to 1 (2026-09-20, explicit direction): the first-pass engagement is what
+    # matters right now - retry masked how well/badly a single pass performs by averaging it with
+    # follow-up attempts at different geometry. Revisit once first-pass reliability itself is solid.
+    MAX_INTERCEPT_ATTEMPTS = int(os.environ.get("NINJAPILOT_INTERCEPT_MAX_ATTEMPTS", "1"))
+    status, final_dist = "timeout", 1e9
+    for attempt in range(1, MAX_INTERCEPT_ATTEMPTS + 1):
+        # REQUIRED handoff step, copied from shape_test's own proven pattern (it is NEVER skipped there -
+        # every _fly_interceptor_leg call is immediately preceded by _turn_to_heading). Missing this the
+        # first time round caused a real, reproduced crash: the vehicle plummeted 30m -> 0.3m within the
+        # first ~4s of leg_climb/leg_transition, twice, identically. _turn_to_heading actively holds
+        # altitude (a real closed loop, not a stale throttle value) AND yaws the nose to face the intended
+        # travel direction before interceptor mode's pitch-over engages - without it, the pitch-over
+        # rotates the vehicle nose-first into whatever direction it happened to be facing after a passive
+        # detection-wait loop (or a prior failed attempt), not the direction it is about to fly.
+        ok3, n0, e0, alt0, _vn0, _ve0, _climb0 = pilot.nav()
+        tstate0 = get_target()
+        if not (ok3 and tstate0 is not None):
+            print("[wroom] intercept attempt %d: FAIL - lost nav or target track before re-aiming"
+                  % attempt, flush=True)
+            status = "safety"
+            break
+        # REPLACED (2026-09-21, direct user correction: "if you'd lead properly, set a proper
+        # predictive angle for takeoff, then transition into forward flight there is ZERO reason to
+        # not nail the intercept" - and separately, the referenced Zheng & Chen 2021 paper's own actual
+        # point, which this file cited but never fully applied: solve the exact intercept geometry
+        # once, precisely, rather than soft-correct afterward). The PRIOR version of this block
+        # extrapolated the target only to the END of the blind window (climb+transition duration), then
+        # aimed the nose at THAT point - not at the target's position at the moment intercept actually
+        # happens, which is LATER (by however long cruise then takes to close the remaining distance,
+        # often several more seconds). That remaining gap was never fed back into the initial aim at
+        # all. `_solve_intercept_lead()` (see its own docstring) fixes this: it solves for the FULL
+        # intercept time (blind window + cruise-closing time, self-consistently, not just the first
+        # piece), and now ALSO the target's predicted ALTITUDE at that exact moment - the vertical
+        # component of leading, which the file's whole altitude-tracking history (sections 19-21) had to
+        # keep correcting REACTIVELY, tick by tick, because it was never part of the INITIAL aim to
+        # begin with. `lead_alt0` is stashed for the climb to aim at directly (see its own use in
+        # `_fly_intercept_leg` below) instead of only reacting to the gap once airborne.
+        t_intercept, tgt_n0, tgt_e0, lead_alt0 = _solve_intercept_lead(
+            n0, e0, alt0, tstate0[0], tstate0[1], tstate0[2], tstate0[3], tstate0[4], tstate0[5],
+            pre_cruise_blind_s, cruise_speed)
+        bearing0 = math.degrees(math.atan2(tgt_e0 - e0, tgt_n0 - n0))
+        print("[wroom] intercept attempt %d/%d: re-aiming from (%.1f,%.1f,%.1f) at t+%.1fs (full "
+              "intercept solve, not just blind-window) predicted (%.1f,%.1f,%.1f), bearing %.0f deg"
+              % (attempt, MAX_INTERCEPT_ATTEMPTS, n0, e0, alt0, t_intercept, tgt_n0, tgt_e0, lead_alt0,
+                 bearing0), flush=True)
+        # ADAPTIVE CLIMB DURATION (2026-09-23, see _solve_adaptive_climb_s's own module comment for the
+        # full reasoning): solve for a climb_s that leaves post-transition altitude near lead_alt0
+        # instead of the fixed ~9.5m overshoot every prior engagement used regardless of need. Pushed to
+        # firmware via gb.push_stabilization_update() (new plumbing this same session, see its own
+        # docstring for the whole-object-write hazard it is careful to avoid) BEFORE _turn_to_heading,
+        # so it lands well before this attempt's climb begins - and the GROUND's own `climb_s` is
+        # updated to match, so _fly_intercept_leg's phase-tracking stays synchronized with what firmware
+        # is actually now doing (a real, previously-identified failure mode if these two ever disagree -
+        # see this file's own comments on why _turn_to_heading is a REQUIRED handoff).
+        if os.environ.get("NINJAPILOT_ADAPTIVE_CLIMB_ENABLE", "1") == "1":
+            desired_overshoot = lead_alt0 - staging_alt
+            adaptive_climb_s = _solve_adaptive_climb_s(desired_overshoot)
+            print("[wroom] intercept attempt %d: adaptive climb_s %.2f -> %.2f (desired overshoot %.1fm)"
+                  % (attempt, climb_s, adaptive_climb_s, desired_overshoot), flush=True)
+            gb.push_stabilization_update("InterceptorClimbTime", adaptive_climb_s)
+            time.sleep(0.3)   # let uavtalk_thread's own loop notice and send it before climb begins
+            climb_s = adaptive_climb_s
+        # Measures _TURN_TO_HEADING_ESTIMATE_S's real accuracy (2026-09-20) - that estimate is the one
+        # un-measured piece of pre_cruise_blind_s (climb_s/rate/transition math are all known exactly
+        # in advance; how long the actual yaw+settle takes is not). Logged so it can be calibrated
+        # against real data instead of left as a guessed constant.
+        # LOOSENED (2026-09-21, direct user correction: "how late to the party the interceptor is
+        # after literally being there first, hovering"): tolerance_deg=1.0 + the default 2.5s
+        # hold_settle_s were sized back when climb+transition were FULLY BLIND (zero ground steering
+        # reached the airframe until CRUISE) - the one-shot pre-engagement aim had to be as precise as
+        # physically achievable because nothing could correct it for the next ~7-10s. That is no
+        # longer true: the live_frac fix (2026-09-20) plus this session's own continuous climb-pitch
+        # fix (_intercept_pitch_to_target, right above) mean BOTH bearing (roll) and elevation (pitch)
+        # are corrected continuously throughout climb now. Paying a slow, "weak, prop-torque-only yaw"
+        # (this file's own _turn_to_heading docstring) rotation down to within 1 degree, THEN holding
+        # that for a flat 2.5s more, before even starting to move, was measured costing 3.7-10.1s of
+        # pure dead time on every single engagement - often longer than climb_s itself. Loosened to the
+        # shared 6 deg default (shape_test's own proven tolerance) and a much shorter 0.5s settle -
+        # good enough to fix psi_ref's one-time capture in the right ballpark, with climb's own
+        # continuous correction now doing the fine work that _turn_to_heading used to have to do alone.
+        # Overridable (2026-09-21, see TRANSITION_THEORY.md section 20.5 item 1): the loosened 6.0/0.5
+        # defaults above cut latency a lot but regressed seed 1/2's visual-lock convergence quality -
+        # exposed here rather than hardcoded so a middle ground can be tried without another edit.
+        _turn_tol_deg = float(os.environ.get("NINJAPILOT_TURN_TOLERANCE_DEG", "6.0"))
+        _turn_settle_s = float(os.environ.get("NINJAPILOT_TURN_SETTLE_S", "0.5"))
+        _turn_t0 = time.time()
+        if not _turn_to_heading(pilot, bearing0, n0, e0, staging_alt, tolerance_deg=_turn_tol_deg,
+                                 hold_settle_s=_turn_settle_s):
+            _finish(pilot, "FAIL - %s" % (pilot.fail_reason or "turn-to-heading failed"))
+            return
+        print("[wroom] intercept attempt %d: _turn_to_heading took %.1fs (estimate was %.1fs)"
+              % (attempt, time.time() - _turn_t0, _TURN_TO_HEADING_ESTIMATE_S), flush=True)
+
+        status, final_dist = _fly_intercept_leg(pilot, get_target, staging_alt, cruise_pitch, cruise_thr,
+                                                 climb_s, rate, cruise_speed, hit_dist=1.5, max_leg_s=max_leg_s,
+                                                 lead_alt=lead_alt0)
+        print("[wroom] intercept attempt %d: %s at %.2fm" % (attempt, status, final_dist), flush=True)
+        if status in ("arrived", "visual_lock", "safety"):
+            # visual_lock is treated as a terminal success here too (2026-09-20, user's reframing) -
+            # a sustained, converging visual track is a real engagement outcome, not a failed attempt
+            # worth re-aiming and trying again from scratch.
+            break
+        if attempt < MAX_INTERCEPT_ATTEMPTS:
+            print("[wroom] intercept attempt %d: %s - retrying from the real position above"
+                  % (attempt, status), flush=True)
+
+    # FIXED (2026-09-21, reversing the 2026-09-20 "deliberately not fixed" call above - superseded by
+    # watching a live miss): descend_and_land() defaulted to tgt_n=0, tgt_e=0 - the ORIGIN PAD, not the
+    # vehicle's real position - so on anything short of a hit, the vehicle flew all the way back toward
+    # the pad before landing, regardless of where the engagement actually left it. The earlier reasoning
+    # ("a real interception is terminal, so this doesn't matter") only holds when every run hits; misses
+    # are still a real fraction of outcomes (section 17/18/19), and on a miss this produced exactly the
+    # confusing behavior it looks like from the outside: the vehicle appears to fly back toward the
+    # target's OWN flight path (every randomized track passes within 0-12m of the pad by construction -
+    # see randomize_target_track()) and land there, long after the real target has moved on - which
+    # reads as "chasing a stale point" even though it was actually just going home. Landing at the
+    # vehicle's REAL current position (already recovered to, by _fly_intercept_leg's own
+    # "intercept_recover" leg above) removes that dead, purposeless leg entirely, on a hit OR a miss.
+    ok_land0, land_n, land_e, _land_alt, _land_vn, _land_ve, _land_climb = pilot.nav()
+    landed = pilot.descend_and_land(tgt_n=land_n, tgt_e=land_e) if ok_land0 else pilot.descend_and_land()
+    if status == "arrived":
+        verdict = ("PASS - closed to %.2fm (hit_dist 1.5m)" % final_dist if landed
+                   else "FAIL - arrived, closed to %.2fm, but landing failed" % final_dist)
+    elif status == "visual_lock":
+        # Separate PASS wording, deliberately not reusing the "closed to Xm (hit_dist)" phrasing - a
+        # visual-lock success is NOT a kinematic hit, and the verdict line should say so plainly rather
+        # than let a hit_dist-shaped string imply a collision occurred.
+        verdict = ("PASS (visual lock, matched pursuit) - sustained visual track, converged to %.2fm "
+                   "without a direct hit" % final_dist if landed
+                   else "FAIL - visual lock achieved (%.2fm) but landing failed" % final_dist)
+    else:
+        verdict = "FAIL - %s, closed to %.2fm" % (status, final_dist)
+    _finish(pilot, verdict)
 
 
 def shape_test():
@@ -1766,6 +2897,101 @@ def hoverstep_test():
             ok = pilot.fly_until(4.0, staging_alt, tgt_n=None, tgt_e=None, label="recover")
     landed = pilot.descend_and_land() if ok else False
     verdict = ("PASS - logged hover roll step response at stick=%.2f" % step_stick
+               if (ok and landed) else "FAIL - %s" % (pilot.fail_reason or "did not complete"))
+    _finish(pilot, verdict)
+
+
+def yaw_authority_test():
+    """Hover (Attitude/Bank1) yaw step response - the direct A/B harness for comparing yaw-authority
+    hardware changes (motor toe/cant angle, swirl-recovery vanes) against the unmodified airframe.
+    Applies a fixed yaw stick and holds it, logging yaw rate (the actual authority metric - yaw has no
+    settled angle to compare, unlike roll/pitch) plus roll/pitch/altitude to catch any coupling side
+    effects a thrust-vector change could introduce (that's the "general controllability" question, not
+    just "does yaw rate go up"). Same stick/logging shape as hoverstep_test/rollstep_test so results are
+    directly comparable: run once against the baseline model.sdf, once against a modified one (e.g.
+    toed rotor joint axes), diff the steady-state yaw rate and the roll/pitch/altitude excursions.
+    NINJAPILOT_YAWSTEP_STICK (default 0.30).
+    """
+    pilot = _start("wroom_yawauth")
+    if pilot is None:
+        return
+    staging_alt = float(os.environ.get("NINJAPILOT_SHAPE_ALT", "10"))
+    pilot.CEILING_M = staging_alt + 15.0
+    step_stick = float(os.environ.get("NINJAPILOT_YAWSTEP_STICK", "0.30"))
+    bank_stick = float(os.environ.get("NINJAPILOT_YAWAUTH_ROLL", "0.0"))
+    hold_s = float(os.environ.get("NINJAPILOT_YAWAUTH_HOLD_S", "6.0"))
+    # Default takeoff timeout (25s) is sized for ~4m staging, not this test's higher altitudes -
+    # same gotcha rollstep_test already documents. Scale it so a 30m+ staging climb doesn't spuriously FAIL.
+    ok = pilot.takeoff(staging_alt, timeout=max(25.0, staging_alt * 2.0))
+    if ok:
+        ok = pilot.fly_until(3.0, staging_alt, tgt_n=0.0, tgt_e=0.0, label="settle")
+    if ok and bank_stick:
+        # Bank first, closed-loop altitude hold (ClimbTrim - same mechanism CruiseControl uses), THEN add yaw on
+        # top once the bank has settled: this reproduces "yaw authority while banked hard" (the mixer headroom
+        # squeeze from a large roll command competing with throttle-for-altitude), not an artificial fixed
+        # high-throttle hover that just climbs uncontrolled.
+        print("[wroom] yawauth: banking to roll=%.2f first (closed-loop altitude hold)" % bank_stick, flush=True)
+        trim = ClimbTrim(gb.control.throttle, staging_alt)
+        t0 = time.time()
+        while time.time() - t0 < 3.0:
+            ok2, _n, _e, alt, _vn, _ve, climb = pilot.nav()
+            gb.control.throttle = trim.update(alt, climb, 0.05) if ok2 else gb.control.throttle
+            gb.control.roll = bank_stick
+            gb.control.pitch = 0.0
+            if not pilot.check_safety():
+                ok = False
+                break
+            time.sleep(0.05)
+    else:
+        trim = None
+    if ok:
+        print("[wroom] yawauth: applying yaw step=%.2f (bank=%.2f), logging at ~20Hz for %.1fs"
+              % (step_stick, bank_stick, hold_s), flush=True)
+        baseline_thr = gb.control.throttle
+        t0 = time.time()
+        prev_t, prev_yaw = None, None
+        samples = []
+        while time.time() - t0 < hold_s:
+            now = time.time()
+            ok2, n, e, alt, vn, ve, climb = pilot.nav()
+            if trim is not None:
+                gb.control.throttle = trim.update(alt, climb, 0.05) if ok2 else baseline_thr
+            else:
+                gb.control.throttle = baseline_thr
+            gb.control.roll = bank_stick
+            gb.control.pitch = 0.0
+            gb.control.yaw = step_stick
+            r, p, y = truth_rpy()
+            yaw_rate = 0.0
+            if prev_t is not None:
+                ydt = max(now - prev_t, 0.01)
+                yaw_rate = _heading_error(y, prev_yaw) / ydt
+            prev_t, prev_yaw = now, y
+            samples.append((now - t0, r, p, y, yaw_rate, alt))
+            if not pilot.check_safety():
+                ok = False
+                break
+            time.sleep(0.05)
+        for st, r, p, y, yr, alt in samples:
+            print("[wroom] yawauth t=%5.2f roll=%6.1f pitch=%6.1f yaw=%7.2f yaw_rate=%+6.2f/s alt=%5.2f"
+                  % (st, r, p, y, yr, alt), flush=True)
+        if samples:
+            window_s = min(2.0, hold_s / 2.0)
+            steady = [s for s in samples if s[0] > hold_s - window_s]  # past the spin-up transient
+            if steady:
+                mean_yaw_rate = sum(s[4] for s in steady) / len(steady)
+                mean_roll = sum(abs(s[1]) for s in steady) / len(steady)
+                mean_pitch = sum(abs(s[2]) for s in steady) / len(steady)
+                alt_excursion = max(s[5] for s in samples) - min(s[5] for s in samples)
+                print("[wroom] yawauth STEADY-STATE (last %.1fs): yaw_rate=%+6.2f deg/s  "
+                      "|roll|=%5.2f deg  |pitch|=%5.2f deg  alt_excursion=%5.2fm"
+                      % (window_s, mean_yaw_rate, mean_roll, mean_pitch, alt_excursion), flush=True)
+        gb.control.yaw = 0.0
+        gb.control.roll = 0.0
+        if ok:
+            ok = pilot.fly_until(4.0, staging_alt, tgt_n=None, tgt_e=None, label="recover")
+    landed = pilot.descend_and_land() if ok else False
+    verdict = ("PASS - logged hover yaw step response at stick=%.2f" % step_stick
                if (ok and landed) else "FAIL - %s" % (pilot.fail_reason or "did not complete"))
     _finish(pilot, verdict)
 

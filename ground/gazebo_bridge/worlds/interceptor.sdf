@@ -61,6 +61,13 @@
       <render_engine>ogre2</render_engine>
     </plugin>
 
+    <!-- Required for cam_thermal (model.sdf) to render anything but flat black - without at least one
+         gz-sim-thermal-system instance somewhere in the world, the sensor produces no useful image at
+         all. This plugin is scoped per-object (nested in a <visual>), not global, per gz-sim8's actual
+         reference usage (worlds/thermal_camera.sdf) - everything else renders at the sensor's own
+         default ambient. target_ball (gazebo_bridge.py spawn_target) sets its own <temperature> on its
+         link so it stands out, which is the actual point of a thermal camera on an interceptor. -->
+
     <!-- Contact sensing must be a WORLD system, not a model plugin. Declared
          on the model it loads silently and publishes nothing, which is how
          the intercept test ended up detecting collisions by sampling the
@@ -407,9 +414,14 @@
          `gz sim -s` only renders once a GUI client has brought up a
          context; with both up, frames carry real scene content. -->
 
-    <plugin filename="CameraView" name="Down">
+    <!-- The real interceptor model has exactly 2 cameras, both nose-forward (see model.sdf): cam_thermal
+         (26mm thermal, narrow FOV) and cam_rgb (19.5mm RGB, wide FOV). The 3-panel Down/FPV45/Up stack above
+         was leftover from a different setup and pointed at topics (cam_tail, cam_nose) that don't exist on
+         this model, hence "no signal" on all three. Replaced with 2 panels on the real topics - display
+         only, no other behavior attached. -->
+    <plugin filename="CameraView" name="Thermal">
       <gz-gui>
-        <title>Down</title>
+        <title>Thermal</title>
         <property type="bool" key="showTitleBar">true</property>
         <property type="bool" key="resizable">true</property>
         <property type="double" key="width">300</property>
@@ -420,39 +432,23 @@
           <line own="right" target="right"/>
         </anchors>
       </gz-gui>
-      <topic>/interceptor/cam_tail/image</topic>
+      <topic>/interceptor/cam_thermal/image</topic>
     </plugin>
 
-    <plugin filename="CameraView" name="FPV 45deg">
+    <plugin filename="CameraView" name="RGB">
       <gz-gui>
-        <title>FPV 45deg</title>
+        <title>RGB</title>
         <property type="bool" key="showTitleBar">true</property>
         <property type="bool" key="resizable">true</property>
         <property type="double" key="width">300</property>
         <property type="double" key="height">225</property>
         <property type="string" key="state">floating</property>
-        <anchors target="Down">
+        <anchors target="Thermal">
           <line own="bottom" target="top"/>
           <line own="right" target="right"/>
         </anchors>
       </gz-gui>
-      <topic>/interceptor/cam_nose/image</topic>
-    </plugin>
-
-    <plugin filename="CameraView" name="Up">
-      <gz-gui>
-        <title>Up</title>
-        <property type="bool" key="showTitleBar">true</property>
-        <property type="bool" key="resizable">true</property>
-        <property type="double" key="width">300</property>
-        <property type="double" key="height">225</property>
-        <property type="string" key="state">floating</property>
-        <anchors target="FPV 45deg">
-          <line own="bottom" target="top"/>
-          <line own="right" target="right"/>
-        </anchors>
-      </gz-gui>
-      <topic>/interceptor/cam_nose/image</topic>
+      <topic>/interceptor/cam_rgb/image</topic>
     </plugin>
 
     </gui>
