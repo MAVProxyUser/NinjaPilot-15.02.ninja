@@ -2763,8 +2763,19 @@ def _intercept_run(node, client):
             vision = None
     else:
         print("[vision] disabled (NINJAPILOT_VISION=0) - EKF on position only")
+    # "frames"/"handoffs" must exist from the start, not just once the first
+    # lock happens (2026-09-23, real crash found while investigating why the
+    # camera never showed the ball on the interceptor airframe): the final
+    # summary print reads both unconditionally, and BallTracker's dedicated
+    # tracking topics (cam_track_up/cam_track_45) only exist on the X3 model
+    # - on "interceptor" vision.lock() never returns non-None even once, so
+    # these keys were never created, and every single intercept_test run
+    # ended in "KeyError: 'frames'" from a background thread (silent - it
+    # didn't fail the run, but it meant this summary line never printed and
+    # the crash trace polluted every log).
     vis_state = {"locked": False, "n_bearing": 0, "n_pos": 0,
-                 "locked_s": 0.0, "innov": [], "last": None}
+                 "locked_s": 0.0, "innov": [], "last": None,
+                 "frames": 0, "handoffs": 0}
     tvel, _pub, _tw = drive_target(node)
 
     # "Detection": the object crosses into range. Stands in for whatever
