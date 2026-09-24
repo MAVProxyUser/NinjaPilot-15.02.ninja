@@ -315,6 +315,14 @@ TRACK_VISION       = os.environ.get("NINJAPILOT_VISION", "1") == "1"
 # real collision at 0.50-0.58m still scores, because `real_contact` from the
 # ball's own contact sensor is checked first and is the actual ground truth;
 # the backstop exists only to catch a strike the 20Hz sampler stepped over.
+# Live PN roll-steering during the (opt-in) post-trigger Interceptor dive -
+# see the NINJAPILOT_INTERCEPT_DIVE_TRIGGER block in _intercept_run(). Same
+# values wroom_pilot.py uses for its own PN steering (_PN_GAIN_N,
+# _PN_BANK_PER_STICK_DEG, _PN_RANGE_FLOOR_M) - not re-derived, ported.
+PN_GAIN_N = float(os.environ.get("NINJAPILOT_PN_GAIN_N", "8.0"))
+PN_BANK_PER_STICK_DEG = 19.0 / 0.30
+PN_RANGE_FLOOR_M = 5.0
+
 INTERCEPT_HIT_DIST = 0.485  # m centre-to-centre: guaranteed-contact distance
 # Hover sits at 1.00g and the 90th percentile through a whole intercept run
 # is 1.06g, so anything above ~1.5 is not flight - measured, not guessed.
@@ -468,6 +476,7 @@ _last_accel_g = [1.0]    # |specific force| in g, from the vehicle's own IMU
 # impulse can alias away regardless of loop rate.
 _peak_accel_g = [1.0]
 _attitude_dbg_last = [0.0]   # NINJAPILOT_ATTITUDE_DEBUG rate-limit, see _intercept_run
+_pn_live_dbg_last = [0.0]    # live PN dive-steering debug rate-limit, see _intercept_run
 _contact_hit = [None]    # wall-clock of the PHYSICS ENGINE's own contact report
 POSE_TOPIC = "/world/%s/pose/info" % GAZEBO_WORLD
 IMU_TOPIC = "/%s/imu" % GZ_NS
@@ -2634,6 +2643,11 @@ def intercept_test():
         print("[intercept] disarming")
         try:
             control.mode_position = 0
+            # A lingering nonzero control.roll from live PN dive-steering
+            # (NINJAPILOT_INTERCEPT_DIVE_TRIGGER) would otherwise carry into
+            # whatever comes next under plain manual/Attitude mode - reset
+            # it explicitly rather than relying on the mode switch alone.
+            control.roll = 0.0
             time.sleep(1.0)
             control.armed = False
         except Exception as e:
@@ -2959,20 +2973,33 @@ def _intercept_run(node, client):
         # vs. 0.40-0.60m near-hits on the same seed under plain PositionHold)
         # - not a wash, a real regression. In both runs altitude kept
         # CLIMBING past the target's 11m (up to 18m+) during what should be
-        # a -45deg DIVE, even after collapsing InterceptorClimbTime to 0.1s
-        # to rule out a fresh 3s ground-launch climb re-triggering mid-air -
-        # that fix did NOT stop the overshoot, so the real cause is still
-        # unidentified (candidate: interceptor_level_thrust()'s lift
-        # compensation behaving differently when entered already-moving,
-        # mid-air, than the wroom harness's own controlled from-a-standstill
-        # entry it was tuned against). Left in place, gated off by default,
-        # so the working PositionHold-only baseline is not regressed while
-        # this gets root-caused - do not flip the default without a real fix
-        # verified against multiple seeds.
+        # a -45deg DIVE. Collapsing InterceptorClimbTime to 0.1s (ruling out
+        # a fresh 3s ground-launch climb re-triggering mid-air) did NOT stop
+        # it, which was the real clue: ROOT CAUSE FOUND by reading
+        # interceptor_level_thrust() itself (outerloop.c) - its whole job is
+        # to hold ALTITUDE STEADY at a given tilt by compensating for the
+        # lift lost to pitching over (gain = 1/cos(tilt)). It commands zero
+        # net VERTICAL ACCELERATION from the tilt, not a descent - it says
+        # nothing about the vehicle's EXISTING vertical velocity. The
+        # trigger only checked altitude GAP, not vertical velocity - both
+        # failed tests fired while PositionHold still had the vehicle
+        # climbing hard (this is a mid-CLIMB engagement: the interceptor
+        # starts below the target and closes the gap by climbing), so it
+        # carried that existing upward momentum straight through the
+        # hand-off into a thrust law that only prevents further
+        # acceleration, not one that arrests or reverses existing velocity -
+        # coasting up past the target on its own inertia, exactly matching
+        # both overshoots. Fixed by ALSO gating the trigger on vertical
+        # velocity (own climb rate must have eased off, not just position
+        # having aligned) - see NINJAPILOT_INTERCEPT_DIVE_MAX_CLIMB_MPS
+        # below. Still opt-in pending a multi-seed re-test with this fix -
+        # do not flip the default on a single verification run.
+        DIVE_MAX_CLIMB_MPS = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_MAX_CLIMB_MPS", "0.5"))
         if os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TRIGGER") == "1" \
                 and not dive_triggered[0] and hit_gz is None:
             alt_gap = abs(tned[2] - dned[2])
-            if alt_gap < ALIGN_ALT_M:
+            own_climb_mps = -(ivel_ned[2] if ivel_ned else 0.0)   # NED down-positive -> climb-positive
+            if alt_gap < ALIGN_ALT_M and own_climb_mps < DIVE_MAX_CLIMB_MPS:
                 dive_triggered[0] = True
                 control.mode_position = 2   # Stabilized3 = Interceptor (Bank3)
                 # interceptor_enter() (outerloop.c) always starts at phase
@@ -2989,6 +3016,39 @@ def _intercept_run(node, client):
                 push_stabilization_update("InterceptorClimbTime", 0.1)
                 print(f"[intercept] *** ALTITUDE ALIGNED (gap {alt_gap:.1f}m) - "
                       f"committing to Interceptor dive (Bank3) ***")
+
+        # LIVE PN ROLL STEERING DURING THE DIVE (2026-09-24): the first
+        # velocity-gated retest still missed by 5.41m (much better than the
+        # 20.07m/12.74m pre-fix overshoots, but worse than PositionHold's own
+        # 0.40-0.60m) - traced to outerloop.c's CRUISE case always holding
+        # roll_off at 0.0, with nothing here ever sending a live stick
+        # correction, so once triggered the vehicle commits to a pure
+        # BALLISTIC heading from the trigger instant while the target keeps
+        # moving (measured az_LOS drifting -133.9 -> -141.1 deg over the next
+        # 3s with no correction). wroom_pilot.py already solves exactly this
+        # for its own use of this same state machine
+        # (_intercept_pn_roll/live_frac) - same classical-PN math ported
+        # here rather than re-derived, sent via control.roll (the same RC-
+        # channel-simulation field wroom_pilot.py uses), which
+        # live_frac blends into StabilizationDesired during CRUISE.
+        if dive_triggered[0] and os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TRIGGER") == "1":
+            Rn, Re = tned[0] - dned[0], tned[1] - dned[1]
+            r2 = max(Rn * Rn + Re * Re, PN_RANGE_FLOOR_M * PN_RANGE_FLOOR_M)
+            own_vn = ivel_ned[0] if ivel_ned else 0.0
+            own_ve = ivel_ned[1] if ivel_ned else 0.0
+            Vrn, Vre = tvel[0] - own_vn, tvel[1] - own_ve
+            los_rate = (Rn * Vre - Re * Vrn) / r2
+            turn_rate_cmd = PN_GAIN_N * los_rate
+            vfwd = max(math.hypot(own_vn, own_ve), 1.0)
+            bank_deg = math.degrees(math.atan2(vfwd * turn_rate_cmd, 9.81))
+            control.roll = max(-0.45, min(0.45, bank_deg / PN_BANK_PER_STICK_DEG))
+            if os.environ.get("NINJAPILOT_ATTITUDE_DEBUG") == "1":
+                now_pn = time.time()
+                if now_pn - _pn_live_dbg_last[0] > 0.5:
+                    _pn_live_dbg_last[0] = now_pn
+                    print(f"[pnlivedbg] los_rate={los_rate:+.4f} turn_rate_cmd={turn_rate_cmd:+.4f} "
+                          f"bank_deg={bank_deg:+.1f} control.roll={control.roll:+.3f} "
+                          f"live_frac_est(t_phase-based, not read here)")
 
         # ATTITUDE-VS-LOS DEBUG (2026-09-23, NINJAPILOT_ATTITUDE_DEBUG=1):
         # direct answer to "why doesn't the camera ever see the ball" -
