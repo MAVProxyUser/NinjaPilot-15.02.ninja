@@ -125,11 +125,28 @@ class BallTracker:
     """Subscribes to the tracker cameras and exposes the freshest in-frame
     line-of-sight ray. Thread-safe; the guidance loop just calls lock()."""
 
-    def __init__(self, node):
+    def __init__(self, node, bridge_ray_fn=None):
+        """bridge_ray_fn, when given (2026-09-24): a zero-arg callable
+        returning (ray_frd, npix, age_s) or None, bypassing this class's own
+        topic subscriptions entirely. Exists for the "interceptor" airframe,
+        which has no dedicated cam_track_up/cam_track_45 sensors the way X3
+        does (see TRANSITION_THEORY.md section 25.2/25.8) - subscribing this
+        class directly to interceptor's cam_rgb (640x400, vs. the 160x120
+        this class's own _find_ball scan was sized for) would reproduce the
+        exact thread-starvation-in-the-gz-transport-callback hazard this
+        module's own docstring already warns about twice, just at a
+        different topic. gazebo_bridge.py already has a SAFE, worker-thread,
+        drop-if-busy detector for cam_rgb (get_camera_ball_ray) - passed in
+        here as a plain function so this module stays independent of
+        gazebo_bridge (dependency injection, not an import)."""
         self._lock = threading.Lock()
         self._best = None      # (t, cam, ray_frd, npix)
         self.frames = 0
         self.detections = 0
+        self._bridge_ray_fn = bridge_ray_fn
+        if bridge_ray_fn is not None:
+            print("[vision] using bridge-provided cam_rgb detector (interceptor airframe)")
+            return
         try:
             from gz.msgs10.image_pb2 import Image
         except Exception as e:
@@ -172,6 +189,16 @@ class BallTracker:
     def lock(self):
         """Return (cam, ray_frd, npix, age_s) if the ball is in frame and
         fresh, else None. ray_frd is a unit vector in the body FRD frame."""
+        if self._bridge_ray_fn is not None:
+            r = self._bridge_ray_fn()
+            if r is None:
+                return None
+            ray_frd, npix, age = r
+            if age > LOCK_TIMEOUT_S:
+                return None
+            self.frames += 1
+            self.detections += 1
+            return ("cam_rgb", ray_frd, npix, age)
         with self._lock:
             b = self._best
         if b is None:

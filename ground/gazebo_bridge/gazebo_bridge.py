@@ -450,6 +450,48 @@ def _camera_ball_worker():
         _camera_ball_worker_busy[0] = False
 
 
+def get_camera_ball_ray(max_age_s=0.3):
+    """(ray_frd, npix, age_s) if the ball was seen in the real rendered
+    cam_rgb frame recently, else None - ray_frd is a unit vector in the
+    body FRD frame, the same contract tools/ball_tracker.py's BallTracker
+    exposes via lock() (2026-09-24: interceptor has no dedicated
+    cam_track_up/cam_track_45 sensors the way X3 does - see
+    TRANSITION_THEORY.md section 25.2 - so BallTracker's EKF-fusion vision
+    path was a structural no-op on this airframe. This reuses the SAME
+    safe, already-verified worker-thread detection this module already
+    built for cam_rgb (_camera_ball_worker), just converted to a body-frame
+    ray with the SAME pixel-to-ray geometry ball_tracker.py's own
+    _pixel_to_body_ray uses, rather than re-subscribing cam_rgb a second
+    time with a second, unsafe direct-in-callback scan - the exact hazard
+    class ball_tracker.py's own docstring already warns about twice.
+    cam_rgb's real mount pose (model.sdf): pure pitch, no roll/yaw, pitch
+    -1.5707963 rad (looks along body +z, "track_up"'s own convention) -
+    same R_y(pitch) + FLU->FRD conversion, hand-derived here rather than
+    imported from ball_tracker.py to avoid a runtime cross-module coupling
+    for one small piece of trig."""
+    st = _camera_ball_state[0]
+    if st is None:
+        return None
+    t, u, v, npix, w, h = st
+    age = time.time() - t
+    if age > max_age_s:
+        return None
+    hfov = 1.2043   # cam_rgb's real horizontal_fov, model.sdf
+    pitch = -1.5707963   # cam_rgb's real mount pitch, model.sdf - no roll/yaw
+    fx = (w / 2.0) / math.tan(hfov / 2.0)
+    x_c = 1.0
+    y_c = -(u - w / 2.0) / fx
+    z_c = -(v - h / 2.0) / fx
+    n = math.sqrt(x_c * x_c + y_c * y_c + z_c * z_c)
+    x_c, y_c, z_c = x_c / n, y_c / n, z_c / n
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    x_f = cp * x_c + sp * z_c
+    y_f = y_c
+    z_f = -sp * x_c + cp * z_c
+    ray_frd = (x_f, -y_f, -z_f)   # FLU -> FRD
+    return (ray_frd, npix, age)
+
+
 def get_camera_ball_bearing(max_age_s=0.3):
     """(az_deg, el_deg, npix) if the ball was seen in the REAL rendered RGB frame within the last
     `max_age_s` seconds, else None - "currently visible," not "was ever visible." Bearing is in the
@@ -2782,7 +2824,13 @@ def _intercept_run(node, client):
     if TRACK_VISION:
         try:
             from ball_tracker import BallTracker
-            vision = BallTracker(node)
+            # interceptor has no dedicated cam_track_up/cam_track_45 sensors
+            # (X3-only) - route through the already-safe cam_rgb detector
+            # instead of a second, unsafe direct-scan subscription. See
+            # get_camera_ball_ray's own docstring and TRANSITION_THEORY.md
+            # section 25.8.
+            bridge_fn = get_camera_ball_ray if GAZEBO_MODEL == "interceptor" else None
+            vision = BallTracker(node, bridge_ray_fn=bridge_fn)
         except Exception as e:
             print(f"[vision] disabled ({e})")
             vision = None
