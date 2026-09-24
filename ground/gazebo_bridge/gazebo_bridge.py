@@ -108,7 +108,8 @@ def _fms_values(armed):
         # (Stabilized6, Rate/Rate/Rate by default) keeps the ground-
         # piloted flip alive for A/B comparison - also on Bank2.
         fms["Stabilization2Settings"] = ["Attitude", "Attitude", "AxisLock", "Manual"]
-    if WROOM and TEST_MODE in ("wroom_transition", "wroom_shape", "wroom_rollstep", "wroom_speedcorridor", "wroom_reengage", "wroom_intercept"):
+    if (WROOM and TEST_MODE in ("wroom_transition", "wroom_shape", "wroom_rollstep", "wroom_speedcorridor", "wroom_reengage", "wroom_intercept")) \
+            or TEST_MODE == "intercept":
         # Switch position 2 (Stabilized3) is the Interceptor's tail-sitter transition mode: the firmware's own
         # Interceptor outer loop climbs, pitches over and hands the sticks back (flight/modules/Stabilization/outerloop.c).
         # wroom_shape (shape_test) engages this same switch position on every leg - missing it here left the mode
@@ -117,6 +118,15 @@ def _fms_values(armed):
         # a frozen open-loop MANUAL throttle for the several seconds it took the pilot to notice, at whatever thrust
         # happened to be captured when the leg began - the whole first star mission (2026-09-19) free-fell on leg 1
         # from exactly this, looking for all the world like a control failure when the mode was never even engaged.
+        #
+        # TEST_MODE == "intercept" added 2026-09-24: run_intercept.sh's own _intercept_run() flies this exact
+        # airframe entirely under PositionHold/PathFollower (mode_position=3, Bank1 hover gains) and NEVER had
+        # this switch position configured at all - real telemetry (NINJAPILOT_ATTITUDE_DEBUG=1) showed roll/pitch
+        # staying under 10 deg for the WHOLE engagement, i.e. the vehicle translates like an ordinary hovering
+        # multirotor and its nose (and camera, mounted along the same axis) never comes anywhere close to
+        # pointing at the target. This just makes Bank3/Interceptor mode REACHABLE for this test; _intercept_run()
+        # still has to actually switch into it (mode_position=2) once the geometry calls for it - see the comment
+        # there.
         fms["Stabilization3Settings"] = ["Interceptor", "Interceptor", "Interceptor", "Interceptor"]
     if WROOM and TEST_MODE == "wroom_rattitude":
         # Switch position 5 (Stabilized6) repurposed for this test only, same pattern as Interceptor's position-2
@@ -457,6 +467,7 @@ _last_accel_g = [1.0]    # |specific force| in g, from the vehicle's own IMU
 # callback keeps the running maximum; the loop reads AND RESETS it, so no
 # impulse can alias away regardless of loop rate.
 _peak_accel_g = [1.0]
+_attitude_dbg_last = [0.0]   # NINJAPILOT_ATTITUDE_DEBUG rate-limit, see _intercept_run
 _contact_hit = [None]    # wall-clock of the PHYSICS ENGINE's own contact report
 POSE_TOPIC = "/world/%s/pose/info" % GAZEBO_WORLD
 IMU_TOPIC = "/%s/imu" % GZ_NS
@@ -2763,6 +2774,30 @@ def _intercept_run(node, client):
             vision = None
     else:
         print("[vision] disabled (NINJAPILOT_VISION=0) - EKF on position only")
+    # Advertised ONCE, here, well before the engagement even starts - not at
+    # the moment of contact. A freshly-created gz-transport publisher needs a
+    # short discovery window with its subscriber (ApplyLinkWrench's system-
+    # level topic handler) before a publish is guaranteed to be delivered;
+    # advertising early means that window closes long before the one-shot
+    # reaction impulse actually needs to go out, and there is no second
+    # chance to resend it once the physics has moved on.
+    from gz.msgs10.entity_wrench_pb2 import EntityWrench
+    from gz.msgs10.entity_pb2 import Entity
+    wrench_pub = node.advertise(f"/world/{GAZEBO_WORLD}/wrench", EntityWrench)
+    # PERSISTENT, not the one-shot /wrench topic (2026-09-24): confirmed in
+    # isolation that a one-shot "instantaneous" wrench genuinely moves the
+    # vehicle (both paused-single-step and real-time-on-the-ground tests
+    # showed large, real displacement) - but on every actual in-flight
+    # real_contact hit so far, IMU peak stayed flat, never once catching it.
+    # Leading theory: the "instantaneous" window is much shorter than the
+    # IMU's own ~4ms (250Hz) sample spacing, so it can land BETWEEN samples
+    # in real-time running. Using the persistent topic (continuous force
+    # until explicitly cleared - see the "hold, then clear" code at the
+    # real_contact site) removes that race by construction: hold it for a
+    # duration comfortably longer than several IMU samples, so the IMU
+    # cannot miss it no matter which sample lands where.
+    wrench_persistent_pub = node.advertise(f"/world/{GAZEBO_WORLD}/wrench/persistent", EntityWrench)
+    wrench_clear_pub = node.advertise(f"/world/{GAZEBO_WORLD}/wrench/clear", Entity)
     # "frames"/"handoffs" must exist from the start, not just once the first
     # lock happens (2026-09-23, real crash found while investigating why the
     # camera never showed the ball on the interceptor airframe): the final
@@ -2823,6 +2858,8 @@ def _intercept_run(node, client):
     t_engage = [time.time()]
     struck = [None]   # wall-clock of the strike, once hit
     knock = [(0.0, 0.0, 0.0)]   # post-impact velocity NED
+    dive_triggered = [False]   # see the ALTITUDE-ALIGNED DIVE TRIGGER below
+    ALIGN_ALT_M = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_ALIGN_M", "3.0"))
     maneuver = os.environ.get("NINJAPILOT_TARGET_MANEUVER") == "1"
     turned = [False]
     if maneuver:
@@ -2884,9 +2921,95 @@ def _intercept_run(node, client):
         if st is None:
             time.sleep(0.02); continue
         tt, tned = st
-        hp, dned, q_ned, _, _, _ = state.snapshot()
+        hp, dned, q_ned, ivel_ned, _, _ = state.snapshot()
         if not hp:
             time.sleep(0.02); continue
+
+        # ALTITUDE-ALIGNED DIVE TRIGGER (2026-09-24, direct user request after
+        # watching NINJAPILOT_ATTITUDE_DEBUG telemetry): this whole engagement
+        # used to fly entirely under PositionHold/PathFollower (Bank1 hover
+        # gains) - real data showed roll/pitch under 10 deg for the ENTIRE
+        # approach, i.e. the vehicle translates like an ordinary hovering
+        # multirotor and its nose (and the camera mounted on it) never gets
+        # anywhere close to pointing at the target, even on a clean hit.
+        # PositionHold is genuinely good at the long-range azimuth tracking
+        # (measured within 1-3 deg of true bearing the whole approach) - the
+        # gap is purely vertical: it never commits to a real nose-forward
+        # attitude. The user's own read of the telemetry: there is a real
+        # moment where the interceptor and target level out (altitude gap
+        # crosses zero) - "that feels like the best point" to stop
+        # translating like a hovering quad and commit to an actual dive.
+        # That is exactly when this switches into Bank3/Interceptor mode
+        # (outerloop.c's climb/transition/cruise state machine, already
+        # built and tuned for this airframe by wroom_pilot.py - just never
+        # wired to this test before; see _fms_values' and stab_settings'
+        # matching TEST_MODE == "intercept" additions). interceptor_enter()
+        # captures the REAL attitude and heading at hand-over and blends
+        # from there, so this is a clean mid-flight switch, not a cold
+        # start - but once switched, CRUISE's roll_off is always 0.0 (see
+        # outerloop.c) and nothing here sends live stick corrections, so
+        # this commits to a BALLISTIC dive along the heading captured at the
+        # trigger instant. That is deliberately the smallest first version:
+        # azimuth is already excellent at this point (1-3 deg), so a
+        # straight commit should still connect over the short remaining
+        # distance - test before adding live course correction on top.
+        #
+        # OPT-IN, DEFAULT OFF (2026-09-24): tested twice on seed 6 and BOTH
+        # times made things dramatically worse (20.07m and 12.74m misses,
+        # vs. 0.40-0.60m near-hits on the same seed under plain PositionHold)
+        # - not a wash, a real regression. In both runs altitude kept
+        # CLIMBING past the target's 11m (up to 18m+) during what should be
+        # a -45deg DIVE, even after collapsing InterceptorClimbTime to 0.1s
+        # to rule out a fresh 3s ground-launch climb re-triggering mid-air -
+        # that fix did NOT stop the overshoot, so the real cause is still
+        # unidentified (candidate: interceptor_level_thrust()'s lift
+        # compensation behaving differently when entered already-moving,
+        # mid-air, than the wroom harness's own controlled from-a-standstill
+        # entry it was tuned against). Left in place, gated off by default,
+        # so the working PositionHold-only baseline is not regressed while
+        # this gets root-caused - do not flip the default without a real fix
+        # verified against multiple seeds.
+        if os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TRIGGER") == "1" \
+                and not dive_triggered[0] and hit_gz is None:
+            alt_gap = abs(tned[2] - dned[2])
+            if alt_gap < ALIGN_ALT_M:
+                dive_triggered[0] = True
+                control.mode_position = 2   # Stabilized3 = Interceptor (Bank3)
+                # interceptor_enter() (outerloop.c) always starts at phase
+                # CLIMB with a FRESH t_phase=0 timer, running for the full
+                # InterceptorClimbTime (3.0s default) under
+                # InterceptorClimbThrust regardless of current altitude -
+                # correct for a cold ground launch, wrong here: first real
+                # test overshot straight through the target's altitude
+                # (9.9m at trigger -> 18m+ by t+8s) because it climbed hard
+                # for another 3 full seconds when it was ALREADY where it
+                # needed to be. Collapsing the climb window to near-zero
+                # lets it fall through to TRANSITION (ramp to
+                # InterceptorCruisePitch) almost immediately instead.
+                push_stabilization_update("InterceptorClimbTime", 0.1)
+                print(f"[intercept] *** ALTITUDE ALIGNED (gap {alt_gap:.1f}m) - "
+                      f"committing to Interceptor dive (Bank3) ***")
+
+        # ATTITUDE-VS-LOS DEBUG (2026-09-23, NINJAPILOT_ATTITUDE_DEBUG=1):
+        # direct answer to "why doesn't the camera ever see the ball" -
+        # printed from INSIDE this same loop so there is no separate-process
+        # timing race with a side-channel pose tap. Compares the vehicle's
+        # REAL attitude (from the same q_ned already used for scoring) to
+        # the true line-of-sight bearing/elevation to the target.
+        if os.environ.get("NINJAPILOT_ATTITUDE_DEBUG") == "1":
+            now_dbg = time.time()
+            if now_dbg - _attitude_dbg_last[0] > 1.0:
+                _attitude_dbg_last[0] = now_dbg
+                roll_d, pitch_d, yaw_d = quat_to_euler_deg(q_ned)
+                dN = tned[0] - dned[0]; dE = tned[1] - dned[1]
+                dDown = tned[2] - dned[2]
+                horiz_d = math.hypot(dN, dE)
+                elev_los = math.degrees(math.atan2(-dDown, horiz_d)) if horiz_d > 0.01 else float("nan")
+                az_los = math.degrees(math.atan2(dE, dN))
+                print(f"[attdbg] t+{now_dbg - t0:.1f}s roll={roll_d:+.1f} "
+                      f"pitch={pitch_d:+.1f} yaw={yaw_d:+.1f} "
+                      f"elev_LOS={elev_los:+.1f} az_LOS={az_los:+.1f} "
+                      f"horiz={horiz_d:.1f}m alt_i={-dned[2]:.1f}m alt_t={-tned[2]:.1f}m")
 
         # TRACKING. The division of labour is unchanged - the firmware still
         # receives only a target position and velocity, which is all an
@@ -3100,6 +3223,83 @@ def _intercept_run(node, client):
             if real_contact:
                 struck[0] = time.time()
                 print("[intercept] *** TARGET KNOCKED DOWN ***")
+                # REACTION IMPULSE ON THE INTERCEPTOR ITSELF (2026-09-23,
+                # real bug: every confirmed real_contact hit this project has
+                # ever logged still reads "IMU strike: no (peak 1.43g)" -
+                # the exact "IMU flat" symptom the comment above already
+                # named once, for a DIFFERENT bug (the distance backstop),
+                # but never actually fixed for genuine contact. Root cause:
+                # nothing here ever applies a reciprocal force to the
+                # interceptor - only the target's own driven velocity is
+                # touched (knock[0] above), and target_ball's
+                # VelocityControl plugin re-asserts that velocity every
+                # single physics step, which suppresses whatever native
+                # collision response DART would otherwise generate for
+                # BOTH bodies. A 0.15kg target at a few m/s isn't too light
+                # to register: assuming a fully inelastic transfer of its
+                # momentum (relative to the interceptor) delivered over one
+                # physics step (max_step_size 0.001s, see worlds/
+                # interceptor.sdf), the interceptor's own peak accel comes
+                # out to several g - comfortably above IMU_HIT_G - so the
+                # IMU criterion was never physically unreachable, just never
+                # fed a real force. Applied via gz-sim-apply-link-wrench-
+                # system (added to worlds/interceptor.sdf) using its
+                # PERSISTENT topic held for a fixed short duration rather
+                # than its one-shot "instantaneous" topic - see the HOLD_S
+                # comment below for why the one-shot version, though proven
+                # mechanically real in isolated testing, never once showed
+                # up on a live IMU sample.
+                try:
+                    m_target = 0.15       # spawn_target()'s own link mass
+                    # HOLD_S, not the physics dt (2026-09-24): the one-shot
+                    # /wrench topic ("instantaneous", nominally one physics
+                    # step) tested as mechanically real in isolation - both
+                    # a paused-single-step test and a real-time static test
+                    # showed large, unambiguous displacement - yet every
+                    # actual in-flight real_contact hit still read a flat
+                    # IMU peak. Leading theory: that window is far shorter
+                    # than the IMU's own ~4ms (250Hz) sample spacing, so a
+                    # real-time run can land the force entirely BETWEEN two
+                    # samples. Fix: hold a PERSISTENT force (not the one-shot
+                    # topic) for a fixed wall-clock duration comfortably
+                    # longer than several IMU samples, sized so the TOTAL
+                    # IMPULSE (force * hold time) still equals the same
+                    # fully-inelastic momentum transfer - a longer hold at
+                    # proportionally lower force delivers the identical
+                    # physical Δv, it just cannot be missed by the sampler.
+                    HOLD_S = 0.02   # 20ms = ~5 IMU samples at 250Hz
+                    rel_vel_ned = [tvel[i] - (ivel_ned[i] if ivel_ned else 0.0)
+                                   for i in range(3)]
+                    # F = m_target * v_rel / HOLD_S: constant force over
+                    # HOLD_S delivers the same momentum the target loses in a
+                    # fully inelastic hit as the original one-shot version did
+                    # over one physics step - same impulse, longer/gentler.
+                    force_ned = [m_target * v / HOLD_S for v in rel_vel_ned]
+                    force_enu = ned_to_gazebo_pos(force_ned)
+                    # Targeting the LINK by its own name ("interceptor/base_link",
+                    # type LINK) was tested in isolation via the gz CLI and
+                    # produced ZERO measurable effect on the model - the
+                    # embedded "/" likely confuses whatever scoped-name lookup
+                    # ApplyLinkWrench does internally. Targeting the MODEL
+                    # ("interceptor", type MODEL) instead was tested the same
+                    # way and DID move it - also matches gz-sim's own
+                    # reference usage (apply_link_wrench.sdf's <persistent>
+                    # example targets a model, not one of its links).
+                    wr = EntityWrench()
+                    wr.entity.name = "interceptor"
+                    wr.entity.type = wr.entity.MODEL
+                    wr.wrench.force.x, wr.wrench.force.y, wr.wrench.force.z = force_enu
+                    wrench_persistent_pub.publish(wr)
+                    time.sleep(HOLD_S)
+                    clear_ent = Entity()
+                    clear_ent.name = "interceptor"
+                    clear_ent.type = clear_ent.MODEL
+                    wrench_clear_pub.publish(clear_ent)
+                    print(f"[intercept] reaction wrench held {HOLD_S*1000:.0f}ms: "
+                          f"force_ned={force_ned} force_enu={force_enu} "
+                          f"rel_vel_ned={rel_vel_ned}")
+                except Exception as e:
+                    print(f"[intercept] !!! could not apply reaction wrench: {e}")
             else:
                 print(f"[intercept] close pass {sep:.2f}m (no physical "
                       f"contact) - breaking off, engagement over")
@@ -4542,8 +4742,13 @@ def uavtalk_thread():
             # on Bank1. The bank mirror is re-copied from the mapped bank on
             # every mode change, so each regime's rates apply the instant
             # the switch moves.
+            # TEST_MODE == "intercept" (2026-09-24): same reasoning as
+            # _fms_values' matching change - Bank3 must actually be mapped to
+            # position 2 for the Stabilization3Settings override above to do
+            # anything (a Stabilized3 flight mode with no bank pointed at it
+            # is dead configuration).
             "FlightModeMap": (["Bank1", "Bank2", "Bank3", "Bank1", "Bank1", "Bank2"]
-                              if WROOM else ["Bank1"] * 6),
+                              if (WROOM or TEST_MODE == "intercept") else ["Bank1"] * 6),
         }
         # Interceptor (Interceptor transition) settings: pack() sends any field it is not given as 0, which would make the mode
         # command zero thrust. Same env vars wroom_pilot.transition_test reads, so the pilot and the firmware agree.

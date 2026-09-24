@@ -1,0 +1,113 @@
+Subscribed to /world/quadcopter/pose/info, /interceptor/imu, /interceptor/navsat, publishing motor commands on /interceptor/gazebo/command/motor_speed
+HomeLocation: 37.774900, -122.419400, 30.0m
+Verbose per-object/per-sample debug prints: off (set NINJAPILOT_VERBOSE=1 to enable)
+[link] connected to flight side
+[test] HomeLocation.Be set from WORLD field (NED, plugin units): 26520.8944 408.0138 40801.3760
+[fclog] on-board logging enabled (OnlyWhenArmed), 22/22 objects marked for logging
+[intercept] waiting for link + config to settle...
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] waiting for attitude estimator... (Attitude alarm: Critical)
+[test] attitude estimator ready (Attitude alarm OK for 1s)
+[intercept] forcing a state-estimator reinit before arming (see PositionState divergence note)
+[intercept] vehicle COLD on the pad; releasing the target
+[intercept] respawn attempt 1 -> ok=False
+[intercept] respawn attempt 2 -> ok=True
+[intercept] spawn target_ball at N=-34.0 E=-34.0 alt=11.0m -> ok=True
+[intercept] contact sensor subscribed: /world/quadcopter/model/target_ball/link/link/sensor/ball_contact/contact
+[vision] watching track_up (/X3/cam_track_up/image)
+[vision] watching track_45 (/X3/cam_track_45/image)
+[intercept] target underway: 1.2 m/s, velocity N=+0.85 E=+0.85 climb=+0.00
+[intercept] watching for inbound within 46m...
+[intercept] *** CONTACT DETECTED at 46.0m - SCRAMBLE ***
+[test] waiting for vertical velocity to settle before liftoff...
+[test] vertical velocity wait ended: settled=True vel_down=0.000
+[test] switching to liftoff
+[test] climbing to 1.50m via liftoff (real AltitudeVario)...
+[test] centering thrust stick: reached=True alt=0.926 climb_rate=1.279 - real AltitudeHold PID takes over
+[intercept] airborne 6.9s after detection - engaging intercept immediately
+[intercept] *** TARGET KNOCKED DOWN ***
+[intercept] reaction wrench held 20ms: force_ned=[18.27490501286448, 17.386132598218367, 0.06940932881694072] force_enu=(17.386132598218367, 18.27490501286448, -0.06940932881694072) rel_vel_ned=[2.436654001715264, 2.3181510130957825, 0.009254577175592096]
+[intercept] *** GAZEBO CONTACT *** t+13.6s sep=0.37m
+[intercept] *** IMU STRIKE *** t+16.6s 19.89g
+[intercept] track -> /var/folders/6x/y8cxh51j0xbfk12fhtw6k43c0000gn/T/wrenchfinal_seed2_track.json
+[vision]   in-frame frames 0, lock acquisitions 0
+[intercept] ---- result ----
+[intercept]   barn deadline      : object reaches the barn 63.6s into its run
+[intercept]   intercept at       : t+13.6s, 32% along its track  (IN TIME)
+[intercept]   closest separation : 0.37 m
+[intercept]   gazebo contact     : YES t+13.6s at 0.37m
+[intercept]   IMU strike         : YES t+16.6s 19.89g (peak 19.89g)
+[intercept] intercept_test: PASS - intercepted=True, felt=True, min_sep=0.37m, track_frac=0.32
+[intercept] disarming
+[test] YawControl -> manual
+[fclog] telemetry pull skipped (data is already on disk)
+=== wrenchfinal_seed2 ===
+--- bridge log: outcome + harness ---
+[intercept] intercept_test: PASS - intercepted=True, felt=True, min_sep=0.37m, track_frac=0.32
+--- board log: decode from the FC's own flash ---
+flights present: [0] -> keeping flight 0 (1352 of 1352 records)
+decoded 259 slot files -> 1352 records -> /var/folders/6x/y8cxh51j0xbfk12fhtw6k43c0000gn/T//wrenchfinal_seed2_flash.jsonl
+--- plan: what the follower was actually given ---
+  leg  end (N,E,Down)          startV  endV   cruise  bearing  mode
+  !!! PLANNED PATH MISMATCH - every score in this run is being
+      measured against the WRONG shape. Fix tools/star_geom.py
+      to match build_mission() before believing any number.
+      logged legs 0, expected waypoints 9
+--- intercept: three-log comparison ---
+--- vertical: commanded climb vs achieved (board log, one clock) ---
+  climb commanded from t+6.7s to t+11.5s (40 samples)
+  t(s)     cmd_climb    actual       shortfall
+  9.87     2.80         2.96         -0.16
+  9.99     2.71         2.88         -0.17
+  10.11    2.64         2.81         -0.17
+  10.24    2.44         2.69         -0.26
+  10.36    2.24         2.53         -0.30
+  10.48    2.04         2.36         -0.32
+  10.61    1.84         2.18         -0.34
+  10.73    1.64         1.98         -0.34
+  10.85    1.44         1.77         -0.33
+  10.98    1.24         1.59         -0.35
+  11.10    1.04         1.35         -0.31
+  11.22    0.84         1.17         -0.33
+  11.34    0.64         0.96         -0.33
+  11.47    0.44         0.74         -0.30
+  shortfall over the climb: mean 0.24 m/s, worst +0.38 at t+7.3s
+  commanded climb: peak 3.00 m/s, last 0.44 m/s
+  -> vehicle TRACKED the vertical command. If it finished low, GUIDANCE UNDER-ASKED.
+--- estimator: FC belief vs Gazebo truth ---
+  alignment poor (altitude rms 2.48 m) - NOT pairing these logs
+--- guidance: commanded aim vs flown ---
+  distance from the vehicle to its COMMANDED aim point:
+    start 37.34 m -> end 0.29 m; last 3s mean 0.29 m
+    at closest approach (t+13.6s): 0.29 m from the aim point, 0.37 m from the ball
+  -> guidance was ASKING for the right place; the vehicle got there
+--- oscillation (is it porpoising/hunting, and at what frequency) ---
+samples: 214 over 26.3s (8.1 Hz)
+oscillation (detrended):
+  altitude   RMS  0.062 m      p2p  0.416  period  1.59s (0.63 Hz)
+  horiz spd  RMS  0.148 m/s    p2p  1.783  period  1.05s (0.95 Hz)
+  roll       RMS  2.937 deg    p2p 35.115  period  2.02s (0.49 Hz)
+  pitch      RMS  3.611 deg    p2p 36.542  period  1.95s (0.51 Hz)
+  yaw        RMS 13.746 deg    p2p 148.545  period  1.35s (0.74 Hz)
+--- yaw: tracking error vs the bearing it was told to hold ---
+  (no settled leg samples)
+--- estimator health: filtered position vs its own GPS input ---
+  filter vs GPS: mean 0.067 m  max 0.879 m -> estimator OK, error is CONTROLLER
+--- gazebo SERVER log: physics/plugin complaints ---
+[1;31m[Err] [Contact.cc:247] [0m[1;31mInternal error, missing Contact sensor for entity [[0m[1;31m62[0m[1;31m][0m[1;31m[0m
+[1;31m[Err] [Contact.cc:247] [0m[1;31mInternal error, missing Contact sensor for entity [[0m[1;31m71[0m[1;31m][0m[1;31m[0m
+[1;31m[Err] [Contact.cc:247] [0m[1;31mInternal error, missing Contact sensor for entity [[0m[1;31m80[0m[1;31m][0m[1;31m[0m
+[1;31m[Err] [Contact.cc:247] [0m[1;31mInternal error, missing Contact sensor for entity [[0m[1;31m85[0m[1;31m][0m[1;31m[0m
+[1;31m[Err] [Contact.cc:247] [0m[1;31mInternal error, missing Contact sensor for entity [[0m[1;31m90[0m[1;31m][0m[1;31m[0m
+  total complaint lines: 12
+--- planned vs flown + altitude profile ---
+  /var/folders/6x/y8cxh51j0xbfk12fhtw6k43c0000gn/T//wrenchfinal_seed2.png (intercept plot)
+--- recorder coverage: does the board log reach the end of the flight? ---
+--- gazebo: truth vs board (do they agree?) ---
+
+[intercept] target released to free-fall physics as target_ball_debris -> ok=True

@@ -60,6 +60,20 @@
       name="gz::sim::systems::Sensors">
       <render_engine>ogre2</render_engine>
     </plugin>
+    <!-- Lets gazebo_bridge.py's intercept_test apply a genuine reaction
+         impulse to the interceptor at the moment of a real collision
+         (2026-09-23): target_ball's VelocityControl plugin re-asserts its
+         own velocity every physics step, which suppresses whatever native
+         DART collision response would otherwise reach the interceptor too -
+         every confirmed hit logged "IMU strike: no" because nothing ever
+         actually pushed back on the interceptor's own body. No <persistent>
+         child - only the one-shot /world/quadcopter/wrench topic is used,
+         published from Python with a real momentum-conserving force at the
+         instant of contact. -->
+    <plugin
+      filename="gz-sim-apply-link-wrench-system"
+      name="gz::sim::systems::ApplyLinkWrench">
+    </plugin>
 
     <!-- Required for cam_thermal (model.sdf) to render anything but flat black - without at least one
          gz-sim-thermal-system instance somewhere in the world, the sensor produces no useful image at
