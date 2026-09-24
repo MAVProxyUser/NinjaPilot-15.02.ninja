@@ -3289,8 +3289,23 @@ def _intercept_run(node, client):
                     wr.entity.name = "interceptor"
                     wr.entity.type = wr.entity.MODEL
                     wr.wrench.force.x, wr.wrench.force.y, wr.wrench.force.z = force_enu
-                    wrench_persistent_pub.publish(wr)
-                    time.sleep(HOLD_S)
+                    # REPUBLISHED 4x across the hold window, not sent once
+                    # (2026-09-24, real reproduced failure): a batch of 8
+                    # fresh runs hit exactly one real_contact case and it
+                    # STILL read flat (1.43g) despite a correctly-computed
+                    # force being published, one-shot, with this exact
+                    # mechanism - an intermittent delivery miss, not a
+                    # magnitude problem (the force was comparable to the
+                    # one that DID register 19.89g minutes earlier). Safe to
+                    # repeat here in a way it was NOT for the old one-shot
+                    # /wrench topic: this is a "hold steady at this force"
+                    # command, not a fresh impulse each time, so re-sending
+                    # the identical persistent command mid-hold cannot
+                    # over-apply the impulse the way re-publishing a one-shot
+                    # instantaneous force would have.
+                    for _ in range(4):
+                        wrench_persistent_pub.publish(wr)
+                        time.sleep(HOLD_S / 4)
                     clear_ent = Entity()
                     clear_ent.name = "interceptor"
                     clear_ent.type = clear_ent.MODEL

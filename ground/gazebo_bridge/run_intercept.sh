@@ -41,9 +41,24 @@ for _ in $(seq 1 20); do pgrep -f fw_simposix >/dev/null || break; sleep 0.5; do
 # ball stays in the world, and the NEXT run's spawn returns ok=False - which
 # is how icpt07 died with "could not spawn target" while the log showed a
 # perfectly healthy climb.
+#
+# BOTH NAMES, not just "target_ball" (2026-09-24, real reproduced failure):
+# a hit renames the ball to "target_ball_debris" (see gazebo_bridge.py's
+# real_contact handling) before releasing it to free-fall - the `grep -q
+# target_ball` checks below match that as a SUBSTRING and correctly detect
+# it, but the remove SERVICE CALL only ever asked for the exact name
+# "target_ball", which a literal "target_ball_debris" entity never matches.
+# The result was a detect-but-never-fix loop: both retry loops below ran
+# their full 10+8=18s, then the outer check printed "stale target could not
+# be removed" (first block) or hard-exited the whole run (second block) -
+# reproduced directly this session, losing a full run with zero [intercept]
+# output at all after a preceding run's hit left debris behind.
 gz service -s /world/quadcopter/remove --reqtype gz.msgs.Entity \
   --reptype gz.msgs.Boolean --timeout 3000 \
   --req 'name: "target_ball", type: MODEL' >/dev/null 2>&1
+gz service -s /world/quadcopter/remove --reqtype gz.msgs.Entity \
+  --reptype gz.msgs.Boolean --timeout 3000 \
+  --req 'name: "target_ball_debris", type: MODEL' >/dev/null 2>&1
 # VERIFY, do not assume. A crashed run leaves the ball in the world and the
 # next spawn then returns ok=False, wasting a whole cycle - which it did.
 for _ in $(seq 1 10); do
@@ -51,6 +66,9 @@ for _ in $(seq 1 10); do
     gz service -s /world/quadcopter/remove --reqtype gz.msgs.Entity \
       --reptype gz.msgs.Boolean --timeout 2000 \
       --req 'name: "target_ball", type: MODEL' >/dev/null 2>&1
+    gz service -s /world/quadcopter/remove --reqtype gz.msgs.Entity \
+      --reptype gz.msgs.Boolean --timeout 2000 \
+      --req 'name: "target_ball_debris", type: MODEL' >/dev/null 2>&1
     sleep 1
 done
 gz model --list 2>/dev/null | grep -q target_ball && \
@@ -70,6 +88,9 @@ for _ in $(seq 1 8); do
     gz service -s /world/quadcopter/remove --reqtype gz.msgs.Entity \
       --reptype gz.msgs.Boolean --timeout 2000 \
       --req 'name: "target_ball", type: MODEL' >/dev/null 2>&1
+    gz service -s /world/quadcopter/remove --reqtype gz.msgs.Entity \
+      --reptype gz.msgs.Boolean --timeout 2000 \
+      --req 'name: "target_ball_debris", type: MODEL' >/dev/null 2>&1
     sleep 1
 done
 if gz model --list 2>/dev/null | grep -q target_ball; then
