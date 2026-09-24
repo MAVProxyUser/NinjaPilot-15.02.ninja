@@ -2487,6 +2487,20 @@ def spawn_target(node):
         ent = Entity()
         ent.name = TARGET_MODEL
         ent.type = Entity.MODEL
+        # ALSO the debris name (2026-09-24, real reproduced failure): a hit
+        # renames the ball to f"{TARGET_MODEL}_debris" before releasing it
+        # (see the real_contact handling below) - this retry loop only ever
+        # asked to remove the exact name TARGET_MODEL, so if THAT is what's
+        # actually blocking the spawn, every one of the 3 retries below
+        # fails identically no matter how many times it runs. Reproduced
+        # directly: seed7 of a 15-seed batch failed all 3 attempts with
+        # target_ball_debris confirmed present in `gz model --list` right
+        # after. run_intercept.sh's own pre-run cleanup already had this
+        # exact bug fixed - this is the same class of bug in a second,
+        # separate retry loop that was missed the first time.
+        ent_debris = Entity()
+        ent_debris.name = f"{TARGET_MODEL}_debris"
+        ent_debris.type = Entity.MODEL
         # BOUNDED RETRY, not a single attempt. One remove + 1.0s was not
         # enough: Gazebo does not free the model NAME synchronously, so a
         # fast respawn still collides with the corpse of the last run's
@@ -2496,6 +2510,8 @@ def spawn_target(node):
         # with a growing wait clears it.
         for attempt in range(3):
             node.request(f"/world/{GAZEBO_WORLD}/remove", ent, Entity,
+                         Boolean, 3000)
+            node.request(f"/world/{GAZEBO_WORLD}/remove", ent_debris, Entity,
                          Boolean, 3000)
             time.sleep(1.0 + attempt)
             ok, rep = node.request(f"/world/{GAZEBO_WORLD}/create", req,
