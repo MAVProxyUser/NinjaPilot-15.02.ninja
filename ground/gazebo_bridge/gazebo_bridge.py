@@ -923,7 +923,13 @@ class ControlState(object):
         # cleared by uavtalk_thread()'s own main loop, which is the only thread allowed to touch
         # `client` - see push_stabilization_update()'s own docstring for the full reasoning, especially
         # the whole-object UAVTalk write hazard this is careful to avoid.
-        self.pending_stab_update = None
+        # A LIST, not a single (field, value) slot (2026-09-24, real race
+        # found): the dive-trigger needed to push two fields
+        # (InterceptorCruisePitch, InterceptorClimbTime) back to back, and a
+        # single slot means the second push can silently clobber the first
+        # before uavtalk_thread's consumer ever drains it - append/drain-all
+        # instead, so any number of pushes queued in the same tick all land.
+        self.pending_stab_update = []
 
     def gcs_channels(self):
         throttle_us = int(round(1000 + self.throttle * 1000))
@@ -960,8 +966,13 @@ def push_stabilization_update(field, value):
     this reason) before resending - never sending a bare partial dict itself. If no full settings have
     been sent yet (e.g. called before send_config() has run), the request is silently dropped by the
     consumer rather than risking a partial-object send - callers should not rely on a first-ever engagement
-    (before any config lands) picking this up."""
-    control.pending_stab_update = (field, value)
+    (before any config lands) picking this up.
+
+    Appends to a list rather than overwriting a single slot (2026-09-24) -
+    see ControlState.pending_stab_update's own comment for the real
+    clobbering bug this replaced. list.append is atomic under the GIL, so
+    this needs no separate lock for this simple producer/consumer pattern."""
+    control.pending_stab_update.append((field, value))
 
 
 class FCState(object):
@@ -2937,6 +2948,9 @@ def _intercept_run(node, client):
     struck = [None]   # wall-clock of the strike, once hit
     knock = [(0.0, 0.0, 0.0)]   # post-impact velocity NED
     dive_triggered = [False]   # see the ALTITUDE-ALIGNED DIVE TRIGGER below
+    dive_tilt_done = [False]   # see the FINAL-LEG TILT ROUTINE below
+    dive_tilt_start = [None]
+    dive_tilt_bank = [0.0]
     ALIGN_ALT_M = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_ALIGN_M", "3.0"))
     maneuver = os.environ.get("NINJAPILOT_TARGET_MANEUVER") == "1"
     turned = [False]
@@ -3032,87 +3046,191 @@ def _intercept_run(node, client):
         # straight commit should still connect over the short remaining
         # distance - test before adding live course correction on top.
         #
-        # OPT-IN, DEFAULT OFF (2026-09-24): tested twice on seed 6 and BOTH
-        # times made things dramatically worse (20.07m and 12.74m misses,
-        # vs. 0.40-0.60m near-hits on the same seed under plain PositionHold)
-        # - not a wash, a real regression. In both runs altitude kept
-        # CLIMBING past the target's 11m (up to 18m+) during what should be
-        # a -45deg DIVE. Collapsing InterceptorClimbTime to 0.1s (ruling out
-        # a fresh 3s ground-launch climb re-triggering mid-air) did NOT stop
-        # it, which was the real clue: ROOT CAUSE FOUND by reading
-        # interceptor_level_thrust() itself (outerloop.c) - its whole job is
-        # to hold ALTITUDE STEADY at a given tilt by compensating for the
-        # lift lost to pitching over (gain = 1/cos(tilt)). It commands zero
-        # net VERTICAL ACCELERATION from the tilt, not a descent - it says
-        # nothing about the vehicle's EXISTING vertical velocity. The
-        # trigger only checked altitude GAP, not vertical velocity - both
-        # failed tests fired while PositionHold still had the vehicle
-        # climbing hard (this is a mid-CLIMB engagement: the interceptor
-        # starts below the target and closes the gap by climbing), so it
-        # carried that existing upward momentum straight through the
-        # hand-off into a thrust law that only prevents further
-        # acceleration, not one that arrests or reverses existing velocity -
-        # coasting up past the target on its own inertia, exactly matching
-        # both overshoots. Fixed by ALSO gating the trigger on vertical
-        # velocity (own climb rate must have eased off, not just position
-        # having aligned) - see NINJAPILOT_INTERCEPT_DIVE_MAX_CLIMB_MPS
-        # below. Still opt-in pending a multi-seed re-test with this fix -
-        # do not flip the default on a single verification run.
-        DIVE_MAX_CLIMB_MPS = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_MAX_CLIMB_MPS", "0.5"))
+        # OPT-IN, DEFAULT OFF (2026-09-24, third iteration). First two tests
+        # (gate on altitude gap alone) made things dramatically worse -
+        # traced to interceptor_level_thrust() holding ALTITUDE STEADY at
+        # the current tilt (it cancels further acceleration, it does not
+        # touch EXISTING velocity), so residual climb from PositionHold
+        # carried straight through the mode switch and coasted past the
+        # target on its own inertia. Gating on climb rate < 0.5 m/s (second
+        # iteration) cut the miss from 20.07m/12.74m to a repeatable
+        # 5.4-6.1m - real progress, but re-reading THAT SAME telemetry
+        # closely (not just the headline separation number) found the
+        # actual remaining bug: horiz distance was closing fine post-trigger
+        # (12.1m -> 5.6m), so the 6.10m "miss" was not a horizontal/steering
+        # failure at all - it was elev_LOS drifting to -15 deg (target now
+        # BELOW), i.e. STILL a vertical overshoot, just a smaller one.
+        # 0.5 m/s of residual climb integrated over the several-second
+        # TRANSITION ramp (theta_off moving toward InterceptorCruisePitch at
+        # InterceptorTransitionRate deg/s, which takes seconds) alone
+        # accounts for the observed ~1.5-2m of continued altitude gain
+        # (0.5 m/s * ~3-4s) - the earlier "PN reacts too late" diagnosis
+        # was chasing a symptom, not the cause. Two real fixes follow
+        # directly from re-reading this correctly:
+        #   1. Tighten the gate to require the climb to have actually
+        #      stopped (near-zero or slightly negative), not merely eased
+        #      to 0.5 m/s, so there is no residual momentum left to
+        #      integrate into overshoot during the transition ramp at all.
+        #   2. Tried shallow pitch (-15deg) on the theory that a
+        #      same-altitude engagement should "level out" rather than dive
+        #      - measured WORSE (11.48m single test), but a fair 6-seed A/B
+        #      of -45deg vs. -15deg (same climb-gate/thrust/live_frac fixes,
+        #      matched seeds) showed -45deg is actually the better closer:
+        #      the horizontal closing speed a shallow pitch buys in camera
+        #      angle costs more in closing speed than this short engagement
+        #      window can afford. Kept at -45deg (the wroom_pilot.py
+        #      default) - see NINJAPILOT_INTERCEPT_DIVE_CRUISE_PITCH_DEG to
+        #      override for further experiments.
+        #   3. InterceptorTransitionRate: kept at the 15deg/s default -
+        #      tried a much faster 40deg/s ramp on the theory that a shorter
+        #      transition window leaves less time for momentum to compound
+        #      either failure mode, but combined with -25deg pitch this
+        #      tested WORSE (8.72-13.30m across a 4-seed check) than the
+        #      validated -45deg/15deg/s baseline below - reverted rather
+        #      than keep an unproven "fix" that regressed the measured
+        #      result. NINJAPILOT_INTERCEPT_DIVE_TRANSITION_RATE remains
+        #      available to override for further experiments.
+        DIVE_MAX_CLIMB_MPS = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_MAX_CLIMB_MPS", "0.0"))
+        DIVE_CRUISE_PITCH_DEG = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_CRUISE_PITCH_DEG", "-45"))
+        DIVE_TRANSITION_RATE = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TRANSITION_RATE", "15"))
         if os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TRIGGER") == "1" \
                 and not dive_triggered[0] and hit_gz is None:
             alt_gap = abs(tned[2] - dned[2])
             own_climb_mps = -(ivel_ned[2] if ivel_ned else 0.0)   # NED down-positive -> climb-positive
             if alt_gap < ALIGN_ALT_M and own_climb_mps < DIVE_MAX_CLIMB_MPS:
                 dive_triggered[0] = True
-                control.mode_position = 2   # Stabilized3 = Interceptor (Bank3)
-                # interceptor_enter() (outerloop.c) always starts at phase
-                # CLIMB with a FRESH t_phase=0 timer, running for the full
-                # InterceptorClimbTime (3.0s default) under
-                # InterceptorClimbThrust regardless of current altitude -
-                # correct for a cold ground launch, wrong here: first real
-                # test overshot straight through the target's altitude
-                # (9.9m at trigger -> 18m+ by t+8s) because it climbed hard
-                # for another 3 full seconds when it was ALREADY where it
-                # needed to be. Collapsing the climb window to near-zero
-                # lets it fall through to TRANSITION (ramp to
-                # InterceptorCruisePitch) almost immediately instead.
+                # ALL THREE fields pushed together (now a list, drained in
+                # one send - see push_stabilization_update's own docstring
+                # for the single-slot clobbering bug this replaced):
+                #   - InterceptorCruisePitch: shallow, not the -45deg
+                #     ground-launch-tuned default - see the geometry
+                #     reasoning above.
+                #   - InterceptorClimbTime: collapsed to near-zero so the
+                #     mandatory CLIMB phase (interceptor_enter() always
+                #     starts there) passes through almost immediately
+                #     instead of running its full 3s ground-launch duration
+                #     mid-air.
+                #   - InterceptorClimbThrust: DOWN to InterceptorHoverThrust,
+                #     not left at its own aggressive ground-launch value
+                #     (2026-09-24, the real remaining bug after the above two
+                #     fixes: even triggering at NEGATIVE climb rate, altitude
+                #     still grew 11.4->12.2m post-trigger - interceptor_enter()
+                #     always sets thrust_auto = InterceptorClimbThrust for
+                #     CLIMB regardless of how brief that phase now is, and its
+                #     own ground-launch value (tuned to lift off from a
+                #     standstill) is well above what an already-airborne,
+                #     already-trimmed vehicle needs - a real thrust KICK, not
+                #     just a leftover timer, was still landing during that
+                #     shrunk window.
+                DIVE_HOVER_THRUST = float(os.environ.get("NINJAPILOT_INTERCEPTOR_HOVER_THRUST", "0.65"))
+                push_stabilization_update("InterceptorCruisePitch", DIVE_CRUISE_PITCH_DEG)
                 push_stabilization_update("InterceptorClimbTime", 0.1)
-                print(f"[intercept] *** ALTITUDE ALIGNED (gap {alt_gap:.1f}m) - "
-                      f"committing to Interceptor dive (Bank3) ***")
+                push_stabilization_update("InterceptorClimbThrust", DIVE_HOVER_THRUST)
+                push_stabilization_update("InterceptorTransitionRate", DIVE_TRANSITION_RATE)
+                control.mode_position = 2   # Stabilized3 = Interceptor (Bank3)
+                print(f"[intercept] *** ALTITUDE ALIGNED (gap {alt_gap:.1f}m, "
+                      f"climb {own_climb_mps:+.2f}m/s) - committing to "
+                      f"Interceptor level approach (Bank3, cruise pitch "
+                      f"{DIVE_CRUISE_PITCH_DEG:.0f}deg, climb thrust "
+                      f"{DIVE_HOVER_THRUST:.2f}, transition rate "
+                      f"{DIVE_TRANSITION_RATE:.0f}deg/s) ***")
 
-        # LIVE PN ROLL STEERING DURING THE DIVE (2026-09-24): the first
-        # velocity-gated retest still missed by 5.41m (much better than the
-        # 20.07m/12.74m pre-fix overshoots, but worse than PositionHold's own
-        # 0.40-0.60m) - traced to outerloop.c's CRUISE case always holding
-        # roll_off at 0.0, with nothing here ever sending a live stick
-        # correction, so once triggered the vehicle commits to a pure
-        # BALLISTIC heading from the trigger instant while the target keeps
-        # moving (measured az_LOS drifting -133.9 -> -141.1 deg over the next
-        # 3s with no correction). wroom_pilot.py already solves exactly this
-        # for its own use of this same state machine
-        # (_intercept_pn_roll/live_frac) - same classical-PN math ported
-        # here rather than re-derived, sent via control.roll (the same RC-
-        # channel-simulation field wroom_pilot.py uses), which
-        # live_frac blends into StabilizationDesired during CRUISE.
-        if dive_triggered[0] and os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TRIGGER") == "1":
-            Rn, Re = tned[0] - dned[0], tned[1] - dned[1]
-            r2 = max(Rn * Rn + Re * Re, PN_RANGE_FLOOR_M * PN_RANGE_FLOOR_M)
-            own_vn = ivel_ned[0] if ivel_ned else 0.0
-            own_ve = ivel_ned[1] if ivel_ned else 0.0
-            Vrn, Vre = tvel[0] - own_vn, tvel[1] - own_ve
-            los_rate = (Rn * Vre - Re * Vrn) / r2
-            turn_rate_cmd = PN_GAIN_N * los_rate
-            vfwd = max(math.hypot(own_vn, own_ve), 1.0)
-            bank_deg = math.degrees(math.atan2(vfwd * turn_rate_cmd, 9.81))
-            control.roll = max(-0.45, min(0.45, bank_deg / PN_BANK_PER_STICK_DEG))
-            if os.environ.get("NINJAPILOT_ATTITUDE_DEBUG") == "1":
-                now_pn = time.time()
-                if now_pn - _pn_live_dbg_last[0] > 0.5:
-                    _pn_live_dbg_last[0] = now_pn
-                    print(f"[pnlivedbg] los_rate={los_rate:+.4f} turn_rate_cmd={turn_rate_cmd:+.4f} "
-                          f"bank_deg={bank_deg:+.1f} control.roll={control.roll:+.3f} "
-                          f"live_frac_est(t_phase-based, not read here)")
+        # FINAL-LEG TILT ROUTINE (2026-09-24) - a single decisive bank
+        # correction, not a continuous feedback loop. History: a continuous
+        # classical-PN steering loop was tried here first and proven NET
+        # NEGATIVE by a fair, matched 6-seed A/B (no-PN ballistic: a
+        # consistent 3.5-4.5m; PN at its original gain: worse on every
+        # single-run test; PN re-tuned gentler: matched no-PN on 4/6 seeds
+        # but diverged badly - 10.86m, 12.63m - on the other 2). That
+        # INTERMITTENT divergence pattern is the tell: by the time this
+        # trigger fires the engagement is already inside what paths.c's own
+        # C code calls ENDGAME range, where its own comment says pure PN is
+        # unstable because LOS-rate's r^2 denominator blows up as range
+        # shrinks - a real architectural mismatch, not a gain problem.
+        #
+        # The actual missing piece (direct user diagnosis): interceptor_enter()
+        # (outerloop.c) freezes psi_ref at whatever heading the vehicle
+        # HAPPENED to be going the instant the trigger fired
+        # (interceptor_heading(a), current attitude only) - not a computed
+        # aim point at all. That heading is a good match for the TARGET'S
+        # POSITION AT THAT INSTANT (PositionHold's own azimuth tracking is
+        # excellent, 1-3 deg), but the target keeps moving for the several
+        # seconds the dive takes, and nothing ever re-aims - that continuous
+        # drift is the real ~3.5-4.5m gap, not a steering-law problem.
+        #
+        # Fix attempted: ONE-TIME, at the trigger instant - compute where
+        # the target will actually BE using its own real velocity and an
+        # estimated closing time (not the frozen entry heading), compare to
+        # current heading, and command a SINGLE bounded bank correction for
+        # a short, fixed "commit" duration - then release (roll back to 0)
+        # and fly the corrected heading straight through to impact. No
+        # LOS-rate, no r^2 term, no continuous loop, so it cannot suffer
+        # PN's range-based instability.
+        #
+        # DEFAULT OFF, ALSO PROVEN NET NEGATIVE (2026-09-24) - a real,
+        # important negative result, not a wash: a fair, matched 6-seed A/B
+        # (same seeds as the no-correction baseline) gave 6.71, 12.55, 3.88,
+        # 5.56, 12.17, 4.57m (mean ~7.6m) vs. the no-correction baseline's
+        # tight 3.53-4.53m (mean ~4.0m) - WORSE on every seed, with the SAME
+        # intermittent-blowup pattern continuous PN showed (2/6 seeds
+        # diverging past 12m). Both a continuous feedback loop (PN) and a
+        # single bounded one-shot correction fail the same way, which
+        # rules out "continuous vs. one-shot" as the actual variable - the
+        # common factor is commanding ANY nonzero roll during this phase at
+        # all. Leading theory: interceptor_level_thrust()'s thrust
+        # compensation depends on cos(roll) regardless of bank DIRECTION,
+        # so any added roll - correcting the right way or not - increases
+        # commanded thrust and disturbs the already-delicate vertical
+        # balance the climb-gate/climb-thrust fixes above depend on;
+        # coupling the lateral correction to the SAME phase as the vertical
+        # stabilization may be the real design flaw, not the correction law
+        # itself. The validated best-known configuration remains the pure
+        # ballistic dive with BOTH lateral mechanisms off
+        # (NINJAPILOT_INTERCEPT_DIVE_PN_STEER=0, this flag off by default) -
+        # 3.5-4.5m, a real ~4-6x improvement over the original 12-20m
+        # failures, not yet a hit. Left available via
+        # NINJAPILOT_INTERCEPT_DIVE_TILT=1 for further work - a promising
+        # next angle is decoupling lateral correction from vertical
+        # stabilization entirely (e.g. holding roll at a fixed small value
+        # while overriding thrust independently, rather than trusting
+        # interceptor_level_thrust()'s single formula to handle both at
+        # once), not another correction-law swap.
+        DIVE_TILT_KP = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TILT_KP", "1.2"))
+        DIVE_TILT_MAX_BANK_DEG = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TILT_MAX_BANK_DEG", "35"))
+        DIVE_TILT_HOLD_S = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TILT_HOLD_S", "0.8"))
+        if dive_triggered[0] and os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TRIGGER") == "1" \
+                and os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TILT", "0") == "1" \
+                and not dive_tilt_done[0]:
+            if dive_tilt_start[0] is None:
+                dive_tilt_start[0] = time.time()
+                # Estimated closing time for the lead solve: horizontal
+                # range over the closing speed already established just
+                # before trigger (own ground speed) - crude but sufficient
+                # for a one-shot lead, not a continuously-corrected value.
+                own_vn0 = ivel_ned[0] if ivel_ned else 0.0
+                own_ve0 = ivel_ned[1] if ivel_ned else 0.0
+                own_speed = max(math.hypot(own_vn0, own_ve0), 1.0)
+                Rn0, Re0 = tned[0] - dned[0], tned[1] - dned[1]
+                range0 = math.hypot(Rn0, Re0)
+                t_lead = range0 / own_speed
+                lead_n = tned[0] + tvel[0] * t_lead
+                lead_e = tned[1] + tvel[1] * t_lead
+                lead_bearing = math.degrees(math.atan2(lead_e - dned[1], lead_n - dned[0]))
+                own_heading = math.degrees(math.atan2(own_ve0, own_vn0)) if own_speed > 1.5 else lead_bearing
+                err = lead_bearing - own_heading
+                while err > 180.0: err -= 360.0
+                while err < -180.0: err += 360.0
+                bank_deg = max(-DIVE_TILT_MAX_BANK_DEG, min(DIVE_TILT_MAX_BANK_DEG, DIVE_TILT_KP * err))
+                dive_tilt_bank[0] = max(-0.45, min(0.45, bank_deg / PN_BANK_PER_STICK_DEG))
+                print(f"[intercept] *** FINAL-LEG TILT: lead_bearing={lead_bearing:+.1f} "
+                      f"own_heading={own_heading:+.1f} err={err:+.1f}deg "
+                      f"bank_stick={dive_tilt_bank[0]:+.3f} hold={DIVE_TILT_HOLD_S:.1f}s ***")
+            if time.time() - dive_tilt_start[0] < DIVE_TILT_HOLD_S:
+                control.roll = dive_tilt_bank[0]
+            else:
+                control.roll = 0.0
+                dive_tilt_done[0] = True
+                print("[intercept] *** FINAL-LEG TILT complete - releasing to straight, full speed ***")
 
         # ATTITUDE-VS-LOS DEBUG (2026-09-23, NINJAPILOT_ATTITUDE_DEBUG=1):
         # direct answer to "why doesn't the camera ever see the ball" -
@@ -5371,24 +5489,31 @@ def uavtalk_thread():
                     send_reliable("FlightModeSettings", bov.resolve_enum_values(db["FlightModeSettings"], fms))
                     last_arm_state["armed"] = control.armed
 
-                if control.pending_stab_update is not None:
+                if control.pending_stab_update:
                     # See push_stabilization_update()'s own docstring for the full reasoning - most
                     # importantly why this merges into the last FULL settings dict rather than ever
                     # sending the requested (field, value) pair alone (a partial StabilizationSettings
                     # write would zero every other field, a real, dangerous mid-flight control loss, not
                     # a hypothetical one - see send_config()'s own "pack() sends any field it is not
                     # given as 0" comment).
-                    field, value = control.pending_stab_update
+                    #
+                    # DRAIN THE WHOLE LIST in one send, not one pair per tick
+                    # (2026-09-24): a caller pushing two related fields back
+                    # to back (e.g. a dive trigger's CruisePitch + ClimbTime)
+                    # needs BOTH to land in the SAME settings write, not two
+                    # separate sends racing this loop's own tick rate.
+                    pending, control.pending_stab_update = control.pending_stab_update, []
                     if last_stab_settings["value"] is not None:
                         updated = dict(last_stab_settings["value"])
-                        updated[field] = value
+                        for field, value in pending:
+                            updated[field] = value
                         send_reliable("StabilizationSettings",
                                       bov.resolve_enum_values(db["StabilizationSettings"], updated))
                         last_stab_settings["value"] = updated
                     else:
-                        print("[bridge] pending_stab_update dropped: no full StabilizationSettings "
-                              "sent yet to merge into (see push_stabilization_update's own docstring)",
-                              flush=True)
+                        print("[bridge] pending_stab_update dropped %s: no full StabilizationSettings "
+                              "sent yet to merge into (see push_stabilization_update's own docstring)"
+                              % (pending,), flush=True)
                     control.pending_stab_update = None
 
                 if control.request_estimator_reset:

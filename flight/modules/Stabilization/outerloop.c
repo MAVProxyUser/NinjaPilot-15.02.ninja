@@ -88,7 +88,20 @@ static PiOSDeltatimeConfig timeval;
  * below) fades IN over this many seconds once CRUISE starts, so the auto-to-manual hand-over has no step either, even
  * if the pilot's stick is not centred the instant the mode finishes its own transition. */
 #define INTERCEPTOR_ENTRY_BLEND_TIME 0.6f
-#define INTERCEPTOR_LIVE_BLEND_TIME  0.8f
+/* 0.8 -> 0.15 (2026-09-24, real reproduced problem): a mid-flight trigger
+ * (ground/gazebo_bridge.py's altitude-aligned dive trigger, entering this
+ * mode from an already-armed, already-flying PositionHold engagement
+ * rather than a ground launch) found this 0.8s dead window ate most of its
+ * available reaction time - control.roll's PN steering command was
+ * computing real, growing corrections from the moment of entry, but
+ * live_frac scaled them toward zero for the first ~0.8s, by which point
+ * the target had already drifted off the captured heading with no time
+ * left to correct. 0.8s was chosen only to stay "much shorter than a
+ * typical few-second ClimbTime" for the ground-launch case this was
+ * designed around - it was never load-bearing at that specific value, and
+ * a shorter blend is still smooth (no attitude step, same mechanism) while
+ * costing that case nothing it was relying on. */
+#define INTERCEPTOR_LIVE_BLEND_TIME  0.15f
 /* Vertical-equilibrium thrust cap: tilting the hover-frame thrust vector theta degrees off vertical costs cos(theta)
  * of vertical lift (TRANSITION_THEORY.md #4's T = weight/sin(pitch-from-horizontal), same statement in this frame's
  * convention: pitch-from-horizontal = 90-|theta_off|, sin(90-x) = cos(x)), so holding altitude at any off-level
