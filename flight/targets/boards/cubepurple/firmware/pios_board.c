@@ -184,6 +184,9 @@ uint32_t pios_com_debug_id;
 uint32_t pios_com_gps_id       = 0;
 uint32_t pios_com_telem_usb_id = 0;
 uint32_t pios_com_telem_rf_id  = 0;
+#if defined(PIOS_INCLUDE_CAN)
+uint32_t pios_can2_id;
+#endif
 uint32_t pios_com_bridge_id    = 0;
 uint32_t pios_com_hkosd_id     = 0;
 uint32_t pios_com_vcp_id       = 0;
@@ -941,6 +944,13 @@ void PIOS_Board_Init(void)
 
 #if defined(PIOS_INCLUDE_MS5611_SPI)
     PIOS_MS5611_SPI_Init(&pios_ms5611_cfg, pios_spi_sensors_id, CUBE_SPI1_SLAVE_MS5611);
+
+#if defined(PIOS_INCLUDE_CAN)
+    /* CAN2: DroneCAN peripherals (ESCs, GPS, power); the module does the talking */
+    if (PIOS_CAN_Init(&pios_can2_id, &pios_can2_cfg) != 0) {
+        pios_can2_id = 0;
+    }
+#endif
     PIOS_MS5611_Register();
 #endif
 #ifdef CUBE_MARKS

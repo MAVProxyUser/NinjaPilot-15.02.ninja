@@ -57,6 +57,64 @@ const struct pios_gpio_cfg *PIOS_BOARD_HW_DEFS_GetLedCfg(__attribute__((unused))
 
 #endif /* PIOS_INCLUDE_LED */
 
+
+#if defined(PIOS_INCLUDE_CAN)
+#include <pios_can_priv.h>
+
+/*
+ * CAN2 (the carrier's "CAN2" connector): PB12 RX, PB6 TX, both AF9.
+ * 42 MHz APB1 / 3 = 14 MHz, 1 + 11 + 2 = 14 tq -> 1 Mbit/s, sample point 86 %.
+ * CAN2 filters live in banks 14..27.
+ */
+static const struct pios_can_cfg pios_can2_cfg = {
+    .regs        = CAN2,
+    .rcc_periph  = RCC_APB1Periph_CAN2,
+    .init        = {
+        .CAN_TTCM      = DISABLE,
+        .CAN_ABOM      = ENABLE,    /* leave bus-off on its own */
+        .CAN_AWUM      = DISABLE,
+        .CAN_NART      = DISABLE,   /* retransmit until acknowledged */
+        .CAN_RFLM      = DISABLE,
+        .CAN_TXFP      = DISABLE,
+        .CAN_Mode      = CAN_Mode_Normal,
+        .CAN_SJW       = CAN_SJW_1tq,
+        .CAN_BS1       = CAN_BS1_11tq,
+        .CAN_BS2       = CAN_BS2_2tq,
+        .CAN_Prescaler = 3,
+    },
+    .filter_bank = 14,
+    .remap       = GPIO_AF_CAN2,
+    .rx          = {
+        .gpio = GPIOB,
+        .init = {
+            .GPIO_Pin   = GPIO_Pin_12,
+            .GPIO_Speed = GPIO_Speed_50MHz,
+            .GPIO_Mode  = GPIO_Mode_AF,
+            .GPIO_OType = GPIO_OType_PP,
+            .GPIO_PuPd  = GPIO_PuPd_UP
+        },
+    },
+    .tx          = {
+        .gpio = GPIOB,
+        .init = {
+            .GPIO_Pin   = GPIO_Pin_6,
+            .GPIO_Speed = GPIO_Speed_50MHz,
+            .GPIO_Mode  = GPIO_Mode_AF,
+            .GPIO_OType = GPIO_OType_PP,
+            .GPIO_PuPd  = GPIO_PuPd_UP
+        },
+    },
+    .rx_irq      = {
+        .init = {
+            .NVIC_IRQChannel    = CAN2_RX0_IRQn,
+            .NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_MID,
+            .NVIC_IRQChannelSubPriority        = 0,
+            .NVIC_IRQChannelCmd = ENABLE,
+        },
+    },
+};
+#endif /* PIOS_INCLUDE_CAN */
+
 #if defined(PIOS_INCLUDE_SPI)
 
 #include <pios_spi_priv.h>

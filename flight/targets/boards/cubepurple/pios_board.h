@@ -124,6 +124,10 @@ extern uint32_t pios_i2c_internal_adapter_id;
 // -------------------------
 #define PIOS_COM_MAX_DEVS 5
 extern uint32_t pios_com_telem_rf_id;
+#if defined(PIOS_INCLUDE_CAN)
+extern uint32_t pios_can2_id;
+#define PIOS_CAN_DRONECAN pios_can2_id
+#endif
 extern uint32_t pios_com_gps_id;
 extern uint32_t pios_com_telem_usb_id;
 extern uint32_t pios_com_bridge_id;

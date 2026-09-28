@@ -1,0 +1,16 @@
+<xml>
+    <object name="DroneCANESCStatus" singleinstance="true" settings="false" category="System">
+        <description>Telemetry from DroneCAN ESCs (uavcan.equipment.esc.Status, data type 1034), indexed by the esc_index each ESC reports. Temperature is converted to degrees C; Updates counts the messages decoded per index.</description>
+        <field name="NodeId" units="" type="uint8" elements="8" defaultvalue="0"/>
+        <field name="Voltage" units="V" type="float" elements="8" defaultvalue="0"/>
+        <field name="Current" units="A" type="float" elements="8" defaultvalue="0"/>
+        <field name="Temperature" units="C" type="float" elements="8" defaultvalue="0"/>
+        <field name="RPM" units="rpm" type="int32" elements="8" defaultvalue="0"/>
+        <field name="ErrorCount" units="" type="uint32" elements="8" defaultvalue="0"/>
+        <field name="Updates" units="" type="uint16" elements="8" defaultvalue="0"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="false" updatemode="manual" period="0"/>
+        <telemetryflight acked="false" updatemode="periodic" period="1000"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>

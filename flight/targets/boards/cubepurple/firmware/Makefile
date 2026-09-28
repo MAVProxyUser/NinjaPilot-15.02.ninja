@@ -47,6 +47,7 @@ MODULES += PathPlanner
 MODULES += PathFollower
 MODULES += Telemetry
 MODULES += Notify
+MODULES += DroneCAN
 
 OPTMODULES += ComUsbBridge
 

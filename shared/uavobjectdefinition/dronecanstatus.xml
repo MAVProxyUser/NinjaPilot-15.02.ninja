@@ -1,0 +1,24 @@
+<xml>
+    <object name="DroneCANStatus" singleinstance="true" settings="false" category="System">
+        <description>What the flight controller sees on its DroneCAN bus: frame and error counters for the CAN peripheral, the dynamic node-id allocations it has served, and a table of every node heard (from NodeStatus, 1 Hz per node).</description>
+        <field name="RxFrames" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="TxFrames" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="RxDropped" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="TxDropped" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="AnonymousRequests" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="Allocations" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="TxErrorCounter" units="" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="RxErrorCounter" units="" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="BusOff" units="" type="enum" elements="1" options="False,True" defaultvalue="False"/>
+        <field name="NodeCount" units="" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="NodeId" units="" type="uint8" elements="16" defaultvalue="0"/>
+        <field name="NodeHealth" units="" type="enum" elements="16" options="OK,Warning,Error,Critical" defaultvalue="OK"/>
+        <field name="NodeMode" units="" type="enum" elements="16" options="Operational,Initialization,Maintenance,SoftwareUpdate,Offline" defaultvalue="Operational"/>
+        <field name="NodeUptime" units="s" type="uint32" elements="16" defaultvalue="0"/>
+        <field name="NodeLastSeen" units="s" type="uint16" elements="16" defaultvalue="0"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="false" updatemode="manual" period="0"/>
+        <telemetryflight acked="false" updatemode="periodic" period="1000"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>
