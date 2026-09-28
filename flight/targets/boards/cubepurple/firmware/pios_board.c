@@ -295,13 +295,24 @@ void PIOS_Board_ServoSetHz(const uint16_t *hz, uint8_t banks)
 static void cube_bl_reset(void) __attribute__((noreturn));
 static void cube_bl_reset(void)
 {
-    RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
-    PWR_BackupAccessCmd(ENABLE);
-    RTC_WriteBackupRegister(RTC_BKP_DR0, 0xB0070001);
+    cube_bootloader_hold();
     NVIC_SystemReset();
     for (;;) {}
 }
 #endif
+
+/* Ask the ArduPilot bootloader to stay resident after the next reset (RTC
+ * BKP0R 0xB0070001, its "hold" signature).  A plain soft reset boots the
+ * application straight back (no upload window), so this is what the
+ * FirmwareIAP STEP_3_HOLD command uses when the board is powered from the
+ * CAN bus as well and a USB power cycle cannot reset it.  The bootloader
+ * clears the signature when it runs. */
+void cube_bootloader_hold(void)
+{
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
+    PWR_BackupAccessCmd(ENABLE);
+    RTC_WriteBackupRegister(RTC_BKP_DR0, 0xB0070001);
+}
 #if CUBE_BOOT_STOP
 void CUBE_BootStage(uint32_t n)
 {

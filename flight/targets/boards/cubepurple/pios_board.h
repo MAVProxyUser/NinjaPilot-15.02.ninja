@@ -124,6 +124,10 @@ extern uint32_t pios_i2c_internal_adapter_id;
 // -------------------------
 #define PIOS_COM_MAX_DEVS 5
 extern uint32_t pios_com_telem_rf_id;
+/* FirmwareIAP STEP_3_HOLD: keep the ArduPilot bootloader waiting for an uploader */
+void cube_bootloader_hold(void);
+#define PIOS_IAP_BOOTLOADER_HOLD() cube_bootloader_hold()
+
 #if defined(PIOS_INCLUDE_CAN)
 extern uint32_t pios_can2_id;
 #define PIOS_CAN_DRONECAN pios_can2_id

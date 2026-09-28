@@ -37,6 +37,11 @@
 #define IAP_CMD_STEP_1      1122
 #define IAP_CMD_STEP_2      2233
 #define IAP_CMD_STEP_3      3344
+/* Like STEP_3, but a board that sits behind a bootloader of its own (Cube
+ * Purple: ArduPilot's) asks that bootloader to wait for an uploader instead
+ * of booting the application straight away.  Boards without the hook treat
+ * it exactly like STEP_3. */
+#define IAP_CMD_STEP_3_HOLD 6677
 
 #define IAP_CMD_CRC         100
 #define IAP_CMD_VERIFY      101
@@ -174,7 +179,7 @@ static void FirmwareIAPCallback(UAVObjEvent *ev)
             }
             break;
         case IAP_STATE_STEP_2:
-            if (data.Command == IAP_CMD_STEP_3) {
+            if ((data.Command == IAP_CMD_STEP_3) || (data.Command == IAP_CMD_STEP_3_HOLD)) {
                 if (delta > iap_time_3_low_end && delta < iap_time_3_high_end) {
 #ifndef PIOS_APPS_MINIMAL
                     FlightStatusData flightStatus;
@@ -190,6 +195,11 @@ static void FirmwareIAPCallback(UAVObjEvent *ev)
                     // we've met the time requirements.
                     PIOS_IAP_SetRequest1();
                     PIOS_IAP_SetRequest2();
+#ifdef PIOS_IAP_BOOTLOADER_HOLD
+                    if (data.Command == IAP_CMD_STEP_3_HOLD) {
+                        PIOS_IAP_BOOTLOADER_HOLD();
+                    }
+#endif
 
                     /* Note: Cant just wait timeout value, because first time is randomized */
                     reset_count = 0;

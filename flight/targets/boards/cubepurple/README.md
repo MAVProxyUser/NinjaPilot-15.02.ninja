@@ -25,6 +25,33 @@ OpenPilot DFU bootloader); telemetry, configuration and the setup wizard
 work over `USB: CubePurple` (HID).  The virtual serial port is disabled
 by default (HwSettings USB_VCPPort).
 
+When something else powers the board as well (a CAN BEC back-feeds the
+5 V rail through the CAN port), a USB power cycle does not reset it, and a
+plain soft reset is no use either: the bootloader boots the application
+straight back after one (0.35 s USB gap, no window).  Use the IAP route:
+
+    FLASH_REBOOT=iap tools/flash.sh build/fw_cubepurple/fw_cubepurple.apj
+
+It sends FirmwareIAP 1122/2233/6677 (`tools/iap_reboot.py --hold`): the
+third step is the tree's STEP_3 with a board hook that leaves the
+bootloader's "hold" signature in RTC BKP0R, so the bootloader waits for the
+uploader and boots the new firmware when it is done.  The firmware on the
+board must already have the hook (anything after commit cdaa0e056's
+successor); before that, cut the other supply once and use the USB path.
+The GCS reboot (1122/2233/3344) is unchanged: it comes back as the
+application.
+
+## DroneCAN on CAN2
+
+CAN2 (PB12/PB6, 1 Mbit/s) runs a small DroneCAN v0 node (`MODULE DroneCAN`,
+`flight/modules/DroneCAN`): it broadcasts NodeStatus (node id 10), answers
+dynamic node-id allocation for anonymous nodes, keeps a census of the
+nodes it hears (`DroneCANStatus`: counters, error counters, bus-off, node
+table with health/mode/uptime, the first eight data type ids seen with
+frame counts) and decodes `uavcan.equipment.esc.Status` (1034) into
+`DroneCANESCStatus` by ESC index.  No CAN output yet (ESC RawCommand is the
+next step).  CAN1 is not brought up.
+
 ## Bring-up aids (off by default)
 
 The board has no console.  Two knobs, passed as `CUBE_CDEFS=...` on the

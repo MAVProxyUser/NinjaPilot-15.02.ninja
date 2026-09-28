@@ -15,11 +15,13 @@ UPLOADER="${UPLOADER:-$ROOT/../lineage/ardupilot/Tools/scripts/uploader.py}"
 HUB="${HUB:-8-3}"; HUB_PORT="${HUB_PORT:-1}"
 [ -f "$UPLOADER" ] || { echo "uploader.py not found: $UPLOADER (set UPLOADER=)"; exit 1; }
 if [ "${FLASH_REBOOT:-usb}" = "iap" ]; then
-    # The board is powered from elsewhere too (CAN BEC): reset it through the
-    # firmware's IAP command, then start the uploader at once - the bootloader
-    # only waits ~5 s, and an uploader that is already probing the running
-    # firmware's serial port misses that window.
-    python3 "$HERE/iap_reboot.py" || exit 1
+    # The board is powered from elsewhere too (CAN BEC), so a USB power cycle
+    # does not reset it.  A plain soft reset is no use either: the ArduPilot
+    # bootloader boots the application straight back after one.  So ask the
+    # firmware (IAP 1122/2233/6677) to leave the bootloader's "hold" signature
+    # before it resets; the bootloader then waits for the uploader, which
+    # boots the new firmware when it is done.
+    python3 "$HERE/iap_reboot.py" --hold || exit 1
     nohup python3 "$UPLOADER" "$APJ" > "$LOG" 2>&1 &
     UP=$!
 else

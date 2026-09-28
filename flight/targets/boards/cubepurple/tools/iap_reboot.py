@@ -35,15 +35,18 @@ class HidTransport(object):
         return bytes(r[2:2 + n])
 
 db = uavtalk.UAVObjectDB(os.path.join(ROOT, "shared", "uavobjectdefinition"))
-tr = HidTransport(wait=float(sys.argv[1]) if len(sys.argv) > 1 else 10); client = UAVTalkClient(tr, db); state = {}
+args = [a for a in sys.argv[1:] if not a.startswith("--")]
+tr = HidTransport(wait=float(args[0]) if args else 10); client = UAVTalkClient(tr, db); state = {}
 def on_object(od, inst, dec):
     if od.name == "FirmwareIAPObj" and "iap" not in state: state["iap"] = dec
 client.run(duration=3, on_object=on_object, on_connected=lambda: client.request_object("FirmwareIAPObj"))
 iap = state.get("iap")
 if not iap:
     print("no FirmwareIAPObj answer (is the firmware up and the GCS disconnected?)"); sys.exit(1)
-for cmd in (1122, 2233, 3344):
+# --hold: third step 6677 keeps the ArduPilot bootloader resident (uploader window)
+hold = "--hold" in sys.argv
+for cmd in (1122, 2233, 6677 if hold else 3344):
     iap["Command"] = cmd
     client.send_object("FirmwareIAPObj", iap)
     time.sleep(0.6)
-print("IAP reset sent")
+print("IAP reset sent" + (" (bootloader hold)" if hold else ""))

@@ -93,6 +93,21 @@ static uint32_t anon_requests;
 static uint8_t  ns_tid;
 static struct reasm esc_rx[4];
 
+/* which data types are on the bus: the first 8 seen, with frame counts */
+#define DTID_HIST_SIZE DRONECANSTATUS_DATATYPEID_NUMELEM
+static uint16_t dtid_hist_id[DTID_HIST_SIZE];
+static uint32_t dtid_hist_count[DTID_HIST_SIZE];
+static void dtid_count(uint16_t dtid)
+{
+    for (uint32_t i = 0; i < DTID_HIST_SIZE; i++) {
+        if (dtid_hist_count[i] == 0 || dtid_hist_id[i] == dtid) {
+            dtid_hist_id[i] = dtid;
+            dtid_hist_count[i]++;
+            return;
+        }
+    }
+}
+
 static void dronecanTask(void *parameters);
 
 int32_t DroneCANStart(void)
@@ -359,31 +374,30 @@ static void dna_handle_request(const uint8_t *data, uint8_t dlc)
 /* ---- receive side ---- */
 static struct node_entry *node_lookup(uint8_t node_id, bool create)
 {
-    struct node_entry *oldest = NULL;
+    struct node_entry *free_slot = NULL, *stalest = NULL;
 
     for (uint32_t i = 0; i < NODE_TABLE_SIZE; i++) {
         if (nodes[i].node_id == node_id) {
             return &nodes[i];
         }
         if (nodes[i].node_id == 0) {
-            if (!oldest) {
-                oldest = &nodes[i];
+            if (!free_slot) {
+                free_slot = &nodes[i];
             }
-        } else if (!create) {
-            continue;
-        } else if (!oldest || (int32_t)(nodes[i].last_seen - oldest->last_seen) < 0) {
-            if (oldest && oldest->node_id == 0) {
-                continue; /* keep the free slot */
-            }
-            oldest = &nodes[i];
+        } else if (!stalest || (int32_t)(nodes[i].last_seen - stalest->last_seen) < 0) {
+            stalest = &nodes[i];
         }
     }
-    if (!create || !oldest) {
+    if (!create) {
         return NULL;
     }
-    memset(oldest, 0, sizeof(*oldest));
-    oldest->node_id = node_id;
-    return oldest;
+    struct node_entry *e = free_slot ? free_slot : stalest;
+    if (!e) {
+        return NULL;
+    }
+    memset(e, 0, sizeof(*e));
+    e->node_id = node_id;
+    return e;
 }
 
 /* Multi-frame reassembly keyed by source node; returns the payload length
@@ -500,6 +514,8 @@ static void handle_frame(const struct pios_can_frame *f)
     uint16_t dtid = (id >> 8) & 0xFFFF;
     uint8_t  tail = f->data[f->dlc - 1];
 
+    dtid_count(dtid);
+
     struct node_entry *e = node_lookup(node, true);
     if (e) {
         e->last_seen = xTaskGetTickCount();
@@ -555,6 +571,10 @@ static void publish_status(void)
         }
     }
     st.NodeCount = count;
+    for (uint32_t i = 0; i < DTID_HIST_SIZE; i++) {
+        st.DataTypeId[i]    = dtid_hist_id[i];
+        st.DataTypeCount[i] = dtid_hist_count[i];
+    }
     DroneCANStatusSet(&st);
 }
 

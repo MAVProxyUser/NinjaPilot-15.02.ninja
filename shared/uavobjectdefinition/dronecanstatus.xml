@@ -16,6 +16,8 @@
         <field name="NodeMode" units="" type="enum" elements="16" options="Operational,Initialization,Maintenance,SoftwareUpdate,Offline" defaultvalue="Operational"/>
         <field name="NodeUptime" units="s" type="uint32" elements="16" defaultvalue="0"/>
         <field name="NodeLastSeen" units="s" type="uint16" elements="16" defaultvalue="0"/>
+        <field name="DataTypeId" units="" type="uint16" elements="8" defaultvalue="0"/>
+        <field name="DataTypeCount" units="" type="uint32" elements="8" defaultvalue="0"/>
         <access gcs="readwrite" flight="readwrite"/>
         <telemetrygcs acked="false" updatemode="manual" period="0"/>
         <telemetryflight acked="false" updatemode="periodic" period="1000"/>
