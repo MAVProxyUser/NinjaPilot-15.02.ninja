@@ -260,3 +260,32 @@ make line, replace it:
 * Spektrum channel order out of the IO decoder is 1 throttle, 2 roll,
   3 pitch, 4 yaw, 5 gear, 6 aux1; the ArduPilot DSM decoder scales sticks to
   about 1100..1900 us around 1500.
+
+## Spektrum satellite: TELEM2, not RC IN (2026-09-29, verified)
+
+* This Cube's IO co-processor runs the PX4IO-generation firmware
+  (`IOMCUStatus.ProtocolVersion2` = 3; ArduPilot's ChibiOS IO answers 10).
+  That generation decodes Spektrum only on its own DSM UART, never on the
+  PPM pin, and it ignores the newer RC-protocol mask register. With the
+  Mini Carrier's RC IN re-jumpered to SPKT it still delivered nothing, so
+  the IO path is parked. `pios_iomcu.c` now decodes that generation's RC
+  page layout (channels from register 6, RC OK = flags bit 4), drives its
+  DSM register 7 (power-up at handshake, five-step bind), and reads the
+  status page as before.
+* What works: the satellite on **TELEM2** (pin 1 = 5 V, pin 3 = RX, pin 6 =
+  GND), `HwSettings.RV_AuxPort = DSM`, channel groups `DSM (MainPort)`,
+  decoded by the FMU's own driver (`pios_dsm`, `PIOS_INCLUDE_DSM`). The
+  raw values are 11-bit (342..1706, centre 1024 on the test radio), not
+  microseconds. Throttle neutral must sit above the minimum (372 vs 342)
+  so idle reads negative, or the arming handler never sees "throttle low".
+  Yaw came in reversed on this radio (min/max swapped). Arming = throttle
+  low + yaw right for 1 s, verified from the transmitter.
+* Motor tests once `ActuatorSettings.ChannelType` is DroneCAN: the actuator
+  module streams RawCommand at 500 Hz whether armed or not, so the bench
+  path (`DroneCANESCCommand`, `esc_test.py`, `can_ramp.py`) is out-voted.
+  Use `tools/actuator_ramp.py` (ActuatorCommand in output-test mode, the
+  GCS Output tab mechanism). Measured on the bench, no props, 4 x EMAX
+  ECO II 2207: 4 % = 1780 rpm, 8 % = 3060, 12 % = 4300, 16 % = 5520,
+  matched within 2 %; 0.5 A per ESC at 16 %; bus 300 rx / 520 tx frames/s,
+  0 drops, TEC/REC 0, CPU 48 %. A 3 A bench limit sagged to 9.8 V at the
+  16 -> 20 % step; the tool aborts below 11 V.

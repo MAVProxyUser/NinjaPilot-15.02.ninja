@@ -72,6 +72,7 @@
 #define REG_SETUP_FORCE_SAFETY_OFF 12
 #define REG_SETUP_DSM_BIND	22	/* any write starts IO's Spektrum bind sequence */
 #define REG_SETUP_RC_PROTOCOLS	23	/* two registers: bit 0 of the 32-bit mask = every protocol */
+#define REG_SETUP_DSM_PX4IO	7	/* the PX4IO generation keeps its DSM bind/power state here; 22 is its S.Bus output rate */
 #define FORCE_SAFETY_MAGIC	22027
 
 #define ARMING_IO_ARM_OK	(1 << 0)
@@ -107,6 +108,8 @@ struct pios_iomcu_dev {
 	uint16_t rate_hz;
 	bool rate_dirty;
 	bool safety_forced;
+	uint8_t bind_pulses;		/* DSM bind requested: pulses to send (9 = DSMX 11 ms), run by the task once the IO is up */
+	bool px4io_layout;		/* IO firmware of the PX4IO generation (protocol_version2 != 10): other RC page + bind protocol */
 	uint8_t tx[PKT_HEADER + 2 * PKT_MAX_REGS];
 	uint8_t rx[PKT_HEADER + 2 * PKT_MAX_REGS];
 	uint16_t rx_fill;
@@ -263,6 +266,16 @@ static bool PIOS_IOMCU_Handshake(struct pios_iomcu_dev *dev)
 	dev->st.protocol_version2 = cfg[1];
 	dev->st.mcuid = (uint32_t)cfg[2] | ((uint32_t)cfg[3] << 16);
 	dev->st.state = PIOS_IOMCU_STATE_INIT;
+	/* ArduPilot's ChibiOS IO firmware has answered 10 here since 2018-11; the
+	 * PX4IO (NuttX) generation puts its hardware version (2 or 3) there. */
+	dev->px4io_layout = (dev->st.protocol_version2 != 10);
+	if (dev->px4io_layout) {
+		/* The PX4IO generation gates the 3.3 V Spektrum regulator (the
+		 * satellite's supply on the SPKT/3V3 path) behind its bind
+		 * register: low nibble 1 = power up, no bind pulses. */
+		uint16_t v = 1;
+		dev->st.rc_mask_ack = PIOS_IOMCU_WriteRegs(dev, PAGE_SETUP, REG_SETUP_DSM_PX4IO, 1, &v) ? 1 : 2;
+	}
 
 	/* The IO may arm its outputs, this firmware does the mixing (no IO-side
 	 * failsafe mixing), and the outputs follow our values at once: this
@@ -276,7 +289,7 @@ static bool PIOS_IOMCU_Handshake(struct pios_iomcu_dev *dev)
 	 * default 1 = all); the mask is a zero-initialised global in the IO.
 	 * Older IO firmware has no such register and rejects the write, which
 	 * is fine: it decodes everything anyway. */
-	{
+	if (!dev->px4io_layout) {
 		uint16_t mask[2] = { 1, 0 };
 		dev->st.rc_mask_ack = PIOS_IOMCU_WriteRegs(dev, PAGE_SETUP, REG_SETUP_RC_PROTOCOLS, 2, mask) ? 1 : 2;
 	}
@@ -302,6 +315,37 @@ static void PIOS_IOMCU_ApplyRate(struct pios_iomcu_dev *dev)
 	if (PIOS_IOMCU_WriteRegs(dev, PAGE_SETUP, REG_SETUP_PWM_RATE_MASK, 3, regs)) {
 		dev->rate_dirty = false;
 	}
+}
+
+/* Put the satellite on the IO's DSM UART into bind mode. The ChibiOS IO
+ * firmware runs the whole sequence itself on any write to register 22; the
+ * PX4IO generation expects the flight side to drive it step by step through
+ * the same register: low nibble = command (0 power down, 1 power up,
+ * 2 RX line as output, 3 send pulses, 4 UART back), high nibble = pulses. */
+static void PIOS_IOMCU_RunBind(struct pios_iomcu_dev *dev)
+{
+	uint16_t v;
+	uint8_t pulses = dev->bind_pulses;
+
+	dev->bind_pulses = 0;
+	if (!dev->px4io_layout) {
+		v = 1;
+		PIOS_IOMCU_WriteRegs(dev, PAGE_SETUP, REG_SETUP_DSM_BIND, 1, &v);
+		return;
+	}
+	v = 0;	/* power down */
+	PIOS_IOMCU_WriteRegs(dev, PAGE_SETUP, REG_SETUP_DSM_PX4IO, 1, &v);
+	vTaskDelay(500 / portTICK_PERIOD_MS);
+	v = 2;	/* RX line becomes an output */
+	PIOS_IOMCU_WriteRegs(dev, PAGE_SETUP, REG_SETUP_DSM_PX4IO, 1, &v);
+	v = 1;	/* power up */
+	PIOS_IOMCU_WriteRegs(dev, PAGE_SETUP, REG_SETUP_DSM_PX4IO, 1, &v);
+	vTaskDelay(72 / portTICK_PERIOD_MS);
+	v = 3 | (pulses << 4);	/* the bind pulses */
+	PIOS_IOMCU_WriteRegs(dev, PAGE_SETUP, REG_SETUP_DSM_PX4IO, 1, &v);
+	vTaskDelay(50 / portTICK_PERIOD_MS);
+	v = 4;	/* UART back */
+	PIOS_IOMCU_WriteRegs(dev, PAGE_SETUP, REG_SETUP_DSM_PX4IO, 1, &v);
 }
 
 static void PIOS_IOMCU_Task(void *parameters)
@@ -333,16 +377,37 @@ static void PIOS_IOMCU_Task(void *parameters)
 		if (dev->rate_dirty) {
 			PIOS_IOMCU_ApplyRate(dev);
 		}
+		if (dev->bind_pulses) {
+			PIOS_IOMCU_RunBind(dev);
+		}
 
 		/* RC input, every other period (50 Hz is plenty for any RC link) */
-		if ((tick % 2) == 0 && PIOS_IOMCU_ReadRegs(dev, PAGE_RAW_RCIN, 0, RCIN_REGS, regs)) {
-			const uint8_t *b = (const uint8_t *)regs;
-			dev->st.rc_count = b[0];
-			dev->st.rc_failsafe = b[1] & 0x01;
-			dev->st.rc_ok = (b[1] >> 1) & 0x01;
-			dev->st.rc_protocol = b[2];
-			memcpy(dev->st.rc, &regs[2], sizeof(dev->st.rc));
-			dev->st.rc_rssi = (int16_t)regs[18];
+		/* the PX4IO page keeps 6 header registers ahead of the channels */
+		if ((tick % 2) == 0 && PIOS_IOMCU_ReadRegs(dev, PAGE_RAW_RCIN, 0, dev->px4io_layout ? 6 + PIOS_IOMCU_NUM_RC : RCIN_REGS, regs)) {
+			if (dev->px4io_layout) {
+				/* PX4IO page 4: count, flags (bit1 failsafe, bit4 RC_OK),
+				 * nrssi, data, frame count, lost frames, then the channels. */
+				dev->st.rc_count = (uint8_t)regs[0];
+				dev->st.rc_failsafe = (regs[1] >> 1) & 0x01;
+				dev->st.rc_ok = (regs[1] >> 4) & 0x01;
+				dev->st.rc_rssi = (int16_t)regs[2];
+				memcpy(dev->st.rc, &regs[6], sizeof(dev->st.rc));
+				/* which decoder fired: status flags PPM bit3, DSM bit4, S.Bus bit5,
+				 * ST24 bit14, SUMD bit15; numbered like the newer firmware does */
+				dev->st.rc_protocol = (dev->st.status_flags & (1 << 3)) ? 0 :
+						      (dev->st.status_flags & (1 << 5)) ? 2 :
+						      (dev->st.status_flags & (1 << 4)) ? 4 :
+						      (dev->st.status_flags & (1 << 15)) ? 5 :
+						      (dev->st.status_flags & (1 << 14)) ? 10 : 255;
+			} else {
+				const uint8_t *b = (const uint8_t *)regs;
+				dev->st.rc_count = b[0];
+				dev->st.rc_failsafe = b[1] & 0x01;
+				dev->st.rc_ok = (b[1] >> 1) & 0x01;
+				dev->st.rc_protocol = b[2];
+				memcpy(dev->st.rc, &regs[2], sizeof(dev->st.rc));
+				dev->st.rc_rssi = (int16_t)regs[18];
+			}
 			if (dev->st.rc_ok && !dev->st.rc_failsafe) {
 				dev->rc_last_ok_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
 			}
@@ -418,12 +483,12 @@ void PIOS_IOMCU_ServoSet(uint32_t iomcu_id, uint8_t channel, uint16_t us)
 bool PIOS_IOMCU_DsmBind(uint32_t iomcu_id)
 {
 	struct pios_iomcu_dev *dev = (struct pios_iomcu_dev *)iomcu_id;
-	uint16_t one = 1;
 
 	if (PIOS_IOMCU_Validate(dev) != 0) {
 		return false;
 	}
-	return PIOS_IOMCU_WriteRegs(dev, PAGE_SETUP, REG_SETUP_DSM_BIND, 1, &one);
+	dev->bind_pulses = 9;	/* DSMX, 11 ms frames: what a modern satellite wants */
+	return true;
 }
 
 void PIOS_IOMCU_ServoSetHz(uint32_t iomcu_id, uint16_t hz)

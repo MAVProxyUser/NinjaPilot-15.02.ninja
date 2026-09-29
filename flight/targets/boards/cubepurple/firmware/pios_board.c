@@ -874,6 +874,7 @@ void PIOS_Board_Init(void)
      *   CUBE_GPS2Port    = GPS 2  (UART8, the 6-pin connector)
      */
     uint8_t hwsettings_port;
+    uint32_t pios_dsm_telem2_rcvr_id = 0;
 
     HwSettingsRV_TelemetryPortGet(&hwsettings_port);
     switch (hwsettings_port) {
@@ -902,6 +903,27 @@ void PIOS_Board_Init(void)
     case HWSETTINGS_RV_AUXPORT_OSDHK:
         PIOS_Board_configure_com(&pios_usart_telem2_cfg, PIOS_COM_HKOSD_RX_BUF_LEN, PIOS_COM_HKOSD_TX_BUF_LEN, &pios_usart_com_driver, &pios_com_hkosd_id);
         break;
+#if defined(PIOS_INCLUDE_DSM)
+    case HWSETTINGS_RV_AUXPORT_DSM:
+    {
+        /* Spektrum satellite wired to TELEM2 (signal on RX): decoded here on
+         * the FMU, independent of whatever firmware the IO runs. */
+        uint32_t pios_usart_dsm_id;
+        if (PIOS_USART_Init(&pios_usart_dsm_id, &pios_usart_dsm_telem2_cfg)) {
+            PIOS_Assert(0);
+        }
+        uint8_t dsm_bind = 0;
+        HwSettingsDSMxBindGet(&dsm_bind);
+        uint32_t pios_dsm_id;
+        if (PIOS_DSM_Init(&pios_dsm_id, &pios_dsm_telem2_cfg, &pios_usart_com_driver, pios_usart_dsm_id, dsm_bind)) {
+            PIOS_Assert(0);
+        }
+        if (PIOS_RCVR_Init(&pios_dsm_telem2_rcvr_id, &pios_dsm_rcvr_driver, pios_dsm_id)) {
+            PIOS_Assert(0);
+        }
+    }
+    break;
+#endif /* PIOS_INCLUDE_DSM */
     default:
         break;
     }
@@ -983,6 +1005,11 @@ void PIOS_Board_Init(void)
             pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_SBUS] = pios_iomcu_rcvr_id;
             pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_DSMMAINPORT]  = pios_iomcu_rcvr_id;
             pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_DSMFLEXIPORT] = pios_iomcu_rcvr_id;
+        }
+        if (pios_dsm_telem2_rcvr_id) {
+            /* a satellite on TELEM2 takes the DSM groups away from the IO */
+            pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_DSMMAINPORT]  = pios_dsm_telem2_rcvr_id;
+            pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_DSMFLEXIPORT] = pios_dsm_telem2_rcvr_id;
         }
         /* HwSettings DSMxBind set (tools/dsm_bind.py): put the satellite on
          * the SPKT/DSM port into bind mode now, while the transmitter is

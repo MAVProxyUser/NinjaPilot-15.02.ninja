@@ -497,6 +497,65 @@ static const struct pios_usart_cfg pios_usart_telem2_cfg = {
     },
 };
 
+#if defined(PIOS_INCLUDE_DSM)
+#include <pios_dsm_priv.h>
+/* A Spektrum satellite on TELEM2: 115200 8N1 into USART3 RX; the bind pulses
+ * go out on the same pin before the UART takes it. */
+static const struct pios_usart_cfg pios_usart_dsm_telem2_cfg = {
+    .regs  = USART3,
+    .remap = GPIO_AF_USART3,
+    .init  = {
+        .USART_BaudRate            = 115200,
+        .USART_WordLength          = USART_WordLength_8b,
+        .USART_Parity              = USART_Parity_No,
+        .USART_StopBits            = USART_StopBits_1,
+        .USART_HardwareFlowControl = USART_HardwareFlowControl_None,
+        .USART_Mode                = USART_Mode_Rx | USART_Mode_Tx,
+    },
+    .irq   = {
+        .init                                      = {
+            .NVIC_IRQChannel    = USART3_IRQn,
+            .NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_MID,
+            .NVIC_IRQChannelSubPriority        = 0,
+            .NVIC_IRQChannelCmd = ENABLE,
+        },
+    },
+    .rx    = {
+        .gpio = GPIOD,
+        .init = {
+            .GPIO_Pin   = GPIO_Pin_9,
+            .GPIO_Speed = GPIO_Speed_2MHz,
+            .GPIO_Mode  = GPIO_Mode_AF,
+            .GPIO_OType = GPIO_OType_PP,
+            .GPIO_PuPd  = GPIO_PuPd_UP
+        },
+    },
+    .tx    = {
+        .gpio = GPIOD,
+        .init = {
+            .GPIO_Pin   = GPIO_Pin_8,
+            .GPIO_Speed = GPIO_Speed_2MHz,
+            .GPIO_Mode  = GPIO_Mode_AF,
+            .GPIO_OType = GPIO_OType_PP,
+            .GPIO_PuPd  = GPIO_PuPd_UP
+        },
+    },
+};
+
+static const struct pios_dsm_cfg pios_dsm_telem2_cfg = {
+    .bind = {
+        .gpio = GPIOD,
+        .init = {
+            .GPIO_Pin   = GPIO_Pin_9,
+            .GPIO_Speed = GPIO_Speed_2MHz,
+            .GPIO_Mode  = GPIO_Mode_OUT,
+            .GPIO_OType = GPIO_OType_PP,
+            .GPIO_PuPd  = GPIO_PuPd_NOPULL,
+        },
+    },
+};
+#endif /* PIOS_INCLUDE_DSM */
+
 /*
  * GPS connector - UART4 on PA0 (tx) / PA1 (rx).  HwSettings.RV_GPSPort.
  */
