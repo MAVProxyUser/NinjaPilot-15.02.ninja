@@ -15,6 +15,7 @@ OTHER_FILES += \
 HEADERS += \
     configrevowidget.h \
     configrevohwwidget.h \
+    configcubehwwidget.h \
     configplugin.h \
     configgadgetwidget.h \
     configgadgetfactory.h \
@@ -62,6 +63,7 @@ HEADERS += \
 SOURCES += \
     configrevowidget.cpp \
     configrevohwwidget.cpp \
+    configcubehwwidget.cpp \
     configplugin.cpp \
     configgadgetwidget.cpp \
     configgadgetfactory.cpp \
@@ -102,6 +104,7 @@ SOURCES += \
 FORMS += \
     revosensors.ui \
     configrevohwwidget.ui \
+    configcubehwwidget.ui \
     airframe.ui \
     airframe_ccpm.ui \
     airframe_fixedwing.ui \

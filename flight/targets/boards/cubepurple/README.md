@@ -295,3 +295,14 @@ make line, replace it:
   28.7 k, 90 % = 31.6 k, 100 % = 33.9 k rpm; 2.1 A per ESC and 8.5 A total at
   full, pack 14.6 -> 13.2 V, ESCs 39..46 C, zero errors, bus 800 frames/s
   (~11 % of 1 Mbit/s), CPU 47 %. Nothing on the bus or the ESCs limited it.
+
+## GCS hardware page (2026-09-29)
+
+`ConfigCubeHWWidget` replaces the Revolution page for board type 0x0C: the
+Mini Carrier's photo with only its connectors around it (TELEM 1/2, GPS 1/2,
+RC IN, USB; CAN 2, I2C 2 and MAIN OUT as notes), bound to the same HwSettings
+fields the firmware reads. `tools/hwpage_check.py` scripts the check: page
+values equal the board, TELEM1 changed and saved both ways, page rebuilt
+after a disconnect/reconnect (the config gadget's "same board" guard used to
+leave the placeholder page in place; fixed). `tools/gcs_shot.sh` captures the
+GCS window by window id, never a screen region.

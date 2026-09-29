@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>CubeHWWidget</class>
+ <widget class="QWidget" name="CubeHWWidget">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>1000</width><height>760</height></rect></property>
+  <property name="windowTitle"><string>Form</string></property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QScrollArea" name="scrollArea">
+     <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
+     <property name="widgetResizable"><bool>true</bool></property>
+     <widget class="QWidget" name="scrollAreaWidgetContents">
+      <layout class="QVBoxLayout" name="contentsLayout">
+       <item><widget class="QLabel" name="lblTitle"><property name="font"><font><bold>true</bold></font></property><property name="text"><string>CubePilot Cube Purple on the Mini Carrier Board: the carrier's connectors, as the firmware uses them. Port changes need a reboot.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+       <item>
+        <layout class="QGridLayout" name="boardGrid">
+         <item row="0" column="1">
+          <layout class="QHBoxLayout" name="topRow">
+           <item><widget class="QGroupBox" name="grpTelem1"><property name="title"><string>TELEM 1  (Serial 1, USART2)</string></property><layout class="QVBoxLayout"><item><widget class="QComboBox" name="cbTelem1"><property name="minimumSize"><size><width>170</width><height>0</height></size></property></widget></item><item><layout class="QHBoxLayout"><item><widget class="QLabel" name="lblTelem1Speed"><property name="text"><string>Speed</string></property></widget></item><item><widget class="QComboBox" name="cbTelem1TelemSpeed"><property name="minimumSize"><size><width>110</width><height>0</height></size></property></widget></item><item><widget class="QComboBox" name="cbTelem1ComSpeed"><property name="minimumSize"><size><width>110</width><height>0</height></size></property></widget></item></layout></item></layout></widget></item>
+           <item><widget class="QGroupBox" name="grpTelem2"><property name="title"><string>TELEM 2  (Serial 2, USART3)</string></property><layout class="QVBoxLayout"><item><widget class="QComboBox" name="cbTelem2"><property name="minimumSize"><size><width>170</width><height>0</height></size></property></widget></item><item><layout class="QHBoxLayout"><item><widget class="QLabel" name="lblTelem2Speed"><property name="text"><string>Speed</string></property></widget></item><item><widget class="QComboBox" name="cbTelem2TelemSpeed"><property name="minimumSize"><size><width>110</width><height>0</height></size></property></widget></item><item><widget class="QComboBox" name="cbTelem2ComSpeed"><property name="minimumSize"><size><width>110</width><height>0</height></size></property></widget></item></layout></item><item><widget class="QLabel" name="lblTelem2Note"><property name="font"><font><italic>true</italic></font></property><property name="text"><string>DSM: a Spektrum satellite on TELEM2 (pin 1 5V, pin 3 RX, pin 6 GND), decoded by the flight controller.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item></layout></widget></item>
+          </layout>
+         </item>
+         <item row="1" column="0">
+          <layout class="QVBoxLayout" name="leftColumn">
+           <item><widget class="QGroupBox" name="grpGPS1"><property name="title"><string>GPS 1  (Serial 3, UART4, 8-pin)</string></property><layout class="QVBoxLayout"><item><widget class="QComboBox" name="cbGPS1"><property name="minimumSize"><size><width>170</width><height>0</height></size></property></widget></item><item><layout class="QHBoxLayout"><item><widget class="QLabel" name="lblGPS1Speed"><property name="text"><string>Speed</string></property></widget></item><item><widget class="QComboBox" name="cbGPS1TelemSpeed"><property name="minimumSize"><size><width>110</width><height>0</height></size></property></widget></item><item><widget class="QComboBox" name="cbGPS1GPSSpeed"><property name="minimumSize"><size><width>110</width><height>0</height></size></property></widget></item><item><widget class="QComboBox" name="cbGPS1ComSpeed"><property name="minimumSize"><size><width>110</width><height>0</height></size></property></widget></item></layout></item><item><layout class="QHBoxLayout"><item><widget class="QLabel" name="lblGPS1Protocol"><property name="text"><string>Protocol</string></property></widget></item><item><widget class="QComboBox" name="cbGPS1GPSProtocol"><property name="minimumSize"><size><width>110</width><height>0</height></size></property></widget></item></layout></item></layout></widget></item>
+           <item><widget class="QGroupBox" name="grpCAN2"><property name="title"><string>CAN 2  (4-pin)</string></property><layout class="QVBoxLayout"><item><widget class="QLabel" name="grpCAN2Lbl"><property name="text"><string>DroneCAN bus: the ESCs and other CAN nodes. No setting; the DroneCAN module owns it.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item></layout></widget></item>
+           <item><spacer name="leftSpacer"><property name="orientation"><enum>Qt::Vertical</enum></property></spacer></item>
+          </layout>
+         </item>
+         <item row="1" column="1" alignment="Qt::AlignHCenter|Qt::AlignTop">
+          <widget class="QLabel" name="lblBoard">
+           <property name="pixmap"><pixmap resource="configgadget.qrc">:/configgadget/images/cube_mini_carrier.png</pixmap></property>
+           <property name="toolTip"><string>CubePilot Cube Mini Carrier Board, top side (Cube removed)</string></property>
+          </widget>
+         </item>
+         <item row="1" column="2">
+          <layout class="QVBoxLayout" name="rightColumn">
+           <item><widget class="QGroupBox" name="grpI2C2"><property name="title"><string>I2C 2  (4-pin)</string></property><layout class="QVBoxLayout"><item><widget class="QLabel" name="grpI2C2Lbl"><property name="text"><string>External compass and other I2C peripherals. No setting.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item></layout></widget></item>
+           <item><widget class="QGroupBox" name="grpGPS2"><property name="title"><string>GPS 2  (Serial 4, UART8, 6-pin)</string></property><layout class="QVBoxLayout"><item><widget class="QComboBox" name="cbGPS2"><property name="minimumSize"><size><width>170</width><height>0</height></size></property></widget></item><item><layout class="QHBoxLayout"><item><widget class="QLabel" name="lblGPS2Speed"><property name="text"><string>Speed</string></property></widget></item><item><widget class="QComboBox" name="cbGPS2TelemSpeed"><property name="minimumSize"><size><width>110</width><height>0</height></size></property></widget></item><item><widget class="QComboBox" name="cbGPS2GPSSpeed"><property name="minimumSize"><size><width>110</width><height>0</height></size></property></widget></item><item><widget class="QComboBox" name="cbGPS2ComSpeed"><property name="minimumSize"><size><width>110</width><height>0</height></size></property></widget></item></layout></item><item><layout class="QHBoxLayout"><item><widget class="QLabel" name="lblGPS2Protocol"><property name="text"><string>Protocol</string></property></widget></item><item><widget class="QComboBox" name="cbGPS2GPSProtocol"><property name="minimumSize"><size><width>110</width><height>0</height></size></property></widget></item></layout></item></layout></widget></item>
+           <item><spacer name="rightSpacer"><property name="orientation"><enum>Qt::Vertical</enum></property></spacer></item>
+          </layout>
+         </item>
+         <item row="2" column="1">
+          <layout class="QHBoxLayout" name="bottomRow">
+           <item><widget class="QGroupBox" name="grpRcvr"><property name="title"><string>RC IN  (servo header, PPM/S.Bus pin)</string></property><layout class="QVBoxLayout"><item><widget class="QComboBox" name="cbRcvr"><property name="minimumSize"><size><width>170</width><height>0</height></size></property></widget></item><item><widget class="QLabel" name="lblRcvrNote"><property name="font"><font><italic>true</italic></font></property><property name="text"><string>Decoded by the IO co-processor: PWM = on. Spektrum satellites do not work here; use TELEM2 = DSM.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item></layout></widget></item>
+           <item><widget class="QGroupBox" name="grpMainOut"><property name="title"><string>MAIN OUT 1-8  (servo header)</string></property><layout class="QVBoxLayout"><item><widget class="QLabel" name="grpMainOutLbl"><property name="text"><string>IO co-processor PWM outputs. DroneCAN ESCs are on CAN 2 instead. POWER 1 / POWER 2: power modules.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item></layout></widget></item>
+          </layout>
+         </item>
+         <item row="3" column="0" colspan="3">
+          <layout class="QHBoxLayout" name="usbRow">
+           <item>
+            <widget class="QGroupBox" name="grpUSB">
+             <property name="title"><string>USB (on the Cube itself)</string></property>
+             <layout class="QHBoxLayout">
+              <item><widget class="QLabel" name="lblUSBHID"><property name="text"><string>HID</string></property></widget></item><item><widget class="QComboBox" name="cbUSBHIDFunction"><property name="minimumSize"><size><width>130</width><height>0</height></size></property></widget></item>
+              <item><widget class="QLabel" name="lblUSBVCP"><property name="text"><string>Virtual COM</string></property></widget></item><item><widget class="QComboBox" name="cbUSBVCPFunction"><property name="minimumSize"><size><width>130</width><height>0</height></size></property></widget></item>
+              <item><widget class="QLabel" name="lblUSBVCPSpeed"><property name="text"><string>Speed</string></property></widget></item><item><widget class="QComboBox" name="cbUSBVCPSpeed"><property name="minimumSize"><size><width>110</width><height>0</height></size></property></widget></item>
+             </layout>
+            </widget>
+           </item>
+           <item><spacer name="usbSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property></spacer></item>
+          </layout>
+         </item>
+        </layout>
+       </item>
+       <item><widget class="QLabel" name="lblCredit"><property name="font"><font><italic>true</italic></font></property><property name="text"><string>Board photo: CubePilot / ProfiCNC.</string></property></widget></item>
+       <item><spacer name="bottomSpacer"><property name="orientation"><enum>Qt::Vertical</enum></property></spacer></item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonRow">
+     <item><spacer name="buttonSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property></spacer></item>
+     <item>
+      <widget class="QPushButton" name="saveTelemetryToRAM">
+       <property name="toolTip"><string>Send to the board (not saved)</string></property>
+       <property name="text"><string>Apply</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="saveTelemetryToSD">
+       <property name="toolTip"><string>Send to the board and save to flash. A port change takes effect after a reboot.</string></property>
+       <property name="text"><string>Save</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources><include location="configgadget.qrc"/></resources>
+ <connections/>
+</ui>

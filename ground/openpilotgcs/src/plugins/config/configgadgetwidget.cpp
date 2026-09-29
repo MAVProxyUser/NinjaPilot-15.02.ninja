@@ -31,6 +31,7 @@
 #include <QLabel>
 #include "configrevowidget.h"
 #include "configrevohwwidget.h"
+#include "configcubehwwidget.h"
 
 #include "configvehicletypewidget.h"
 #include "configccattitudewidget.h"
@@ -186,6 +187,10 @@ void ConfigGadgetWidget::onAutopilotDisconnect()
     qwd = new DefaultHwSettingsWidget(this);
     stackWidget->replaceTab(ConfigGadgetWidget::hardware, qwd);
 
+    /* the placeholders above replaced the board's pages: the next connect
+     * must rebuild them even when it is the same board again */
+    m_appliedBoard = 0;
+
     emit autopilotDisconnected();
 }
 
@@ -225,7 +230,15 @@ void ConfigGadgetWidget::onAutopilotConnect()
 
             qwd = new ConfigCCHWWidget(this);
             stackWidget->replaceTab(ConfigGadgetWidget::hardware, qwd);
-        } else if (((board & 0xff00) == 0x0900) || ((board & 0xff00) == 0x1100) || ((board & 0xff00) == 0x0C00)) {
+        } else if ((board & 0xff00) == 0x0C00) {
+            /* CubePilot Cube Purple (0x0C): Revolution-class sensors page,
+             * its own hardware page (the Mini Carrier's connectors) */
+            QWidget *qwd = new ConfigRevoWidget(this);
+            stackWidget->replaceTab(ConfigGadgetWidget::sensors, qwd);
+
+            qwd = new ConfigCubeHWWidget(this);
+            stackWidget->replaceTab(ConfigGadgetWidget::hardware, qwd);
+        } else if (((board & 0xff00) == 0x0900) || ((board & 0xff00) == 0x1100)) {
             // Revolution family + NinjaPilot realposix (0x11): the Revo
             // config widgets were purged from this fork and are restored
             // from pre-7f571cf87 history.
