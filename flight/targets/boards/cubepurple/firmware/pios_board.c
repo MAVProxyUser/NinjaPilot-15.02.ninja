@@ -305,13 +305,40 @@ static void cube_bl_reset(void)
  * BKP0R 0xB0070001, its "hold" signature).  A plain soft reset boots the
  * application straight back (no upload window), so this is what the
  * FirmwareIAP STEP_3_HOLD command uses when the board is powered from the
- * CAN bus as well and a USB power cycle cannot reset it.  The bootloader
- * clears the signature when it runs. */
+ * CAN bus as well and a USB power cycle cannot reset it.
+ *
+ * Two things defeat a naive write of the signature:
+ *  - the bootloader's HAL resets the whole backup domain when the RTC clock
+ *    source is not the one it configures (LSI on this part; PIOS_RTC_Init
+ *    switches it to HSE/24), which wipes the signature before the
+ *    bootloader looks at it.  So put the source it found at boot back
+ *    first; RTCSEL is write-once between backup domain resets.
+ *  - the reset-cause flags in RCC_CSR are sticky until a power-on and the
+ *    bootloader boots the application at once after any watchdog reset,
+ *    signature or not.  Nothing else ever clears them, so clear them here.
+ * The bootloader clears the signature when it runs. */
+static uint32_t cube_bdcr_boot; /* RCC_BDCR as the bootloader left it */
+
 void cube_bootloader_hold(void)
 {
+    uint32_t sel = cube_bdcr_boot & RCC_BDCR_RTCSEL;
+
+    if (sel == 0) {
+        sel = RCC_BDCR_RTCSEL_1; /* LSI */
+    }
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
     PWR_BackupAccessCmd(ENABLE);
+    RCC_BackupResetCmd(ENABLE);
+    RCC_BackupResetCmd(DISABLE);
+    if (sel == RCC_BDCR_RTCSEL_0) {
+        RCC_LSEConfig(RCC_LSE_ON);
+    } else {
+        RCC_LSICmd(ENABLE);
+    }
+    RCC->BDCR |= sel;
+    RCC->BDCR |= RCC_BDCR_RTCEN;
     RTC_WriteBackupRegister(RTC_BKP_DR0, 0xB0070001);
+    RCC_ClearFlag();
 }
 #if CUBE_BOOT_STOP
 void CUBE_BootStage(uint32_t n)
@@ -620,6 +647,7 @@ void PIOS_Board_Init(void)
 
     CUBE_STAGE(4);
     CUBE_MARK(8);
+    cube_bdcr_boot = RCC->BDCR; /* before PIOS_RTC_Init changes the RTC clock source */
 #if defined(PIOS_INCLUDE_RTC)
     PIOS_RTC_Init(&pios_rtc_main_cfg);
 #endif
