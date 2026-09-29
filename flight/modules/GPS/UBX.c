@@ -118,6 +118,7 @@ int parse_ubx_stream(uint8_t *rx, uint16_t len, char *gps_rx_buffer, GPSPosition
         UBX_LEN1,
         UBX_LEN2,
         UBX_PAYLOAD,
+        UBX_SKIP,   /* payload larger than our buffer: swallow it, stay in sync */
         UBX_CHK1,
         UBX_CHK2,
         FINISHED
@@ -156,12 +157,27 @@ int parse_ubx_stream(uint8_t *rx, uint16_t len, char *gps_rx_buffer, GPSPosition
             break;
         case UBX_LEN2:
             ubx->header.len += (c << 8);
+            rx_count = 0;
             if (ubx->header.len > sizeof(UBXPayload)) {
+                /* Too big for us (a u-blox 9 tracking 30+ satellites sends
+                 * NAV-SVINFO/NAV-SAT well past this buffer, and it may
+                 * carry other large messages).  Resetting here scanned the
+                 * rest of the payload for sync bytes; a false match handed
+                 * the parser a bogus length and it swallowed real packets
+                 * for seconds, which read as "NoGPS" with a 3D fix.  Skip
+                 * the payload and checksum instead, unless the length is
+                 * absurd (then it was a false sync in the first place). */
                 gpsRxStats->gpsRxOverflow++;
-                proto_state = START;
+                proto_state = (ubx->header.len > 4096) ? START : UBX_SKIP;
+            } else if (ubx->header.len == 0) {
+                proto_state = UBX_CHK1;
             } else {
-                rx_count    = 0;
                 proto_state = UBX_PAYLOAD;
+            }
+            break;
+        case UBX_SKIP:
+            if (++rx_count >= (uint16_t)(ubx->header.len + 2)) {
+                proto_state = START;
             }
             break;
         case UBX_PAYLOAD:

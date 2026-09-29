@@ -564,7 +564,10 @@ static const struct pios_usart_cfg pios_usart_gps2_cfg = {
     .irq   = {
         .init                                      = {
             .NVIC_IRQChannel    = UART8_IRQn,
-            .NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_MID,
+            /* Top priority: at 230400 a byte lasts 43 us and the F4 UART holds one;
+             * behind the IMU DMA, USB and IO-link interrupts at HIGH it lost bytes,
+             * every big packet failed its checksum and the fix status flapped. */
+            .NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_HIGHEST,
             .NVIC_IRQChannelSubPriority        = 0,
             .NVIC_IRQChannelCmd = ENABLE,
         },

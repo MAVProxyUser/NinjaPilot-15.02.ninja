@@ -1,0 +1,13 @@
+<xml>
+    <object name="GPSRxStats" singleinstance="true" settings="false" category="Sensors">
+        <description>What the GPS parser sees on its port: complete packets, checksum failures, packets larger than its buffer (skipped), parser resyncs. Counters wrap at 65535. A rising checksum count with a receiver that has a fix means bytes are being lost on the serial link.</description>
+        <field name="Received" units="" type="uint16" elements="1" defaultvalue="0"/>
+        <field name="ChecksumErrors" units="" type="uint16" elements="1" defaultvalue="0"/>
+        <field name="Oversize" units="" type="uint16" elements="1" defaultvalue="0"/>
+        <field name="ParserErrors" units="" type="uint16" elements="1" defaultvalue="0"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="false" updatemode="manual" period="0"/>
+        <telemetryflight acked="false" updatemode="periodic" period="1000"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>

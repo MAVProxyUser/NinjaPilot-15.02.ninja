@@ -165,7 +165,11 @@ uint32_t pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_NONE];
 #define PIOS_COM_TELEM_RF_RX_BUF_LEN     512
 #define PIOS_COM_TELEM_RF_TX_BUF_LEN     512
 
-#define PIOS_COM_GPS_RX_BUF_LEN          128
+/* 1 KB: the GPS task is the lowest-priority task and the M9N runs at
+ * 230400, where 128 bytes is 5 ms of data - it overflowed whenever the task
+ * was held off, the corrupted packets never completed, and the status
+ * flapped to NoGPS with 12 satellites in view. */
+#define PIOS_COM_GPS_RX_BUF_LEN          1024
 #define PIOS_COM_GPS_TX_BUF_LEN          32
 
 #define PIOS_COM_TELEM_USB_RX_BUF_LEN    65

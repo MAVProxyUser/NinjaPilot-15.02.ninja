@@ -162,6 +162,21 @@ GPS.c folded that error into its "timed out" test, so a receiver with a 3D
 fix showed NoGPS.  A NAK now just skips that message, and only silence on
 the port means NoGPS; a failed auto-configuration is a GPS *warning*.
 
+**GPS status flapping at 230400 (fixed).** With a 3D fix and 12+ satellites
+the status still dropped to NoGPS every second or two: bytes were being
+lost on UART8.  At 230400 a byte lasts 43 us, the F4 UART buffers exactly
+one, and the port's interrupt sat at MID behind the IMU DMA, USB and
+IO-link interrupts at HIGH, so every long packet failed its checksum and
+the MON-VER reply the auto-config waits for (280 bytes on an M9N) never
+got through - auto-config stuck RUNNING, NoGPS after any 500 ms without a
+complete packet.  The GPS 2 UART interrupt is now HIGHEST (its handler is
+a byte into a ring buffer), the receive buffer is 1 KB, and the parser
+skips a message larger than its buffer instead of resetting mid-payload
+(a false sync inside the leftover bytes used to jam it for seconds).
+`GPSRxStats` (packets, checksum failures, oversize, resyncs, once a
+second) shows the link's health; a rising checksum count with a fix means
+lost bytes.
+
 **System health panel, for the record:** the slot labelled CAN is the I2C
 alarm, which the DroneCAN module now drives (green with live nodes, amber
 when the error counters climb or the bus is empty, red when bus-off);

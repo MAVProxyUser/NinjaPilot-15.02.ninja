@@ -33,6 +33,7 @@
 #include <openpilot.h>
 
 #include "gpspositionsensor.h"
+#include "gpsrxstats.h"
 #include "homelocation.h"
 #include "gpstime.h"
 #include "gpssatellites.h"
@@ -186,6 +187,7 @@ int32_t GPSInitialize(void)
     // because the rest of the system expects to just
     // attach to their queues
     GPSPositionSensorInitialize();
+    GPSRxStatsInitialize();
     GPSVelocitySensorInitialize();
     GPSTimeInitialize();
     GPSSatellitesInitialize();
@@ -356,6 +358,19 @@ static void gpsTask(__attribute__((unused)) void *parameters)
             }
         }
 
+        // Parser counters, once a second, so link trouble is visible
+        {
+            static uint32_t lastStatsMs;
+            if ((uint32_t)(xTaskGetTickCount() * portTICK_RATE_MS) - lastStatsMs >= 1000) {
+                lastStatsMs = xTaskGetTickCount() * portTICK_RATE_MS;
+                GPSRxStatsData rs;
+                rs.Received       = gpsRxStats.gpsRxReceived;
+                rs.ChecksumErrors = gpsRxStats.gpsRxChkSumError;
+                rs.Oversize       = gpsRxStats.gpsRxOverflow;
+                rs.ParserErrors   = gpsRxStats.gpsRxParserError;
+                GPSRxStatsSet(&rs);
+            }
+        }
         // Check for GPS timeout
         timeNowMs = xTaskGetTickCount() * portTICK_RATE_MS;
 #ifdef USE_SIM_POSIX
