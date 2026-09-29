@@ -61,9 +61,34 @@ not the flight path: while Enabled the module broadcasts
 `uavcan.equipment.esc.RawCommand` (1030) with its values at Rate Hz and
 falls back to zeros when nobody refreshes it for 2 s;
 `tools/esc_test.py` uses it to spin the motors one at a time (no props)
-and prints the telemetry that comes back.  AM32 ESCs send nothing but
-NodeStatus and LogMessage (16383) until they are commanded.  CAN1 is not
-brought up.
+and prints the telemetry that comes back.  `DroneCANParam` is a one-shot
+parameter client (GetSet, ExecuteOpcode, GetNodeInfo, a Raw payload for
+experiments) behind `tools/esc_params.py` (nodes, list, get, set, save,
+assign).  CAN1 is not brought up.
+
+What the Vimdrones S50 (AM32 2.20, `com.vimdrones.esc_s50`) does on this
+bus, all measured here:
+
+* At rest it sits in its DroneCAN bootloader (`AM32_BOOTLOADER_L431` 16.0,
+  NodeStatus mode Maintenance, log "no signal"), which answers GetNodeInfo
+  but has no parameters.  The application starts about 3 s into a
+  RawCommand stream, allocates a node id of its own (so ids change at
+  every transition; the bootloader and application both take one), reports
+  Operational, sends esc.Status at TELEM_RATE (25 Hz), and hands back to the
+  bootloader a few seconds after the stream stops.  Parameter work therefore
+  needs the stream running, which esc_params.py does.
+* REQUIRE_ARMING is on by default: it only runs after hearing
+  uavcan.equipment.safety.ArmingStatus FULLY_ARMED, and it wants a second
+  of zero throttle after its application starts before it arms.
+* All four shipped with ESC_INDEX 0 (every one obeys RawCommand element 0
+  and their names all read #M1).  `esc_params.py 0 assign` gave them 0..3
+  in ascending node-id order and saved it; the names then read #M1..#M4
+  and each element drives one motor.
+* Parameter encoding: a GetSet request is accepted with the 3-bit Value
+  tag the v0 spec describes; the responses carry byte-wide union tags.
+  The client encodes and decodes exactly that.
+* Current telemetry has 10 mV/A resolution (0.07 A steps); rpm is
+  electrical rpm scaled by the ESC's MOTOR_POLES setting.
 
 ## Bring-up aids (off by default)
 
