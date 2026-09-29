@@ -2,8 +2,7 @@
 """hwpage_check.py: drive the GCS (NINJAPILOT_GCS_AUTOMATION=1) through the
 Cube hardware page: values match the board, a change saves both ways, the
 page survives a disconnect/reconnect. Captures of the GCS window only land
-in the current directory (gcs_shot.sh, window-id based).
-
+in the current directory (gcs_shot.sh, window-id based)."""
 import sys, os, time, json, subprocess
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "..", "..", "ground", "pyuavtalk"))
