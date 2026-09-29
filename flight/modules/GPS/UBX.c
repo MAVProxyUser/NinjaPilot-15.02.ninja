@@ -168,6 +168,9 @@ int parse_ubx_stream(uint8_t *rx, uint16_t len, char *gps_rx_buffer, GPSPosition
                  * the payload and checksum instead, unless the length is
                  * absurd (then it was a false sync in the first place). */
                 gpsRxStats->gpsRxOverflow++;
+                gpsRxStats->lastOversizeClass = ubx->header.class;
+                gpsRxStats->lastOversizeId    = ubx->header.id;
+                gpsRxStats->lastOversizeLen   = ubx->header.len;
                 proto_state = (ubx->header.len > 4096) ? START : UBX_SKIP;
             } else if (ubx->header.len == 0) {
                 proto_state = UBX_CHK1;
@@ -429,6 +432,9 @@ static void parse_ubx_nav_svinfo(struct UBXPacket *ubx, __attribute__((unused)) 
     struct UBX_NAV_SVINFO *svinfo = &ubx->payload.nav_svinfo;
 
     svdata.SatsInView = 0;
+    if (svinfo->numCh > MAX_SVS) {
+        svinfo->numCh = MAX_SVS;
+    }
 
     // First, use slots for SVs actually being received
     for (chan = 0; chan < svinfo->numCh; chan++) {

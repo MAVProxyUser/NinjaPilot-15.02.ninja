@@ -71,6 +71,7 @@
 #define REG_SETUP_ALTRATE	4
 #define REG_SETUP_FORCE_SAFETY_OFF 12
 #define REG_SETUP_DSM_BIND	22	/* any write starts IO's Spektrum bind sequence */
+#define REG_SETUP_RC_PROTOCOLS	23	/* two registers: bit 0 of the 32-bit mask = every protocol */
 #define FORCE_SAFETY_MAGIC	22027
 
 #define ARMING_IO_ARM_OK	(1 << 0)
@@ -269,6 +270,15 @@ static bool PIOS_IOMCU_Handshake(struct pios_iomcu_dev *dev)
 	if (!PIOS_IOMCU_ModifyReg(dev, PAGE_SETUP, REG_SETUP_ARMING, 0,
 				  ARMING_IO_ARM_OK | ARMING_RC_HANDLING_DISABLED | ARMING_FMU_ARMED)) {
 		return false;
+	}
+	/* IO firmware built after 2020-08 decodes NO receiver protocol until the
+	 * flight side writes the allowed-protocol mask (ArduPilot's RC_PROTOCOLS,
+	 * default 1 = all); the mask is a zero-initialised global in the IO.
+	 * Older IO firmware has no such register and rejects the write, which
+	 * is fine: it decodes everything anyway. */
+	{
+		uint16_t mask[2] = { 1, 0 };
+		dev->st.rc_mask_ack = PIOS_IOMCU_WriteRegs(dev, PAGE_SETUP, REG_SETUP_RC_PROTOCOLS, 2, mask) ? 1 : 2;
 	}
 	if (dev->force_safety_off && !dev->safety_forced) {
 		uint16_t magic = FORCE_SAFETY_MAGIC;

@@ -40,6 +40,11 @@
 #include "dronecanlog.h"
 #include "actuatorcommand.h"
 #include "alarms.h"
+#ifdef PIOS_INCLUDE_IOMCU
+#include <pios_iomcu.h>
+#include "iomcustatus.h"
+extern uint32_t pios_iomcu_id;
+#endif
 
 #if defined(PIOS_INCLUDE_CAN)
 
@@ -190,6 +195,9 @@ int32_t DroneCANInitialize(void)
     DroneCANESCCommandConnectCallback(esccmd_updated_cb);
     DroneCANParamInitialize();
     DroneCANLogInitialize();
+#ifdef PIOS_INCLUDE_IOMCU
+    IOMCUStatusInitialize();
+#endif
     DroneCANParamConnectCallback(param_cb);
     return 0;
 }
@@ -1004,6 +1012,43 @@ static void svc_handle_response(uint8_t node, uint8_t svc, const uint8_t *data, 
     param_finish(DRONECANPARAM_RESULT_OK, copy, n);
 }
 
+#ifdef PIOS_INCLUDE_IOMCU
+/* Board housekeeping that rides on this task: the IO co-processor's view,
+ * once a second, so RC IN can be debugged from the ground. */
+static void iomcu_publish(void)
+{
+    static uint32_t last;
+    uint32_t now = xTaskGetTickCount();
+
+    if (!pios_iomcu_id || (now - last) < (1000 / portTICK_RATE_MS)) {
+        return;
+    }
+    last = now;
+    struct pios_iomcu_status st;
+    PIOS_IOMCU_GetStatus(pios_iomcu_id, &st);
+    IOMCUStatusData o;
+    memset(&o, 0, sizeof(o));
+    o.State           = st.state <= PIOS_IOMCU_STATE_LOST ? st.state : IOMCUSTATUS_STATE_OFFLINE;
+    o.ProtocolVersion = st.protocol_version;
+    o.ProtocolVersion2 = st.protocol_version2;
+    o.RcMaskAck       = st.rc_mask_ack;
+    o.StatusFlags     = st.status_flags;
+    o.RcCount         = st.rc_count;
+    o.RcOk            = st.rc_ok;
+    o.RcFailsafe      = st.rc_failsafe;
+    o.RcProtocol      = st.rc_protocol;
+    o.ServoRail       = st.vservo_mv;
+    o.IoErrors        = st.io_errors;
+    o.TxOk            = st.ok;
+    o.TxFail          = st.fail;
+    for (uint8_t i = 0; i < IOMCUSTATUS_RCCHANNEL_NUMELEM; i++) {
+        int32_t v = PIOS_IOMCU_RcGet(pios_iomcu_id, i);
+        o.RcChannel[i] = (v < 0 || v > 0xFFFF) ? 0 : (uint16_t)v;
+    }
+    IOMCUStatusSet(&o);
+}
+#endif /* PIOS_INCLUDE_IOMCU */
+
 static void publish_status(void)
 {
     DroneCANStatusData st;
@@ -1091,6 +1136,9 @@ static void dronecanTask(__attribute__((unused)) void *parameters)
             publish_status();
             esc_publish();
         }
+#ifdef PIOS_INCLUDE_IOMCU
+        iomcu_publish();
+#endif
         if ((now - last_cmd) >= esccmd_period) {
             last_cmd = now;
             esccmd_tx(now);

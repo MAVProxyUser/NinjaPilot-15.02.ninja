@@ -70,6 +70,7 @@ struct pios_iomcu_status {
 	uint8_t  rc_ok;
 	uint8_t  rc_failsafe;
 	uint8_t  rc_protocol;
+	uint8_t  rc_mask_ack;		/* 0 not written, 1 IO accepted the RC protocol mask, 2 rejected (old IO firmware) */
 	int16_t  rc_rssi;
 	uint32_t rc_age_ms;		/* since the last good RC frame */
 	uint16_t rc[PIOS_IOMCU_NUM_RC];

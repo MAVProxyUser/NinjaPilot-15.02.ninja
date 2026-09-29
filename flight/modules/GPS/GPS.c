@@ -368,6 +368,9 @@ static void gpsTask(__attribute__((unused)) void *parameters)
                 rs.ChecksumErrors = gpsRxStats.gpsRxChkSumError;
                 rs.Oversize       = gpsRxStats.gpsRxOverflow;
                 rs.ParserErrors   = gpsRxStats.gpsRxParserError;
+                rs.LastOversizeClass = gpsRxStats.lastOversizeClass;
+                rs.LastOversizeId    = gpsRxStats.lastOversizeId;
+                rs.LastOversizeLen   = gpsRxStats.lastOversizeLen;
                 GPSRxStatsSet(&rs);
             }
         }

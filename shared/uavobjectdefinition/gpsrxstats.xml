@@ -5,6 +5,9 @@
         <field name="ChecksumErrors" units="" type="uint16" elements="1" defaultvalue="0"/>
         <field name="Oversize" units="" type="uint16" elements="1" defaultvalue="0"/>
         <field name="ParserErrors" units="" type="uint16" elements="1" defaultvalue="0"/>
+        <field name="LastOversizeClass" units="hex" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="LastOversizeId" units="hex" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="LastOversizeLen" units="bytes" type="uint16" elements="1" defaultvalue="0"/>
         <access gcs="readwrite" flight="readwrite"/>
         <telemetrygcs acked="false" updatemode="manual" period="0"/>
         <telemetryflight acked="false" updatemode="periodic" period="1000"/>

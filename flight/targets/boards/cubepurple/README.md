@@ -239,3 +239,24 @@ make line, replace it:
   copied from an existing tree: `ground/openpilotgcs/src/libs/qwt/designer`
   and Eigen's `Eigen/src/Core` (ignored by Eigen's own `.gitignore` rule
   `core` on a case-insensitive filesystem).
+
+## Receiver on the Mini Carrier (2026-09-29 findings)
+
+* The Mini Carrier has no SPKT/DSM socket. Its RC IN pin row is, by factory
+  solder jumpers, the IO's PPM/S.Bus pulse input with the 5 V "RCIN power
+  rail" on the middle pin. CubePilot's docs describe re-jumpering it for a
+  Spektrum satellite: cut the two default links, bridge 3V3 to the power pad
+  and SPKT to the signal pad. Only that configuration reaches the IO's DSM
+  UART, so only that configuration makes the IO's bind sequence
+  (`HwSettings.DSMxBind`, `tools/dsm_bind.py`) do anything.
+* The servo rail (MAIN OUT +/-) is a separate rail; `IOMCUStatus.ServoRail`
+  reading ~80 mV does not mean RC IN is unpowered.
+* IO firmware built after 2020-08 decodes NO receiver protocol until the
+  flight side writes the RC protocol allow-mask (PAGE_SETUP registers 23/24,
+  bit 0 = all). ArduPilot's FMU always sends it; `pios_iomcu.c` now sends it
+  in the handshake and `IOMCUStatus.RcMaskAck` reports whether the IO took
+  it (older IO firmware rejects the register and needs no mask).
+  `IOMCUStatus.ProtocolVersion2` dates the IO firmware.
+* Spektrum channel order out of the IO decoder is 1 throttle, 2 roll,
+  3 pitch, 4 yaw, 5 gear, 6 aux1; the ArduPilot DSM decoder scales sticks to
+  about 1100..1900 us around 1500.

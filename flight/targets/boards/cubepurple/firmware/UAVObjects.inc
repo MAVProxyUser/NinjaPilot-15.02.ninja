@@ -108,6 +108,7 @@ UAVOBJSRCFILENAMES += dronecanesccommand
 UAVOBJSRCFILENAMES += dronecanparam
 UAVOBJSRCFILENAMES += dronecanlog
 UAVOBJSRCFILENAMES += gpsrxstats
+UAVOBJSRCFILENAMES += iomcustatus
 UAVOBJSRCFILENAMES += flightstatus
 UAVOBJSRCFILENAMES += hwsettings
 UAVOBJSRCFILENAMES += receiveractivity
