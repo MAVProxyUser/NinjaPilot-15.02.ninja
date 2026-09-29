@@ -289,3 +289,9 @@ make line, replace it:
   matched within 2 %; 0.5 A per ESC at 16 %; bus 300 rx / 520 tx frames/s,
   0 drops, TEC/REC 0, CPU 48 %. A 3 A bench limit sagged to 9.8 V at the
   16 -> 20 % step; the tool aborts below 11 V.
+* Battery sweep (4S, no props, 10 % steps to full, `actuator_ramp.py --top
+  2000 --step 100 --minvolts 12.5`): 10 % = 4.5 k, 20 % = 8.3 k, 30 % =
+  11.8 k, 40 % = 15.3 k, 50 % = 18.6 k, 60 % = 21.7 k, 70 % = 24.9 k, 80 % =
+  28.7 k, 90 % = 31.6 k, 100 % = 33.9 k rpm; 2.1 A per ESC and 8.5 A total at
+  full, pack 14.6 -> 13.2 V, ESCs 39..46 C, zero errors, bus 800 frames/s
+  (~11 % of 1 Mbit/s), CPU 47 %. Nothing on the bus or the ESCs limited it.
