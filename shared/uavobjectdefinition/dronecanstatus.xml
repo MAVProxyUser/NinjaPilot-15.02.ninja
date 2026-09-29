@@ -19,6 +19,12 @@
         <field name="DataTypeId" units="" type="uint16" elements="8" defaultvalue="0"/>
         <field name="DataTypeCount" units="" type="uint32" elements="8" defaultvalue="0"/>
         <field name="CommandsSent" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="ServiceTx" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="ServiceRx" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="LastServiceId" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="LogCount" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="LogNode" units="" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="LogText" units="" type="uint8" elements="96" defaultvalue="0"/>
         <access gcs="readwrite" flight="readwrite"/>
         <telemetrygcs acked="false" updatemode="manual" period="0"/>
         <telemetryflight acked="false" updatemode="periodic" period="1000"/>

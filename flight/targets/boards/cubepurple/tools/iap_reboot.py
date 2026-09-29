@@ -18,8 +18,20 @@ if not iap:
     print("no FirmwareIAPObj answer (is the firmware up and the GCS disconnected?)"); sys.exit(1)
 # --hold: third step 6677 keeps the ArduPilot bootloader resident (uploader window)
 hold = "--hold" in sys.argv
-for cmd in (1122, 2233, 6677 if hold else 3344):
-    iap["Command"] = cmd
-    client.send_object("FirmwareIAPObj", iap)
-    time.sleep(0.6)
-print("IAP reset sent" + (" (bootloader hold)" if hold else ""))
+import hid
+from hidlink import VID, PID
+for attempt in range(3):
+    for cmd in (1122, 2233, 6677 if hold else 3344):
+        iap["Command"] = cmd
+        client.send_object("FirmwareIAPObj", iap)
+        time.sleep(1.0)   # the firmware wants 0.5-5 s between the steps
+    # the board is gone from USB when it resets; a busy telemetry link can
+    # stretch the gaps past the window, so check and retry
+    t0 = time.time()
+    while time.time() - t0 < 4.0 and hid.enumerate(VID, PID):
+        time.sleep(0.05)
+    if not hid.enumerate(VID, PID):
+        print("IAP reset sent" + (" (bootloader hold)" if hold else "")); break
+    print("board still up after attempt %d, retrying" % (attempt + 1))
+else:
+    print("the board did not reset"); sys.exit(1)
