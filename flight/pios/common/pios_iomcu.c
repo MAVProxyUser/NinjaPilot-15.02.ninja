@@ -70,6 +70,7 @@
 #define REG_SETUP_DEFAULTRATE	3
 #define REG_SETUP_ALTRATE	4
 #define REG_SETUP_FORCE_SAFETY_OFF 12
+#define REG_SETUP_DSM_BIND	22	/* any write starts IO's Spektrum bind sequence */
 #define FORCE_SAFETY_MAGIC	22027
 
 #define ARMING_IO_ARM_OK	(1 << 0)
@@ -397,6 +398,22 @@ void PIOS_IOMCU_ServoSet(uint32_t iomcu_id, uint8_t channel, uint16_t us)
 		return;
 	}
 	dev->servo[channel] = us;
+}
+
+/* Spektrum satellite bind, done by the IO firmware on the SPKT/DSM port:
+ * it drops the satellite's power for half a second, restores it, waits
+ * 72 ms and sends nine bind pulses (works with every DSM2/DSMX satellite),
+ * then hands the line back to its UART.  The transmitter must already be
+ * in bind mode.  Only meaningful while disarmed, i.e. at boot. */
+bool PIOS_IOMCU_DsmBind(uint32_t iomcu_id)
+{
+	struct pios_iomcu_dev *dev = (struct pios_iomcu_dev *)iomcu_id;
+	uint16_t one = 1;
+
+	if (PIOS_IOMCU_Validate(dev) != 0) {
+		return false;
+	}
+	return PIOS_IOMCU_WriteRegs(dev, PAGE_SETUP, REG_SETUP_DSM_BIND, 1, &one);
 }
 
 void PIOS_IOMCU_ServoSetHz(uint32_t iomcu_id, uint16_t hz)

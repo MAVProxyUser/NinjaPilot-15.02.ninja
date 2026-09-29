@@ -140,7 +140,11 @@ static const struct pios_exti_cfg pios_exti_imu_cfg __exti_config = {
 static const struct pios_invensense_cfg pios_invensense_cfg = {
     .exti_cfg       = &pios_exti_imu_cfg,
     .type           = PIOS_INVENSENSE_MPU9250,
-    .smpl_rate_div  = 1,
+    /* 1 kHz, two samples per 500 Hz sensor window.  At 500 Hz (div 1) the
+     * part's own clock beat against the RTOS tick: every 3-4 s the window
+     * closed just before the sample landed, the sensors task saw nothing,
+     * reset the sensor and tripped the Sensors alarm. */
+    .smpl_rate_div  = 0,
     .int_cfg        = PIOS_INVENSENSE_INT_CLR_ANYRD,
     .int_en         = PIOS_INVENSENSE_INTEN_DATA_RDY,
     .user_ctl       = PIOS_INVENSENSE_USERCTL_DIS_I2C,
@@ -975,6 +979,14 @@ void PIOS_Board_Init(void)
             pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_SBUS] = pios_iomcu_rcvr_id;
             pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_DSMMAINPORT]  = pios_iomcu_rcvr_id;
             pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_DSMFLEXIPORT] = pios_iomcu_rcvr_id;
+        }
+        /* HwSettings DSMxBind set (tools/dsm_bind.py): put the satellite on
+         * the SPKT/DSM port into bind mode now, while the transmitter is
+         * already binding.  The tool clears the setting afterwards. */
+        uint8_t dsm_bind = 0;
+        HwSettingsDSMxBindGet(&dsm_bind);
+        if (dsm_bind) {
+            PIOS_IOMCU_DsmBind(pios_iomcu_id);
         }
     }
 #endif /* PIOS_INCLUDE_IOMCU */

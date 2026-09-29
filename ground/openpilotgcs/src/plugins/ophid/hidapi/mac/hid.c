@@ -980,8 +980,12 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	if (!dev)
 		return;
 
-	/* Disconnect the report callback before close. */
-	if (!dev->disconnected) {
+	/* Disconnect the report callback before close.  Always, disconnected or
+	 * not: on macOS 10.10 and later a removal callback left registered on a
+	 * device that has already gone fires again later on this freed struct
+	 * (CFRunLoopStop on a garbage run loop; the GCS died that way every
+	 * time the board rebooted for a flash).  Same fix as upstream hidapi. */
+	{
 		IOHIDDeviceRegisterInputReportCallback(
 			dev->device_handle, dev->input_report_buf, dev->max_input_report_len,
 			NULL, dev);

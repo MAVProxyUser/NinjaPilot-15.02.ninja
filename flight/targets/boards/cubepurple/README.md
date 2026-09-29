@@ -138,6 +138,31 @@ take a `window` hint so a dialog stays addressable while the main window
 has focus, and a client that gives up mid-command no longer crashes the
 server).
 
+**Spektrum satellite.** Plug it into the SPKT/DSM socket (3.3 V, the port
+the IO co-processor can power-cycle); IO decodes DSM and serves it as the
+PWM channel group, so no wizard choice is needed.  To bind:
+`tools/dsm_bind.py` sets HwSettings DSMxBind, reboots the board (the
+firmware then asks IO for its bind sequence: power-cycle, nine pulses),
+waits and clears the setting again.  Put the transmitter in bind mode
+before pressing Enter.
+
+**Sensors alarm every 3-4 s (fixed).** With the MPU9250 at 500 Hz and the
+sensors task at 500 Hz there was one sample per window, and the part's own
+clock beat against the RTOS tick: every few seconds a window closed just
+before its sample landed, the sensors task reset the IMU and tripped the
+alarm.  The IMU now runs at 1 kHz (two samples per window): no trips, CPU
+48 %.  DIAG_TASKS is off in the flight build for the same reason (the
+task monitor suspends the scheduler; use CUBE_CDEFS=-DDIAG_TASKS to
+measure stacks).
+
+**System health panel, for the record:** the slot labelled CAN is the I2C
+alarm, TIME is the battery module's remaining-flight-time estimate (not
+GPS time, which lives in GPSTime), USB has no alarm behind it, MAG is the
+Magnetometer alarm and stays uninitialised while the attitude filter does
+not use the compass.  The GCS itself used to crash when the board vanished
+for a flash (hidapi removal callback on a freed device; fixed in
+`ophid/hidapi/mac/hid.c`).
+
 ## Bring-up aids (off by default)
 
 The board has no console.  Two knobs, passed as `CUBE_CDEFS=...` on the

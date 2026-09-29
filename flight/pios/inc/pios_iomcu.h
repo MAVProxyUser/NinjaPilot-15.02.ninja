@@ -88,6 +88,7 @@ extern int32_t PIOS_IOMCU_Init(uint32_t *iomcu_id, uint32_t com_id, bool force_s
 extern void PIOS_IOMCU_ServoSet(uint32_t iomcu_id, uint8_t channel, uint16_t us);
 /* PWM rate for all MAIN OUT channels (50 default). */
 extern void PIOS_IOMCU_ServoSetHz(uint32_t iomcu_id, uint16_t hz);
+bool PIOS_IOMCU_DsmBind(uint32_t iomcu_id);
 /* PIOS_RCVR semantics: microseconds, or PIOS_RCVR_TIMEOUT / _INVALID. */
 extern int32_t PIOS_IOMCU_RcGet(uint32_t iomcu_id, uint8_t channel);
 extern void PIOS_IOMCU_GetStatus(uint32_t iomcu_id, struct pios_iomcu_status *status);

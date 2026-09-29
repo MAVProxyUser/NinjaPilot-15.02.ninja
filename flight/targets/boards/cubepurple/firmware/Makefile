@@ -57,7 +57,12 @@ SRC += $(FLIGHTLIB)/notification.c
 CDEFS += -DUSE_INPUT_LPF -DUSE_GIMBAL_LPF -DUSE_GIMBAL_FF
 
 # Some diagnostics
-CDEFS += -DDIAG_TASKS
+# DIAG_TASKS (TaskInfo/CallbackInfo for stack measurements) is off in the
+# flight build: the task monitor walks every task with the scheduler
+# suspended a few times a second, the IMU reader misses its sample window
+# each time, and the Sensors alarm trips every 3-4 s.  Add it with
+# CUBE_CDEFS=-DDIAG_TASKS when measuring stacks.
+#CDEFS += -DDIAG_TASKS
 
 # Bring-up knobs from the command line, e.g. CUBE_CDEFS=-DCUBE_BOOT_STOP=3
 CDEFS += $(CUBE_CDEFS)
