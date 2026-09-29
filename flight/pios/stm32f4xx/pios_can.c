@@ -130,7 +130,12 @@ int32_t PIOS_CAN_Send(uint32_t can_id, const struct pios_can_frame *frame)
     msg.RTR   = CAN_RTR_Data;
     msg.DLC   = frame->dlc;
     memcpy(msg.Data, frame->data, 8);
-    if (CAN_Transmit(dev->cfg->regs, &msg) == CAN_TxStatus_NoMailBox) {
+    /* the actuator task and the DroneCAN task both transmit: the mailbox
+     * pick-and-fill must not interleave */
+    PIOS_IRQ_Disable();
+    uint8_t mailbox = CAN_Transmit(dev->cfg->regs, &msg);
+    PIOS_IRQ_Enable();
+    if (mailbox == CAN_TxStatus_NoMailBox) {
         dev->stats.tx_dropped++;
         return -1;
     }

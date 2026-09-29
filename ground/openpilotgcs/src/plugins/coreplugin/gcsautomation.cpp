@@ -107,13 +107,31 @@ static QJsonObject nodeJson(QAccessibleInterface *iface, int depth,
 }
 
 // Resolve an index-path (from the active window's accessible root) to a node.
-static QAccessibleInterface *resolvePath(const QJsonArray &path)
+/* Which top-level window a command walks: the one whose title contains the
+ * request's "window" (a wizard dialog stays reachable when the main window
+ * takes focus, e.g. after it reboots the board), else the active window,
+ * else the first visible one. */
+static QString g_windowHint;
+static QWidget *pickWindow(const QString &hint)
 {
+    const auto tops = QApplication::topLevelWidgets();
+    if (!hint.isEmpty()) {
+        for (QWidget *t : tops) {
+            if (t->isWindow() && t->isVisible() && t->windowTitle().contains(hint, Qt::CaseInsensitive)) {
+                return t;
+            }
+        }
+    }
     QWidget *w = QApplication::activeWindow();
     if (!w) {
-        const auto tops = QApplication::topLevelWidgets();
         for (QWidget *t : tops) { if (t->isWindow() && t->isVisible()) { w = t; break; } }
     }
+    return w;
+}
+
+static QAccessibleInterface *resolvePath(const QJsonArray &path)
+{
+    QWidget *w = pickWindow(g_windowHint);
     if (!w) return nullptr;
     QAccessibleInterface *iface = QAccessible::queryAccessibleInterface(w);
     for (const QJsonValue &v : path) {
@@ -241,7 +259,20 @@ void GcsAutomationServer::onNewConnection()
 {
     while (QTcpSocket *s = m_server->nextPendingConnection()) {
         connect(s, &QTcpSocket::readyRead, this, &GcsAutomationServer::onReadyRead);
-        connect(s, &QTcpSocket::disconnected, s, &QObject::deleteLater);
+        connect(s, &QTcpSocket::disconnected, this, [this, s]() {
+            /* A command can run a nested event loop for a long time (the
+             * wizard's Save page, a reboot).  If the client gives up meanwhile
+             * and we deleteLater() the socket, that nested loop is at the
+             * level that processes the deletion, so the socket dies while
+             * Qt's readyRead emission (onReadyRead's caller) still holds it:
+             * SIGSEGV in QIODevice::channelReadyRead.  Park it until the
+             * command has returned. */
+            if (m_busy) {
+                m_zombies.append(s);
+            } else {
+                s->deleteLater();
+            }
+        });
     }
 }
 
@@ -253,6 +284,19 @@ void GcsAutomationServer::onReadyRead()
      * a QPointer and check it again before replying. */
     QPointer<QTcpSocket> s = qobject_cast<QTcpSocket *>(sender());
     if (!s) return;
+    struct Busy {
+        GcsAutomationServer *o;
+        Busy(GcsAutomationServer *x) : o(x) { o->m_busy++; }
+        ~Busy()
+        {
+            if (--o->m_busy == 0) {
+                for (QTcpSocket *z : o->m_zombies) {
+                    z->deleteLater(); /* now at the outer loop level: safe */
+                }
+                o->m_zombies.clear();
+            }
+        }
+    } busy(this);
     while (s && s->canReadLine()) {
         QByteArray line = s->readLine().trimmed();
         if (line.isEmpty()) continue;
@@ -275,6 +319,7 @@ QJsonObject GcsAutomationServer::dispatch(const QJsonObject &req)
 {
     QJsonObject r;
     const QString cmd = req.value("cmd").toString();
+    g_windowHint = req.value("window").toString();
 
     if (cmd == "ping") {
         r["ok"] = true; r["pong"] = true; return r;
@@ -326,8 +371,7 @@ QJsonObject GcsAutomationServer::dispatch(const QJsonObject &req)
     if (cmd == "tree") {
         int depth = req.contains("depth") ? req.value("depth").toInt() : 12;
         int maxNodes = req.contains("max") ? req.value("max").toInt() : 4000;
-        QWidget *w = QApplication::activeWindow();
-        if (!w) { for (QWidget *t : QApplication::topLevelWidgets()) if (t->isWindow() && t->isVisible()) { w = t; break; } }
+        QWidget *w = pickWindow(req.value("window").toString());
         QAccessibleInterface *root = w ? QAccessible::queryAccessibleInterface(w) : nullptr;
         int count = 0;
         if (root) { r["ok"] = true; r["tree"] = nodeJson(root, depth, QJsonArray(), maxNodes, &count); r["nodes"] = count; }
@@ -339,8 +383,7 @@ QJsonObject GcsAutomationServer::dispatch(const QJsonObject &req)
         QString nameQ = req.value("name").toString();
         QString roleQ = req.value("role").toString();
         int maxHits = req.contains("max") ? req.value("max").toInt() : 100;
-        QWidget *w = QApplication::activeWindow();
-        if (!w) { for (QWidget *t : QApplication::topLevelWidgets()) if (t->isWindow() && t->isVisible()) { w = t; break; } }
+        QWidget *w = pickWindow(req.value("window").toString());
         QAccessibleInterface *root = w ? QAccessible::queryAccessibleInterface(w) : nullptr;
         QJsonArray hits;
         if (root) searchTree(root, QJsonArray(), nameQ, roleQ, &hits, maxHits, 20);

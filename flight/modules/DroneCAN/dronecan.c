@@ -36,6 +36,9 @@
 #include "dronecanescstatus.h"
 #include "dronecanesccommand.h"
 #include "dronecanparam.h"
+#include "flightstatus.h"
+#include "dronecanlog.h"
+#include "actuatorcommand.h"
 
 #if defined(PIOS_INCLUDE_CAN)
 
@@ -111,7 +114,7 @@ static uint64_t dc_bits(const uint8_t *buf, uint32_t bit_ofs, uint8_t nbits);
 static int64_t dc_sbits(const uint8_t *buf, uint32_t bit_ofs, uint8_t nbits);
 static struct reasm log_rx[2];
 static uint8_t  log_node;
-static uint8_t  log_text[DRONECANSTATUS_LOGTEXT_NUMELEM];
+static uint8_t  log_text[DRONECANLOG_LOGTEXT_NUMELEM];
 static uint32_t log_count;
 
 /* uavcan.protocol.debug.LogMessage: level u3, source u8[<=31] (u5 length), text u8[<=90] (tail) */
@@ -136,6 +139,11 @@ static void log_decode(uint8_t node, const uint8_t *p, uint8_t n)
     }
     log_node = node;
     log_count++;
+    DroneCANLogData lg;
+    lg.LogCount = log_count;
+    lg.LogNode  = log_node;
+    memcpy(lg.LogText, log_text, sizeof(lg.LogText));
+    DroneCANLogSet(&lg);
 }
 
 /* which data types are on the bus: the first 8 seen, with frame counts */
@@ -180,6 +188,7 @@ int32_t DroneCANInitialize(void)
     DroneCANESCCommandInitialize();
     DroneCANESCCommandConnectCallback(esccmd_updated_cb);
     DroneCANParamInitialize();
+    DroneCANLogInitialize();
     DroneCANParamConnectCallback(param_cb);
     return 0;
 }
@@ -672,10 +681,60 @@ static void handle_frame(const struct pios_can_frame *f)
     }
 }
 
-/* ---- ESC RawCommand from DroneCANESCCommand (bench tool, not the flight path) ---- */
+/* ---- ESC RawCommand from the actuator module (the flight path) ---- */
+static int16_t  esc_out[DRONECANESCCOMMAND_COMMAND_NUMELEM];
+static uint8_t  esc_out_count;
+static uint32_t esc_out_last;                  /* tick of the last flush */
 static uint8_t  rawcmd_tid;
-static uint32_t esccmd_updated;               /* tick of the last write from the ground */
 static uint32_t esccmd_sent;
+
+void DroneCANESCSet(uint8_t index, int16_t raw)
+{
+    if (index >= NELEMENTS(esc_out)) {
+        return;
+    }
+    esc_out[index] = raw;
+    if ((uint8_t)(index + 1) > esc_out_count) {
+        esc_out_count = (uint8_t)(index + 1);
+    }
+}
+
+/* Called from the actuator task after every update, so the stream runs at
+ * the actuator rate and keeps running (zeros) while disarmed: the AM32
+ * application drops back to its bootloader when the stream stops. */
+void DroneCANESCFlush(void)
+{
+    uint8_t payload[14];
+
+    if (!can_id || !esc_out_count) {
+        return;
+    }
+    memset(payload, 0, sizeof(payload));
+    for (uint8_t i = 0; i < esc_out_count; i++) {
+        int16_t v = esc_out[i];
+        if (v > 8191) {
+            v = 8191;
+        }
+        if (v < -8192) {
+            v = -8192;
+        }
+        dc_put_bits(payload, i * 14u, 14, (uint64_t)((uint16_t)v & 0x3FFFu));
+    }
+    dc_broadcast(DC_PRIO_HIGH, DC_DTID_ESC_RAWCOMMAND, DC_RAWCOMMAND_BASE_CRC, &rawcmd_tid,
+                 payload, (uint8_t)((esc_out_count * 14u + 7u) / 8u));
+    esc_out_last = xTaskGetTickCount();
+    esccmd_sent++;
+    esc_out_count = 0;
+    memset(esc_out, 0, sizeof(esc_out));
+}
+
+static bool esc_actuator_active(uint32_t now)
+{
+    return esc_out_last && (now - esc_out_last) < (1000 / portTICK_RATE_MS);
+}
+
+/* ---- ESC RawCommand from DroneCANESCCommand (bench tool, not the flight path) ---- */
+static uint32_t esccmd_updated;               /* tick of the last write from the ground */
 static uint32_t esccmd_period = 20 / portTICK_RATE_MS;
 static uint8_t  arming_tid;
 static uint32_t esccmd_last_enabled;          /* tick the command path was last enabled */
@@ -702,8 +761,8 @@ static void esccmd_tx(uint32_t now)
     if (esccmd_period == 0) {
         esccmd_period = 1;
     }
-    if (cmd.Enabled != DRONECANESCCOMMAND_ENABLED_TRUE) {
-        return;
+    if (cmd.Enabled != DRONECANESCCOMMAND_ENABLED_TRUE || esc_actuator_active(now)) {
+        return; /* off, or the actuator owns the bus */
     }
     esccmd_last_enabled = now;
     esccmd_arm = cmd.Arm == DRONECANESCCOMMAND_ARM_TRUE;
@@ -737,7 +796,17 @@ static void arming_tx(uint32_t now)
 {
     uint8_t status;
 
-    if (esccmd_last_enabled && (now - esccmd_last_enabled) < (100 / portTICK_RATE_MS)) {
+    if (esc_actuator_active(now)) {
+        /* Armed, or the operator has taken the outputs over (ActuatorCommand
+         * read-only: the GCS Output tab and the wizard's motor test) - the
+         * same carve-out the actuator makes for its own outputs, without
+         * which those tests spin nothing because the ESCs refuse to run
+         * unarmed. */
+        FlightStatusArmedOptions armed;
+        FlightStatusArmedGet(&armed);
+        bool go = (armed == FLIGHTSTATUS_ARMED_ARMED) || ActuatorCommandReadOnly();
+        status = go ? DC_ARMING_FULLY_ARMED : DC_ARMING_DISARMED;
+    } else if (esccmd_last_enabled && (now - esccmd_last_enabled) < (100 / portTICK_RATE_MS)) {
         status = esccmd_arm ? DC_ARMING_FULLY_ARMED : DC_ARMING_DISARMED;
     } else if (esccmd_last_enabled && (now - esccmd_last_enabled) < (1000 / portTICK_RATE_MS)) {
         status = DC_ARMING_DISARMED;
@@ -973,9 +1042,6 @@ static void publish_status(void)
     st.ServiceTx     = svc_tx;
     st.ServiceRx     = svc_rx_count;
     st.LastServiceId = svc_last_id;
-    st.LogCount = log_count;
-    st.LogNode  = log_node;
-    memcpy(st.LogText, log_text, sizeof(st.LogText));
     for (uint32_t i = 0; i < DTID_HIST_SIZE; i++) {
         st.DataTypeId[i]    = dtid_hist_id[i];
         st.DataTypeCount[i] = dtid_hist_count[i];

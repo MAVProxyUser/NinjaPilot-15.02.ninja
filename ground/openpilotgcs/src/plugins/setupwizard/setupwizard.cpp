@@ -130,6 +130,13 @@ int SetupWizard::nextId() const
         }
     }
     case PAGE_MULTI:
+        if (getControllerType() == CONTROLLER_CUBE) {
+            /* Cube Purple: the motors are DroneCAN ESCs on CAN2 (one bus, the
+             * ESCs carry their own index; getEscType() says so), so there is
+             * no pulse format to choose and no ESC range to calibrate.  Skip
+             * straight to GPS. */
+            return PAGE_GPS;
+        }
         return PAGE_ESC;
 
     case PAGE_FIXEDWING:
@@ -233,7 +240,7 @@ int SetupWizard::nextId() const
              * the RF switch-wiggle calibration. */
             return PAGE_OUTPUT_CALIBRATION;
         }
-        if (getVehicleType() == VEHICLE_MULTI) {
+        if (getVehicleType() == VEHICLE_MULTI && getEscType() != ESC_DRONECAN) {
             return PAGE_ESC_CALIBRATION;
         } else {
             return PAGE_OUTPUT_CALIBRATION;
@@ -466,6 +473,9 @@ QString SetupWizard::getSummaryText()
         break;
     case ESC_ONESHOT:
         summary.append(tr("Oneshot ESC"));
+        break;
+    case ESC_DRONECAN:
+        summary.append(tr("DroneCAN ESC (CAN2)"));
         break;
     default:
         summary.append(tr("Unknown"));

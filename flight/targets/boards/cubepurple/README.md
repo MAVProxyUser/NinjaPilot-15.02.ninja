@@ -56,8 +56,26 @@ dynamic node-id allocation for anonymous nodes, keeps a census of the
 nodes it hears (`DroneCANStatus`: counters, error counters, bus-off, node
 table with health/mode/uptime, the first eight data type ids seen with
 frame counts) and decodes `uavcan.equipment.esc.Status` (1034) into
-`DroneCANESCStatus` by ESC index.  `DroneCANESCCommand` is a bench tool,
-not the flight path: while Enabled the module broadcasts
+`DroneCANESCStatus` (one row per ESC node, with the index each reports) and
+keeps the ESCs' last LogMessage in `DroneCANLog` (its own object: the GCS
+drops any UAVTalk payload over 256 bytes, and the status had grown past
+that).
+
+**The flight path.** ActuatorSettings ChannelType `DroneCAN` makes the
+actuator module hand a channel to the CAN module instead of a PWM pin:
+ChannelMin..ChannelMax (us) maps to esc.RawCommand 0..8191, the element is
+ChannelAddr, and one RawCommand goes out per actuator update (500 Hz here)
+with zeros while disarmed, so the ESC applications stay up.  ArmingStatus
+FULLY_ARMED goes out when the board is armed or when the operator has taken
+the outputs over (ActuatorCommand read-only: the GCS Output tab and the
+wizard's motor test); otherwise DISARMED, and the AM32s will not run.  The
+setup wizard treats a Cube Purple as "DroneCAN ESCs on CAN2": no ESC page,
+no ESC calibration page, the motor channels come out of the wizard as
+DroneCAN 1000/2000 us.  Verified on the bench through the wizard's own
+read-only output path, one motor per element, about 3700 rpm at 1100 us.
+
+`DroneCANESCCommand` is a bench tool, not the flight path (it yields
+whenever the actuator is streaming): while Enabled the module broadcasts
 `uavcan.equipment.esc.RawCommand` (1030) with its values at Rate Hz and
 falls back to zeros when nobody refreshes it for 2 s;
 `tools/esc_test.py` uses it to spin the motors one at a time (no props)
@@ -89,6 +107,21 @@ bus, all measured here:
   The client encodes and decodes exactly that.
 * Current telemetry has 10 mV/A resolution (0.07 A steps); rpm is
   electrical rpm scaled by the ESC's MOTOR_POLES setting.
+
+## Building the GCS for this tree
+
+The recipe in the repository notes applies (qmake straight from
+`ground/openpilotgcs/openpilotgcs.pro`, an empty `opfw_resource.qrc`,
+`make uavobjects_gcs` first).  Two things bit here: a fresh checkout lacks
+`ground/openpilotgcs/src/libs/eigen/Eigen/src/Core/util` (Eigen's own
+`.gitignore` hides it on a case-insensitive filesystem; copy it from a
+built tree), and a UAVObject over 256 bytes is silently dropped by the
+GCS's UAVTalk ("incorrect packet size" in the log), so keep the objects
+small.  The wizard was driven end to end over the automation port
+(`NINJAPILOT_GCS_AUTOMATION=1`, `ground/pyuavtalk/gcs_client.py`; commands
+take a `window` hint so a dialog stays addressable while the main window
+has focus, and a client that gives up mid-command no longer crashes the
+server).
 
 ## Bring-up aids (off by default)
 

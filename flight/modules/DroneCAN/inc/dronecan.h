@@ -33,4 +33,10 @@
 int32_t DroneCANInitialize(void);
 int32_t DroneCANStart(void);
 
+/* Actuator output: the actuator module hands over every channel whose
+ * ActuatorSettings ChannelType is DroneCAN (index = ChannelAddr, raw
+ * 0..8191) and flushes once per update; one esc.RawCommand goes out. */
+void DroneCANESCSet(uint8_t index, int16_t raw);
+void DroneCANESCFlush(void);
+
 #endif /* DRONECAN_H */

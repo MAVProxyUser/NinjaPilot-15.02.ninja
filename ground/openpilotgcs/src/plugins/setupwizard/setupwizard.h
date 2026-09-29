@@ -85,6 +85,10 @@ public:
     }
     SetupWizard::ESC_TYPE getEscType() const
     {
+        /* Cube Purple: the motors are DroneCAN ESCs on CAN2, always. */
+        if (m_controllerType == CONTROLLER_CUBE) {
+            return ESC_DRONECAN;
+        }
         return m_escType;
     }
 

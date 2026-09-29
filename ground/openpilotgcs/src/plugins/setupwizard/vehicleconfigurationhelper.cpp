@@ -481,6 +481,12 @@ void VehicleConfigurationHelper::applyActuatorConfiguration()
         bankMode     = ActuatorSettings::BANKMODE_ONESHOT125;
         escFrequence = ONESHOT_ESC_FREQUENCY;
         break;
+    case VehicleConfigurationSource::ESC_DRONECAN:
+        /* Commands go out on CAN2 from the actuator module at its own rate;
+         * the PWM banks are idle, so leave them at their defaults. */
+        bankMode     = ActuatorSettings::BANKMODE_PWM;
+        escFrequence = LEGACY_ESC_FREQUENCY;
+        break;
     case VehicleConfigurationSource::ESC_BRUSHED:
         /* No ESC, so no frame rate and no pulse format. The outputs are an
          * LEDC duty cycle at a fixed 24 kHz carrier; PIOS_Servo_SetHz() is a
@@ -538,6 +544,37 @@ void VehicleConfigurationHelper::applyActuatorConfiguration()
             data.ChannelMin[i]     = actuatorSettings[i].channelMin;
             data.ChannelNeutral[i] = actuatorSettings[i].channelNeutral;
             data.ChannelMax[i]     = actuatorSettings[i].channelMax;
+        }
+
+        if (m_configSource->getEscType() == VehicleConfigurationSource::ESC_DRONECAN) {
+            /* Cube Purple: the first N mixer channels are the motors and they
+             * are DroneCAN ESCs on CAN2, element i of esc.RawCommand driving
+             * the ESC whose ESC_INDEX is i.  1000..2000 us maps to 0..8191 in
+             * the firmware; the idle point stays whatever the output page set,
+             * with a sane default if it never ran. */
+            int motors = 4;
+            switch (m_configSource->getVehicleSubType()) {
+            case VehicleConfigurationSource::MULTI_ROTOR_TRI_Y: motors = 3; break;
+            case VehicleConfigurationSource::MULTI_ROTOR_HEXA:
+            case VehicleConfigurationSource::MULTI_ROTOR_HEXA_H:
+            case VehicleConfigurationSource::MULTI_ROTOR_HEXA_X:
+            case VehicleConfigurationSource::MULTI_ROTOR_HEXA_COAX_Y: motors = 6; break;
+            case VehicleConfigurationSource::MULTI_ROTOR_OCTO:
+            case VehicleConfigurationSource::MULTI_ROTOR_OCTO_X:
+            case VehicleConfigurationSource::MULTI_ROTOR_OCTO_V:
+            case VehicleConfigurationSource::MULTI_ROTOR_OCTO_COAX_X:
+            case VehicleConfigurationSource::MULTI_ROTOR_OCTO_COAX_PLUS: motors = 8; break;
+            default: break;
+            }
+            for (int i = 0; i < motors && i < (int)ActuatorSettings::CHANNELTYPE_NUMELEM; i++) {
+                data.ChannelType[i] = ActuatorSettings::CHANNELTYPE_DRONECAN;
+                data.ChannelAddr[i] = i;
+                data.ChannelMin[i]  = 1000;
+                data.ChannelMax[i]  = 2000;
+                if (data.ChannelNeutral[i] < 1000 || data.ChannelNeutral[i] > 1200) {
+                    data.ChannelNeutral[i] = 1050;
+                }
+            }
         }
 
         if (esp32 && (bankMode == ActuatorSettings::BANKMODE_ONESHOT125 ||

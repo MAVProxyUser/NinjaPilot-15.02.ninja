@@ -35,6 +35,8 @@ private slots:
 private:
     QJsonObject dispatch(const QJsonObject &req);
     QTcpServer *m_server;
+    int m_busy = 0;                  /* commands on the stack */
+    QList<QTcpSocket *> m_zombies;   /* disconnected while busy; deleted after */
 };
 
 } // namespace Internal
