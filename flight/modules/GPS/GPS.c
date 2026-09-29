@@ -371,8 +371,10 @@ static void gpsTask(__attribute__((unused)) void *parameters)
         GPSPositionSensorGet(&gpspositionsensor);
         bool gpsTimedOut = false;
 #else
-        bool gpsTimedOut = (timeNowMs - timeOfLastUpdateMs) >= GPS_TIMEOUT_MS ||
-                            (gpsSettings.DataProtocol == GPSSETTINGS_DATAPROTOCOL_UBX && gpspositionsensor.AutoConfigStatus == GPSPOSITIONSENSOR_AUTOCONFIGSTATUS_ERROR);
+        /* Only silence means no GPS.  A failed auto-configuration used to be
+         * folded in here and turned a receiver with a 3D fix into "NoGPS";
+         * it is reported as a GPS warning below instead. */
+        bool gpsTimedOut = (timeNowMs - timeOfLastUpdateMs) >= GPS_TIMEOUT_MS;
 #endif
         if (gpsTimedOut) {
             // we have not received any valid GPS sentences for a while.
@@ -387,7 +389,12 @@ static void gpsTask(__attribute__((unused)) void *parameters)
             if ((gpspositionsensor.PDOP < gpsSettings.MaxPDOP) && (gpspositionsensor.Satellites >= gpsSettings.MinSatellites) &&
                 (gpspositionsensor.Status == GPSPOSITIONSENSOR_STATUS_FIX3D) &&
                 (gpspositionsensor.Latitude != 0 || gpspositionsensor.Longitude != 0)) {
-                AlarmsClear(SYSTEMALARMS_ALARM_GPS);
+                if (gpsSettings.DataProtocol == GPSSETTINGS_DATAPROTOCOL_UBX &&
+                    gpspositionsensor.AutoConfigStatus == GPSPOSITIONSENSOR_AUTOCONFIGSTATUS_ERROR) {
+                    AlarmsSet(SYSTEMALARMS_ALARM_GPS, SYSTEMALARMS_ALARM_WARNING);
+                } else {
+                    AlarmsClear(SYSTEMALARMS_ALARM_GPS);
+                }
 #ifdef PIOS_GPS_SETS_HOMELOCATION
                 HomeLocationData home;
                 HomeLocationGet(&home);

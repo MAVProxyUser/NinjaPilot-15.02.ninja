@@ -377,6 +377,12 @@ static void processSamples3d(sensor_fetch_context *sensor_context, const PIOS_SE
         temperature = (float)sensor_context->temperature * inv_count * 0.01f;
         if (sensor->type == PIOS_SENSORS_TYPE_3AXIS_MAG) {
             handleMag(samples, temperature);
+            /* The compass is present and delivering.  The attitude filters
+             * that use it own the alarm from here on; only lift it out of
+             * Uninitialised, so the health panel shows a fitted compass. */
+            if (AlarmsGet(SYSTEMALARMS_ALARM_MAGNETOMETER) == SYSTEMALARMS_ALARM_UNINITIALISED) {
+                AlarmsSet(SYSTEMALARMS_ALARM_MAGNETOMETER, SYSTEMALARMS_ALARM_OK);
+            }
             PERF_MEASURE_PERIOD(counterMagPeriod);
             return;
         } else {

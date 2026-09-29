@@ -155,11 +155,21 @@ alarm.  The IMU now runs at 1 kHz (two samples per window): no trips, CPU
 task monitor suspends the scheduler; use CUBE_CDEFS=-DDIAG_TASKS to
 measure stacks).
 
+**GPS "NoGPS" with a receiver that is talking (fixed).** The UBX
+auto-configuration gave up (INIT_STEP_ERROR) when the M9N rejected a
+message it no longer supports (the deprecated NAV-SOL/SVINFO family), and
+GPS.c folded that error into its "timed out" test, so a receiver with a 3D
+fix showed NoGPS.  A NAK now just skips that message, and only silence on
+the port means NoGPS; a failed auto-configuration is a GPS *warning*.
+
 **System health panel, for the record:** the slot labelled CAN is the I2C
-alarm, TIME is the battery module's remaining-flight-time estimate (not
-GPS time, which lives in GPSTime), USB has no alarm behind it, MAG is the
-Magnetometer alarm and stays uninitialised while the attitude filter does
-not use the compass.  The GCS itself used to crash when the board vanished
+alarm, which the DroneCAN module now drives (green with live nodes, amber
+when the error counters climb or the bus is empty, red when bus-off);
+TIME is the battery module's remaining-flight-time estimate (not GPS time,
+which lives in GPSTime); USB has no alarm behind it; MAG is the
+Magnetometer alarm, lifted to OK by the sensors module as soon as the
+compass delivers samples (the mag-using attitude filters own it after
+that).  The GCS itself used to crash when the board vanished
 for a flash (hidapi removal callback on a freed device; fixed in
 `ophid/hidapi/mac/hid.c`).
 

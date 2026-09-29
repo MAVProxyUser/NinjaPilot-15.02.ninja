@@ -39,6 +39,7 @@
 #include "flightstatus.h"
 #include "dronecanlog.h"
 #include "actuatorcommand.h"
+#include "alarms.h"
 
 #if defined(PIOS_INCLUDE_CAN)
 
@@ -1036,6 +1037,23 @@ static void publish_status(void)
             st.NodeUptime[i]   = 0;
             st.NodeLastSeen[i] = 0;
         }
+    }
+    uint8_t live = 0;
+    for (uint32_t i = 0; i < NODE_TABLE_SIZE; i++) {
+        if (nodes[i].node_id && (now - nodes[i].last_seen) < (3000u / portTICK_RATE_MS)) {
+            live++;
+        }
+    }
+    /* The health panel's "CAN" slot is the I2C alarm in this tree (the
+     * realposix sensor hub reports its CAN link there too): red when the
+     * controller is bus-off, amber when the error counters climb or nobody
+     * else is on the bus, green with live nodes. */
+    if (cs.bus_off) {
+        AlarmsSet(SYSTEMALARMS_ALARM_I2C, SYSTEMALARMS_ALARM_ERROR);
+    } else if (cs.tx_errors >= 96 || cs.rx_errors >= 96 || live == 0) {
+        AlarmsSet(SYSTEMALARMS_ALARM_I2C, SYSTEMALARMS_ALARM_WARNING);
+    } else {
+        AlarmsClear(SYSTEMALARMS_ALARM_I2C);
     }
     st.NodeCount = count;
     st.CommandsSent = esccmd_sent;
