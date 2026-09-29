@@ -108,6 +108,12 @@ bus, all measured here:
 * Current telemetry has 10 mV/A resolution (0.07 A steps); rpm is
   electrical rpm scaled by the ESC's MOTOR_POLES setting.
 
+**GPS connector.** HwSettings RV_GPSPort = GPS is the Cube's **GPS 1**
+connector (UART4).  GPS 2 is UART8, which the STM32F4 USART driver in this
+tree does not drive (USART1-6 and UART4/5 only), so a receiver on GPS 2 is
+invisible to the firmware whatever the speed setting says.  Move it to
+GPS 1, or add UART7/8 to `pios_usart.c` and a GPS2 port option.
+
 ## Building the GCS for this tree
 
 The recipe in the repository notes applies (qmake straight from
