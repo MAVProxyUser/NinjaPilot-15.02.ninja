@@ -34,6 +34,7 @@
 #include "dronecan.h"
 #include "dronecanstatus.h"
 #include "dronecanescstatus.h"
+#include "dronecanesccommand.h"
 
 #if defined(PIOS_INCLUDE_CAN)
 
@@ -46,6 +47,9 @@
 #define DC_ALLOCATION_BASE_CRC  0xF258u  /* crc16-ccitt of its DSDL signature */
 #define DC_DTID_NODESTATUS      341u     /* uavcan.protocol.NodeStatus */
 #define DC_DTID_ESC_STATUS      1034u    /* uavcan.equipment.esc.Status */
+#define DC_DTID_ESC_RAWCOMMAND  1030u    /* uavcan.equipment.esc.RawCommand, int14[<=20] */
+#define DC_RAWCOMMAND_BASE_CRC  0x1907u  /* crc16-ccitt of signature 0x217F5C87BD91B1BB (only used past 4 ESCs) */
+#define DC_PRIO_HIGH            8u
 #define DC_PRIO_LOW             30u
 #define DNA_RANGE_MIN           1u
 #define DNA_RANGE_MAX           125u
@@ -109,6 +113,7 @@ static void dtid_count(uint16_t dtid)
 }
 
 static void dronecanTask(void *parameters);
+static void esccmd_updated_cb(UAVObjEvent *ev);
 
 int32_t DroneCANStart(void)
 {
@@ -129,6 +134,8 @@ int32_t DroneCANInitialize(void)
     }
     DroneCANStatusInitialize();
     DroneCANESCStatusInitialize();
+    DroneCANESCCommandInitialize();
+    DroneCANESCCommandConnectCallback(esccmd_updated_cb);
     return 0;
 }
 MODULE_INITCALL(DroneCANInitialize, DroneCANStart);
@@ -154,6 +161,27 @@ static uint64_t dc_bits(const uint8_t *buf, uint32_t bit_ofs, uint8_t nbits)
         out |= (uint64_t)bytes[i] << (8u * i);
     }
     return out;
+}
+
+/* The mirror of dc_bits: little-endian bytes, most significant bit first
+ * inside each byte, the partial last byte holding the value's top bits. */
+static void dc_put_bits(uint8_t *buf, uint32_t bit_ofs, uint8_t nbits, uint64_t value)
+{
+    uint8_t nbytes = (uint8_t)((nbits + 7u) / 8u);
+
+    for (uint8_t i = 0; i < nbytes; i++) {
+        uint8_t want = (uint8_t)((nbits - i * 8u) >= 8u ? 8u : (nbits - i * 8u));
+        uint8_t v    = (uint8_t)(value >> (8u * i));
+        for (uint8_t b = 0; b < want; b++) {
+            uint32_t dbit = bit_ofs + i * 8u + b;
+            uint8_t  mask = (uint8_t)(1u << (7u - (dbit % 8u)));
+            if ((v >> (want - 1u - b)) & 1u) {
+                buf[dbit / 8u] |= mask;
+            } else {
+                buf[dbit / 8u] &= (uint8_t)~mask;
+            }
+        }
+    }
 }
 
 static int64_t dc_sbits(const uint8_t *buf, uint32_t bit_ofs, uint8_t nbits)
@@ -226,11 +254,12 @@ static void tx_frame(uint32_t id, const uint8_t *data, uint8_t dlc)
 
 /* Broadcast a message transfer from us: single frame, or multi-frame with
  * the transfer CRC prepended, tail bytes stamped SOT/EOT/toggle/transfer-id. */
-static void dc_broadcast(uint16_t dtid, uint16_t base_crc, const uint8_t *payload, uint8_t len)
+static void dc_broadcast(uint8_t prio, uint16_t dtid, uint16_t base_crc, uint8_t *tid_counter,
+                         const uint8_t *payload, uint8_t len)
 {
     uint8_t stream[2 + 16];
     uint8_t slen = 0;
-    uint8_t tid  = (uint8_t)(dna_tid++ & 0x1F);
+    uint8_t tid  = (uint8_t)((*tid_counter)++ & 0x1F);
 
     if (len > 7) {
         uint16_t crc = crc16_ccitt(payload, len, base_crc);
@@ -239,7 +268,7 @@ static void dc_broadcast(uint16_t dtid, uint16_t base_crc, const uint8_t *payloa
     }
     memcpy(stream + slen, payload, len);
     slen = (uint8_t)(slen + len);
-    uint32_t id  = (DC_PRIO_LOW << 24) | ((uint32_t)dtid << 8) | DC_NODE_ID;
+    uint32_t id  = ((uint32_t)prio << 24) | ((uint32_t)dtid << 8) | DC_NODE_ID;
     uint8_t  ofs = 0, toggle = 0, first = 1;
     do {
         uint8_t chunk = (uint8_t)((slen - ofs) > 7 ? 7 : (slen - ofs));
@@ -352,19 +381,19 @@ static void dna_handle_request(const uint8_t *data, uint8_t dlc)
         dna_query_len = uid_len;
         dna_query_ts  = now;
         n = dna_pack(0, 0, dna_query, dna_query_len, pl);
-        dc_broadcast(DC_DTID_ALLOCATION, DC_ALLOCATION_BASE_CRC, pl, n);
+        dc_broadcast(DC_PRIO_LOW, DC_DTID_ALLOCATION, DC_ALLOCATION_BASE_CRC, &dna_tid, pl, n);
     } else if (uid_len == 6 && dna_query_len == 6) {
         memcpy(dna_query + 6, uid, 6);
         dna_query_len = 12;
         dna_query_ts  = now;
         n = dna_pack(0, 0, dna_query, 12, pl);
-        dc_broadcast(DC_DTID_ALLOCATION, DC_ALLOCATION_BASE_CRC, pl, n);
+        dc_broadcast(DC_PRIO_LOW, DC_DTID_ALLOCATION, DC_ALLOCATION_BASE_CRC, &dna_tid, pl, n);
     } else if (uid_len == 4 && dna_query_len == 12) {
         memcpy(dna_query + 12, uid, 4);
         uint8_t alloc = dna_assign(dna_query, req_node);
         if (alloc) {
             n = dna_pack(alloc, 0, dna_query, 16, pl);
-            dc_broadcast(DC_DTID_ALLOCATION, DC_ALLOCATION_BASE_CRC, pl, n);
+            dc_broadcast(DC_PRIO_LOW, DC_DTID_ALLOCATION, DC_ALLOCATION_BASE_CRC, &dna_tid, pl, n);
             dna_allocations++;
         }
         dna_query_len = 0;
@@ -536,6 +565,60 @@ static void handle_frame(const struct pios_can_frame *f)
     }
 }
 
+/* ---- ESC RawCommand from DroneCANESCCommand (bench tool, not the flight path) ---- */
+static uint8_t  rawcmd_tid;
+static uint32_t esccmd_updated;               /* tick of the last write from the ground */
+static uint32_t esccmd_sent;
+static uint32_t esccmd_period = 20 / portTICK_RATE_MS;
+
+static void esccmd_updated_cb(__attribute__((unused)) UAVObjEvent *ev)
+{
+    esccmd_updated = xTaskGetTickCount();
+}
+
+/* int14[<=20] with the tail-array optimisation: no length, the count follows
+ * from the payload size.  4 ESCs = 56 bits = one frame. */
+static void esccmd_tx(uint32_t now)
+{
+    DroneCANESCCommandData cmd;
+    uint8_t payload[14];
+
+    DroneCANESCCommandGet(&cmd);
+    uint8_t rate = cmd.Rate ? cmd.Rate : 50;
+    if (rate > 200) {
+        rate = 200;
+    }
+    esccmd_period = (1000u / rate) / portTICK_RATE_MS;
+    if (esccmd_period == 0) {
+        esccmd_period = 1;
+    }
+    if (cmd.Enabled != DRONECANESCCOMMAND_ENABLED_TRUE) {
+        return;
+    }
+    uint8_t count = cmd.Count;
+    if (count < 1) {
+        count = 1;
+    }
+    if (count > DRONECANESCCOMMAND_COMMAND_NUMELEM) {
+        count = DRONECANESCCOMMAND_COMMAND_NUMELEM;
+    }
+    bool stale = (now - esccmd_updated) > (2000 / portTICK_RATE_MS);
+    memset(payload, 0, sizeof(payload));
+    for (uint8_t i = 0; i < count; i++) {
+        int16_t v = stale ? 0 : cmd.Command[i];
+        if (v > 8191) {
+            v = 8191;
+        }
+        if (v < -8192) {
+            v = -8192;
+        }
+        dc_put_bits(payload, i * 14u, 14, (uint64_t)((uint16_t)v & 0x3FFFu));
+    }
+    dc_broadcast(DC_PRIO_HIGH, DC_DTID_ESC_RAWCOMMAND, DC_RAWCOMMAND_BASE_CRC, &rawcmd_tid,
+                 payload, (uint8_t)((count * 14u + 7u) / 8u));
+    esccmd_sent++;
+}
+
 static void publish_status(void)
 {
     DroneCANStatusData st;
@@ -571,6 +654,7 @@ static void publish_status(void)
         }
     }
     st.NodeCount = count;
+    st.CommandsSent = esccmd_sent;
     for (uint32_t i = 0; i < DTID_HIST_SIZE; i++) {
         st.DataTypeId[i]    = dtid_hist_id[i];
         st.DataTypeCount[i] = dtid_hist_count[i];
@@ -580,7 +664,7 @@ static void publish_status(void)
 
 static void dronecanTask(__attribute__((unused)) void *parameters)
 {
-    uint32_t last_ns = 0, last_pub = 0;
+    uint32_t last_ns = 0, last_pub = 0, last_cmd = 0;
     struct pios_can_frame f;
 
     while (1) {
@@ -595,6 +679,10 @@ static void dronecanTask(__attribute__((unused)) void *parameters)
         if ((now - last_pub) >= (500 / portTICK_RATE_MS)) {
             last_pub = now;
             publish_status();
+        }
+        if ((now - last_cmd) >= esccmd_period) {
+            last_cmd = now;
+            esccmd_tx(now);
         }
     }
 }

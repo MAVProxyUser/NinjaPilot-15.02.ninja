@@ -1,0 +1,13 @@
+<xml>
+    <object name="DroneCANESCCommand" singleinstance="true" settings="false" category="System">
+        <description>Bench control of DroneCAN ESCs. While Enabled, the DroneCAN module broadcasts uavcan.equipment.esc.RawCommand (data type 1030) carrying the first Count values of Command at Rate Hz (50 when 0). Raw units: 0 stops, 8191 is full throttle, negative reverses on bidirectional ESCs. If nobody refreshes the object for 2 s the module sends zeros instead. Not the flight path: the actuator module does not use this.</description>
+        <field name="Command" units="raw" type="int16" elements="8" defaultvalue="0"/>
+        <field name="Count" units="" type="uint8" elements="1" defaultvalue="4"/>
+        <field name="Rate" units="Hz" type="uint8" elements="1" defaultvalue="50"/>
+        <field name="Enabled" units="" type="enum" elements="1" options="False,True" defaultvalue="False"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="false" updatemode="manual" period="0"/>
+        <telemetryflight acked="false" updatemode="manual" period="0"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>

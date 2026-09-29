@@ -35,11 +35,18 @@ straight back after one (0.35 s USB gap, no window).  Use the IAP route:
 It sends FirmwareIAP 1122/2233/6677 (`tools/iap_reboot.py --hold`): the
 third step is the tree's STEP_3 with a board hook that leaves the
 bootloader's "hold" signature in RTC BKP0R, so the bootloader waits for the
-uploader and boots the new firmware when it is done.  The firmware on the
-board must already have the hook (anything after commit cdaa0e056's
-successor); before that, cut the other supply once and use the USB path.
-The GCS reboot (1122/2233/3344) is unchanged: it comes back as the
-application.
+uploader (its own USB device, 2dae:1005, appears and stays) and boots the
+new firmware when it is done.  Two things had to be handled for that to
+work, both in `cube_bootloader_hold()`: the bootloader's HAL resets the
+whole backup domain when the RTC clock source is not the LSI it configures
+(PIOS_RTC_Init selects HSE/24), which wiped the signature before it was
+read, so the hook restores the source the bootloader left at boot; and the
+reset-cause flags in RCC_CSR are sticky until a power-on and the bootloader
+boots the application at once after any watchdog reset, signature or not,
+so the hook clears them.  The firmware on the board must already have the
+hook (commit d9272ee75 or later); before that, cut the other supply once
+and use the USB path.  The GCS reboot (1122/2233/3344) is unchanged: it
+comes back as the application.
 
 ## DroneCAN on CAN2
 
@@ -49,8 +56,14 @@ dynamic node-id allocation for anonymous nodes, keeps a census of the
 nodes it hears (`DroneCANStatus`: counters, error counters, bus-off, node
 table with health/mode/uptime, the first eight data type ids seen with
 frame counts) and decodes `uavcan.equipment.esc.Status` (1034) into
-`DroneCANESCStatus` by ESC index.  No CAN output yet (ESC RawCommand is the
-next step).  CAN1 is not brought up.
+`DroneCANESCStatus` by ESC index.  `DroneCANESCCommand` is a bench tool,
+not the flight path: while Enabled the module broadcasts
+`uavcan.equipment.esc.RawCommand` (1030) with its values at Rate Hz and
+falls back to zeros when nobody refreshes it for 2 s;
+`tools/esc_test.py` uses it to spin the motors one at a time (no props)
+and prints the telemetry that comes back.  AM32 ESCs send nothing but
+NodeStatus and LogMessage (16383) until they are commanded.  CAN1 is not
+brought up.
 
 ## Bring-up aids (off by default)
 

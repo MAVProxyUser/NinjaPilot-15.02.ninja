@@ -37,6 +37,7 @@ HEADERS += \
     $$UAVOBJECT_SYNTHETICS/ak8975sensor.h \
     $$UAVOBJECT_SYNTHETICS/i2cbusscan.h \
     $$UAVOBJECT_SYNTHETICS/dronecanescstatus.h \
+    $$UAVOBJECT_SYNTHETICS/dronecanesccommand.h \
     $$UAVOBJECT_SYNTHETICS/dronecanstatus.h \
     $$UAVOBJECT_SYNTHETICS/sensorhubsettings.h \
     $$UAVOBJECT_SYNTHETICS/accelsensor.h \
@@ -155,6 +156,7 @@ SOURCES += \
     $$UAVOBJECT_SYNTHETICS/ak8975sensor.cpp \
     $$UAVOBJECT_SYNTHETICS/i2cbusscan.cpp \
     $$UAVOBJECT_SYNTHETICS/dronecanescstatus.cpp \
+    $$UAVOBJECT_SYNTHETICS/dronecanesccommand.cpp \
     $$UAVOBJECT_SYNTHETICS/dronecanstatus.cpp \
     $$UAVOBJECT_SYNTHETICS/sensorhubsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/accelsensor.cpp \

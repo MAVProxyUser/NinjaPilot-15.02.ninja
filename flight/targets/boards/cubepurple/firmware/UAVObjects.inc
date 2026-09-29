@@ -104,6 +104,7 @@ UAVOBJSRCFILENAMES += velocitydesired
 UAVOBJSRCFILENAMES += watchdogstatus
 UAVOBJSRCFILENAMES += dronecanstatus
 UAVOBJSRCFILENAMES += dronecanescstatus
+UAVOBJSRCFILENAMES += dronecanesccommand
 UAVOBJSRCFILENAMES += flightstatus
 UAVOBJSRCFILENAMES += hwsettings
 UAVOBJSRCFILENAMES += receiveractivity
