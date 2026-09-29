@@ -121,6 +121,8 @@ HANDLER(DCMI_IRQHandler); // DCMI
 HANDLER(CRYP_IRQHandler); // CRYP crypto
 HANDLER(HASH_RNG_IRQHandler); // Hash and Rng
 HANDLER(FPU_IRQHandler); // FPU
+HANDLER(UART7_IRQHandler); // UART7 (STM32F42x/43x)
+HANDLER(UART8_IRQHandler); // UART8 (STM32F42x/43x)
 
 /** stm32f4xx interrupt vector table */
 vector *io_vectors[] __attribute__((section(".io_vectors"))) = {
@@ -206,6 +208,8 @@ vector *io_vectors[] __attribute__((section(".io_vectors"))) = {
     CRYP_IRQHandler, // CRYP crypto
     HASH_RNG_IRQHandler, // Hash and Rng
     FPU_IRQHandler, // FPU
+    UART7_IRQHandler, // UART7 (STM32F42x/43x, IRQ 82)
+    UART8_IRQHandler, // UART8 (STM32F42x/43x, IRQ 83)
 };
 
 /**

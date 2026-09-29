@@ -863,6 +863,7 @@ void PIOS_Board_Init(void)
      *   RV_TelemetryPort = TELEM1 (USART2)
      *   RV_AuxPort       = TELEM2 (USART3)
      *   RV_GPSPort       = GPS    (UART4)
+     *   CUBE_GPS2Port    = GPS 2  (UART8, the 6-pin connector)
      */
     uint8_t hwsettings_port;
 
@@ -910,6 +911,28 @@ void PIOS_Board_Init(void)
     case HWSETTINGS_RV_GPSPORT_COMBRIDGE:
         if (!pios_com_bridge_id) {
             PIOS_Board_configure_com(&pios_usart_gps_cfg, PIOS_COM_BRIDGE_RX_BUF_LEN, PIOS_COM_BRIDGE_TX_BUF_LEN, &pios_usart_com_driver, &pios_com_bridge_id);
+        }
+        break;
+    default:
+        break;
+    }
+
+    /* GPS 2 (the 6-pin connector, UART8): the same functions as GPS 1. */
+    HwSettingsCUBE_GPS2PortGet(&hwsettings_port);
+    switch (hwsettings_port) {
+    case HWSETTINGS_CUBE_GPS2PORT_GPS:
+        if (!pios_com_gps_id) {
+            PIOS_Board_configure_com(&pios_usart_gps2_cfg, PIOS_COM_GPS_RX_BUF_LEN, PIOS_COM_GPS_TX_BUF_LEN, &pios_usart_com_driver, &pios_com_gps_id);
+        }
+        break;
+    case HWSETTINGS_CUBE_GPS2PORT_TELEMETRY:
+        if (!pios_com_telem_rf_id) {
+            PIOS_Board_configure_com(&pios_usart_gps2_cfg, PIOS_COM_TELEM_RF_RX_BUF_LEN, PIOS_COM_TELEM_RF_TX_BUF_LEN, &pios_usart_com_driver, &pios_com_telem_rf_id);
+        }
+        break;
+    case HWSETTINGS_CUBE_GPS2PORT_COMBRIDGE:
+        if (!pios_com_bridge_id) {
+            PIOS_Board_configure_com(&pios_usart_gps2_cfg, PIOS_COM_BRIDGE_RX_BUF_LEN, PIOS_COM_BRIDGE_TX_BUF_LEN, &pios_usart_com_driver, &pios_com_bridge_id);
         }
         break;
     default:

@@ -119,6 +119,7 @@ void PIOS_SYS_Init(void)
         RCC_APB1Periph_USART3 |
         RCC_APB1Periph_UART4 |
         RCC_APB1Periph_UART5 |
+                           RCC_APB1Periph_UART7 | RCC_APB1Periph_UART8 |
         RCC_APB1Periph_I2C1 |
         RCC_APB1Periph_I2C2 |
         RCC_APB1Periph_I2C3 |

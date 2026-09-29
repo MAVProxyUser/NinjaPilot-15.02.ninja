@@ -108,11 +108,20 @@ bus, all measured here:
 * Current telemetry has 10 mV/A resolution (0.07 A steps); rpm is
   electrical rpm scaled by the ESC's MOTOR_POLES setting.
 
-**GPS connector.** HwSettings RV_GPSPort = GPS is the Cube's **GPS 1**
-connector (UART4).  GPS 2 is UART8, which the STM32F4 USART driver in this
-tree does not drive (USART1-6 and UART4/5 only), so a receiver on GPS 2 is
-invisible to the firmware whatever the speed setting says.  Move it to
-GPS 1, or add UART7/8 to `pios_usart.c` and a GPS2 port option.
+**GPS connectors.** HwSettings RV_GPSPort is the 8-pin **GPS 1** connector
+(UART4); `CUBE_GPS2Port` is the 6-pin **GPS 2** connector (UART8, PE0/PE1),
+with the same functions (GPS, Telemetry, ComBridge).  UART7/8 were added to
+`pios_usart.c` and to the vector table for this (the CMSIS header in the
+tree stops at the F40x interrupt set; the F427's UART7/8 are vectors 82/83,
+defined in `board_hw_defs.c`).  The wizard puts a serial GPS on GPS 2 and
+leaves GPS 1 disabled, at 230400 UBX with UbxAutoConfig Configure.  The
+GPS module has no auto-baud, so HwSettings.GPSSpeed must match the
+receiver: the Matek M9N-5883 here talks 230400 (u-blox receivers that have
+run under ArduPilot are left there), and with that it gives a 3D fix on
+the bench.  To find a receiver's speed, set CUBE_GPS2Port and USB_VCPPort
+to ComBridge and read the USB serial port on the host at each
+ComUsbBridgeSpeed (that bridge stops at 115200, so 230400 has to be tried
+through the GPS module itself).
 
 ## Building the GCS for this tree
 

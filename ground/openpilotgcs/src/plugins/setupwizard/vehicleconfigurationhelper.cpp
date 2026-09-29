@@ -195,15 +195,22 @@ void VehicleConfigurationHelper::applyHardwareConfiguration()
         data.RV_RcvrPort      = HwSettings::RV_RCVRPORT_PWM;
         data.RV_TelemetryPort = HwSettings::RV_TELEMETRYPORT_TELEMETRY;
         data.RV_AuxPort       = HwSettings::RV_AUXPORT_DISABLED;
-        data.RV_GPSPort       = HwSettings::RV_GPSPORT_GPS;
+        /* The serial GPS goes on GPS 2 (the 6-pin connector, UART8); GPS 1
+         * is the 8-pin connector with I2C/safety-switch lines, unused here. */
+        data.RV_GPSPort       = HwSettings::RV_GPSPORT_DISABLED;
+        data.CUBE_GPS2Port    = HwSettings::CUBE_GPS2PORT_DISABLED;
         if (m_configSource->getGpsType() != VehicleConfigurationSource::GPS_DISABLED &&
             m_configSource->getGpsType() != VehicleConfigurationSource::GPS_DRONECAN) {
+            data.CUBE_GPS2Port = HwSettings::CUBE_GPS2PORT_GPS;
             data.OptionalModules[HwSettings::OPTIONALMODULES_GPS] = 1;
-            data.GPSSpeed = HwSettings::GPSSPEED_57600;
+            /* 230400: what a u-blox receiver runs at once ArduPilot has had
+             * it (the Matek M9N-5883 on this Cube does), and the firmware's
+             * GPS module has no auto-baud, so the choice has to be right. */
+            data.GPSSpeed = HwSettings::GPSSPEED_230400;
             GPSSettings *gpsSettings = GPSSettings::GetInstance(m_uavoManager);
             Q_ASSERT(gpsSettings);
             GPSSettings::DataFields gpsData = gpsSettings->getData();
-            gpsData.UbxAutoConfig = GPSSettings::UBXAUTOCONFIG_DISABLED;
+            gpsData.UbxAutoConfig = GPSSettings::UBXAUTOCONFIG_CONFIGURE;
             switch (m_configSource->getGpsType()) {
             case VehicleConfigurationSource::GPS_NMEA:
                 gpsData.DataProtocol = GPSSettings::DATAPROTOCOL_NMEA;

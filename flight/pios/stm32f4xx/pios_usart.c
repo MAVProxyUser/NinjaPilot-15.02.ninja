@@ -156,6 +156,23 @@ static void PIOS_USART_6_irq_handler(void)
     PIOS_USART_generic_irq_handler(PIOS_USART_6_id);
 }
 
+#if defined(UART7) && defined(UART8)
+/* STM32F42x/43x: UART7 and UART8 (Cube Purple GPS 2 is UART8). */
+static uint32_t PIOS_USART_7_id;
+void UART7_IRQHandler(void) __attribute__((alias("PIOS_USART_7_irq_handler")));
+static void PIOS_USART_7_irq_handler(void)
+{
+    PIOS_USART_generic_irq_handler(PIOS_USART_7_id);
+}
+
+static uint32_t PIOS_USART_8_id;
+void UART8_IRQHandler(void) __attribute__((alias("PIOS_USART_8_irq_handler")));
+static void PIOS_USART_8_irq_handler(void)
+{
+    PIOS_USART_generic_irq_handler(PIOS_USART_8_id);
+}
+#endif
+
 /**
  * Initialise a single USART device
  */
@@ -214,6 +231,14 @@ int32_t PIOS_USART_Init(uint32_t *usart_id, const struct pios_usart_cfg *cfg)
     case (uint32_t)USART6:
         PIOS_USART_6_id = (uint32_t)usart_dev;
         break;
+#if defined(UART7) && defined(UART8)
+    case (uint32_t)UART7:
+        PIOS_USART_7_id = (uint32_t)usart_dev;
+        break;
+    case (uint32_t)UART8:
+        PIOS_USART_8_id = (uint32_t)usart_dev;
+        break;
+#endif
     }
     NVIC_Init((NVIC_InitTypeDef *)&(usart_dev->cfg->irq.init));
     USART_ITConfig(usart_dev->cfg->regs, USART_IT_RXNE, ENABLE);

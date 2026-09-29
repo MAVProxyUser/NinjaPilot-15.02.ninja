@@ -541,6 +541,56 @@ static const struct pios_usart_cfg pios_usart_gps_cfg = {
     },
 };
 
+/* GPS 2 connector: UART8 on PE0 (RX) / PE1 (TX).  The CMSIS header in this
+ * tree stops at the STM32F40x interrupt set; the F427 in the Cube has UART7
+ * and UART8 at vectors 82 and 83 (added to vectors_stm32f4xx.c). */
+#ifndef UART7_IRQn
+#define UART7_IRQn 82
+#endif
+#ifndef UART8_IRQn
+#define UART8_IRQn 83
+#endif
+static const struct pios_usart_cfg pios_usart_gps2_cfg = {
+    .regs  = UART8,
+    .remap = GPIO_AF_UART8,
+    .init  = {
+        .USART_BaudRate            = 57600,
+        .USART_WordLength          = USART_WordLength_8b,
+        .USART_Parity              = USART_Parity_No,
+        .USART_StopBits            = USART_StopBits_1,
+        .USART_HardwareFlowControl = USART_HardwareFlowControl_None,
+        .USART_Mode                = USART_Mode_Rx | USART_Mode_Tx,
+    },
+    .irq   = {
+        .init                                      = {
+            .NVIC_IRQChannel    = UART8_IRQn,
+            .NVIC_IRQChannelPreemptionPriority = PIOS_IRQ_PRIO_MID,
+            .NVIC_IRQChannelSubPriority        = 0,
+            .NVIC_IRQChannelCmd = ENABLE,
+        },
+    },
+    .rx    = {
+        .gpio = GPIOE,
+        .init = {
+            .GPIO_Pin   = GPIO_Pin_0,
+            .GPIO_Speed = GPIO_Speed_2MHz,
+            .GPIO_Mode  = GPIO_Mode_AF,
+            .GPIO_OType = GPIO_OType_PP,
+            .GPIO_PuPd  = GPIO_PuPd_UP
+        },
+    },
+    .tx    = {
+        .gpio = GPIOE,
+        .init = {
+            .GPIO_Pin   = GPIO_Pin_1,
+            .GPIO_Speed = GPIO_Speed_2MHz,
+            .GPIO_Mode  = GPIO_Mode_AF,
+            .GPIO_OType = GPIO_OType_PP,
+            .GPIO_PuPd  = GPIO_PuPd_UP
+        },
+    },
+};
+
 #if defined(PIOS_INCLUDE_IOMCU)
 /*
  * IO co-processor - USART6 on PC6 (our TX) / PC7 (our RX), 1.5 Mbaud 8N1,
