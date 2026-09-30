@@ -346,47 +346,36 @@ static void board_apply_default_airframe(void)
     }
     act.MotorsSpinWhileArmed = ACTUATORSETTINGS_MOTORSSPINWHILEARMED_FALSE;
     /*
-     * Point the sticks at the GCS receiver, over WiFi.
-     *
-     * This board has NO radio receiver. The V2.6.C schematic has no satellite
-     * connector and no PPM input -- LiteWing is flown over WiFi, which is the
-     * whole idea of the airframe. The DSM mapping inherited from the ESP32
-     * quad therefore pointed all five channels at hardware that does not
-     * exist, ManualControlCommand sat at Connected=FALSE with every channel
-     * reading 65535, and the board could never arm no matter what was done to
-     * it.
-     *
-     * PIOS_GCSRCVR is already built and registered into pios_rcvr_group_map
-     * under CHANNELGROUPS_GCS, so the GCSReceiver UAVObject IS the radio here.
-     * It rides whatever telemetry link is up -- WiFi UDP in flight, USB serial
-     * on the bench -- so the same mapping works for both.
-     *
-     * Endpoints are the conventional 1000/1500/2000 microsecond stick range.
-     * That is the RECEIVER side and is unrelated to the brushed 0..1000 duty
-     * on the actuator side; ManualControl normalises to -1..+1 in between.
-     * Throttle neutral sits at its minimum, as it must for a throttle.
+     * Point the sticks at the GCS receiver -- but only if nothing is mapped
+     * yet (Throttle group None = never configured). This used to run
+     * unconditionally on every boot, which meant the DSM satellite on IO15
+     * was initialised below and then never read: any DSM mapping was
+     * overwritten before ManualControl saw it. A stored mapping is the
+     * user's and survives the boot.
      */
     {
         ManualControlSettingsData mc;
 
         ManualControlSettingsGet(&mc);
-        mc.ChannelGroups.Throttle   = MANUALCONTROLSETTINGS_CHANNELGROUPS_GCS;
-        mc.ChannelGroups.Roll       = MANUALCONTROLSETTINGS_CHANNELGROUPS_GCS;
-        mc.ChannelGroups.Pitch      = MANUALCONTROLSETTINGS_CHANNELGROUPS_GCS;
-        mc.ChannelGroups.Yaw        = MANUALCONTROLSETTINGS_CHANNELGROUPS_GCS;
-        mc.ChannelGroups.FlightMode = MANUALCONTROLSETTINGS_CHANNELGROUPS_GCS;
-        mc.ChannelNumber.Throttle   = 1;
-        mc.ChannelNumber.Roll       = 2;
-        mc.ChannelNumber.Pitch      = 3;
-        mc.ChannelNumber.Yaw        = 4;
-        mc.ChannelNumber.FlightMode = 5;
-        mc.ChannelMin.Throttle = 1000; mc.ChannelNeutral.Throttle = 1000; mc.ChannelMax.Throttle = 2000;
-        mc.ChannelMin.Roll = 1000; mc.ChannelNeutral.Roll = 1500; mc.ChannelMax.Roll = 2000;
-        mc.ChannelMin.Pitch = 1000; mc.ChannelNeutral.Pitch = 1500; mc.ChannelMax.Pitch = 2000;
-        mc.ChannelMin.Yaw = 1000; mc.ChannelNeutral.Yaw = 1500; mc.ChannelMax.Yaw = 2000;
-        mc.ChannelMin.FlightMode = 1000; mc.ChannelNeutral.FlightMode = 1500; mc.ChannelMax.FlightMode = 2000;
-        ManualControlSettingsSet(&mc);
-        UAVObjSave(ManualControlSettingsHandle(), 0);
+        if (mc.ChannelGroups.Throttle >= MANUALCONTROLSETTINGS_CHANNELGROUPS_NONE) {
+            mc.ChannelGroups.Throttle   = MANUALCONTROLSETTINGS_CHANNELGROUPS_GCS;
+            mc.ChannelGroups.Roll       = MANUALCONTROLSETTINGS_CHANNELGROUPS_GCS;
+            mc.ChannelGroups.Pitch      = MANUALCONTROLSETTINGS_CHANNELGROUPS_GCS;
+            mc.ChannelGroups.Yaw        = MANUALCONTROLSETTINGS_CHANNELGROUPS_GCS;
+            mc.ChannelGroups.FlightMode = MANUALCONTROLSETTINGS_CHANNELGROUPS_GCS;
+            mc.ChannelNumber.Throttle   = 1;
+            mc.ChannelNumber.Roll       = 2;
+            mc.ChannelNumber.Pitch      = 3;
+            mc.ChannelNumber.Yaw        = 4;
+            mc.ChannelNumber.FlightMode = 5;
+            mc.ChannelMin.Throttle = 1000; mc.ChannelNeutral.Throttle = 1050; mc.ChannelMax.Throttle = 2000;
+            mc.ChannelMin.Roll = 1000; mc.ChannelNeutral.Roll = 1500; mc.ChannelMax.Roll = 2000;
+            mc.ChannelMin.Pitch = 1000; mc.ChannelNeutral.Pitch = 1500; mc.ChannelMax.Pitch = 2000;
+            mc.ChannelMin.Yaw = 1000; mc.ChannelNeutral.Yaw = 1500; mc.ChannelMax.Yaw = 2000;
+            mc.ChannelMin.FlightMode = 1000; mc.ChannelNeutral.FlightMode = 1500; mc.ChannelMax.FlightMode = 2000;
+            ManualControlSettingsSet(&mc);
+            UAVObjSave(ManualControlSettingsHandle(), 0);
+        }
     }
 
     /* Meaningless on this board and left only so the field is not a stray 0:

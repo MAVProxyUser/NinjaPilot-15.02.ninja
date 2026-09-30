@@ -14,3 +14,6 @@ targets/litewing/esp-idf/build/
 targets/litewing/esp-idf/sdkconfig
 targets/litewing/esp-idf/sdkconfig.old
 targets/litewing/esp-idf/fw_version_info.h
+
+# isolated LiteWing build dir (idf.py -B build-head -DNINJAPILOT_ROOT=<worktree>)
+targets/litewing/esp-idf/build-head/
