@@ -65,6 +65,19 @@
 	     no per-angle trim on top of it, because trimming to force an exact match at one chosen cruise angle is what broke
 	     every other angle the first two times this was tried (see TRANSITION_THEORY.md #8). -->
 	<field name="InterceptorHoverThrust" units="" type="float" elements="1" defaultvalue="0.65"/>
+	<!-- 2026-09-24: interceptor_level_thrust()'s feedforward multiplies by 1/cos(roll) as well as
+	     1/cos(pitch) - correct physics for a TRIMMED, steady attitude, but a real, reproduced problem
+	     for a short, aggressive engagement that ALSO commands a live roll correction on top of an
+	     already-ramping pitch: any added roll, correcting the right way or not, pushes MORE thrust into
+	     an already-delicate vertical balance, and three independent lateral-correction attempts (see
+	     TRANSITION_THEORY.md #26.6) all failed the same way - fine most of the time, occasionally
+	     diverging hard (10-12m+ misses, visibly a hooked/overcorrected flight path) - exactly the
+	     intermittent signature of a roll-transient feeding back into a thrust spike. Default FALSE
+	     (unchanged behavior, including wroom_pilot.py's own longer-engagement PN steering, which this
+	     is not known to be a problem for) - TRUE drops the roll term from the feedforward entirely
+	     (uses cos(pitch) alone), decoupling lateral correction from vertical thrust for whoever
+	     re-enables a final-leg correction on ground/gazebo_bridge.py's dive trigger. -->
+	<field name="InterceptorThrustIgnoreRoll" units="" type="enum" elements="1" options="FALSE,TRUE" defaultvalue="FALSE"/>
 	<field name="LowThrottleZeroIntegral" units="" type="enum" elements="1" options="FALSE,TRUE" defaultvalue="TRUE"/>
 
 	<field name="ScaleToAirspeed" units="m/s" type="float" elements="1" defaultvalue="0"/>

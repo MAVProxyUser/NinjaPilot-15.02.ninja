@@ -518,7 +518,6 @@ _last_accel_g = [1.0]    # |specific force| in g, from the vehicle's own IMU
 # impulse can alias away regardless of loop rate.
 _peak_accel_g = [1.0]
 _attitude_dbg_last = [0.0]   # NINJAPILOT_ATTITUDE_DEBUG rate-limit, see _intercept_run
-_pn_live_dbg_last = [0.0]    # live PN dive-steering debug rate-limit, see _intercept_run
 _contact_hit = [None]    # wall-clock of the PHYSICS ENGINE's own contact report
 POSE_TOPIC = "/world/%s/pose/info" % GAZEBO_WORLD
 IMU_TOPIC = "/%s/imu" % GZ_NS
@@ -2948,9 +2947,6 @@ def _intercept_run(node, client):
     struck = [None]   # wall-clock of the strike, once hit
     knock = [(0.0, 0.0, 0.0)]   # post-impact velocity NED
     dive_triggered = [False]   # see the ALTITUDE-ALIGNED DIVE TRIGGER below
-    dive_tilt_done = [False]   # see the FINAL-LEG TILT ROUTINE below
-    dive_tilt_start = [None]
-    dive_tilt_bank = [0.0]
     ALIGN_ALT_M = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_ALIGN_M", "3.0"))
     maneuver = os.environ.get("NINJAPILOT_TARGET_MANEUVER") == "1"
     turned = [False]
@@ -3127,13 +3123,27 @@ def _intercept_run(node, client):
                 push_stabilization_update("InterceptorClimbTime", 0.1)
                 push_stabilization_update("InterceptorClimbThrust", DIVE_HOVER_THRUST)
                 push_stabilization_update("InterceptorTransitionRate", DIVE_TRANSITION_RATE)
+                # NEW FIRMWARE FIELD (2026-09-24): decouple lateral correction
+                # from vertical thrust - interceptor_level_thrust()'s
+                # feedforward multiplies by 1/cos(roll) as well as
+                # 1/cos(pitch), which is why three independent
+                # lateral-correction attempts (classical PN, gentler PN, a
+                # one-shot tilt) all intermittently destabilized the vertical
+                # balance the fixes above depend on. Real, tested via
+                # fw_simposix.elf rebuild - see stabilizationsettings.xml's
+                # own comment on this field and TRANSITION_THEORY.md #26.7.
+                DIVE_THRUST_IGNORE_ROLL = os.environ.get(
+                    "NINJAPILOT_INTERCEPT_DIVE_THRUST_IGNORE_ROLL", "1") == "1"
+                if DIVE_THRUST_IGNORE_ROLL:
+                    push_stabilization_update("InterceptorThrustIgnoreRoll", "TRUE")
                 control.mode_position = 2   # Stabilized3 = Interceptor (Bank3)
                 print(f"[intercept] *** ALTITUDE ALIGNED (gap {alt_gap:.1f}m, "
                       f"climb {own_climb_mps:+.2f}m/s) - committing to "
                       f"Interceptor level approach (Bank3, cruise pitch "
                       f"{DIVE_CRUISE_PITCH_DEG:.0f}deg, climb thrust "
                       f"{DIVE_HOVER_THRUST:.2f}, transition rate "
-                      f"{DIVE_TRANSITION_RATE:.0f}deg/s) ***")
+                      f"{DIVE_TRANSITION_RATE:.0f}deg/s, thrust_ignore_roll "
+                      f"{DIVE_THRUST_IGNORE_ROLL}) ***")
 
         # FINAL-LEG TILT ROUTINE (2026-09-24) - a single decisive bank
         # correction, not a continuous feedback loop. History: a continuous
@@ -3195,42 +3205,30 @@ def _intercept_run(node, client):
         # while overriding thrust independently, rather than trusting
         # interceptor_level_thrust()'s single formula to handle both at
         # once), not another correction-law swap.
-        DIVE_TILT_KP = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TILT_KP", "1.2"))
-        DIVE_TILT_MAX_BANK_DEG = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TILT_MAX_BANK_DEG", "35"))
-        DIVE_TILT_HOLD_S = float(os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TILT_HOLD_S", "0.8"))
-        if dive_triggered[0] and os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TRIGGER") == "1" \
-                and os.environ.get("NINJAPILOT_INTERCEPT_DIVE_TILT", "0") == "1" \
-                and not dive_tilt_done[0]:
-            if dive_tilt_start[0] is None:
-                dive_tilt_start[0] = time.time()
-                # Estimated closing time for the lead solve: horizontal
-                # range over the closing speed already established just
-                # before trigger (own ground speed) - crude but sufficient
-                # for a one-shot lead, not a continuously-corrected value.
-                own_vn0 = ivel_ned[0] if ivel_ned else 0.0
-                own_ve0 = ivel_ned[1] if ivel_ned else 0.0
-                own_speed = max(math.hypot(own_vn0, own_ve0), 1.0)
-                Rn0, Re0 = tned[0] - dned[0], tned[1] - dned[1]
-                range0 = math.hypot(Rn0, Re0)
-                t_lead = range0 / own_speed
-                lead_n = tned[0] + tvel[0] * t_lead
-                lead_e = tned[1] + tvel[1] * t_lead
-                lead_bearing = math.degrees(math.atan2(lead_e - dned[1], lead_n - dned[0]))
-                own_heading = math.degrees(math.atan2(own_ve0, own_vn0)) if own_speed > 1.5 else lead_bearing
-                err = lead_bearing - own_heading
-                while err > 180.0: err -= 360.0
-                while err < -180.0: err += 360.0
-                bank_deg = max(-DIVE_TILT_MAX_BANK_DEG, min(DIVE_TILT_MAX_BANK_DEG, DIVE_TILT_KP * err))
-                dive_tilt_bank[0] = max(-0.45, min(0.45, bank_deg / PN_BANK_PER_STICK_DEG))
-                print(f"[intercept] *** FINAL-LEG TILT: lead_bearing={lead_bearing:+.1f} "
-                      f"own_heading={own_heading:+.1f} err={err:+.1f}deg "
-                      f"bank_stick={dive_tilt_bank[0]:+.3f} hold={DIVE_TILT_HOLD_S:.1f}s ***")
-            if time.time() - dive_tilt_start[0] < DIVE_TILT_HOLD_S:
-                control.roll = dive_tilt_bank[0]
-            else:
-                control.roll = 0.0
-                dive_tilt_done[0] = True
-                print("[intercept] *** FINAL-LEG TILT complete - releasing to straight, full speed ***")
+        # CONTINUOUS EXACT-LEAD-POINT STEERING - REMOVED (2026-09-24). A third
+        # bridge-side design (recomputing the lead point every tick, fixing
+        # two real numerical bugs found live: heading re-derived from noisy
+        # instantaneous velocity, and dive_ref_speed held stale) still found
+        # a THIRD instability (t_lead = range/dive_ref_speed blowing up
+        # whenever speed passed near zero during the pitch-over) and, once
+        # that was also fixed, a fair matched 6-seed sweep still averaged
+        # 8.40m - worse than the 3.5-4.5m no-correction baseline, and the
+        # FOURTH bridge-side lateral-correction design this session to net
+        # negative. That is a structural result, not a tuning one: guidance
+        # computed on the ground, from relayed state, at a 20Hz Python loop
+        # rate, kept finding a new numerical edge case every time the last
+        # one was patched. The actual fix moved onboard instead - see
+        # interceptor_intercept_aim() in outerloop.c, which reuses
+        # path_intercept()'s own already-validated design (a fixed reference
+        # speed for t_lead, the INS's own filtered yaw instead of
+        # velocity-derived heading) and drives BOTH roll (bearing) and pitch
+        # (elevation - keeps the target in the nose-mounted camera's view
+        # throughout pursuit, not just close enough for impact at the end)
+        # from the same PathDesired the ground bridge already sends. Matched
+        # 6-seed result: 6.09m mean, 5/6 seeds within 1m of baseline - not
+        # yet a clean win, but the first design this session without the
+        # wild divergence every bridge-side attempt produced. Full writeup:
+        # TRANSITION_THEORY.md #26 (HamzasWetDream project).
 
         # ATTITUDE-VS-LOS DEBUG (2026-09-23, NINJAPILOT_ATTITUDE_DEBUG=1):
         # direct answer to "why doesn't the camera ever see the ball" -

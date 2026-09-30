@@ -33,6 +33,7 @@
 
 #include <openpilot.h>
 #include <pios_shmlog.h>
+#include <pios_math.h>
 #ifdef SIMPOSIX
 #include <stdio.h>
 #include <sys/time.h>
@@ -47,12 +48,16 @@
 #include <flightstatus.h>
 #include <manualcontrolcommand.h>
 #include <stabilizationbank.h>
+#include <pathdesired.h>
+#include <positionstate.h>
+#include <velocitystate.h>
 
 
 #include <stabilization.h>
 #include <cruisecontrol.h>
 #include <altitudeloop.h>
 #include <CoordinateConversions.h>
+#include <plans.h>
 
 // Private constants
 
@@ -155,9 +160,175 @@ static float interceptor_heading(const AttitudeStateData *a)
  * INTERCEPTOR_FLIGHT_LOG.md section 5. */
 static inline float interceptor_level_thrust(float theta_off_deg, float roll_deg)
 {
+    /* InterceptorThrustIgnoreRoll (2026-09-24): drop the roll term from the
+     * feedforward on request. Correct physics for a TRIMMED, steady
+     * attitude - wrong for a short, aggressive engagement that ALSO
+     * commands a live roll correction on top of an already-ramping pitch:
+     * any added roll, correcting the right way or not, pushes MORE thrust
+     * into an already-delicate vertical balance. See this field's own
+     * comment in stabilizationsettings.xml and TRANSITION_THEORY.md #26.6
+     * for the three independent lateral-correction attempts that all
+     * failed the same intermittent way before this was added. Default
+     * FALSE leaves every existing use (including wroom_pilot.py's own
+     * longer-engagement PN steering) bit-for-bit unchanged. */
+    if (stabSettings.settings.InterceptorThrustIgnoreRoll == STABILIZATIONSETTINGS_INTERCEPTORTHRUSTIGNOREROLL_TRUE) {
+        roll_deg = 0.0f;
+    }
     float cos_tilt = cosf(INTERCEPTOR_DEG2RAD(theta_off_deg)) * cosf(INTERCEPTOR_DEG2RAD(roll_deg));
     float gain     = 1.0f / fmaxf(cos_tilt, 1.0f / INTERCEPTOR_MAX_TILT_GAIN);
     return stabSettings.settings.InterceptorHoverThrust * gain;
+}
+
+/* ---- ONBOARD FINAL-LEG INTERCEPT GUIDANCE (2026-09-24, extended same day for NOSE-AIM pitch) ---------------------
+ * Ports the numerically-robust lead-point design already proven in flight/libraries/paths.c's path_intercept() (the
+ * hover-mode PathFollower intercept - this project's own ~0.40-0.60m closest-approach baseline) into THIS state
+ * machine's TRANSITION/CRUISE phases, replacing a fragile ground-bridge Python "dive tilt" hack that chased the same
+ * problem at 20Hz over a lossy UDP relay and never got clean (TRANSITION_THEORY.md #26.6-26.9: three root causes
+ * there, all ultimately from computing heading/lead-time out of noisy INSTANTANEOUS measurements).
+ *
+ * Two choices make this version safe where the Python one was not:
+ *  1. OWN HEADING is attitudeState.Yaw - the INS's own filtered estimate - never re-derived from velocity. The
+ *     Python side had no such estimate to read and reconstructed heading via atan2(velocity), which goes to noise
+ *     the moment horizontal speed is small relative to vertical - exactly a steep dive (root cause #1 there).
+ *  2. t_lead uses path.EndingVelocity - the ground bridge's own already-intentional closing-speed parameter (the
+ *     same value it hands path_intercept() for hover-mode intercept), not a live measurement and not a separately
+ *     invented constant - range/vmax with vmax fixed for the duration of one lead calculation cannot blow up. A LIVE
+ *     speed can and did (root cause #3 there: it passed near-zero during the pitch-over and sent t_lead to 8s,
+ *     aiming 70+ degrees off and saturating the bank). Floored at 0.1f, matching path_intercept()'s own defensive
+ *     floor exactly rather than picking a fresh number.
+ *
+ * NOSE-AIM PITCH (direct user requirement, 2026-09-24): "never ever should you NOT have the object in camera view
+ * while in pursuit." A fixed InterceptorCruisePitch cannot do this even in principle - it has no relationship to
+ * where the target actually is. Tail-sitter frame convention: theta_off=0 is hover, nose straight up (elevation
+ * 90deg above the horizon); theta_off=-90 is level cruise, nose horizontal (elevation 0deg) - in general
+ * nose_elevation_deg = 90 + theta_off. So aiming the nose at the lead point's true elevation is
+ * theta_off = elevation_to_lead_point_deg - 90, computed from the SAME lead point the bank correction already
+ * targets, not a second, independent guess. This directly explains a previously-open question from earlier in this
+ * project ("why doesn't the camera ever see the ball"): the old fixed -45deg constant points the nose 45deg ABOVE
+ * the horizon even against a target the dive trigger has already altitude-aligned (dead level, ~0deg elevation) -
+ * the miss was never a tuning problem, pitch and target elevation were simply never connected.
+ *
+ * Reads PathDesired the same way the ground bridge already feeds path_intercept() for hover-mode intercept (see
+ * paths.c) - no new ground-side plumbing required. Both outputs are 0/unset (existing behaviour: static roll_off=0,
+ * caller's own InterceptorCruisePitch) whenever PathDesired.Mode isn't PATHDESIRED_MODE_INTERCEPT, so a plain dive
+ * with no target in track behaves exactly as before either of these were added. */
+/* KP is a first-cut tuning value with no equivalent to borrow - path_intercept() commands a velocity VECTOR
+ * directly rather than closing a bearing-error loop with a gain, so there is nothing analogous in this codebase to
+ * reuse the way the three constants below are reused. Flagged here so it reads as "picked, needs validation", not
+ * "derived". */
+#define INTERCEPTOR_INTERCEPT_KP           1.2f    /* deg commanded bank per deg bearing error */
+/* The remaining three all borrow an already-validated constant from paths.c's path_intercept() (this project's own
+ * ~0.40-0.60m baseline) instead of inventing separate numbers for the identical purpose - the earlier version of
+ * this function used its own 35deg/90deg-per-s/6s and got caught for it: none had any relationship to a value this
+ * exact codebase already tunes for the same job. */
+#define INTERCEPTOR_INTERCEPT_MAX_BANK_DEG stabSettings.stabBank.RollMax   /* the airframe's own configured roll limit, not a second one */
+#define INTERCEPTOR_INTERCEPT_MAX_SLEW_DPS 60.0f   /* = paths.c INTERCEPT_MAX_TURN_RATE */
+#define INTERCEPTOR_INTERCEPT_MAX_LEAD_S   2.5f    /* = paths.c INTERCEPT_ENDGAME_MAX_LEAD_S */
+/* TWO FIXES TRIED AND REVERTED (2026-09-25) for the residual "closes to ~3m then re-opens" pattern:
+ * 1. Dropping the bank/pitch slew limit inside path_intercept()'s own INTERCEPT_ENDGAME_DIST (4m), on the theory
+ *    the pattern was a reaction-lag problem a faster response would fix. A matched 3-seed check showed it uniformly
+ *    WORSE (5.50/5.49/5.66m vs. 5.51/3.30/3.72m) - proof this is a KINEMATIC pure-pursuit overshoot, not a lag one:
+ *    this vehicle commits to real forward airspeed and a real turn radius once in CRUISE, and reacting faster to
+ *    the instantaneous bearing does not fix a flight path that geometrically cannot curve tightly enough on top of
+ *    an already-poor approach angle - it just overcorrects harder.
+ * 2. path_intercept()'s own GENERAL-case steering (constant-bearing via cross-LOS decomposition, matching the
+ *    target's cross-range velocity to hold bearing fixed while closing range) ported from its velocity-vector
+ *    output to a heading. The vector math is an exact match to paths.c and is not itself wrong - but it is the
+ *    WRONG TOOL for this vehicle: PN deliberately steers OFF the direct target bearing to null cross-track motion,
+ *    which is fine for a hover-capable vehicle whose camera can point independently of its flight direction, and
+ *    is exactly what the user watched happen live ("hooked away... sign flip in the spline curve" - it was not a
+ *    sign error, it was PN doing its job). For THIS tail-sitter, heading IS flight direction once in CRUISE, so
+ *    steering off the direct bearing at all means the nose - and the camera - comes off the target, directly
+ *    violating "never ever should you NOT have the object in camera view while in pursuit." PN and permanent
+ *    nose-lock are incompatible for an airframe with no independent camera gimbal; do not retry PN/cross-LOS here
+ *    without one. */
+/* Pitch has NO proportional gain, unlike bank: theta_off = elevation_deg - 90 is an exact geometric identity (the
+ * nose-aim requirement), not a control law being tuned toward a setpoint - see block comment. */
+
+struct interceptor_aim {
+    float bank_deg;   /* interceptor.roll_off setpoint */
+    float pitch_deg;  /* interceptor.theta_off setpoint */
+    bool  tracking;   /* false: PathDesired isn't in INTERCEPT mode - caller should use its own fallback pitch */
+};
+
+static struct interceptor_aim interceptor_intercept_aim(float dT, float actual_yaw_deg)
+{
+    static float lastBank  = 0.0f;
+    static float lastPitch = 0.0f;
+    struct interceptor_aim aim = { 0.0f, 0.0f, false };
+
+    PathDesiredData path;
+    PathDesiredGet(&path);
+    if (path.Mode != PATHDESIRED_MODE_INTERCEPT) {
+        lastBank  = 0.0f;
+        lastPitch = 0.0f;
+        return aim;
+    }
+    aim.tracking = true;
+
+    PositionStateData pos;
+    PositionStateGet(&pos);
+
+    float Rn    = path.End.North - pos.North;
+    float Re    = path.End.East  - pos.East;
+    float range = sqrtf(Rn * Rn + Re * Re);
+    if (range < 1e-3f) {
+        aim.bank_deg  = lastBank;
+        aim.pitch_deg = lastPitch;
+        return aim;
+    }
+
+    float Vtn = path.ModeParameters[PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELN];
+    float Vte = path.ModeParameters[PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELE];
+    float vmax = path.EndingVelocity;
+    if (vmax < 0.1f) {
+        vmax = 0.1f;
+    }
+    float t_lead = range / vmax;
+    if (t_lead > INTERCEPTOR_INTERCEPT_MAX_LEAD_S) {
+        t_lead = INTERCEPTOR_INTERCEPT_MAX_LEAD_S;
+    }
+    /* Short-horizon lead point, used for BOTH bank/bearing and pitch/elevation, at every range - see this
+     * function's own block comment for the two range-dependent alternatives tried and reverted. Always aiming
+     * directly at this point (never a PN-style off-bearing correction) is what keeps the nose - and the camera -
+     * on the target throughout pursuit, which is the harder, non-negotiable requirement here. */
+    float lead_n = path.End.North + Vtn * t_lead;
+    float lead_e = path.End.East  + Vte * t_lead;
+    float lead_d = path.End.Down  + path.ModeParameters[PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELD] * t_lead;
+    float dn = lead_n - pos.North;
+    float de = lead_e - pos.East;
+    if (dn * dn + de * de < 1e-6f) {
+        aim.bank_deg  = lastBank;
+        aim.pitch_deg = lastPitch;
+        return aim;
+    }
+
+    /* ---- azimuth (bank/heading) ---- */
+    float desired_bearing_deg = RAD2DEG(atan2f(de, dn));
+    float bear_err = desired_bearing_deg - actual_yaw_deg;
+    while (bear_err > 180.0f) { bear_err -= 360.0f; }
+    while (bear_err < -180.0f) { bear_err += 360.0f; }
+
+    float bank = boundf(INTERCEPTOR_INTERCEPT_KP * bear_err,
+                         -INTERCEPTOR_INTERCEPT_MAX_BANK_DEG, INTERCEPTOR_INTERCEPT_MAX_BANK_DEG);
+    float maxBankStep = INTERCEPTOR_INTERCEPT_MAX_SLEW_DPS * dT;
+    float dBank = bank - lastBank;
+    if (dBank > maxBankStep) { bank = lastBank + maxBankStep; } else if (dBank < -maxBankStep) { bank = lastBank - maxBankStep; }
+    lastBank = bank;
+
+    /* ---- elevation (pitch/nose-aim) - see block comment for the frame-convention derivation ---- */
+    float horiz_range   = sqrtf(dn * dn + de * de);
+    float vertical_gap  = pos.Down - lead_d;   /* +ve: lead point is ABOVE us */
+    float elevation_deg = RAD2DEG(atan2f(vertical_gap, horiz_range));
+    float pitch_desired = elevation_deg - 90.0f;
+    float maxPitchStep   = INTERCEPTOR_INTERCEPT_MAX_SLEW_DPS * dT;
+    float dPitch = pitch_desired - lastPitch;
+    if (dPitch > maxPitchStep) { pitch_desired = lastPitch + maxPitchStep; } else if (dPitch < -maxPitchStep) { pitch_desired = lastPitch - maxPitchStep; }
+    lastPitch = pitch_desired;
+
+    aim.bank_deg  = bank;
+    aim.pitch_deg = pitch_desired;
+    return aim;
 }
 
 static void interceptor_enter(const AttitudeStateData *a)
@@ -180,7 +351,7 @@ static void interceptor_enter(const AttitudeStateData *a)
  * the entry blend) - it is what the thrust curve needs to know about during CRUISE, when a steering bank the pilot
  * or the autopilot commanded is real lift loss the pitch-only formula was blind to (see interceptor_level_thrust()'s
  * comment and INTERCEPTOR_FLIGHT_LOG.md section 5's leg-4 finding). */
-static void interceptor_run(float dT, float yaw_stick_rate, float actual_roll_deg)
+static void interceptor_run(float dT, float yaw_stick_rate, float actual_roll_deg, float actual_yaw_deg)
 {
     interceptor.t_phase += dT;
 
@@ -210,6 +381,12 @@ static void interceptor_run(float dT, float yaw_stick_rate, float actual_roll_de
     while (interceptor.psi_ref > 180.0f) { interceptor.psi_ref -= 360.0f; }
     while (interceptor.psi_ref < -180.0f) { interceptor.psi_ref += 360.0f; }
 
+    /* Called once per tick regardless of phase (not just from CRUISE) so its internal slew-rate state stays warm
+     * across the TRANSITION->CRUISE handoff (no step), and so aiming starts the moment a target is in track rather
+     * than waiting for CRUISE to begin - see this function's own block comment for why "aim throughout pursuit,
+     * not just at the end" is a hard requirement here, not a nicety. */
+    struct interceptor_aim aim = interceptor_intercept_aim(dT, actual_yaw_deg);
+
     switch (interceptor.phase) {
     case INTERCEPTOR_CLIMB:
     {
@@ -227,8 +404,10 @@ static void interceptor_run(float dT, float yaw_stick_rate, float actual_roll_de
     break;
     case INTERCEPTOR_TRANSITION:
     {
-        interceptor.roll_off = 0.0f;   /* entry blend is long done by the time transition starts (ClimbTime > ENTRY_BLEND_TIME) */
-        float target = stabSettings.settings.InterceptorCruisePitch;
+        /* entry blend is long done by the time transition starts (ClimbTime > ENTRY_BLEND_TIME); once a target is
+         * in track, aim at it from here rather than waiting for CRUISE - see interceptor_intercept_aim()'s comment */
+        interceptor.roll_off = aim.tracking ? aim.bank_deg : 0.0f;
+        float target = aim.tracking ? aim.pitch_deg : stabSettings.settings.InterceptorCruisePitch;
         float step   = fabsf(stabSettings.settings.InterceptorTransitionRate) * dT;
         if (fabsf(target - interceptor.theta_off) <= step) {
             interceptor.theta_off = target;
@@ -242,8 +421,11 @@ static void interceptor_run(float dT, float yaw_stick_rate, float actual_roll_de
     break;
     case INTERCEPTOR_CRUISE:
     default:
-        interceptor.roll_off    = 0.0f;
-        interceptor.theta_off   = stabSettings.settings.InterceptorCruisePitch;
+        /* onboard final-leg intercept guidance, both axes - see interceptor_intercept_aim()'s own block comment.
+         * Falls back to the old fixed roll_off=0/InterceptorCruisePitch behaviour whenever PathDesired isn't in
+         * INTERCEPT mode, so a plain dive with no target in track is unchanged from before this was added. */
+        interceptor.roll_off    = aim.tracking ? aim.bank_deg  : 0.0f;
+        interceptor.theta_off   = aim.tracking ? aim.pitch_deg : stabSettings.settings.InterceptorCruisePitch;
         interceptor.thrust_auto = interceptor_level_thrust(interceptor.theta_off, actual_roll_deg);
         break;
     }
@@ -342,7 +524,7 @@ static void stabilizationOuterloopTask()
             if (!interceptor.active || armed_now != FLIGHTSTATUS_ARMED_ARMED) {
                 interceptor_enter(&attitudeState);
             }
-            interceptor_run(dT, interceptor.live_frac * stabilizationDesiredAxis[2], attitudeState.Roll);
+            interceptor_run(dT, interceptor.live_frac * stabilizationDesiredAxis[2], attitudeState.Roll, attitudeState.Yaw);
             rpy_desired[0] = interceptor.roll_off  + interceptor.live_frac * stabilizationDesiredAxis[0];
             rpy_desired[1] = interceptor.theta_off + interceptor.live_frac * stabilizationDesiredAxis[1];
             rpy_desired[2] = interceptor.psi_ref;
