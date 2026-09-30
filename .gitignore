@@ -113,3 +113,8 @@ ground/openpilotgcs/src/libs/qwt/lib/
 ground/openpilotgcs/src/libs/qwt/tests/bin/
 # Qt resource compiler output
 qrc_*.cpp
+
+# simposix onboard DebugLog slot dumps land here; logs, not source
+ground/gazebo_bridge/*.o0?
+# Xcode per-user state
+xcuserdata/

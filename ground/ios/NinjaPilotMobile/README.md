@@ -48,20 +48,27 @@ the board's original rates back on disconnect. Force-quitting skips the restore.
 
 ## Flying it from the phone
 
-LiteWing has **no RC receiver** — `pios_board.c` maps Throttle/Roll/Pitch/Yaw/
-FlightMode to the GCS receiver group on every boot, at the conventional
-1000/1500/2000 µs endpoints. Whoever streams the `GCSReceiver` object over the
-telemetry socket is the radio. There is no "take control" step and nothing to
-switch back afterwards.
+LiteWing's radio is a Spektrum DSMX satellite on IO15. The phone can take the
+sticks instead: the **Fly** tab's Spektrum / Phone switch flips the five
+control channels between the DSM group and the GCS receiver group (the same
+thing `tools/bench_test.py` and `tools/dsm_bind.py use gcs` do), parks
+Collective/Accessory on None while the phone has them, and swaps endpoints —
+DSM speaks 2048 counts, GCS speaks microseconds. The DSM set is stashed on
+the phone before it is overwritten and restored on the way back, so a
+measured `rc_calibrate` travel survives the round trip. The board persists
+the choice; it does not overwrite it at boot.
 
-The **Fly** tab streams `GCSReceiver` at 50 Hz while "ENGAGE STICKS" is on.
-Turn the phone sideways: left thumb is throttle (holds where you leave it,
-starts at the bottom) and yaw; right thumb is pitch and roll, spring-centred.
-The segmented control is the flight-mode switch, sized from
-`ManualControlSettings.FlightModeNumber`. "Board sees" echoes
-`ManualControlCommand` back so you can confirm the stream is landing before
-you arm. Arming is the board's own stick gesture (`FlightModeSettings.Arming`,
-shown on screen) — the app adds no arm button.
+With Phone selected, "ENGAGE STICKS" streams `GCSReceiver` at 50 Hz. Turn the
+phone sideways: left thumb is throttle (holds where you leave it, starts at
+the bottom) and yaw; right thumb is pitch and roll, spring-centred. Stick
+values are scaled onto whatever min/neutral/max the board has stored, and
+throttle neutral is always kept above its minimum — `receiver.c` scales a
+stick at neutral to exactly 0 and `armhandler.c` only counts `Throttle < 0`
+as "low", so `Neutral == Min` can never arm. The segmented control is the
+flight-mode switch, sized from `ManualControlSettings.FlightModeNumber`.
+"Board sees" echoes `ManualControlCommand` back so you can confirm the stream
+is landing before you arm. Arming is the board's own stick gesture
+(`FlightModeSettings.Arming`, shown on screen) — the app adds no arm button.
 
 Dropping the sticks, backgrounding the app, or losing the link stops the
 stream, and `pios_gcsrcvr.c`'s supervisor times the channels out into the

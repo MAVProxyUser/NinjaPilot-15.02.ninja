@@ -18,6 +18,11 @@ struct FlyView: View {
     @State private var rightX = 0.0     // roll
     @State private var rightY = 0.0     // pitch
     @State private var modePos = 1
+    @State private var sourceChoice = ""
+    @State private var switching = false
+
+    private static let dsmGroup = "DSM (MainPort)"
+    private static let gcsGroup = "GCS"
 
     private var fs: UAVObjectValue? { link.object("FlightStatus") }
     private var mc: UAVObjectValue? { link.object("ManualControlCommand") }
@@ -71,6 +76,9 @@ struct FlyView: View {
         .onChange(of: link.state) { st in
             if st != .live { disengage() }
         }
+        .onReceive(link.$objects) { _ in
+            if !switching && !engaged, !source.isEmpty, sourceChoice != source { sourceChoice = source }
+        }
         .onDisappear { disengage() }
     }
 
@@ -99,17 +107,27 @@ struct FlyView: View {
                     .font(.system(size: 11)).foregroundColor(.gray)
             }
 
+            Picker("Source", selection: $sourceChoice) {
+                Text("Spektrum").tag(Self.dsmGroup)
+                Text("Phone").tag(Self.gcsGroup)
+            }
+            .pickerStyle(.segmented)
+            .disabled(engaged || switching || mcs == nil || link.state != .live)
+            .onChange(of: sourceChoice) { g in
+                if !g.isEmpty && g != source && !switching { switchSource(to: g) }
+            }
+
             Button {
                 engaged ? disengage() : engage()
             } label: {
-                Text(engaged ? "STICKS LIVE — TAP TO DROP" : "ENGAGE STICKS")
+                Text(engaged ? "STICKS LIVE — TAP TO DROP" : (phoneIsSource ? "ENGAGE STICKS" : "SWITCH SOURCE TO PHONE FIRST"))
                     .font(.system(size: 13, weight: .bold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             }
             .buttonStyle(.borderedProminent)
             .tint(engaged ? .red : .green)
-            .disabled(link.state != .live)
+            .disabled(link.state != .live || !phoneIsSource)
 
             echo
         }
@@ -126,7 +144,8 @@ struct FlyView: View {
         }
         return VStack(alignment: .leading, spacing: 2) {
             HStack {
-                Text("Board sees").font(.system(size: 10, weight: .semibold)).foregroundColor(.gray)
+                Text("Board sees · \(phoneIsSource ? "phone" : (source.isEmpty ? "—" : "Spektrum"))")
+                    .font(.system(size: 10, weight: .semibold)).foregroundColor(.gray)
                 Spacer()
                 Text(mc?.option("Connected") == "True" ? "RX OK" : "no RX")
                     .font(.system(size: 10, weight: .bold))
@@ -151,9 +170,66 @@ struct FlyView: View {
                  live: engaged)
     }
 
+    // MARK: - Source (Spektrum satellite vs this phone)
+
+    /// Whatever the Throttle channel's group says the radio is.
+    private var source: String { mcs?.option("ChannelGroups", 0) ?? "" }
+    private var phoneIsSource: Bool { source == Self.gcsGroup }
+
+    /// Flip the five control channels between the DSM satellite and the GCS
+    /// receiver, the way tools/bench_test.py does -- and park the other four
+    /// groups on None while the phone has them: an Accessory left on DSM with
+    /// the transmitter off times out and invalidates the whole input.
+    ///
+    /// Endpoints are swapped too, because the two sources speak different
+    /// units (DSM 2048 counts vs microseconds). The DSM set is stashed on the
+    /// phone before it is overwritten and restored on the way back, so a
+    /// measured rc_calibrate travel survives a round trip.
+    private func switchSource(to group: String) {
+        guard var m = mcs, !engaged, group != source else { return }
+        switching = true
+        let n = m.def.fields.first(where: { $0.name == "ChannelGroups" })?.count ?? 9
+        let ud = UserDefaults.standard
+        if group == Self.gcsGroup {
+            let stash: [String: [Double]] = [
+                "min": m.array("ChannelMin"), "neutral": m.array("ChannelNeutral"),
+                "max": m.array("ChannelMax"), "groups": m.array("ChannelGroups"),
+            ]
+            if source == Self.dsmGroup { ud.set(stash, forKey: "dsmStash") }
+            for i in 0..<n { m.set("ChannelGroups", option: i < 5 ? Self.gcsGroup : "None", index: i) }
+            var mn = m.array("ChannelMin"), nu = m.array("ChannelNeutral"), mx = m.array("ChannelMax")
+            for i in 0..<min(5, mn.count) { mn[i] = 1000; mx[i] = 2000; nu[i] = i == 0 ? 1050 : 1500 }
+            m.set("ChannelMin", mn); m.set("ChannelNeutral", nu); m.set("ChannelMax", mx)
+        } else {
+            let stash = ud.dictionary(forKey: "dsmStash") as? [String: [Double]]
+            if let st = stash, let g = st["groups"], g.count == n,
+               let mn = st["min"], let nu = st["neutral"], let mx = st["max"] {
+                for i in 0..<n { m.set("ChannelGroups", index: i, g[i]) }
+                m.set("ChannelMin", mn); m.set("ChannelNeutral", nu); m.set("ChannelMax", mx)
+            } else {
+                // Textbook DSM 2048 seeds, throttle neutral above its minimum
+                // so the stick at the bottom reads as "low" (armhandler.c).
+                for i in 0..<n { m.set("ChannelGroups", option: i < 5 ? Self.dsmGroup : "None", index: i) }
+                var mn = m.array("ChannelMin"), nu = m.array("ChannelNeutral"), mx = m.array("ChannelMax")
+                for i in 0..<min(5, mn.count) { mn[i] = 342; mx[i] = 1706; nu[i] = i == 0 ? 410 : 1024 }
+                m.set("ChannelMin", mn); m.set("ChannelNeutral", nu); m.set("ChannelMax", mx)
+            }
+        }
+        var num = m.array("ChannelNumber")
+        for i in 0..<num.count { num[i] = i < 5 ? Double(i + 1) : 0 }
+        m.set("ChannelNumber", num)
+        link.send(m, ack: true)
+        link.save("ManualControlSettings")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            link.request("ManualControlSettings")
+            switching = false
+        }
+    }
+
     // MARK: - Stream
 
     private func engage() {
+        guard phoneIsSource else { return }
         leftY = -1.0                              // never engage with throttle up
         leftX = 0; rightX = 0; rightY = 0
         push()
@@ -166,13 +242,30 @@ struct FlyView: View {
         UIApplication.shared.isIdleTimerDisabled = false
     }
 
-    /// Microseconds, the receiver-side convention pios_board.c configures.
+    /// Endpoints as the board has them stored, so the sticks land wherever
+    /// ManualControlSettings says min/neutral/max are, not where we assume.
+    private func endpoints(_ i: Int) -> (min: Double, neutral: Double, max: Double) {
+        let mn = mcs?.array("ChannelMin") ?? [], nu = mcs?.array("ChannelNeutral") ?? [], mx = mcs?.array("ChannelMax") ?? []
+        guard i < mn.count, i < nu.count, i < mx.count, mx[i] > mn[i] else {
+            return (1000, i == 0 ? 1050 : 1500, 2000)
+        }
+        return (mn[i], nu[i], mx[i])
+    }
+
+    private func centred(_ axis: Double, _ i: Int) -> UInt16 {
+        let e = endpoints(i), a = max(-1, min(1, axis))
+        let v = a >= 0 ? e.neutral + a * (e.max - e.neutral) : e.neutral + a * (e.neutral - e.min)
+        return UInt16(max(0, min(65000, v)))
+    }
+
     private func push() {
-        func centred(_ v: Double) -> UInt16 { UInt16(1500 + max(-1, min(1, v)) * 500) }
-        let thr = UInt16(1000 + (max(-1, min(1, leftY)) + 1) * 500)
-        let mode: UInt16 = modeCount <= 1 ? 1500
-            : UInt16(1000 + Double(modePos - 1) * (1000.0 / Double(modeCount - 1)))
-        link.sticks = [thr, centred(rightX), centred(rightY), centred(leftX), mode,
+        let e0 = endpoints(0)
+        let t = (max(-1, min(1, leftY)) + 1) / 2                // 0 at the bottom
+        let thr = UInt16(max(0, min(65000, e0.min + t * (e0.max - e0.min))))
+        let e4 = endpoints(4)
+        let mode: UInt16 = modeCount <= 1 ? UInt16(e4.neutral)
+            : UInt16(e4.min + Double(modePos - 1) * (e4.max - e4.min) / Double(modeCount - 1))
+        link.sticks = [thr, centred(rightX, 1), centred(rightY, 2), centred(leftX, 3), mode,
                        1000, 1000, 1000]
     }
 }
