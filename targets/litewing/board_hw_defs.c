@@ -548,7 +548,7 @@ const struct pios_esp32_dsm_cfg pios_dsm_cfg = {
      * every power-up. Auto-detect latched to 10 on some boots here, which
      * decoded as a frozen but plausible-looking stream. */
     .resolution  = 11,
-    .bind_pulses = 0,
+    .bind_pulses = 9,   /* TEMPORARY: bind firmware -- set back to 0 after pairing */
     .listen_ms   = 250,
 };
 
