@@ -1,0 +1,14 @@
+<xml>
+    <object name="TuneSettings" singleinstance="true" settings="true" category="System">
+        <description>Tunes the ESCs play. ArmTune plays when the aircraft arms, DisarmTune when it disarms. ArmSource says how: ESCStartupMelody writes the tune into the ESCs as their power-up melody (AM32 STARTUP_TUNE) and holds the command stream while disarmed so the ESCs start, and sing, at the moment of arming; BeepCommand broadcasts each note as uavcan.equipment.indication.BeepCommand (1080) for ESCs that implement it; Both does both. Set WriteESC to Write to send the melody and ESCVolume (AM32 BEEP_VOLUME) to every ESC on the bus and save it there; it returns to Idle when done and DroneCANLog reports each ESC.</description>
+        <field name="ArmTune" units="" type="enum" elements="1" options="None,ImperialMarch,Beethoven5th,OdeToJoy,Korobeiniki,Charge" defaultvalue="ImperialMarch"/>
+        <field name="DisarmTune" units="" type="enum" elements="1" options="None,ImperialMarch,Beethoven5th,OdeToJoy,Korobeiniki,Charge" defaultvalue="None"/>
+        <field name="ArmSource" units="" type="enum" elements="1" options="None,ESCStartupMelody,BeepCommand,Both" defaultvalue="ESCStartupMelody"/>
+        <field name="ESCVolume" units="" type="uint8" elements="1" defaultvalue="5"/>
+        <field name="WriteESC" units="" type="enum" elements="1" options="Idle,Write" defaultvalue="Idle"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="true" updatemode="onchange" period="0"/>
+        <telemetryflight acked="true" updatemode="onchange" period="0"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>

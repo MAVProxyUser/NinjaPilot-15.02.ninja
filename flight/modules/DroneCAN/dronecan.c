@@ -32,6 +32,9 @@
 #include <openpilot.h>
 #include <pios_can.h>
 #include "dronecan.h"
+#include "tunes.h"
+#include "tunesettings.h"
+#include <stdio.h>
 #include "dronecanstatus.h"
 #include "dronecanescstatus.h"
 #include "dronecanesccommand.h"
@@ -68,6 +71,7 @@ static uint32_t svc_tx, svc_rx_count, svc_last_id; /* service frame diagnostics 
 #define DC_SVC_GETSET           11u      /* uavcan.protocol.param.GetSet */
 #define DC_GETSET_BASE_CRC      0xFB10u  /* crc16-ccitt of signature 0xA7B622F939D1A4D5 */
 #define DC_DTID_ARMINGSTATUS    1100u    /* uavcan.equipment.safety.ArmingStatus: u8 status */
+#define DC_DTID_BEEPCOMMAND     1080u    /* uavcan.equipment.indication.BeepCommand: f16 frequency Hz, f16 duration s */
 #define DC_ARMING_FULLY_ARMED   255u
 #define DC_ARMING_DISARMED      0u
 #define DC_PRIO_LOW             30u
@@ -103,6 +107,7 @@ struct reasm {
 
 static xTaskHandle taskHandle;
 static uint32_t can_id;
+static volatile bool esc_stream_hold;         /* DroneCANESCFlush drops the ESC stream while set (tunes) */
 
 static struct node_entry nodes[NODE_TABLE_SIZE];
 static struct dna_entry  dna_table[DNA_MAX_NODES];
@@ -171,6 +176,8 @@ static void dronecanTask(void *parameters);
 static void esccmd_updated_cb(UAVObjEvent *ev);
 static void param_cb(UAVObjEvent *ev);
 static void svc_handle_response(uint8_t node, uint8_t svc, const uint8_t *data, uint8_t dlc);
+static void tune_settings_cb(UAVObjEvent *ev);
+static void tune_push_advance(uint32_t now, bool ok);
 
 int32_t DroneCANStart(void)
 {
@@ -199,6 +206,8 @@ int32_t DroneCANInitialize(void)
     IOMCUStatusInitialize();
 #endif
     DroneCANParamConnectCallback(param_cb);
+    TuneSettingsInitialize();
+    TuneSettingsConnectCallback(tune_settings_cb);
     return 0;
 }
 MODULE_INITCALL(DroneCANInitialize, DroneCANStart);
@@ -320,11 +329,11 @@ static void tx_frame(uint32_t id, const uint8_t *data, uint8_t dlc)
 static void dc_transfer(uint32_t id, uint16_t base_crc, uint8_t *tid_counter,
                         const uint8_t *payload, uint8_t len)
 {
-    uint8_t stream[2 + 64];
+    uint8_t stream[2 + 160];
     uint8_t slen = 0;
     uint8_t tid  = (uint8_t)((*tid_counter)++ & 0x1F);
 
-    if (len > 64) {
+    if (len > 160) {
         return;
     }
 
@@ -718,6 +727,13 @@ void DroneCANESCFlush(void)
     if (!can_id || !esc_out_count) {
         return;
     }
+    if (esc_stream_hold) {
+        /* ESCStartupMelody: no stream while disarmed, so the AM32 ESCs sit in
+         * their bootloader and start (and play their melody) when we arm */
+        esc_out_count = 0;
+        memset(esc_out, 0, sizeof(esc_out));
+        return;
+    }
     memset(payload, 0, sizeof(payload));
     for (uint8_t i = 0; i < esc_out_count; i++) {
         int16_t v = esc_out[i];
@@ -936,6 +952,216 @@ static void param_finish(uint8_t result, const uint8_t *p, uint8_t n)
     DroneCANParamSet(&pr);
 }
 
+/* ---- tunes: BeepCommand sequencer, the arm-gated stream, the melody push ---- */
+static volatile bool tune_settings_dirty;
+static uint8_t  beep_tid;
+static struct {
+    const struct tune *t;
+    uint8_t  idx;
+    uint32_t next;                            /* tick the next note starts */
+} seq;
+static struct {
+    bool     active;
+    uint8_t  step;                            /* 0 warm-up, 1 melody, 2 volume, 3 save */
+    uint8_t  idx;                             /* into nodes[] */
+    uint32_t t;
+    uint8_t  done, failed;
+} tp;
+static bool tune_go_prev;
+
+static void tune_settings_cb(UAVObjEvent *ev)
+{
+    if (ev->event == EV_UNPACKED) {
+        tune_settings_dirty = true;
+    }
+}
+
+static void tune_log(const char *msg, uint8_t node)
+{
+    DroneCANLogData lg;
+    memset(&lg, 0, sizeof(lg));
+    lg.LogCount = ++log_count;
+    lg.LogNode  = node;
+    strncpy((char *)lg.LogText, msg, sizeof(lg.LogText) - 1);
+    DroneCANLogSet(&lg);
+}
+
+/* uavcan.equipment.indication.BeepCommand: one note, single frame */
+static void beep_tx(uint16_t hz, uint16_t ms)
+{
+    uint8_t payload[4];
+    uint16_t f = f32_to_f16((float)hz), d = f32_to_f16((float)ms / 1000.0f);
+    payload[0] = (uint8_t)(f & 0xFF); payload[1] = (uint8_t)(f >> 8);
+    payload[2] = (uint8_t)(d & 0xFF); payload[3] = (uint8_t)(d >> 8);
+    dc_broadcast(DC_PRIO_LOW, DC_DTID_BEEPCOMMAND, 0, &beep_tid, payload, 4);
+}
+
+static void seq_start(const struct tune *t, uint32_t now)
+{
+    seq.t = t; seq.idx = 0; seq.next = now;
+}
+
+static void seq_update(uint32_t now)
+{
+    if (!seq.t || (int32_t)(now - seq.next) < 0) {
+        return;
+    }
+    if (seq.idx >= seq.t->count) {
+        seq.t = NULL;
+        return;
+    }
+    const struct tune_note *n = &seq.t->notes[seq.idx++];
+    if (n->hz) {
+        beep_tx(n->hz, n->ms);
+    }
+    seq.next = now + (n->ms + 30) / portTICK_RATE_MS;
+}
+
+/* GetSet request: index 0, a string value, then the parameter name */
+static void tune_getset_string(uint8_t node, const char *name, const uint8_t *str, uint8_t len)
+{
+    static uint8_t payload[2 + 1 + 128 + 24];
+    uint32_t ofs = 0;
+    memset(payload, 0, sizeof(payload));
+    dc_put_bits(payload, ofs, 13, 0); ofs += 13;
+    dc_put_bits(payload, ofs, 3, 4);  ofs += 3;          /* Value.string_value */
+    dc_put_bits(payload, ofs, 8, len); ofs += 8;
+    for (uint8_t i = 0; i < len; i++) { dc_put_bits(payload, ofs, 8, str[i]); ofs += 8; }
+    for (const char *c = name; *c; c++) { dc_put_bits(payload, ofs, 8, (uint8_t)*c); ofs += 8; }
+    svc_wait.node = node; svc_wait.svc = DC_SVC_GETSET; svc_wait.active = true; svc_wait.sent = xTaskGetTickCount();
+    dc_service_request(DC_SVC_GETSET, node, DC_GETSET_BASE_CRC, &svc_tid_getset, payload, (uint8_t)((ofs + 7u) / 8u));
+}
+
+static void tune_getset_int(uint8_t node, const char *name, int64_t value)
+{
+    uint8_t payload[2 + 8 + 24];
+    uint32_t ofs = 0;
+    memset(payload, 0, sizeof(payload));
+    dc_put_bits(payload, ofs, 13, 0); ofs += 13;
+    dc_put_bits(payload, ofs, 3, 1);  ofs += 3;          /* Value.integer_value */
+    dc_put_bits(payload, ofs, 64, (uint64_t)value); ofs += 64;
+    for (const char *c = name; *c; c++) { dc_put_bits(payload, ofs, 8, (uint8_t)*c); ofs += 8; }
+    svc_wait.node = node; svc_wait.svc = DC_SVC_GETSET; svc_wait.active = true; svc_wait.sent = xTaskGetTickCount();
+    dc_service_request(DC_SVC_GETSET, node, DC_GETSET_BASE_CRC, &svc_tid_getset, payload, (uint8_t)((ofs + 7u) / 8u));
+}
+
+static void tune_save_request(uint8_t node)
+{
+    uint8_t payload[7];
+    memset(payload, 0, sizeof(payload));                 /* opcode 0 = save */
+    svc_wait.node = node; svc_wait.svc = DC_SVC_EXECUTEOPCODE; svc_wait.active = true; svc_wait.sent = xTaskGetTickCount();
+    dc_service_request(DC_SVC_EXECUTEOPCODE, node, 0, &svc_tid_opcode, payload, 7);
+}
+
+/* the next ESC to write: an operational node heard from recently */
+static bool tune_push_next_node(uint32_t now)
+{
+    while (tp.idx < NODE_TABLE_SIZE) {
+        struct node_entry *n = &nodes[tp.idx];
+        if (n->node_id && n->mode == 0 && (now - n->last_seen) < (3000u / portTICK_RATE_MS)) {
+            return true;
+        }
+        tp.idx++;
+    }
+    return false;
+}
+
+static void tune_push_finish(void)
+{
+    char msg[40];
+    TuneSettingsData ts;
+    tp.active = false;
+    snprintf(msg, sizeof(msg), "tune: %u ESC written, %u failed", tp.done, tp.failed);
+    tune_log(msg, 0);
+    TuneSettingsGet(&ts);
+    ts.WriteESC = TUNESETTINGS_WRITEESC_IDLE;
+    TuneSettingsSet(&ts);
+    UAVObjSave(TuneSettingsHandle(), 0);
+}
+
+/* one step of the write-to-ESC sequence; ok says how the last request ended */
+static void tune_push_advance(uint32_t now, bool ok)
+{
+    static uint8_t melody[128];
+    static uint8_t melody_len;
+    TuneSettingsData ts;
+    TuneSettingsGet(&ts);
+
+    if (tp.step == 0) {
+        /* warm-up done: the stream has been on for a while, the applications are up */
+        melody_len = tune_to_bluejay(tune_get(ts.ArmTune), melody, 50);
+        tp.step = 1; tp.idx = 0;
+        if (!tune_push_next_node(now)) {
+            tune_log("tune: no ESC application on the bus", 0);
+            tune_push_finish();
+            return;
+        }
+        tune_getset_string(nodes[tp.idx].node_id, "STARTUP_TUNE", melody, melody_len);
+        return;
+    }
+    if (!ok) {
+        tune_log("tune: no answer from ESC", nodes[tp.idx].node_id);
+        tp.failed++;
+        tp.step = 1; tp.idx++;
+    } else if (tp.step == 1) {
+        tp.step = 2;
+        tune_getset_int(nodes[tp.idx].node_id, "BEEP_VOLUME", ts.ESCVolume > 11 ? 11 : ts.ESCVolume);
+        return;
+    } else if (tp.step == 2) {
+        tp.step = 3;
+        tune_save_request(nodes[tp.idx].node_id);
+        return;
+    } else {
+        tune_log("tune: melody and volume saved", nodes[tp.idx].node_id);
+        tp.done++;
+        tp.step = 1; tp.idx++;
+    }
+    if (tune_push_next_node(now)) {
+        tune_getset_string(nodes[tp.idx].node_id, "STARTUP_TUNE", melody, melody_len);
+    } else {
+        tune_push_finish();
+    }
+}
+
+/* every 100 ms from the task: the gate, the arm/disarm edges, the push */
+static void tune_update(uint32_t now)
+{
+    TuneSettingsData ts;
+    FlightStatusArmedOptions armed;
+    TuneSettingsGet(&ts);
+    FlightStatusArmedGet(&armed);
+    bool go = (armed == FLIGHTSTATUS_ARMED_ARMED) || ActuatorCommandReadOnly();
+    bool esc_melody = (ts.ArmSource == TUNESETTINGS_ARMSOURCE_ESCSTARTUPMELODY || ts.ArmSource == TUNESETTINGS_ARMSOURCE_BOTH);
+    bool beep       = (ts.ArmSource == TUNESETTINGS_ARMSOURCE_BEEPCOMMAND || ts.ArmSource == TUNESETTINGS_ARMSOURCE_BOTH);
+
+    if (tune_settings_dirty) {
+        tune_settings_dirty = false;
+        if (ts.WriteESC == TUNESETTINGS_WRITEESC_WRITE && !tp.active && !svc_wait.active) {
+            memset(&tp, 0, sizeof(tp));
+            tp.active = true; tp.t = now;
+            tune_log("tune: writing ESCs in 4 s", 0);
+        }
+    }
+    /* the stream is held only while disarmed with the ESC-melody source, and never during a write */
+    esc_stream_hold = esc_melody && !go && !tp.active;
+
+    if (tp.active) {
+        if (tp.step == 0 && (now - tp.t) >= (4000 / portTICK_RATE_MS)) {
+            tune_push_advance(now, true);
+        } else if (tp.step && svc_wait.active && (now - svc_wait.sent) > (1000 / portTICK_RATE_MS)) {
+            svc_wait.active = false;
+            tune_push_advance(now, false);
+        }
+    }
+    if (go != tune_go_prev) {
+        tune_go_prev = go;
+        if (beep) {
+            seq_start(tune_get(go ? ts.ArmTune : ts.DisarmTune), now);
+        }
+    }
+    seq_update(now);
+}
+
 static void param_start(uint32_t now)
 {
     DroneCANParamData pr;
@@ -1005,6 +1231,11 @@ static void svc_handle_response(uint8_t node, uint8_t svc, const uint8_t *data, 
     uint8_t n = reasm_feed(svc_rx, NELEMENTS(svc_rx), node, data, dlc, &pl);
 
     if (!n || !svc_wait.active || node != svc_wait.node || svc != svc_wait.svc) {
+        return;
+    }
+    if (tp.active) {
+        svc_wait.active = false;
+        tune_push_advance(xTaskGetTickCount(), true);
         return;
     }
     memset(copy, 0, sizeof(copy));
@@ -1146,12 +1377,13 @@ static void dronecanTask(__attribute__((unused)) void *parameters)
         if ((now - last_arm) >= (100 / portTICK_RATE_MS)) {
             last_arm = now;
             arming_tx(now);
+            tune_update(now);
         }
         if (param_req_pending) {
             param_req_pending = false;
             param_start(now);
         }
-        if (svc_wait.active && (now - svc_wait.sent) > (1000 / portTICK_RATE_MS)) {
+        if (svc_wait.active && !tp.active && (now - svc_wait.sent) > (1000 / portTICK_RATE_MS)) {
             param_finish(DRONECANPARAM_RESULT_TIMEOUT, NULL, 0);
         }
     }
