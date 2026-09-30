@@ -28,10 +28,10 @@
 #define F5 698
 #define G5 784
 
-/* the march, brisk: quarter 320 ms, about three seconds in all */
+/* the march: quarter 450 ms */
 static const struct tune_note imperial_march[] = {
-    { G4, 320 }, { G4, 320 }, { G4, 320 }, { Eb4, 240 }, { Bb4, 80 },
-    { G4, 320 }, { Eb4, 240 }, { Bb4, 80 }, { G4, 640 },
+    { G4, 450 }, { G4, 450 }, { G4, 450 }, { Eb4, 340 }, { Bb4, 110 },
+    { G4, 450 }, { Eb4, 340 }, { Bb4, 110 }, { G4, 900 },
 };
 
 /* the fifth: eighths at 150 ms, the held notes long */
