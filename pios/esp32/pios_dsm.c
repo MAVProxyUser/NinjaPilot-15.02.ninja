@@ -222,15 +222,26 @@ static void dsm_task(__attribute__((unused)) void *arg)
      *
      * The window is relative to the satellite's own power, so turn the
      * problem round: for the first 30 s after this task starts, send the
-     * pulse train every 80 ms (two full trains inside any 200 ms window),
-     * and the operator plugs the satellite in -- or applies its 3.3 V --
-     * AFTER the board is up. The red LED blinks while trains are going
-     * out. The pin is open-drain between pulses so it never fights the
-     * satellite's own data line. UART comes up afterwards as normal. */
+     * pulse train periodically and the operator plugs the satellite in --
+     * or applies its 3.3 V -- AFTER the board is up.
+     *
+     * ONE train per window, not two. The satellite counts every falling
+     * edge it sees inside its 200 ms window and the COUNT selects the
+     * mode: 9 = internal DSMX 11 ms. An 80 ms spacing put 18 or 27 edges
+     * in the window, the satellite entered bind mode as something other
+     * than an internal remote, and the transmitter reported Bind Failed
+     * ("If no remote is put into the internal mode, the transmitter will
+     * report Bind Failed" -- Remote Receiver Interfacing Rev A, 7.3).
+     * 210 ms spacing guarantees at most one train per window; the price
+     * is a ~5% chance that a given plug-in falls in the gap and sees
+     * none, in which case the satellite LED never changes: unplug and
+     * plug again. The red LED blinks while trains are going out. The pin
+     * is open-drain between pulses so it never fights the satellite's own
+     * data line. UART comes up afterwards as normal. */
     if (cfg->bind_pulses) {
-        printf("[DSM] BIND FIRMWARE: pulsing IO%d every 80 ms for 30 s -- "
+        printf("[DSM] BIND FIRMWARE: one %u-pulse train on IO%d every 210 ms for 30 s -- "
                "connect the satellite's power NOW (red LED blinks meanwhile)\n",
-               (int)cfg->rx_pin);
+               (unsigned)cfg->bind_pulses, (int)cfg->rx_pin);
         uart_driver_delete(cfg->port);
         gpio_config_t io = {
             .intr_type    = GPIO_INTR_DISABLE,
@@ -256,7 +267,7 @@ static void dsm_task(__attribute__((unused)) void *arg)
                 PIOS_LED_Toggle(PIOS_LED_ARMED);
             }
 #endif
-            vTaskDelay(pdMS_TO_TICKS(80));
+            vTaskDelay(pdMS_TO_TICKS(210));   /* > 200 ms: one train per window */
         }
 #if defined(PIOS_INCLUDE_LED) && defined(PIOS_LED_ARMED)
         PIOS_LED_Off(PIOS_LED_ARMED);
