@@ -46,15 +46,7 @@
            <item><widget class="QGroupBox" name="grpMainOut"><property name="title"><string>MAIN OUT 1-8  (servo header)</string></property><layout class="QVBoxLayout"><item><widget class="QLabel" name="grpMainOutLbl"><property name="text"><string>IO co-processor PWM outputs. DroneCAN ESCs are on CAN 2 instead. POWER 1 / POWER 2: power modules.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item></layout></widget></item>
           </layout>
          </item>
-         <item row="3" column="0" colspan="3"><widget class="QGroupBox" name="grpTune"><property name="title"><string>Arming tune (the ESCs sing)</string></property><layout class="QGridLayout">
-<item row="0" column="0"><widget class="QLabel" name="lblArmTune"><property name="text"><string>On arm</string></property></widget></item><item row="0" column="1"><widget class="QComboBox" name="cbArmTune"><property name="minimumSize"><size><width>140</width><height>0</height></size></property></widget></item>
-<item row="0" column="2"><widget class="QLabel" name="lblDisarmTune"><property name="text"><string>On disarm</string></property></widget></item><item row="0" column="3"><widget class="QComboBox" name="cbDisarmTune"><property name="minimumSize"><size><width>140</width><height>0</height></size></property></widget></item>
-<item row="1" column="0"><widget class="QLabel" name="lblArmSource"><property name="text"><string>Played by</string></property></widget></item><item row="1" column="1"><widget class="QComboBox" name="cbArmSource"><property name="minimumSize"><size><width>140</width><height>0</height></size></property></widget></item>
-<item row="1" column="2"><widget class="QLabel" name="lblTuneVolume"><property name="text"><string>ESC volume</string></property></widget></item><item row="1" column="3"><widget class="QSpinBox" name="sbTuneVolume"><property name="maximum"><number>11</number></property></widget></item>
-<item row="2" column="0"><widget class="QLabel" name="lblWriteESC"><property name="text"><string>Write to ESCs</string></property></widget></item><item row="2" column="1"><widget class="QComboBox" name="cbWriteESC"><property name="minimumSize"><size><width>140</width><height>0</height></size></property></widget></item>
-<item row="2" column="2" colspan="2"><widget class="QLabel" name="lblTuneNote"><property name="font"><font><italic>true</italic></font></property><property name="text"><string>ESCStartupMelody: the tune is stored in the ESCs and the command stream is held while disarmed, so they start and sing on arming (AM32). Write once after choosing, then Save.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
-</layout></widget></item>
-         <item row="4" column="0" colspan="3">
+         <item row="3" column="0" colspan="3">
           <layout class="QHBoxLayout" name="usbRow">
            <item>
             <widget class="QGroupBox" name="grpUSB">

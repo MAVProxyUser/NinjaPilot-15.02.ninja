@@ -306,25 +306,3 @@ values equal the board, TELEM1 changed and saved both ways, page rebuilt
 after a disconnect/reconnect (the config gadget's "same board" guard used to
 leave the placeholder page in place; fixed). `tools/gcs_shot.sh` captures the
 GCS window by window id, never a screen region.
-
-## Arming tune (2026-09-30)
-
-`TuneSettings` (System category) picks a short motif the ESCs play when the
-aircraft arms: Imperial March, Beethoven's 5th, Ode to Joy, Korobeiniki or
-the ballpark "Charge". Two ways to play it, chosen by `ArmSource`:
-
-* **ESCStartupMelody** (works with stock AM32): the tune is written into every
-  ESC as its startup melody (AM32's `STARTUP_TUNE` string parameter, BlueJay
-  layout: header, then (pulses, period) pairs, `(0,0)` ends it) together with
-  `BEEP_VOLUME`, and saved there. Set `WriteESC = Write` once to do that;
-  DroneCANLog reports each ESC. While disarmed the module then holds the
-  RawCommand stream, so the AM32 application exits to its bootloader and
-  starts, melody first, the moment the aircraft arms (or an output test takes
-  the outputs). Cost: the arm-to-motor latency of that start-up.
-* **BeepCommand**: each note goes out as `uavcan.equipment.indication.
-  BeepCommand` (1080). AM32 2.20 does not implement it; other ESCs do.
-* **Both**.
-
-`flight/modules/DroneCAN/tunes.c` holds the note tables and the melody
-encoder; `tools/np_tune_test.py` (scratch) writes the tune and times the
-gated start.

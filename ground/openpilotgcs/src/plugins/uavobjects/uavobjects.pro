@@ -42,7 +42,6 @@ HEADERS += \
     $$UAVOBJECT_SYNTHETICS/dronecanlog.h \
     $$UAVOBJECT_SYNTHETICS/gpsrxstats.h \
     $$UAVOBJECT_SYNTHETICS/iomcustatus.h \
-    $$UAVOBJECT_SYNTHETICS/tunesettings.h \
     $$UAVOBJECT_SYNTHETICS/dronecanstatus.h \
     $$UAVOBJECT_SYNTHETICS/sensorhubsettings.h \
     $$UAVOBJECT_SYNTHETICS/accelsensor.h \
@@ -166,7 +165,6 @@ SOURCES += \
     $$UAVOBJECT_SYNTHETICS/dronecanlog.cpp \
     $$UAVOBJECT_SYNTHETICS/gpsrxstats.cpp \
     $$UAVOBJECT_SYNTHETICS/iomcustatus.cpp \
-    $$UAVOBJECT_SYNTHETICS/tunesettings.cpp \
     $$UAVOBJECT_SYNTHETICS/dronecanstatus.cpp \
     $$UAVOBJECT_SYNTHETICS/sensorhubsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/accelsensor.cpp \
