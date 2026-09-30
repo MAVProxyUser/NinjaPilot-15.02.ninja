@@ -115,6 +115,6 @@ ground/openpilotgcs/src/libs/qwt/tests/bin/
 qrc_*.cpp
 
 # simposix onboard DebugLog slot dumps land here; logs, not source
-ground/gazebo_bridge/*.o0?
+ground/gazebo_bridge/*.o[0-9A-Fa-f][0-9A-Fa-f]
 # Xcode per-user state
 xcuserdata/
