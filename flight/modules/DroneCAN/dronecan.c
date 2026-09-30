@@ -32,6 +32,9 @@
 #include <openpilot.h>
 #include <pios_can.h>
 #include "dronecan.h"
+#include "dronecanupdate.h"
+#include "dronecanfilerequest.h"
+#include "dronecanfilechunk.h"
 #include "dronecanstatus.h"
 #include "dronecanescstatus.h"
 #include "dronecanesccommand.h"
@@ -68,6 +71,10 @@ static uint32_t svc_tx, svc_rx_count, svc_last_id; /* service frame diagnostics 
 #define DC_SVC_GETSET           11u      /* uavcan.protocol.param.GetSet */
 #define DC_GETSET_BASE_CRC      0xFB10u  /* crc16-ccitt of signature 0xA7B622F939D1A4D5 */
 #define DC_DTID_ARMINGSTATUS    1100u    /* uavcan.equipment.safety.ArmingStatus: u8 status */
+#define DC_SVC_BEGINFWUPDATE    40u      /* uavcan.protocol.file.BeginFirmwareUpdate: u8 source node, path */
+#define DC_SVC_FILEREAD         48u      /* uavcan.protocol.file.Read: u40 offset + path -> i16 error + u8[<=256] */
+#define DC_FILEREAD_BASE_CRC    0x2F12u  /* crc16 of the signature 0x8DCDCA939F33F678, little-endian */
+#define DC_FWUPDATE_PATH        "np.bin" /* the bootloader keeps at most 8 bytes of it */
 #define DC_ARMING_FULLY_ARMED   255u
 #define DC_ARMING_DISARMED      0u
 #define DC_PRIO_LOW             30u
@@ -171,6 +178,9 @@ static void dronecanTask(void *parameters);
 static void esccmd_updated_cb(UAVObjEvent *ev);
 static void param_cb(UAVObjEvent *ev);
 static void svc_handle_response(uint8_t node, uint8_t svc, const uint8_t *data, uint8_t dlc);
+static void fwu_handle_read_request(uint8_t node, const uint8_t *data, uint8_t dlc);
+static void fwu_update_cb(UAVObjEvent *ev);
+static void fwu_chunk_cb(UAVObjEvent *ev);
 
 int32_t DroneCANStart(void)
 {
@@ -199,6 +209,11 @@ int32_t DroneCANInitialize(void)
     IOMCUStatusInitialize();
 #endif
     DroneCANParamConnectCallback(param_cb);
+    DroneCANUpdateInitialize();
+    DroneCANFileRequestInitialize();
+    DroneCANFileChunkInitialize();
+    DroneCANUpdateConnectCallback(fwu_update_cb);
+    DroneCANFileChunkConnectCallback(fwu_chunk_cb);
     return 0;
 }
 MODULE_INITCALL(DroneCANInitialize, DroneCANStart);
@@ -317,14 +332,13 @@ static void tx_frame(uint32_t id, const uint8_t *data, uint8_t dlc)
 
 /* Broadcast a message transfer from us: single frame, or multi-frame with
  * the transfer CRC prepended, tail bytes stamped SOT/EOT/toggle/transfer-id. */
-static void dc_transfer(uint32_t id, uint16_t base_crc, uint8_t *tid_counter,
-                        const uint8_t *payload, uint8_t len)
+static void dc_transfer_tid(uint32_t id, uint16_t base_crc, uint8_t tid,
+                            const uint8_t *payload, uint16_t len)
 {
-    uint8_t stream[2 + 64];
-    uint8_t slen = 0;
-    uint8_t tid  = (uint8_t)((*tid_counter)++ & 0x1F);
+    uint8_t  stream[2 + 300];
+    uint16_t slen = 0;
 
-    if (len > 64) {
+    if (len > 300) {
         return;
     }
 
@@ -334,20 +348,36 @@ static void dc_transfer(uint32_t id, uint16_t base_crc, uint8_t *tid_counter,
         stream[slen++] = (uint8_t)(crc >> 8);
     }
     memcpy(stream + slen, payload, len);
-    slen = (uint8_t)(slen + len);
-    uint8_t  ofs = 0, toggle = 0, first = 1;
+    slen = (uint16_t)(slen + len);
+    uint16_t ofs = 0;
+    uint8_t  toggle = 0, first = 1;
     do {
         uint8_t chunk = (uint8_t)((slen - ofs) > 7 ? 7 : (slen - ofs));
         uint8_t frame[8];
         memcpy(frame, stream + ofs, chunk);
         uint8_t sot = first ? 0x80u : 0u;
-        uint8_t eot = ((uint8_t)(ofs + chunk) >= slen) ? 0x40u : 0u;
-        frame[chunk] = (uint8_t)(sot | eot | (toggle ? 0x20u : 0u) | tid);
+        uint8_t eot = ((uint16_t)(ofs + chunk) >= slen) ? 0x40u : 0u;
+        frame[chunk] = (uint8_t)(sot | eot | (toggle ? 0x20u : 0u) | (tid & 0x1Fu));
         tx_frame(id, frame, (uint8_t)(chunk + 1));
-        ofs     = (uint8_t)(ofs + chunk);
+        ofs     = (uint16_t)(ofs + chunk);
         toggle ^= 1u;
         first   = 0;
     } while (ofs < slen);
+}
+
+static void dc_transfer(uint32_t id, uint16_t base_crc, uint8_t *tid_counter,
+                        const uint8_t *payload, uint8_t len)
+{
+    dc_transfer_tid(id, base_crc, (uint8_t)((*tid_counter)++ & 0x1F), payload, len);
+}
+
+/* Service response to one node: the request's id with the request bit clear, and the requester's transfer id. */
+static void dc_service_response(uint8_t svc, uint8_t dest, uint16_t base_crc, uint8_t tid,
+                                const uint8_t *payload, uint16_t len)
+{
+    dc_transfer_tid(((uint32_t)DC_PRIO_SVC << 24) | ((uint32_t)svc << 16) | ((uint32_t)dest << 8) | 0x80u | DC_NODE_ID,
+                    base_crc, tid, payload, len);
+    svc_tx++;
 }
 
 static void dc_broadcast(uint8_t prio, uint16_t dtid, uint16_t base_crc, uint8_t *tid_counter,
@@ -652,9 +682,14 @@ static void handle_frame(const struct pios_can_frame *f)
     if (id & 0x80u) {
         svc_rx_count++;
         svc_last_id = id;
-        /* service frame: only responses addressed to us */
-        if (((id >> 8) & 0x7Fu) == DC_NODE_ID && !((id >> 15) & 1u)) {
-            svc_handle_response(node, (uint8_t)(id >> 16), f->data, f->dlc);
+        /* service frame addressed to us: a response to our request, or a
+         * request from a bootloader reading its new firmware from us */
+        if (((id >> 8) & 0x7Fu) == DC_NODE_ID) {
+            if (!((id >> 15) & 1u)) {
+                svc_handle_response(node, (uint8_t)(id >> 16), f->data, f->dlc);
+            } else if ((uint8_t)(id >> 16) == DC_SVC_FILEREAD) {
+                fwu_handle_read_request(node, f->data, f->dlc);
+            }
         }
         return;
     }
@@ -936,6 +971,146 @@ static void param_finish(uint8_t result, const uint8_t *p, uint8_t n)
     DroneCANParamSet(&pr);
 }
 
+/* ---- firmware update of a node: we are its file server ---- */
+static volatile bool fwu_cmd_pending, fwu_chunk_pending;
+static struct reasm fwu_rx[1];
+static uint8_t fwu_tid_begin;
+static struct {
+    bool     active;
+    uint8_t  node;
+    uint32_t size;
+    uint32_t req_offset;      /* the read being served */
+    uint16_t req_len;
+    uint8_t  req_tid;
+    uint16_t have;            /* bytes of it the ground has delivered */
+    uint16_t seq;
+    uint16_t reads;
+    uint32_t t_last;
+    uint8_t  buf[256];
+} fwu;
+
+static void fwu_update_cb(UAVObjEvent *ev) { if (ev->event == EV_UNPACKED) { fwu_cmd_pending = true; } }
+static void fwu_chunk_cb(UAVObjEvent *ev)  { if (ev->event == EV_UNPACKED) { fwu_chunk_pending = true; } }
+
+static void fwu_publish(uint8_t state)
+{
+    DroneCANUpdateData u;
+    DroneCANUpdateGet(&u);
+    u.State  = state;
+    u.Offset = fwu.req_offset;
+    u.Reads  = fwu.reads;
+    if (state == DRONECANUPDATE_STATE_DONE || state == DRONECANUPDATE_STATE_FAILED || state == DRONECANUPDATE_STATE_REFUSED || state == DRONECANUPDATE_STATE_IDLE) {
+        u.Command = DRONECANUPDATE_COMMAND_IDLE;
+    }
+    DroneCANUpdateSet(&u);
+}
+
+/* the ground wrote DroneCANUpdate */
+static void fwu_command(uint32_t now)
+{
+    DroneCANUpdateData u;
+    DroneCANUpdateGet(&u);
+    if (u.Command == DRONECANUPDATE_COMMAND_ABORT) {
+        memset(&fwu, 0, sizeof(fwu));
+        fwu_publish(DRONECANUPDATE_STATE_IDLE);
+        return;
+    }
+    if (u.Command != DRONECANUPDATE_COMMAND_BEGIN) {
+        return;
+    }
+    FlightStatusArmedOptions armed;
+    FlightStatusArmedGet(&armed);
+    if (armed != FLIGHTSTATUS_ARMED_DISARMED || u.NodeId == 0 || u.NodeId > 127 || u.ImageSize == 0 || u.ImageSize > (256u * 1024u)) {
+        fwu_publish(DRONECANUPDATE_STATE_REFUSED);
+        return;
+    }
+    memset(&fwu, 0, sizeof(fwu));
+    fwu.active = true;
+    fwu.node   = u.NodeId;
+    fwu.size   = u.ImageSize;
+    fwu.t_last = now;
+    /* BeginFirmwareUpdate: our node id, then the path (tail array, no length) */
+    uint8_t payload[1 + 8];
+    payload[0] = DC_NODE_ID;
+    memcpy(payload + 1, DC_FWUPDATE_PATH, strlen(DC_FWUPDATE_PATH));
+    dc_service_request(DC_SVC_BEGINFWUPDATE, fwu.node, 0, &fwu_tid_begin, payload, (uint8_t)(1 + strlen(DC_FWUPDATE_PATH)));
+    fwu_publish(DRONECANUPDATE_STATE_BEGINSENT);
+}
+
+/* a uavcan.protocol.file.Read request from the node we are updating */
+static void fwu_handle_read_request(uint8_t node, const uint8_t *data, uint8_t dlc)
+{
+    const uint8_t *pl = NULL;
+    uint8_t n = reasm_feed(fwu_rx, NELEMENTS(fwu_rx), node, data, dlc, &pl);
+    if (!n || !fwu.active || node != fwu.node || n < 5) {
+        return;
+    }
+    uint32_t offset = (uint32_t)dc_bits(pl, 0, 32);      /* u40 on the wire; the top byte is beyond any ESC */
+    uint8_t  tid    = (uint8_t)(data[dlc - 1] & 0x1Fu);   /* the transfer id rides in every tail byte */
+    fwu.reads++;
+    fwu.req_offset = offset;
+    fwu.req_tid    = tid;
+    fwu.have       = 0;
+    fwu.t_last     = xTaskGetTickCount();
+    fwu.req_len    = (offset >= fwu.size) ? 0 : (uint16_t)((fwu.size - offset) > 256u ? 256u : (fwu.size - offset));
+    if (fwu.req_len == 0) {
+        /* past the end: an empty read ends the update on the bootloader side */
+        uint8_t payload[2] = { 0, 0 };
+        dc_service_response(DC_SVC_FILEREAD, fwu.node, DC_FILEREAD_BASE_CRC, fwu.req_tid, payload, 2);
+        fwu.active = false;
+        fwu_publish(DRONECANUPDATE_STATE_DONE);
+        return;
+    }
+    DroneCANFileRequestData r;
+    r.Seq    = ++fwu.seq;
+    r.Offset = offset;
+    r.Length = fwu.req_len;
+    DroneCANFileRequestSet(&r);
+    fwu_publish(DRONECANUPDATE_STATE_TRANSFERRING);
+}
+
+/* the ground delivered part of the answer */
+static void fwu_chunk(void)
+{
+    static uint8_t payload[2 + 256];
+    DroneCANFileChunkData c;
+    DroneCANFileChunkGet(&c);
+    if (!fwu.active || c.Seq != fwu.seq || c.Offset < fwu.req_offset || c.Offset + c.Length > fwu.req_offset + fwu.req_len || c.Length > sizeof(c.Data)) {
+        return;
+    }
+    memcpy(fwu.buf + (c.Offset - fwu.req_offset), c.Data, c.Length);
+    fwu.have   = (uint16_t)(fwu.have + c.Length);
+    fwu.t_last = xTaskGetTickCount();
+    if (fwu.have < fwu.req_len) {
+        return;
+    }
+    payload[0] = 0; payload[1] = 0;                        /* Error.value = OK */
+    memcpy(payload + 2, fwu.buf, fwu.req_len);
+    dc_service_response(DC_SVC_FILEREAD, fwu.node, DC_FILEREAD_BASE_CRC, fwu.req_tid, payload, (uint16_t)(2 + fwu.req_len));
+    if (fwu.req_len < 256) {
+        fwu.active = false;                                /* a short read: the bootloader finishes and reboots */
+        fwu.req_offset += fwu.req_len;
+        fwu_publish(DRONECANUPDATE_STATE_DONE);
+    }
+}
+
+/* every 100 ms from the task */
+static void fwu_update(uint32_t now)
+{
+    if (fwu_cmd_pending) {
+        fwu_cmd_pending = false;
+        fwu_command(now);
+    }
+    if (fwu_chunk_pending) {
+        fwu_chunk_pending = false;
+        fwu_chunk();
+    }
+    if (fwu.active && (now - fwu.t_last) > (15000 / portTICK_RATE_MS)) {
+        fwu.active = false;
+        fwu_publish(DRONECANUPDATE_STATE_FAILED);
+    }
+}
+
 static void param_start(uint32_t now)
 {
     DroneCANParamData pr;
@@ -1146,6 +1321,7 @@ static void dronecanTask(__attribute__((unused)) void *parameters)
         if ((now - last_arm) >= (100 / portTICK_RATE_MS)) {
             last_arm = now;
             arming_tx(now);
+            fwu_update(now);
         }
         if (param_req_pending) {
             param_req_pending = false;

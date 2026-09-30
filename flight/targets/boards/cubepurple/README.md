@@ -306,3 +306,22 @@ values equal the board, TELEM1 changed and saved both ways, page rebuilt
 after a disconnect/reconnect (the config gadget's "same board" guard used to
 leave the placeholder page in place; fixed). `tools/gcs_shot.sh` captures the
 GCS window by window id, never a screen region.
+
+## ESC firmware over CAN (2026-09-30)
+
+The AM32 CAN ESCs update through the standard DroneCAN path: the flight
+controller sends `uavcan.protocol.file.BeginFirmwareUpdate`, the ESC reboots
+into its bootloader and reads the image back from the sender with
+`uavcan.protocol.file.Read` (256 bytes per read, a shorter read ends it),
+then checks the image's signature/CRC before jumping. The DroneCAN module is
+that file server: `DroneCANUpdate` (node, size, Begin/Abort, state),
+`DroneCANFileRequest` (a read the bootloader wants) and `DroneCANFileChunk`
+(128-byte pieces the ground supplies). `tools/esc_flash.py IMAGE.bin --node N`
+or `--all` drives it. Refused while armed.
+
+The ESC firmware itself: `lineage/AM32` (upstream v2.20, the release on the
+Vimdrones S50), branch `ninjapilot-beep`, built with the toolchain AM32 pins
+(`make arm_sdk_install`, then `make VIMDRONES_S50_L431_CAN`). The branch adds
+`uavcan.equipment.indication.BeepCommand` (1080): a note the motor plays
+from the main loop while stopped, capped at 400 ms. Untested on the ESCs so
+far.

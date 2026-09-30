@@ -1,0 +1,12 @@
+<xml>
+    <object name="DroneCANFileRequest" singleinstance="true" settings="false" category="System">
+        <description>A bootloader wants Length bytes of the update image from Offset (uavcan.protocol.file.Read). The ground answers with DroneCANFileChunk objects carrying the same Seq, 128 bytes each, and the module replies to the node once it holds them all.</description>
+        <field name="Seq" units="" type="uint16" elements="1" defaultvalue="0"/>
+        <field name="Offset" units="bytes" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="Length" units="bytes" type="uint16" elements="1" defaultvalue="0"/>
+        <access gcs="readonly" flight="readwrite"/>
+        <telemetrygcs acked="false" updatemode="manual" period="0"/>
+        <telemetryflight acked="false" updatemode="onchange" period="0"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>
