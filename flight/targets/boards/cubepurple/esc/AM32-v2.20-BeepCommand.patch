@@ -1,0 +1,142 @@
+From 2c73c74ef50953e40e9d5d49192c822952592b94 Mon Sep 17 00:00:00 2001
+From: Kevin Finisterre <kfinisterre@KevinsMacStudio.localdomain>
+Date: Wed, 30 Sep 2026 17:09:12 -0400
+Subject: [PATCH] DroneCAN: play uavcan.equipment.indication.BeepCommand notes
+ on the motor
+
+A flight controller can now make the ESC sing one note at a time: the
+BeepCommand (1080) frequency and duration are decoded into a pending note
+that the main loop plays, on the same footing as the beacon tones, only
+while the motor is stopped and the input is below the dead band. Notes are
+capped at 400 ms so the armed signal watchdog never fires.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ Inc/sounds.h            |  1 +
+ Src/DroneCAN/DroneCAN.c | 38 ++++++++++++++++++++++++++++++++++++++
+ Src/DroneCAN/DroneCAN.h |  2 ++
+ Src/main.c              | 14 ++++++++++++++
+ 4 files changed, 55 insertions(+)
+
+diff --git a/Inc/sounds.h b/Inc/sounds.h
+index c58eeee..334564f 100644
+--- a/Inc/sounds.h
++++ b/Inc/sounds.h
+@@ -11,6 +11,7 @@
+ #include "main.h"
+ 
+ void playStartupTune(void);
++void playBJNote(uint16_t freq, uint16_t bduration);
+ void playInputTune(void);
+ void playBrushedStartupTune(void);
+ void playInputTune2(void);
+diff --git a/Src/DroneCAN/DroneCAN.c b/Src/DroneCAN/DroneCAN.c
+index f186a8a..51ac776 100644
+--- a/Src/DroneCAN/DroneCAN.c
++++ b/Src/DroneCAN/DroneCAN.c
+@@ -46,6 +46,14 @@ struct CANStats canstats;
+ static bool dronecan_armed;
+ static bool done_startup;
+ 
++/* uavcan.equipment.indication.BeepCommand: float16 frequency (Hz), float16
++ * duration (s). A note the flight controller wants the motor to make; played
++ * from the main loop while the motor is stopped (see dronecan_beep_* in main.c). */
++#define UAVCAN_EQUIPMENT_INDICATION_BEEPCOMMAND_ID 1080
++#define UAVCAN_EQUIPMENT_INDICATION_BEEPCOMMAND_SIGNATURE (0xBE9EA9FEC2B15D52ULL)
++volatile uint16_t dronecan_beep_hz;
++volatile uint16_t dronecan_beep_ms;
++
+ #define APP_SIGNATURE_MAGIC1 0x68f058e6
+ #define APP_SIGNATURE_MAGIC2 0xafcee5a0
+ 
+@@ -676,6 +684,28 @@ static void handle_RawCommand(CanardInstance *ins, CanardRxTransfer *transfer)
+ /*
+   handle ArmingStatus messages
+ */
++static void handle_BeepCommand(CanardInstance* ins, CanardRxTransfer* transfer)
++{
++    (void)ins;
++    uint16_t f16, d16;
++    uint32_t bit_ofs = 0;
++    if (transfer->payload_len < 4) {
++        return;
++    }
++    canardDecodeScalar(transfer, bit_ofs, 16, true, &f16); bit_ofs += 16;
++    canardDecodeScalar(transfer, bit_ofs, 16, true, &d16);
++    float hz = canardConvertFloat16ToNativeFloat(f16);
++    float sec = canardConvertFloat16ToNativeFloat(d16);
++    if (!(hz >= 100.0f && hz <= 5000.0f) || !(sec > 0.0f)) {
++        return;
++    }
++    if (sec > 0.4f) {
++        sec = 0.4f;                 /* the signal watchdog is half a second when armed */
++    }
++    dronecan_beep_hz = (uint16_t)hz;
++    dronecan_beep_ms = (uint16_t)(sec * 1000.0f);
++}
++
+ static void handle_ArmingStatus(CanardInstance *ins, CanardRxTransfer *transfer)
+ {
+     struct uavcan_equipment_safety_ArmingStatus cmd;
+@@ -909,6 +939,10 @@ static void onTransferReceived(CanardInstance *ins, CanardRxTransfer *transfer)
+ 	    handle_ArmingStatus(ins, transfer);
+             break;
+         }
++        case UAVCAN_EQUIPMENT_INDICATION_BEEPCOMMAND_ID: {
++            handle_BeepCommand(ins, transfer);
++            break;
++        }
+         }
+     }
+ }
+@@ -970,6 +1004,10 @@ static bool shouldAcceptTransfer(const CanardInstance *ins,
+ 	    *out_data_type_signature = UAVCAN_EQUIPMENT_SAFETY_ARMINGSTATUS_SIGNATURE;
+             return true;
+         }
++        case UAVCAN_EQUIPMENT_INDICATION_BEEPCOMMAND_ID: {
++            *out_data_type_signature = UAVCAN_EQUIPMENT_INDICATION_BEEPCOMMAND_SIGNATURE;
++            return true;
++        }
+         }
+     }
+     // we don't want any other messages
+diff --git a/Src/DroneCAN/DroneCAN.h b/Src/DroneCAN/DroneCAN.h
+index d3dbfd4..29e765d 100644
+--- a/Src/DroneCAN/DroneCAN.h
++++ b/Src/DroneCAN/DroneCAN.h
+@@ -6,5 +6,7 @@
+ void DroneCAN_Init(void);
+ void DroneCAN_update();
+ bool DroneCAN_active();
++extern volatile uint16_t dronecan_beep_hz;   /* a BeepCommand note waiting to be played */
++extern volatile uint16_t dronecan_beep_ms;
+ 
+ #endif // DRONECAN_SUPPORT
+diff --git a/Src/main.c b/Src/main.c
+index f48ddc4..7335ade 100644
+--- a/Src/main.c
++++ b/Src/main.c
+@@ -1199,6 +1199,20 @@ if (!stepper_sine && armed) {
+                 }
+                 play_tone_flag = 0;
+             }
++#if DRONECAN_SUPPORT
++            if (dronecan_beep_ms && !running) {
++                /* a note from the flight controller: same footing as the
++                 * beacon tones above, energise a phase pair and sing */
++                comStep(3);
++                playBJNote(dronecan_beep_hz, dronecan_beep_ms);
++                allOff();
++                SET_PRESCALER_PWM(0);
++                SET_AUTO_RELOAD_PWM(TIMER1_MAX_ARR);
++                dronecan_beep_ms = 0;
++                signaltimeout = 0;
++                RELOAD_WATCHDOG_COUNTER();
++            }
++#endif
+ 
+             if (!eepromBuffer.comp_pwm) {
+                 duty_cycle_setpoint = 0;
+-- 
+2.50.1 (Apple Git-155)
+
