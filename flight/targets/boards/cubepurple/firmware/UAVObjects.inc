@@ -112,6 +112,7 @@ UAVOBJSRCFILENAMES += iomcustatus
 UAVOBJSRCFILENAMES += dronecanupdate
 UAVOBJSRCFILENAMES += dronecanfilerequest
 UAVOBJSRCFILENAMES += dronecanfilechunk
+UAVOBJSRCFILENAMES += dronecanbeep
 UAVOBJSRCFILENAMES += flightstatus
 UAVOBJSRCFILENAMES += hwsettings
 UAVOBJSRCFILENAMES += receiveractivity

@@ -33,6 +33,7 @@
 #include <pios_can.h>
 #include "dronecan.h"
 #include "dronecanupdate.h"
+#include "dronecanbeep.h"
 #include "dronecanfilerequest.h"
 #include "dronecanfilechunk.h"
 #include "dronecanstatus.h"
@@ -71,6 +72,7 @@ static uint32_t svc_tx, svc_rx_count, svc_last_id; /* service frame diagnostics 
 #define DC_SVC_GETSET           11u      /* uavcan.protocol.param.GetSet */
 #define DC_GETSET_BASE_CRC      0xFB10u  /* crc16-ccitt of signature 0xA7B622F939D1A4D5 */
 #define DC_DTID_ARMINGSTATUS    1100u    /* uavcan.equipment.safety.ArmingStatus: u8 status */
+#define DC_DTID_BEEPCOMMAND     1080u    /* uavcan.equipment.indication.BeepCommand: f16 frequency Hz, f16 duration s */
 #define DC_SVC_BEGINFWUPDATE    40u      /* uavcan.protocol.file.BeginFirmwareUpdate: u8 source node, path */
 #define DC_SVC_FILEREAD         48u      /* uavcan.protocol.file.Read: u40 offset + path -> i16 error + u8[<=256] */
 #define DC_FILEREAD_BASE_CRC    0x2F12u  /* crc16 of the signature 0x8DCDCA939F33F678, little-endian */
@@ -180,6 +182,7 @@ static void param_cb(UAVObjEvent *ev);
 static void svc_handle_response(uint8_t node, uint8_t svc, const uint8_t *data, uint8_t dlc);
 static void fwu_handle_read_request(uint8_t node, const uint8_t *data, uint8_t dlc);
 static void fwu_update_cb(UAVObjEvent *ev);
+static void beep_cb(UAVObjEvent *ev);
 static void fwu_chunk_cb(UAVObjEvent *ev);
 
 int32_t DroneCANStart(void)
@@ -213,6 +216,8 @@ int32_t DroneCANInitialize(void)
     DroneCANFileRequestInitialize();
     DroneCANFileChunkInitialize();
     DroneCANUpdateConnectCallback(fwu_update_cb);
+    DroneCANBeepInitialize();
+    DroneCANBeepConnectCallback(beep_cb);
     DroneCANFileChunkConnectCallback(fwu_chunk_cb);
     return 0;
 }
@@ -971,6 +976,47 @@ static void param_finish(uint8_t result, const uint8_t *p, uint8_t n)
     DroneCANParamSet(&pr);
 }
 
+/* ---- one note for the ESCs: DroneCANBeep -> BeepCommand ---- */
+static volatile bool beep_pending;
+static uint8_t  beep_tid;
+
+static void beep_cb(UAVObjEvent *ev) { if (ev->event == EV_UNPACKED) { beep_pending = true; } }
+
+/* IEEE half precision, round to nearest: enough for hertz and seconds */
+static uint16_t f32_to_f16(float f)
+{
+    uint32_t u;
+    memcpy(&u, &f, 4);
+    uint32_t sign = (u >> 16) & 0x8000u;
+    int32_t  exp  = (int32_t)((u >> 23) & 0xFFu) - 127 + 15;
+    uint32_t mant = u & 0x7FFFFFu;
+    if (exp <= 0) {
+        if (exp < -10) { return (uint16_t)sign; }
+        mant |= 0x800000u;
+        uint32_t shift = (uint32_t)(14 - exp);
+        return (uint16_t)(sign | ((mant >> shift) + ((mant >> (shift - 1)) & 1u)));
+    }
+    if (exp >= 31) { return (uint16_t)(sign | 0x7C00u); }
+    uint32_t half = ((uint32_t)exp << 10) | (mant >> 13);
+    if (mant & 0x1000u) { half++; }
+    return (uint16_t)(sign | half);
+}
+
+static void beep_update(void)
+{
+    if (!beep_pending) {
+        return;
+    }
+    beep_pending = false;
+    DroneCANBeepData b;
+    DroneCANBeepGet(&b);
+    uint16_t f = f32_to_f16((float)b.Frequency), d = f32_to_f16((float)b.Duration / 1000.0f);
+    uint8_t payload[4] = { (uint8_t)(f & 0xFF), (uint8_t)(f >> 8), (uint8_t)(d & 0xFF), (uint8_t)(d >> 8) };
+    dc_broadcast(DC_PRIO_LOW, DC_DTID_BEEPCOMMAND, 0, &beep_tid, payload, 4);
+    b.Sent++;
+    DroneCANBeepSet(&b);
+}
+
 /* ---- firmware update of a node: we are its file server ---- */
 static volatile bool fwu_cmd_pending, fwu_chunk_pending;
 static struct reasm fwu_rx[1];
@@ -1323,6 +1369,7 @@ static void dronecanTask(__attribute__((unused)) void *parameters)
             arming_tx(now);
             fwu_update(now);
         }
+        beep_update();
         if (param_req_pending) {
             param_req_pending = false;
             param_start(now);

@@ -1,0 +1,12 @@
+<xml>
+    <object name="DroneCANBeep" singleinstance="true" settings="false" category="System">
+        <description>One note for the ESCs: every write broadcasts uavcan.equipment.indication.BeepCommand (1080) with Frequency and Duration. ESCs that implement it (AM32 with the NinjaPilot BeepCommand patch) sound the note on the motor while it is stopped; stock AM32 ignores it. Sent counts the broadcasts.</description>
+        <field name="Frequency" units="Hz" type="uint16" elements="1" defaultvalue="440"/>
+        <field name="Duration" units="ms" type="uint16" elements="1" defaultvalue="200"/>
+        <field name="Sent" units="" type="uint16" elements="1" defaultvalue="0"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="true" updatemode="manual" period="0"/>
+        <telemetryflight acked="false" updatemode="manual" period="0"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>
