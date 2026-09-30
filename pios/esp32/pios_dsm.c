@@ -211,6 +211,64 @@ static void dsm_task(__attribute__((unused)) void *arg)
     uint8_t have = 0;
     uint32_t started = dsm_now_ms();
 
+    /* BIND FIRMWARE (bind_pulses != 0).
+     *
+     * Spektrum's Remote Receiver Interfacing spec: the bind pulses must
+     * arrive within 200 ms of the SATELLITE's power-up. This task starts
+     * seconds after the board's power-up -- bootloader, WiFi, sensors and
+     * the rest of PIOS_Board_Init() all come first -- so the one-shot
+     * attempt below, 250 ms after the task starts, never once made the
+     * window. It cannot, from application code.
+     *
+     * The window is relative to the satellite's own power, so turn the
+     * problem round: for the first 30 s after this task starts, send the
+     * pulse train every 80 ms (two full trains inside any 200 ms window),
+     * and the operator plugs the satellite in -- or applies its 3.3 V --
+     * AFTER the board is up. The red LED blinks while trains are going
+     * out. The pin is open-drain between pulses so it never fights the
+     * satellite's own data line. UART comes up afterwards as normal. */
+    if (cfg->bind_pulses) {
+        printf("[DSM] BIND FIRMWARE: pulsing IO%d every 80 ms for 30 s -- "
+               "connect the satellite's power NOW (red LED blinks meanwhile)\n",
+               (int)cfg->rx_pin);
+        uart_driver_delete(cfg->port);
+        gpio_config_t io = {
+            .intr_type    = GPIO_INTR_DISABLE,
+            .mode         = GPIO_MODE_OUTPUT_OD,
+            .pin_bit_mask = 1ULL << cfg->rx_pin,
+            .pull_up_en   = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        };
+        gpio_config(&io);
+        gpio_set_level(cfg->rx_pin, 1);
+        uint32_t t0 = dsm_now_ms();
+        uint32_t trains = 0;
+        while ((dsm_now_ms() - t0) < 30000) {
+            for (uint8_t i = 0; i < cfg->bind_pulses; i++) {
+                gpio_set_level(cfg->rx_pin, 0);
+                PIOS_DELAY_WaituS(120);
+                gpio_set_level(cfg->rx_pin, 1);
+                PIOS_DELAY_WaituS(120);
+            }
+            trains++;
+#if defined(PIOS_INCLUDE_LED) && defined(PIOS_LED_ARMED)
+            if ((trains & 1) == 0) {
+                PIOS_LED_Toggle(PIOS_LED_ARMED);
+            }
+#endif
+            vTaskDelay(pdMS_TO_TICKS(80));
+        }
+#if defined(PIOS_INCLUDE_LED) && defined(PIOS_LED_ARMED)
+        PIOS_LED_Off(PIOS_LED_ARMED);
+#endif
+        gpio_reset_pin(cfg->rx_pin);
+        (void)dsm_uart_start(cfg);
+        dsm.bind_attempted = true;   /* the one-shot below stays off */
+        started = dsm_now_ms();
+        printf("[DSM] bind window over (%lu trains sent); listening for frames\n",
+               (unsigned long)trains);
+    }
+
     for (;;) {
         int got = uart_read_bytes(cfg->port, &frame[have],
                                   DSM_FRAME_BYTES - have, pdMS_TO_TICKS(4));
