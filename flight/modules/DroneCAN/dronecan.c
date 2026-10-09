@@ -76,7 +76,7 @@ static uint32_t svc_tx, svc_rx_count, svc_last_id; /* service frame diagnostics 
 #define DC_GETSET_BASE_CRC      0xFB10u  /* crc16-ccitt of signature 0xA7B622F939D1A4D5 */
 #define DC_DTID_ARMINGSTATUS    1100u    /* uavcan.equipment.safety.ArmingStatus: u8 status */
 #define DC_DTID_BEEPCOMMAND     1080u    /* uavcan.equipment.indication.BeepCommand: f16 frequency Hz, f16 duration s */
-#define DC_DTID_NOTE            20400u   /* com.ninjapilot.esc.Note: u8 mask, u8 volume, f16 frequency, f16 duration */
+#define DC_DTID_NOTE            20400u   /* uavcan.equipment.indication.NoteCommand (id 20400, vendor range until registered): u8 mask, u8 volume, f16 frequency, f16 duration */
 #define DC_SVC_BEGINFWUPDATE    40u      /* uavcan.protocol.file.BeginFirmwareUpdate: u8 source node, path */
 #define DC_SVC_FILEREAD         48u      /* uavcan.protocol.file.Read: u40 offset + path -> i16 error + u8[<=256] */
 #define DC_FILEREAD_BASE_CRC    0x2F12u  /* crc16 of the signature 0x8DCDCA939F33F678, little-endian */
@@ -1025,7 +1025,7 @@ static void beep_tx(uint16_t hz, uint16_t ms)
     dc_broadcast(DC_PRIO_LOW, DC_DTID_BEEPCOMMAND, 0, &beep_tid, payload, 4);
 }
 
-/* com.ninjapilot.esc.Note: the motors in mask, at a volume, one note */
+/* uavcan.equipment.indication.NoteCommand: the motors in mask, at a volume, one note */
 static volatile bool note_pending;
 static uint8_t  note_tid;
 static void note_cb(UAVObjEvent *ev) { if (ev->event == EV_UNPACKED) { note_pending = true; } }

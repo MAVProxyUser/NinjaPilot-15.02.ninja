@@ -1,6 +1,6 @@
-# DroneCAN: play notes on the motor from the bus (BeepCommand, and a per-motor Note)
+# DroneCAN: play notes on the motor from the bus (BeepCommand, and a per-motor NoteCommand)
 
-Pull request against `am32-firmware/AM32`, from tag `v2.20`. Five small commits,
+Pull request against `am32-firmware/AM32`, from tag `v2.20`. Six small commits,
 all in `Src/DroneCAN/DroneCAN.c`, `Src/main.c`, `Inc/sounds.h`. Tested on four
 Vimdrones S50 (`VIMDRONES_S50_L431_CAN`) driven by a Cube Purple flight
 controller over CAN, including updating the ESCs over CAN with the result.
@@ -12,8 +12,9 @@ sending a message, the same way it already asks for throttle. Two messages:
 
 * `uavcan.equipment.indication.BeepCommand` (standard, id 1080): one note,
   every ESC on the bus plays it.
-* `com.ninjapilot.esc.Note` (vendor id 20400): one note for the ESCs named in
-  a mask, with a loudness. Four motors can hold four different pitches.
+* `uavcan.equipment.indication.NoteCommand` (id 20400, vendor range until a
+  DSDL definition is registered): one note for the ESCs named in a mask,
+  with a loudness. Four motors can hold four different pitches.
 
 The ESC plays a note the way it already plays its own beacon tunes: motor
 stopped, input below the dead band, interrupts masked, watchdog reloaded.
@@ -42,7 +43,7 @@ per-motor message is the small extra that turns four ESCs into four voices.
 
 Broadcast; every ESC that hears it plays it. Single CAN frame.
 
-### `com.ninjapilot.esc.Note` (20400, vendor range)
+### `uavcan.equipment.indication.NoteCommand` (20400, vendor range until registered)
 
 | field       | type    | meaning                                                  |
 |-------------|---------|----------------------------------------------------------|
@@ -184,10 +185,11 @@ musical work, so, for the record:
    click: `tenKhzRoutine()` zeroes the duty cycle 10 000 times a second while
    the motor is stopped.
 3. **True pitch.** The 11/10 correction described above.
-4. **`com.ninjapilot.esc.Note`.** Mask, volume, pitch, duration; the volume
+4. **`NoteCommand`.** Mask, volume, pitch, duration; the volume
    set for the note and restored.
 5. **Drop, never defer.** A note that arrives while the motor runs is
    discarded.
+6. **Named like the message it extends:** `uavcan.equipment.indication.NoteCommand`.
 
 ## Testing
 
@@ -203,10 +205,66 @@ musical work, so, for the record:
 * Telemetry (`esc.Status`) keeps flowing between notes; no watchdog resets,
   no error counts, no bus errors across hours of bench use.
 
+## Playing a short tune, in plain words
+
+The ESC keeps no tune. A tune is the sender sending one note after another
+and keeping time itself. To play the first phrase of the march on every
+motor:
+
+1. Decide the notes: G4, G4, G4, Eb4, Bb4, G4, Eb4, Bb4, G4 (392, 392, 392,
+   311, 466, 392, 311, 466, 392 Hz), with lengths 320, 320, 320, 240, 80,
+   320, 240, 80, 640 ms.
+2. For each note, broadcast one `BeepCommand` with the frequency and the
+   duration in seconds, then wait that duration plus about 12 ms (the ESC's
+   turnaround), plus a 40 ms breath if you want the notes separated.
+3. A note longer than 0.4 s is sent as pieces: the 640 ms G4 is two commands
+   of 0.32 s, the second sent 332 ms after the first, no breath between.
+4. A rest is nothing at all: just wait.
+5. For voices, send `NoteCommand` instead, once per distinct pitch, with the
+   mask of the motors that should play it; the commands of one step go out
+   back to back and the motors sound together.
+
+What that looks like on the wire, from node 10 at priority 30 (every frame
+is a single-frame transfer: tail byte `0xC0 | transfer id`, transfer id
+counting up per message type):
+
+| note | message | CAN id (29-bit) | payload bytes | tail |
+|------|---------|-----------------|---------------|------|
+| G4 392 Hz, 0.32 s, all motors | BeepCommand | `0x1E04380A` | `20 5E 1F 35` | `C0` |
+| G4 again | BeepCommand | `0x1E04380A` | `20 5E 1F 35` | `C1` |
+| Eb4 311 Hz, 0.24 s | BeepCommand | `0x1E04380A` | `DC 5C AE 33` | `C3` |
+| Bb4 466 Hz, 0.08 s | BeepCommand | `0x1E04380A` | `48 5F 1F 2D` | `C4` |
+| G4, 0.64 s: first piece | BeepCommand | `0x1E04380A` | `20 5E 1F 35` | `C8` |
+| G4, 0.64 s: second piece, 332 ms later | BeepCommand | `0x1E04380A` | `20 5E 1F 35` | `C9` |
+| the same G4 on motors 0 and 1 only, volume 6 | NoteCommand | `0x1E4FB00A` | `03 06 20 5E 1F 35` | `C0` |
+| G3 196 Hz bass on motors 2 and 3 at the same time | NoteCommand | `0x1E4FB00A` | `0C 06 20 5A 1F 35` | `C1` |
+
+(float16, little-endian: 392 Hz = `0x5E20`, 0.32 s = `0x351F`; the id is
+priority 30 in bits 24-28, the data type id in bits 8-23, the source node
+in bits 0-6.)
+
+**What you get back: nothing, by design.** Both messages are broadcasts and
+have no reply. What you can observe:
+
+* While a note plays the ESC is silent on the bus: no `esc.Status`, no
+  `NodeStatus`, no reaction to throttle. Its next `esc.Status` arrives after
+  the note. A gap in its status telemetry equal to the note's duration is
+  the only receipt there is, and it is a reliable one.
+* A note the ESC refused (motor running, out of range, zero duration, not in
+  the mask) leaves no gap and makes no sound. Nothing is logged and no error
+  counter moves, on purpose: a note is advisory.
+* Throttle frames sent during a note are lost to the ESC's receive FIFO; the
+  stream simply resumes afterwards. The armed signal watchdog does not trip
+  because the ESC clears its signal timer when the note ends.
+* `esc.Status` error counts, temperature and voltage are unchanged by notes.
+
+The reference sender keeps a tune as steps of `{hz[4], ms}`, 0 meaning rest
+for that voice, and the eighteen tables above are exactly that.
+
 ## Not in this PR
 
-A tune format inside the ESC. We thought about it and kept it out: the ESC
-has no spare flash to speak of, the controller already knows the time and
-the occasion, and one note per message is enough to do anything, including
-four-part arrangements. If the project wants an ESC-resident tune later,
-`STARTUP_TUNE`'s BlueJay layout is the obvious container.
+A tune format inside the ESC. The ESC has no spare flash to speak of, the
+controller already knows the time and the occasion, and one note per
+message is enough to do anything, including four-part arrangements. If the
+project wants an ESC-resident tune later, `STARTUP_TUNE`'s BlueJay layout is
+the obvious container.

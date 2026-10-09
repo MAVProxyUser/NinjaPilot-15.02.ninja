@@ -1,7 +1,7 @@
 From 12758d734b4c0baeb3ee0b22127fa9a45224e7e7 Mon Sep 17 00:00:00 2001
 From: Kevin Finisterre <kfinisterre@KevinsMacStudio.localdomain>
 Date: Fri, 9 Oct 2026 16:23:07 -0400
-Subject: [PATCH] DroneCAN: com.ninjapilot.esc.Note, a note for the motors
+Subject: [PATCH 4/6] DroneCAN: com.ninjapilot.esc.Note, a note for the motors
  named in a mask
 
 Vendor data type 20400: uint8 mask (bit i = ESC index i), uint8 volume

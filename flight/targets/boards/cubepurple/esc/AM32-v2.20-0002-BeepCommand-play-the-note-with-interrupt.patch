@@ -1,7 +1,7 @@
 From 32e3548a8ed20b32156f64d2ab1781ccd4832b4e Mon Sep 17 00:00:00 2001
 From: Kevin Finisterre <kfinisterre@KevinsMacStudio.localdomain>
 Date: Fri, 9 Oct 2026 15:39:17 -0400
-Subject: [PATCH 2/2] DroneCAN BeepCommand: play the note with interrupts
+Subject: [PATCH 2/6] DroneCAN BeepCommand: play the note with interrupts
  masked
 
 tenKhzRoutine() rewrites the duty cycle every 100 us, zero while the motor

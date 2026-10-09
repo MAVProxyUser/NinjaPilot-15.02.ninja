@@ -1,7 +1,7 @@
 From d4c63f4bad833ffc9fd97661c37d968637762bd1 Mon Sep 17 00:00:00 2001
 From: Kevin Finisterre <kfinisterre@KevinsMacStudio.localdomain>
 Date: Fri, 9 Oct 2026 15:56:38 -0400
-Subject: [PATCH] DroneCAN BeepCommand: play the frequency asked for
+Subject: [PATCH 3/6] DroneCAN BeepCommand: play the frequency asked for
 
 playBJNote() sizes the period for a clock/10 timer but runs it at
 prescaler 10 (clock/11), so every note came out 10/11 of its frequency;

@@ -1,6 +1,6 @@
 <xml>
     <object name="DroneCANNote" singleinstance="true" settings="false" category="System">
-        <description>One note for the motors named in Mask (bit i = ESC index i), at Volume (0..11, 255 = the ESC's own), as the vendor message com.ninjapilot.esc.Note (20400). Every write broadcasts it. Four motors can hold four different pitches. Needs the NinjaPilot AM32 build; BeepCommand (DroneCANBeep) is the all-motors standard message.</description>
+        <description>One note for the motors named in Mask (bit i = ESC index i), at Volume (0..11, 255 = the ESC's own), as uavcan.equipment.indication.NoteCommand (data type 20400 until registered upstream). Every write broadcasts it. Four motors can hold four different pitches. Needs the NinjaPilot AM32 build; BeepCommand (DroneCANBeep) is the all-motors standard message.</description>
         <field name="Mask" units="" type="uint8" elements="1" defaultvalue="15"/>
         <field name="Volume" units="" type="uint8" elements="1" defaultvalue="255"/>
         <field name="Frequency" units="Hz" type="uint16" elements="1" defaultvalue="440"/>

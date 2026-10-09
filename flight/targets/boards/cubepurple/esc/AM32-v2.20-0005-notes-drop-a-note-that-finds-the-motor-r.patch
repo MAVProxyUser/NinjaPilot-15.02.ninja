@@ -1,7 +1,7 @@
 From 55bb010c6a15d0c29547a82e874f780253d3dea9 Mon Sep 17 00:00:00 2001
 From: Kevin Finisterre <kfinisterre@KevinsMacStudio.localdomain>
 Date: Fri, 9 Oct 2026 16:31:50 -0400
-Subject: [PATCH] DroneCAN notes: drop a note that finds the motor running
+Subject: [PATCH 5/6] DroneCAN notes: drop a note that finds the motor running
 
 The note branch only ran while stopped, so a note that arrived during a
 run would have waited and played the moment the motor stopped. Clear it

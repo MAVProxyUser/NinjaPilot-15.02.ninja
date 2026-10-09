@@ -345,7 +345,7 @@ the ground; `sweep` steps 100 Hz to 4.5 kHz for a listening test.
 
 ## Four voices, eighteen tunes, the ESC PR (2026-10-09)
 
-ESC patches 0004 (`com.ninjapilot.esc.Note` 20400: mask, volume, pitch,
+ESC patches 0004 (`uavcan.equipment.indication.NoteCommand` 20400: mask, volume, pitch,
 duration, one note for the motors named) and 0005 (a note that finds the
 motor running is dropped, never deferred). `DroneCANNote` sends one from the
 ground. `TuneSettings.Voices` = FourVoices sends each voice of a step to its
