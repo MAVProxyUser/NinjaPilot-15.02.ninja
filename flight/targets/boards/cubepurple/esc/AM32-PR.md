@@ -117,13 +117,35 @@ struct tune_step { uint16_t hz[4]; uint16_t ms; };
 
 ## Example tones included
 
-Opening motifs only, a few seconds each, written as note tables by us:
+Eighteen short tables in the reference sender, each a few seconds, arranged
+for four voices (melody doubled on two motors, a harmony line, a bass) and
+rendered to .wav by `tune_render.py` for listening off the bench. Lengths
+are as sent, including the gaps.
 
-* Beethoven, Symphony No. 5, opening (1808; public domain).
-* Beethoven, "Ode to Joy" theme (1824; public domain).
-* "Korobeiniki", Russian folk song (19th century; public domain).
-* "Charge!", the ballpark fanfare (traditional bugle figure).
-* "The Imperial March" (Williams, 1980): the nine-note opening figure.
+| # | name | what it is | status | length |
+|---|------|------------|--------|--------|
+| 1 | ImperialMarch | the nine-note opening figure (Williams, 1980) | in copyright, brief quotation | 2.6 s |
+| 2 | Beethoven5th | Symphony No. 5, the opening (1808) | public domain | 2.7 s |
+| 3 | OdeToJoy | Symphony No. 9, the theme (1824) | public domain | 4.8 s |
+| 4 | Korobeiniki | Russian folk song, 19th century | public domain | 4.0 s |
+| 5 | Charge | the ballpark bugle figure, traditional | public domain | 1.4 s |
+| 6 | AxelF | the keyboard hook and a four-thump drum fill (Faltermeyer, 1984) | in copyright, brief quotation | 6.7 s |
+| 7 | EyeOfTheTiger | the opening stabs (Survivor, 1982) | in copyright, brief quotation | 3.2 s |
+| 8 | FurElise | Bagatelle No. 25, opening bars (Beethoven, 1810) | public domain | 4.0 s |
+| 9 | MountainKing | Peer Gynt, the troll theme (Grieg, 1875) | public domain | 5.0 s |
+| 10 | GranVals | Tárrega's waltz, the four bars phones made famous (1902) | public domain | 3.0 s |
+| 11 | Valkyries | the opening call (Wagner, 1856) | public domain | 4.9 s |
+| 12 | ShaveAndAHaircut | with the two-bit answer, traditional | public domain | 1.9 s |
+| 13 | Reveille | the bugle call | public domain | 2.5 s |
+| 14 | HappyBirthday | first two lines (melody 1893; Warner/Chappell's claim ended 2016) | public domain | 3.6 s |
+| 15 | Laser | a fast downward sweep | ours | 0.3 s |
+| 16 | Siren | two-tone | ours | 1.8 s |
+| 17 | Chirps | droid chatter scattered over the four motors | ours | 1.2 s |
+| 18 | SOS | Morse, all motors | ours | 3.2 s |
+
+The two pieces marked as hooks (6, 7) and the march (1) are the only
+in-copyright material; see below. Everything else is either older than
+copyright or written here.
 
 ## On copyright and the note tables
 
@@ -137,14 +159,16 @@ musical work, so, for the record:
   reference table: <https://guides.library.cornell.edu/copyright/publicdomain>.
   A composition and a *recording* of it are separate works: a public-domain
   symphony does not make a 1990 recording of it free, and vice versa.
-* The one in-copyright item, the march, is a nine-note quotation of its
-  opening figure, re-rendered as timer values for a motor, non-commercial,
-  and no substitute for the work. Those are the fair-use factors (purpose and
+* The three in-copyright items, the march, the cop-theme hook and the boxing
+  riff, are quotations of an opening figure of a few seconds each,
+  re-rendered as timer values for a motor, non-commercial, and no
+  substitute for the work. Those are the fair-use factors (purpose and
   character, nature, amount, market effect), see the Copyright Office's FAQ:
   <https://www.copyright.gov/help/faq/faq-fairuse.html> and its index of
   decisions: <https://www.copyright.gov/fair-use/>. Fair use is decided case
   by case; nothing here is legal advice, and a maintainer who would rather
-  not carry that table can drop it without touching the code.
+  not carry those three tables can drop them without touching the code: the
+  fifteen others and the mechanism do not depend on them.
 * **There is no "30-second rule"**, and never was. The Copyright Office is
   explicit that no amount of a work is automatically safe to take; Stanford's
   fair-use guide says the same: <https://fairuse.stanford.edu/overview/fair-use/four-factors/>.
@@ -172,9 +196,10 @@ musical work, so, for the record:
   `file.Read` served by the flight controller), all four back within a
   second of the last block.
 * Single notes, four-note figures, chained notes, chords (four pitches on
-  four motors), a volume ramp 1..11, formant-style triads, and arming and
-  disarming tunes from the flight controller, all audible and at pitch. A
-  throttle opened during a tune spins the motors at once.
+  four motors), a volume ramp 1..11, formant-style triads, the eighteen
+  tunes above, and arming and disarming tunes from the flight controller,
+  all audible and at pitch. A throttle opened during a tune spins the
+  motors at once.
 * Telemetry (`esc.Status`) keeps flowing between notes; no watchdog resets,
   no error counts, no bus errors across hours of bench use.
 
