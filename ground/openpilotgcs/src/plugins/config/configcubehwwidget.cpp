@@ -69,10 +69,10 @@ ConfigCubeHWWidget::ConfigCubeHWWidget(QWidget *parent) : ConfigTaskWidget(paren
     addWidgetBinding("TuneSettings", "DisarmTune", m_ui->cbDisarmTune);
     addWidgetBinding("TuneSettings", "Voices", m_ui->cbVoices);
     addWidgetBinding("TuneSettings", "Volume", m_ui->sbTuneVolume);
-    addWidgetBinding("TuneSettings", "Play", m_ui->cbPlay);
 
     setupCustomCombos();
-    connect(m_ui->btnPlay, SIGNAL(clicked()), this, SLOT(playTune()));
+    connect(m_ui->btnPlayArm, SIGNAL(clicked()), this, SLOT(playArmTune()));
+    connect(m_ui->btnPlayDisarm, SIGNAL(clicked()), this, SLOT(playDisarmTune()));
 
     enableControls(true);
     populateWidgets();
@@ -200,17 +200,25 @@ void ConfigCubeHWWidget::gps2Changed(int index)
 }
 
 /* Play: send only TuneSettings.Play to the board, right now, saving nothing.
- * The flight side starts the tune and puts the field back to None. */
-void ConfigCubeHWWidget::playTune()
+ * The flight side starts the tune, with the voices and volume it holds (press
+ * Apply first if those were changed), and puts the field back to None. */
+static void playSelection(UAVObjectManager *mgr, const QString &name)
 {
-    TuneSettings *tune = TuneSettings::GetInstance(getObjectManager());
-    if (!tune) {
+    TuneSettings *tune = TuneSettings::GetInstance(mgr);
+    UAVObjectField *f = tune ? tune->getField("Play") : NULL;
+    if (!f || name.isEmpty() || name == "None") {
         return;
     }
-    UAVObjectField *f = tune->getField("Play");
-    if (!f) {
-        return;
-    }
-    f->setValue(m_ui->cbPlay->currentText());
+    f->setValue(name);
     tune->updated();
+}
+
+void ConfigCubeHWWidget::playArmTune()
+{
+    playSelection(getObjectManager(), m_ui->cbArmTune->currentText());
+}
+
+void ConfigCubeHWWidget::playDisarmTune()
+{
+    playSelection(getObjectManager(), m_ui->cbDisarmTune->currentText());
 }

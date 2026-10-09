@@ -41,7 +41,8 @@ private slots:
     void gps2Changed(int index);
     void usbVCPPortChanged(int index);
     void usbHIDPortChanged(int index);
-    void playTune();
+    void playArmTune();
+    void playDisarmTune();
 };
 
 #endif // CONFIGCUBEHWWIDGET_H
