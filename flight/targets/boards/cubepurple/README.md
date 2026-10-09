@@ -323,5 +323,12 @@ The ESC firmware itself: `lineage/AM32` (upstream v2.20, the release on the
 Vimdrones S50), branch `ninjapilot-beep`, built with the toolchain AM32 pins
 (`make arm_sdk_install`, then `make VIMDRONES_S50_L431_CAN`). The branch adds
 `uavcan.equipment.indication.BeepCommand` (1080): a note the motor plays
-from the main loop while stopped, capped at 400 ms. Untested on the ESCs so
-far.
+from the main loop while stopped, interrupts masked, capped at 400 ms.
+Verified 2026-10-09: all four ESCs updated over CAN from the Cube (about 55 s
+each) and play `DroneCANBeep` notes on their motors.
+
+Lesson from the first update attempt: the ground sends a block as two
+128-byte `DroneCANFileChunk` writes back to back, and a single-instance
+object only keeps the last one, so the chunk must be captured in the
+object's unpack callback, not in the module task's periodic slot. The
+bootloader itself accepted every response first time.

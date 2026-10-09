@@ -19,7 +19,12 @@ def opt(name):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else None
 image = open(sys.argv[1], "rb").read()
 client = open_client(); st = {}
-def grab(od, inst, d): st[od.name] = d
+def grab(od, inst, d):
+    st[od.name] = d
+    if od.name == "DroneCANLog":
+        txt = bytes(d["LogText"]).split(b"\0")[0].decode(errors="replace")
+        key = (d["LogCount"], txt)
+        if key != st.get("_lastlog"): st["_lastlog"] = key; print("   log[node %d]: %s" % (d["LogNode"], txt), flush=True)
 def run(d): client.run(duration=d, on_object=grab)
 def fetch(name, secs=5):
     st.pop(name, None); client.request_object(name); t = time.time() + secs
@@ -29,22 +34,27 @@ def fetch(name, secs=5):
 def flash(node):
     print("node %d: %d bytes" % (node, len(image)))
     client.send_object("DroneCANUpdate", {"NodeId": node, "ImageSize": len(image), "Command": "Begin", "State": "Idle", "Offset": 0, "Reads": 0}, msg_type=uavtalk.TYPE_OBJ_ACK)
-    t0 = time.time(); last_seq = None; last_pct = -1; state = "?"
-    while time.time() - t0 < 180:
+    t0 = time.time(); last_seq = None; last_pct = -1; state = "?"; last_sent = 0; reads = 0
+    while time.time() - t0 < 600:
         run(0.05)
         u = st.get("DroneCANUpdate")
         if u:
             state = u["State"]
             if state in ("Done", "Failed", "Refused"): break
         r = st.get("DroneCANFileRequest")
-        if r and r["Seq"] != last_seq:
-            last_seq = r["Seq"]; off = r["Offset"]; ln = r["Length"]
+        if time.time() - last_sent > 1.5:
+            client.request_object("DroneCANFileRequest"); client.request_object("DroneCANUpdate")   # resync if an update went missing
+        if r and (r["Seq"] != last_seq or time.time() - last_sent > 0.4):
+            # a new read, or the last answer has not moved the flight side on: (re)send; the flight side drops repeats
+            if r["Seq"] != last_seq: reads += 1
+            last_seq = r["Seq"]; off = r["Offset"]; ln = r["Length"]; last_sent = time.time()
             for o in range(off, off + ln, 128):
                 piece = image[o:min(o + 128, off + ln)]
                 client.send_object("DroneCANFileChunk", {"Seq": r["Seq"], "Offset": o, "Length": len(piece), "Data": list(piece) + [0] * (128 - len(piece))})
             pct = 100 * (off + ln) // len(image)
-            if pct // 10 != last_pct // 10: print("   %3d%%  (offset %d, read #%d)" % (pct, off, r["Seq"]), flush=True); last_pct = pct
-    print("node %d: %s after %.1f s" % (node, state, time.time() - t0))
+            if pct // 10 != last_pct // 10: print("   %3d%%  (offset %d, read #%d, %.1f s)" % (pct, off, r["Seq"], time.time() - t0), flush=True); last_pct = pct
+    cs = fetch("DroneCANStatus"); u = fetch("DroneCANUpdate")
+    print("node %d: %s after %.1f s | %d bootloader reads for %d blocks | bus txdrop %s TEC %s" % (node, state, time.time() - t0, u["Reads"] if u else -1, (len(image) + 255) // 256, cs and cs["TxDropped"], cs and cs["TxErrorCounter"]))
     return state == "Done"
 
 run(3)

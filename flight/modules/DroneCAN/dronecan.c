@@ -182,6 +182,7 @@ static void param_cb(UAVObjEvent *ev);
 static void svc_handle_response(uint8_t node, uint8_t svc, const uint8_t *data, uint8_t dlc);
 static void fwu_handle_read_request(uint8_t node, const uint8_t *data, uint8_t dlc);
 static void fwu_update_cb(UAVObjEvent *ev);
+static struct fwu_state { bool active; uint8_t node; uint32_t size; uint32_t req_offset; uint16_t req_len; uint8_t req_tid; uint16_t have; uint8_t halves; bool answered; bool finishing; uint32_t t_progress; uint16_t seq; uint16_t reads; uint32_t t_last; uint8_t buf[256]; } fwu;
 static void beep_cb(UAVObjEvent *ev);
 static void fwu_chunk_cb(UAVObjEvent *ev);
 
@@ -367,6 +368,11 @@ static void dc_transfer_tid(uint32_t id, uint16_t base_crc, uint8_t tid,
         ofs     = (uint16_t)(ofs + chunk);
         toggle ^= 1u;
         first   = 0;
+        if (slen > 7) {
+            /* one frame per tick: a node that polls its receive FIFO (the
+             * ESC bootloader) loses most of a long transfer sent at wire rate */
+            vTaskDelay(1);
+        }
     } while (ofs < slen);
 }
 
@@ -1021,27 +1027,57 @@ static void beep_update(void)
 static volatile bool fwu_cmd_pending, fwu_chunk_pending;
 static struct reasm fwu_rx[1];
 static uint8_t fwu_tid_begin;
-static struct {
-    bool     active;
-    uint8_t  node;
-    uint32_t size;
-    uint32_t req_offset;      /* the read being served */
-    uint16_t req_len;
-    uint8_t  req_tid;
-    uint16_t have;            /* bytes of it the ground has delivered */
-    uint16_t seq;
-    uint16_t reads;
-    uint32_t t_last;
-    uint8_t  buf[256];
-} fwu;
+/* fwu: declared with the forward declarations above (DroneCANESCFlush reads .active) */
 
 static void fwu_update_cb(UAVObjEvent *ev) { if (ev->event == EV_UNPACKED) { fwu_cmd_pending = true; } }
-static void fwu_chunk_cb(UAVObjEvent *ev)  { if (ev->event == EV_UNPACKED) { fwu_chunk_pending = true; } }
+/* Runs in the telemetry task the instant a chunk is unpacked: the ground
+ * sends the two halves of a block back to back into this one single-instance
+ * object, so waiting for the DroneCAN task's slot would see only the last. */
+static void fwu_chunk_cb(UAVObjEvent *ev)
+{
+    if (ev->event != EV_UNPACKED) {
+        return;
+    }
+    DroneCANFileChunkData c;
+    DroneCANFileChunkGet(&c);
+    if (!fwu.active || c.Seq != fwu.seq || c.Offset < fwu.req_offset || c.Offset + c.Length > fwu.req_offset + fwu.req_len || c.Length > sizeof(c.Data)) {
+        return;
+    }
+    uint8_t half = (uint8_t)((c.Offset - fwu.req_offset) / 128u);
+    if (fwu.answered || (fwu.halves & (1u << half))) {
+        return;                                            /* a repeat of a piece we hold */
+    }
+    memcpy(fwu.buf + (c.Offset - fwu.req_offset), c.Data, c.Length);
+    fwu.halves |= (uint8_t)(1u << half);
+    fwu.have   = (uint16_t)(fwu.have + c.Length);
+    fwu.t_last = xTaskGetTickCount();
+    fwu.t_progress = fwu.t_last;
+    if (fwu.have >= fwu.req_len) {
+        fwu_chunk_pending = true;                          /* the DroneCAN task sends the answer */
+    }
+}
+
+static void fwu_log(const char *what)
+{
+    DroneCANLogData lg;
+    char msg[96];
+    memset(&lg, 0, sizeof(lg));
+    snprintf(msg, sizeof(msg), "fwu %s: reads %u seq %u off %u len %u have %u tid %u age %u",
+             what, (unsigned)fwu.reads, (unsigned)fwu.seq, (unsigned)fwu.req_offset, (unsigned)fwu.req_len, (unsigned)fwu.have, (unsigned)fwu.req_tid,
+             (unsigned)((xTaskGetTickCount() - fwu.t_last) * portTICK_RATE_MS));
+    lg.LogCount = ++log_count;
+    lg.LogNode  = fwu.node;
+    memcpy(lg.LogText, msg, sizeof(lg.LogText) - 1);
+    DroneCANLogSet(&lg);
+}
 
 static void fwu_publish(uint8_t state)
 {
     DroneCANUpdateData u;
     DroneCANUpdateGet(&u);
+    if (state == DRONECANUPDATE_STATE_DONE) { fwu_log("done"); }
+    if (state == DRONECANUPDATE_STATE_FAILED) { fwu_log("FAILED (timeout)"); }
+    if (state == DRONECANUPDATE_STATE_REFUSED) { fwu_log("refused"); }
     u.State  = state;
     u.Offset = fwu.req_offset;
     u.Reads  = fwu.reads;
@@ -1075,6 +1111,7 @@ static void fwu_command(uint32_t now)
     fwu.node   = u.NodeId;
     fwu.size   = u.ImageSize;
     fwu.t_last = now;
+    fwu.t_progress = now;
     /* BeginFirmwareUpdate: our node id, then the path (tail array, no length) */
     uint8_t payload[1 + 8];
     payload[0] = DC_NODE_ID;
@@ -1094,17 +1131,32 @@ static void fwu_handle_read_request(uint8_t node, const uint8_t *data, uint8_t d
     uint32_t offset = (uint32_t)dc_bits(pl, 0, 32);      /* u40 on the wire; the top byte is beyond any ESC */
     uint8_t  tid    = (uint8_t)(data[dlc - 1] & 0x1Fu);   /* the transfer id rides in every tail byte */
     fwu.reads++;
+    fwu.t_last = xTaskGetTickCount();
+    if (fwu.seq && offset == fwu.req_offset) {
+        /* the bootloader asks again every 750 ms, each time with a new
+         * transfer id: same read, answer with the id it is waiting for */
+        fwu.req_tid = tid;
+        if (fwu.answered) {
+            static uint8_t again[2 + 256];
+            again[0] = 0; again[1] = 0;
+            memcpy(again + 2, fwu.buf, fwu.req_len);
+            dc_service_response(DC_SVC_FILEREAD, fwu.node, DC_FILEREAD_BASE_CRC, fwu.req_tid, again, (uint16_t)(2 + fwu.req_len));
+        }
+        return;
+    }
     fwu.req_offset = offset;
     fwu.req_tid    = tid;
     fwu.have       = 0;
-    fwu.t_last     = xTaskGetTickCount();
+    fwu.halves     = 0;
+    fwu.answered   = false;
+    fwu.t_progress = fwu.t_last;
     fwu.req_len    = (offset >= fwu.size) ? 0 : (uint16_t)((fwu.size - offset) > 256u ? 256u : (fwu.size - offset));
     if (fwu.req_len == 0) {
         /* past the end: an empty read ends the update on the bootloader side */
         uint8_t payload[2] = { 0, 0 };
         dc_service_response(DC_SVC_FILEREAD, fwu.node, DC_FILEREAD_BASE_CRC, fwu.req_tid, payload, 2);
-        fwu.active = false;
-        fwu_publish(DRONECANUPDATE_STATE_DONE);
+        fwu.answered  = true;
+        fwu.finishing = true;
         return;
     }
     DroneCANFileRequestData r;
@@ -1115,28 +1167,21 @@ static void fwu_handle_read_request(uint8_t node, const uint8_t *data, uint8_t d
     fwu_publish(DRONECANUPDATE_STATE_TRANSFERRING);
 }
 
-/* the ground delivered part of the answer */
+/* the block is complete: answer the bootloader (DroneCAN task) */
 static void fwu_chunk(void)
 {
     static uint8_t payload[2 + 256];
-    DroneCANFileChunkData c;
-    DroneCANFileChunkGet(&c);
-    if (!fwu.active || c.Seq != fwu.seq || c.Offset < fwu.req_offset || c.Offset + c.Length > fwu.req_offset + fwu.req_len || c.Length > sizeof(c.Data)) {
-        return;
-    }
-    memcpy(fwu.buf + (c.Offset - fwu.req_offset), c.Data, c.Length);
-    fwu.have   = (uint16_t)(fwu.have + c.Length);
-    fwu.t_last = xTaskGetTickCount();
-    if (fwu.have < fwu.req_len) {
+    if (!fwu.active || fwu.answered || fwu.have < fwu.req_len) {
         return;
     }
     payload[0] = 0; payload[1] = 0;                        /* Error.value = OK */
     memcpy(payload + 2, fwu.buf, fwu.req_len);
     dc_service_response(DC_SVC_FILEREAD, fwu.node, DC_FILEREAD_BASE_CRC, fwu.req_tid, payload, (uint16_t)(2 + fwu.req_len));
+    fwu.answered = true;
     if (fwu.req_len < 256) {
-        fwu.active = false;                                /* a short read: the bootloader finishes and reboots */
-        fwu.req_offset += fwu.req_len;
-        fwu_publish(DRONECANUPDATE_STATE_DONE);
+        /* the short last block: the bootloader finishes once it has it, so
+         * keep answering its retries until it stops asking */
+        fwu.finishing = true;
     }
 }
 
@@ -1151,7 +1196,13 @@ static void fwu_update(uint32_t now)
         fwu_chunk_pending = false;
         fwu_chunk();
     }
-    if (fwu.active && (now - fwu.t_last) > (15000 / portTICK_RATE_MS)) {
+    if (fwu.active && fwu.finishing && (now - fwu.t_last) > (3000 / portTICK_RATE_MS)) {
+        /* three seconds without a read after the last block: it took it and rebooted */
+        fwu.active = false;
+        fwu.req_offset += fwu.req_len;
+        fwu_publish(DRONECANUPDATE_STATE_DONE);
+    } else if (fwu.active && !fwu.finishing && (now - fwu.t_progress) > (15000 / portTICK_RATE_MS)) {
+        /* retries alone are not progress: the ground has gone away */
         fwu.active = false;
         fwu_publish(DRONECANUPDATE_STATE_FAILED);
     }

@@ -1,8 +1,8 @@
 From 2c73c74ef50953e40e9d5d49192c822952592b94 Mon Sep 17 00:00:00 2001
 From: Kevin Finisterre <kfinisterre@KevinsMacStudio.localdomain>
 Date: Wed, 30 Sep 2026 17:09:12 -0400
-Subject: [PATCH] DroneCAN: play uavcan.equipment.indication.BeepCommand notes
- on the motor
+Subject: [PATCH 1/2] DroneCAN: play uavcan.equipment.indication.BeepCommand
+ notes on the motor
 
 A flight controller can now make the ESC sing one note at a time: the
 BeepCommand (1080) frequency and duration are decoded into a pending note
