@@ -332,3 +332,13 @@ Lesson from the first update attempt: the ground sends a block as two
 object only keeps the last one, so the chunk must be captured in the
 object's unpack callback, not in the module task's periodic slot. The
 bootloader itself accepted every response first time.
+
+## Arming tune, the proper way (2026-10-09)
+
+`TuneSettings.ArmTune` / `DisarmTune` (Imperial March, Beethoven's 5th, Ode to
+Joy, Korobeiniki, Charge) are sequenced by the DroneCAN module as
+`uavcan.equipment.indication.BeepCommand` notes on the arm and disarm edges;
+the ESCs (our AM32 build, pitch-corrected in patch 0003) play them on the
+motors. Notes over 400 ms are chained. Selector on the Cube hardware page.
+`tools/esc_tune.py march|fifth|ode|korobeiniki|charge|scale|sweep` plays from
+the ground; `sweep` steps 100 Hz to 4.5 kHz for a listening test.

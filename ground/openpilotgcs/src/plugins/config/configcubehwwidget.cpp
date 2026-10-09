@@ -63,6 +63,10 @@ ConfigCubeHWWidget::ConfigCubeHWWidget(QWidget *parent) : ConfigTaskWidget(paren
     addWidgetBinding("GPSSettings", "DataProtocol", m_ui->cbGPS1GPSProtocol);
     addWidgetBinding("GPSSettings", "DataProtocol", m_ui->cbGPS2GPSProtocol);
 
+    /* the tunes the ESCs play on arm and disarm: TuneSettings, sequenced by the DroneCAN module */
+    addWidgetBinding("TuneSettings", "ArmTune", m_ui->cbArmTune);
+    addWidgetBinding("TuneSettings", "DisarmTune", m_ui->cbDisarmTune);
+
     setupCustomCombos();
 
     enableControls(true);

@@ -1,0 +1,11 @@
+<xml>
+    <object name="TuneSettings" singleinstance="true" settings="true" category="System">
+        <description>What the ESCs play when the aircraft arms (ArmTune) and disarms (DisarmTune): a short motif sent note by note as uavcan.equipment.indication.BeepCommand (1080), which the ESC firmware plays on the motor while it is stopped. Notes longer than 400 ms are chained. Needs ESC firmware that implements BeepCommand (the Vimdrones AM32 build in this tree).</description>
+        <field name="ArmTune" units="" type="enum" elements="1" options="None,ImperialMarch,Beethoven5th,OdeToJoy,Korobeiniki,Charge" defaultvalue="ImperialMarch"/>
+        <field name="DisarmTune" units="" type="enum" elements="1" options="None,ImperialMarch,Beethoven5th,OdeToJoy,Korobeiniki,Charge" defaultvalue="None"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="true" updatemode="onchange" period="0"/>
+        <telemetryflight acked="true" updatemode="onchange" period="0"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>

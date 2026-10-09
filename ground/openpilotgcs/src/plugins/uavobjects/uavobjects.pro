@@ -46,6 +46,7 @@ HEADERS += \
     $$UAVOBJECT_SYNTHETICS/dronecanfilerequest.h \
     $$UAVOBJECT_SYNTHETICS/dronecanfilechunk.h \
     $$UAVOBJECT_SYNTHETICS/dronecanbeep.h \
+    $$UAVOBJECT_SYNTHETICS/tunesettings.h \
     $$UAVOBJECT_SYNTHETICS/dronecanstatus.h \
     $$UAVOBJECT_SYNTHETICS/sensorhubsettings.h \
     $$UAVOBJECT_SYNTHETICS/accelsensor.h \
@@ -173,6 +174,7 @@ SOURCES += \
     $$UAVOBJECT_SYNTHETICS/dronecanfilerequest.cpp \
     $$UAVOBJECT_SYNTHETICS/dronecanfilechunk.cpp \
     $$UAVOBJECT_SYNTHETICS/dronecanbeep.cpp \
+    $$UAVOBJECT_SYNTHETICS/tunesettings.cpp \
     $$UAVOBJECT_SYNTHETICS/dronecanstatus.cpp \
     $$UAVOBJECT_SYNTHETICS/sensorhubsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/accelsensor.cpp \

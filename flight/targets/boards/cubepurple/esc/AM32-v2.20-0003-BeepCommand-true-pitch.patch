@@ -1,0 +1,34 @@
+From d4c63f4bad833ffc9fd97661c37d968637762bd1 Mon Sep 17 00:00:00 2001
+From: Kevin Finisterre <kfinisterre@KevinsMacStudio.localdomain>
+Date: Fri, 9 Oct 2026 15:56:38 -0400
+Subject: [PATCH] DroneCAN BeepCommand: play the frequency asked for
+
+playBJNote() sizes the period for a clock/10 timer but runs it at
+prescaler 10 (clock/11), so every note came out 10/11 of its frequency;
+the BlueJay melody path compensates with its 11 MHz constant. Do the same.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ Src/main.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/Src/main.c b/Src/main.c
+index 7e32cea..4f4d811 100644
+--- a/Src/main.c
++++ b/Src/main.c
+@@ -1207,7 +1207,11 @@ if (!stepper_sine && armed) {
+                 __disable_irq();
+                 RELOAD_WATCHDOG_COUNTER();
+                 comStep(3);
+-                playBJNote(dronecan_beep_hz, dronecan_beep_ms);
++                /* playBJNote() runs TIM1 at prescaler 10 (clock / 11) but
++                 * sizes the period for clock / 10, so it sounds 10/11 of
++                 * what it is asked for; the BlueJay melody path hides the
++                 * same 1.1 in its 11 MHz constant.  Ask for 11/10. */
++                playBJNote((uint16_t)(((uint32_t)dronecan_beep_hz * 11u + 5u) / 10u), dronecan_beep_ms);
+                 allOff();
+                 SET_PRESCALER_PWM(0);
+                 SET_AUTO_RELOAD_PWM(TIMER1_MAX_ARR);
+-- 
+2.50.1 (Apple Git-155)
+

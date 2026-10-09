@@ -34,6 +34,8 @@
 #include "dronecan.h"
 #include "dronecanupdate.h"
 #include "dronecanbeep.h"
+#include "tunes.h"
+#include "tunesettings.h"
 #include "dronecanfilerequest.h"
 #include "dronecanfilechunk.h"
 #include "dronecanstatus.h"
@@ -218,6 +220,7 @@ int32_t DroneCANInitialize(void)
     DroneCANFileChunkInitialize();
     DroneCANUpdateConnectCallback(fwu_update_cb);
     DroneCANBeepInitialize();
+    TuneSettingsInitialize();
     DroneCANBeepConnectCallback(beep_cb);
     DroneCANFileChunkConnectCallback(fwu_chunk_cb);
     return 0;
@@ -1008,6 +1011,13 @@ static uint16_t f32_to_f16(float f)
     return (uint16_t)(sign | half);
 }
 
+static void beep_tx(uint16_t hz, uint16_t ms)
+{
+    uint16_t f = f32_to_f16((float)hz), d = f32_to_f16((float)ms / 1000.0f);
+    uint8_t payload[4] = { (uint8_t)(f & 0xFF), (uint8_t)(f >> 8), (uint8_t)(d & 0xFF), (uint8_t)(d >> 8) };
+    dc_broadcast(DC_PRIO_LOW, DC_DTID_BEEPCOMMAND, 0, &beep_tid, payload, 4);
+}
+
 static void beep_update(void)
 {
     if (!beep_pending) {
@@ -1016,11 +1026,66 @@ static void beep_update(void)
     beep_pending = false;
     DroneCANBeepData b;
     DroneCANBeepGet(&b);
-    uint16_t f = f32_to_f16((float)b.Frequency), d = f32_to_f16((float)b.Duration / 1000.0f);
-    uint8_t payload[4] = { (uint8_t)(f & 0xFF), (uint8_t)(f >> 8), (uint8_t)(d & 0xFF), (uint8_t)(d >> 8) };
-    dc_broadcast(DC_PRIO_LOW, DC_DTID_BEEPCOMMAND, 0, &beep_tid, payload, 4);
+    beep_tx(b.Frequency, b.Duration);
     b.Sent++;
     DroneCANBeepSet(&b);
+}
+
+/* ---- the arming tune: TuneSettings, played as a sequence of BeepCommand notes ---- */
+#define TUNE_NOTE_MAX_MS 400u        /* the ESC plays at most this per command */
+static struct {
+    const struct tune *t;
+    uint8_t  idx;                    /* next note */
+    uint16_t left;                   /* ms of the current note still to send */
+    uint32_t next;                   /* tick the next command goes out */
+} seq;
+static bool tune_go_prev;
+
+static void seq_start(const struct tune *t, uint32_t now)
+{
+    seq.t = t; seq.idx = 0; seq.left = 0; seq.next = now;
+}
+
+/* the task calls this every loop: one command when its time comes */
+static void seq_update(uint32_t now)
+{
+    if (!seq.t || (int32_t)(now - seq.next) < 0) {
+        return;
+    }
+    if (seq.left == 0) {
+        if (seq.idx >= seq.t->count) {
+            seq.t = NULL;
+            return;
+        }
+        seq.left = seq.t->notes[seq.idx].ms;
+        if (seq.t->notes[seq.idx].hz == 0) {                    /* a rest */
+            seq.next = now + seq.left / portTICK_RATE_MS;
+            seq.left = 0; seq.idx++;
+            return;
+        }
+    }
+    uint16_t piece = seq.left > TUNE_NOTE_MAX_MS ? TUNE_NOTE_MAX_MS : seq.left;
+    beep_tx(seq.t->notes[seq.idx].hz, piece);
+    seq.left = (uint16_t)(seq.left - piece);
+    /* the note, the ESC's turnaround, and a breath between notes */
+    seq.next = now + (piece + (seq.left ? 12u : 40u)) / portTICK_RATE_MS;
+    if (seq.left == 0) {
+        seq.idx++;
+    }
+}
+
+/* every 100 ms: the arm and disarm edges */
+static void tune_update(uint32_t now)
+{
+    FlightStatusArmedOptions armed;
+    FlightStatusArmedGet(&armed);
+    bool go = (armed == FLIGHTSTATUS_ARMED_ARMED) || ActuatorCommandReadOnly();
+    if (go != tune_go_prev) {
+        tune_go_prev = go;
+        TuneSettingsData ts;
+        TuneSettingsGet(&ts);
+        seq_start(tune_get(go ? ts.ArmTune : ts.DisarmTune), now);
+    }
 }
 
 /* ---- firmware update of a node: we are its file server ---- */
@@ -1419,8 +1484,10 @@ static void dronecanTask(__attribute__((unused)) void *parameters)
             last_arm = now;
             arming_tx(now);
             fwu_update(now);
+            tune_update(now);
         }
         beep_update();
+        seq_update(now);
         if (param_req_pending) {
             param_req_pending = false;
             param_start(now);
