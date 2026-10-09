@@ -1,0 +1,32 @@
+From 55bb010c6a15d0c29547a82e874f780253d3dea9 Mon Sep 17 00:00:00 2001
+From: Kevin Finisterre <kfinisterre@KevinsMacStudio.localdomain>
+Date: Fri, 9 Oct 2026 16:31:50 -0400
+Subject: [PATCH] DroneCAN notes: drop a note that finds the motor running
+
+The note branch only ran while stopped, so a note that arrived during a
+run would have waited and played the moment the motor stopped. Clear it
+instead: a note is for a stopped motor, now or never.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ Src/main.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/Src/main.c b/Src/main.c
+index f495611..652d9ec 100644
+--- a/Src/main.c
++++ b/Src/main.c
+@@ -1200,6 +1200,10 @@ if (!stepper_sine && armed) {
+                 play_tone_flag = 0;
+             }
+ #if DRONECAN_SUPPORT
++            if (dronecan_beep_ms && running) {
++                /* never defer a note into a running motor: drop it */
++                dronecan_beep_ms = 0;
++            }
+             if (dronecan_beep_ms && !running) {
+                 /* a note from the flight controller, played like the beacon
+                  * tunes: interrupts masked, because tenKhzRoutine() rewrites
+-- 
+2.50.1 (Apple Git-155)
+

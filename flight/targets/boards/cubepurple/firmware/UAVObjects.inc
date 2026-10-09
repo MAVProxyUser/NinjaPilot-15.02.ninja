@@ -113,6 +113,7 @@ UAVOBJSRCFILENAMES += dronecanupdate
 UAVOBJSRCFILENAMES += dronecanfilerequest
 UAVOBJSRCFILENAMES += dronecanfilechunk
 UAVOBJSRCFILENAMES += dronecanbeep
+UAVOBJSRCFILENAMES += dronecannote
 UAVOBJSRCFILENAMES += tunesettings
 UAVOBJSRCFILENAMES += flightstatus
 UAVOBJSRCFILENAMES += hwsettings

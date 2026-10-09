@@ -66,6 +66,9 @@ ConfigCubeHWWidget::ConfigCubeHWWidget(QWidget *parent) : ConfigTaskWidget(paren
     /* the tunes the ESCs play on arm and disarm: TuneSettings, sequenced by the DroneCAN module */
     addWidgetBinding("TuneSettings", "ArmTune", m_ui->cbArmTune);
     addWidgetBinding("TuneSettings", "DisarmTune", m_ui->cbDisarmTune);
+    addWidgetBinding("TuneSettings", "Voices", m_ui->cbVoices);
+    addWidgetBinding("TuneSettings", "Volume", m_ui->sbTuneVolume);
+    addWidgetBinding("TuneSettings", "Play", m_ui->cbPlay);
 
     setupCustomCombos();
 

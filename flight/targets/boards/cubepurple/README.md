@@ -342,3 +342,16 @@ the ESCs (our AM32 build, pitch-corrected in patch 0003) play them on the
 motors. Notes over 400 ms are chained. Selector on the Cube hardware page.
 `tools/esc_tune.py march|fifth|ode|korobeiniki|charge|scale|sweep` plays from
 the ground; `sweep` steps 100 Hz to 4.5 kHz for a listening test.
+
+## Four voices, eighteen tunes, the ESC PR (2026-10-09)
+
+ESC patches 0004 (`com.ninjapilot.esc.Note` 20400: mask, volume, pitch,
+duration, one note for the motors named) and 0005 (a note that finds the
+motor running is dropped, never deferred). `DroneCANNote` sends one from the
+ground. `TuneSettings.Voices` = FourVoices sends each voice of a step to its
+own motors (melody doubled, harmony, bass), AllTogether sends standard
+BeepCommand. `Volume` 0..11, `Play` auditions any tune now. Tunes: the five,
+plus Axel F and Eye of the Tiger (brief motifs), Fur Elise, Mountain King,
+Gran Vals, Valkyries, Shave and a Haircut, Reveille, Happy Birthday, and
+effects Laser, Siren, Chirps, SOS. `esc/AM32-PR.md` is the upstream pull
+request text: formats, limits, timing, examples and the copyright notes.

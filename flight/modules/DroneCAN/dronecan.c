@@ -34,6 +34,7 @@
 #include "dronecan.h"
 #include "dronecanupdate.h"
 #include "dronecanbeep.h"
+#include "dronecannote.h"
 #include "tunes.h"
 #include "tunesettings.h"
 #include "dronecanfilerequest.h"
@@ -75,6 +76,7 @@ static uint32_t svc_tx, svc_rx_count, svc_last_id; /* service frame diagnostics 
 #define DC_GETSET_BASE_CRC      0xFB10u  /* crc16-ccitt of signature 0xA7B622F939D1A4D5 */
 #define DC_DTID_ARMINGSTATUS    1100u    /* uavcan.equipment.safety.ArmingStatus: u8 status */
 #define DC_DTID_BEEPCOMMAND     1080u    /* uavcan.equipment.indication.BeepCommand: f16 frequency Hz, f16 duration s */
+#define DC_DTID_NOTE            20400u   /* com.ninjapilot.esc.Note: u8 mask, u8 volume, f16 frequency, f16 duration */
 #define DC_SVC_BEGINFWUPDATE    40u      /* uavcan.protocol.file.BeginFirmwareUpdate: u8 source node, path */
 #define DC_SVC_FILEREAD         48u      /* uavcan.protocol.file.Read: u40 offset + path -> i16 error + u8[<=256] */
 #define DC_FILEREAD_BASE_CRC    0x2F12u  /* crc16 of the signature 0x8DCDCA939F33F678, little-endian */
@@ -186,6 +188,8 @@ static void fwu_handle_read_request(uint8_t node, const uint8_t *data, uint8_t d
 static void fwu_update_cb(UAVObjEvent *ev);
 static struct fwu_state { bool active; uint8_t node; uint32_t size; uint32_t req_offset; uint16_t req_len; uint8_t req_tid; uint16_t have; uint8_t halves; bool answered; bool finishing; uint32_t t_progress; uint16_t seq; uint16_t reads; uint32_t t_last; uint8_t buf[256]; } fwu;
 static void beep_cb(UAVObjEvent *ev);
+static void note_cb(UAVObjEvent *ev);
+static void tune_settings_cb(UAVObjEvent *ev);
 static void fwu_chunk_cb(UAVObjEvent *ev);
 
 int32_t DroneCANStart(void)
@@ -221,7 +225,10 @@ int32_t DroneCANInitialize(void)
     DroneCANUpdateConnectCallback(fwu_update_cb);
     DroneCANBeepInitialize();
     TuneSettingsInitialize();
+    TuneSettingsConnectCallback(tune_settings_cb);
     DroneCANBeepConnectCallback(beep_cb);
+    DroneCANNoteInitialize();
+    DroneCANNoteConnectCallback(note_cb);
     DroneCANFileChunkConnectCallback(fwu_chunk_cb);
     return 0;
 }
@@ -1018,35 +1025,58 @@ static void beep_tx(uint16_t hz, uint16_t ms)
     dc_broadcast(DC_PRIO_LOW, DC_DTID_BEEPCOMMAND, 0, &beep_tid, payload, 4);
 }
 
+/* com.ninjapilot.esc.Note: the motors in mask, at a volume, one note */
+static volatile bool note_pending;
+static uint8_t  note_tid;
+static void note_cb(UAVObjEvent *ev) { if (ev->event == EV_UNPACKED) { note_pending = true; } }
+
+static void note_tx(uint8_t mask, uint8_t volume, uint16_t hz, uint16_t ms)
+{
+    uint16_t f = f32_to_f16((float)hz), d = f32_to_f16((float)ms / 1000.0f);
+    uint8_t payload[6] = { mask, volume, (uint8_t)(f & 0xFF), (uint8_t)(f >> 8), (uint8_t)(d & 0xFF), (uint8_t)(d >> 8) };
+    dc_broadcast(DC_PRIO_LOW, DC_DTID_NOTE, 0, &note_tid, payload, 6);
+}
+
 static void beep_update(void)
 {
-    if (!beep_pending) {
-        return;
+    if (beep_pending) {
+        beep_pending = false;
+        DroneCANBeepData b;
+        DroneCANBeepGet(&b);
+        beep_tx(b.Frequency, b.Duration);
+        b.Sent++;
+        DroneCANBeepSet(&b);
     }
-    beep_pending = false;
-    DroneCANBeepData b;
-    DroneCANBeepGet(&b);
-    beep_tx(b.Frequency, b.Duration);
-    b.Sent++;
-    DroneCANBeepSet(&b);
+    if (note_pending) {
+        note_pending = false;
+        DroneCANNoteData n;
+        DroneCANNoteGet(&n);
+        note_tx(n.Mask, n.Volume, n.Frequency, n.Duration);
+        n.Sent++;
+        DroneCANNoteSet(&n);
+    }
 }
 
 /* ---- the arming tune: TuneSettings, played as a sequence of BeepCommand notes ---- */
 #define TUNE_NOTE_MAX_MS 400u        /* the ESC plays at most this per command */
 static struct {
     const struct tune *t;
-    uint8_t  idx;                    /* next note */
-    uint16_t left;                   /* ms of the current note still to send */
+    uint8_t  idx;                    /* next step */
+    uint16_t left;                   /* ms of the current step still to send */
     uint32_t next;                   /* tick the next command goes out */
+    bool     four;                   /* per-motor Note messages, else BeepCommand to all */
+    uint8_t  volume;
 } seq;
 static bool tune_go_prev;
+static volatile bool tune_play_pending;
+static void tune_settings_cb(UAVObjEvent *ev) { if (ev->event == EV_UNPACKED) { tune_play_pending = true; } }
 
-static void seq_start(const struct tune *t, uint32_t now)
+static void seq_start(const struct tune *t, uint32_t now, bool four, uint8_t volume)
 {
-    seq.t = t; seq.idx = 0; seq.left = 0; seq.next = now;
+    seq.t = t; seq.idx = 0; seq.left = 0; seq.next = now; seq.four = four; seq.volume = volume;
 }
 
-/* the task calls this every loop: one command when its time comes */
+/* the task calls this every loop: the current step's commands when its time comes */
 static void seq_update(uint32_t now)
 {
     if (!seq.t || (int32_t)(now - seq.next) < 0) {
@@ -1057,17 +1087,31 @@ static void seq_update(uint32_t now)
             seq.t = NULL;
             return;
         }
-        seq.left = seq.t->notes[seq.idx].ms;
-        if (seq.t->notes[seq.idx].hz == 0) {                    /* a rest */
-            seq.next = now + seq.left / portTICK_RATE_MS;
-            seq.left = 0; seq.idx++;
-            return;
-        }
+        seq.left = seq.t->steps[seq.idx].ms;
     }
+    const struct tune_step *st = &seq.t->steps[seq.idx];
     uint16_t piece = seq.left > TUNE_NOTE_MAX_MS ? TUNE_NOTE_MAX_MS : seq.left;
-    beep_tx(seq.t->notes[seq.idx].hz, piece);
+    if (seq.four) {
+        /* one Note per distinct pitch, with the mask of the voices that share it */
+        uint8_t done = 0;
+        for (uint8_t v = 0; v < TUNE_VOICES; v++) {
+            if (!st->hz[v] || (done & (1u << v))) {
+                continue;
+            }
+            uint8_t mask = 0;
+            for (uint8_t w = v; w < TUNE_VOICES; w++) {
+                if (st->hz[w] == st->hz[v]) {
+                    mask |= (uint8_t)(1u << w);
+                }
+            }
+            done |= mask;
+            note_tx(mask, seq.volume, st->hz[v], piece);
+        }
+    } else if (st->hz[0]) {
+        beep_tx(st->hz[0], piece);
+    }
     seq.left = (uint16_t)(seq.left - piece);
-    /* the note, the ESC's turnaround, and a breath between notes */
+    /* the note, the ESC's turnaround, and a breath between steps */
     seq.next = now + (piece + (seq.left ? 12u : 40u)) / portTICK_RATE_MS;
     if (seq.left == 0) {
         seq.idx++;
@@ -1080,11 +1124,22 @@ static void tune_update(uint32_t now)
     FlightStatusArmedOptions armed;
     FlightStatusArmedGet(&armed);
     bool go = (armed == FLIGHTSTATUS_ARMED_ARMED) || ActuatorCommandReadOnly();
+    if (tune_play_pending) {
+        /* Play: audition a tune now, then put the field back */
+        tune_play_pending = false;
+        TuneSettingsData ts;
+        TuneSettingsGet(&ts);
+        if (ts.Play != TUNESETTINGS_PLAY_NONE) {
+            seq_start(tune_get(ts.Play), now, ts.Voices == TUNESETTINGS_VOICES_FOURVOICES, ts.Volume > 11 ? 11 : ts.Volume);
+            ts.Play = TUNESETTINGS_PLAY_NONE;
+            TuneSettingsSet(&ts);
+        }
+    }
     if (go != tune_go_prev) {
         tune_go_prev = go;
         TuneSettingsData ts;
         TuneSettingsGet(&ts);
-        seq_start(tune_get(go ? ts.ArmTune : ts.DisarmTune), now);
+        seq_start(tune_get(go ? ts.ArmTune : ts.DisarmTune), now, ts.Voices == TUNESETTINGS_VOICES_FOURVOICES, ts.Volume > 11 ? 11 : ts.Volume);
     }
 }
 

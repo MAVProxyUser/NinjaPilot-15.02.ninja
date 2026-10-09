@@ -1,8 +1,11 @@
 <xml>
     <object name="TuneSettings" singleinstance="true" settings="true" category="System">
-        <description>What the ESCs play when the aircraft arms (ArmTune) and disarms (DisarmTune): a short motif sent note by note as uavcan.equipment.indication.BeepCommand (1080), which the ESC firmware plays on the motor while it is stopped. Notes longer than 400 ms are chained. Needs ESC firmware that implements BeepCommand (the Vimdrones AM32 build in this tree).</description>
-        <field name="ArmTune" units="" type="enum" elements="1" options="None,ImperialMarch,Beethoven5th,OdeToJoy,Korobeiniki,Charge" defaultvalue="ImperialMarch"/>
-        <field name="DisarmTune" units="" type="enum" elements="1" options="None,ImperialMarch,Beethoven5th,OdeToJoy,Korobeiniki,Charge" defaultvalue="None"/>
+        <description>What the ESCs play when the aircraft arms (ArmTune) and disarms (DisarmTune): a short motif sent note by note as uavcan.equipment.indication.BeepCommand (1080), which the ESC firmware plays on the motor while it is stopped. Notes longer than 400 ms are chained. Voices: AllTogether sends standard BeepCommand (every motor the same note); FourVoices sends com.ninjapilot.esc.Note per voice, so melody and bass land on different motors, at Volume 0..11. Play auditions a tune right away (it returns to None); Save does not keep it. Needs ESC firmware that implements BeepCommand (the Vimdrones AM32 build in this tree).</description>
+        <field name="ArmTune" units="" type="enum" elements="1" options="None,ImperialMarch,Beethoven5th,OdeToJoy,Korobeiniki,Charge,AxelF,EyeOfTheTiger,FurElise,MountainKing,GranVals,Valkyries,ShaveAndAHaircut,Reveille,HappyBirthday,Laser,Siren,Chirps,SOS" defaultvalue="ImperialMarch"/>
+        <field name="DisarmTune" units="" type="enum" elements="1" options="None,ImperialMarch,Beethoven5th,OdeToJoy,Korobeiniki,Charge,AxelF,EyeOfTheTiger,FurElise,MountainKing,GranVals,Valkyries,ShaveAndAHaircut,Reveille,HappyBirthday,Laser,Siren,Chirps,SOS" defaultvalue="None"/>
+        <field name="Play" units="" type="enum" elements="1" options="None,ImperialMarch,Beethoven5th,OdeToJoy,Korobeiniki,Charge,AxelF,EyeOfTheTiger,FurElise,MountainKing,GranVals,Valkyries,ShaveAndAHaircut,Reveille,HappyBirthday,Laser,Siren,Chirps,SOS" defaultvalue="None"/>
+        <field name="Voices" units="" type="enum" elements="1" options="AllTogether,FourVoices" defaultvalue="FourVoices"/>
+        <field name="Volume" units="" type="uint8" elements="1" defaultvalue="5"/>
         <access gcs="readwrite" flight="readwrite"/>
         <telemetrygcs acked="true" updatemode="onchange" period="0"/>
         <telemetryflight acked="true" updatemode="onchange" period="0"/>
