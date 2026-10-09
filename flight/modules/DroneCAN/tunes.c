@@ -194,6 +194,27 @@ static const struct tune_step sos[] = {
     { { 880, 880, 880, 880 }, 120 }, { { 0, 0, 0, 0 }, 120 }, { { 880, 880, 880, 880 }, 120 }, { { 0, 0, 0, 0 }, 120 }, { { 880, 880, 880, 880 }, 120 },
 };
 
+/* Shche ne vmerla Ukrainy (Verbytsky, 1863): the opening phrase, from the
+ * RTTTL "UAAnthem:b=150,o=5,d=4:e,8e,8e,8d,8e,8f,g,8f,e,d,c,e,b4,e,a4,a4" */
+static const struct tune_step ua_anthem[] = {
+    { { 659, 659, 523, 220 }, 400 },
+    { { 659, 659, 523, 220 }, 200 },
+    { { 659, 659, 523, 220 }, 200 },
+    { { 587, 587, 494, 220 }, 200 },
+    { { 659, 659, 523, 220 }, 200 },
+    { { 698, 698, 523, 175 }, 200 },
+    { { 784, 784, 659, 262 }, 400 },
+    { { 698, 698, 523, 175 }, 200 },
+    { { 659, 659, 523, 220 }, 400 },
+    { { 587, 587, 494, 220 }, 400 },
+    { { 523, 523, 440, 262 }, 400 },
+    { { 659, 659, 523, 220 }, 400 },
+    { { 494, 494, 392, 165 }, 400 },
+    { { 659, 659, 523, 220 }, 400 },
+    { { 440, 440, 349, 220 }, 400 },
+    { { 440, 440, 349, 220 }, 400 },
+};
+
 static const struct tune tunes[] = {
     { "None",          0,              0 },
     { "ImperialMarch", imperial_march, sizeof(imperial_march) / sizeof(imperial_march[0]) },
@@ -214,6 +235,7 @@ static const struct tune tunes[] = {
     { "Siren",         siren,          sizeof(siren) / sizeof(siren[0]) },
     { "Chirps",        chirps,         sizeof(chirps) / sizeof(chirps[0]) },
     { "SOS",           sos,            sizeof(sos) / sizeof(sos[0]) },
+    { "UAAnthem",      ua_anthem,      sizeof(ua_anthem) / sizeof(ua_anthem[0]) },
 };
 
 const struct tune *tune_get(uint8_t id)

@@ -118,7 +118,7 @@ struct tune_step { uint16_t hz[4]; uint16_t ms; };
 
 ## Example tones included
 
-Eighteen short tables in the reference sender, each a few seconds, arranged
+Nineteen short tables in the reference sender, each a few seconds, arranged
 for four voices (melody doubled on two motors, a harmony line, a bass) and
 rendered to .wav by `tune_render.py` for listening off the bench. Lengths
 are as sent, including the gaps.
@@ -143,6 +143,7 @@ are as sent, including the gaps.
 | 16 | Siren | two-tone | ours | 1.8 s |
 | 17 | Chirps | droid chatter scattered over the four motors | ours | 1.2 s |
 | 18 | SOS | Morse, all motors | ours | 3.2 s |
+| 19 | UAAnthem | the Ukrainian anthem, opening phrase (Verbytsky, 1863), from an RTTTL string | public domain | 5.2 s |
 
 The two pieces marked as hooks (6, 7) and the march (1) are the only
 in-copyright material; see below. Everything else is either older than
@@ -198,7 +199,7 @@ musical work, so, for the record:
   `file.Read` served by the flight controller), all four back within a
   second of the last block.
 * Single notes, four-note figures, chained notes, chords (four pitches on
-  four motors), a volume ramp 1..11, formant-style triads, the eighteen
+  four motors), a volume ramp 1..11, formant-style triads, the nineteen
   tunes above, and arming and disarming tunes from the flight controller,
   all audible and at pitch. A throttle opened during a tune spins the
   motors at once.
@@ -259,7 +260,10 @@ have no reply. What you can observe:
 * `esc.Status` error counts, temperature and voltage are unchanged by notes.
 
 The reference sender keeps a tune as steps of `{hz[4], ms}`, 0 meaning rest
-for that voice, and the eighteen tables above are exactly that.
+for that voice, and the nineteen tables above are exactly that. Anything in
+RTTTL (the ringtone text format BlueJay's melody editor also takes) converts
+mechanically: `esc_tune.py --rtttl "UAAnthem:b=150,o=5,d=4:e,8e,8e,..."`
+plays one from the ground, and the anthem above was made that way.
 
 ## Not in this PR
 

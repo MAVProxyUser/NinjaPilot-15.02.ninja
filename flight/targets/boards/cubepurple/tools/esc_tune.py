@@ -3,6 +3,7 @@
 note (uavcan.equipment.indication.BeepCommand on the bus).  The ESC firmware
 plays a note for at most 400 ms, so longer notes are chained back to back.
 usage: esc_tune.py TUNE [--tempo 1.0] [--pitch 1.0] [--gap 30]
+       esc_tune.py --rtttl "name:b=150,o=5,d=4:e,8e,8e,8d,..."   any ringtone-text tune
   TUNE: march | fifth | ode | korobeiniki | charge | sweep | scale
   --pitch  multiplies every frequency (to trim the ESC's timer rounding)
   --gap    silence between notes in ms (the ESC adds its own re-arm time)
@@ -28,7 +29,23 @@ TUNES = {
     "scale":       [(f, 300) for f in (C4, D4, E4, F4, G4, A4, B4, C5)],
     "sweep":       [(int(100 * 2 ** (i / 2)), 500) for i in range(12)],   # 100 Hz .. 4.5 kHz
 }
-name = next((a for a in sys.argv[1:] if a in TUNES), None)
+def rtttl(text):
+    """RTTTL (ringtone text) -> [(hz, ms)]: 'name:b=bpm,o=octave,d=length:notes'"""
+    import re
+    name, defaults, notes = text.split(":"); d = dict(kv.split("=") for kv in defaults.split(","))
+    bpm, octv, dlen = int(d.get("b", 63)), int(d.get("o", 6)), int(d.get("d", 4))
+    semis = {"c": 0, "c#": 1, "d": 2, "d#": 3, "e": 4, "f": 5, "f#": 6, "g": 7, "g#": 8, "a": 9, "a#": 10, "b": 11, "p": None}
+    out = []
+    for tok in notes.split(","):
+        m = re.match(r"(\d*)([a-gp]#?)(\.?)(\d?)(\.?)", tok.strip().lower()); ln = int(m.group(1) or dlen); n = m.group(2); dot = "." in (m.group(3) + m.group(5)); o = int(m.group(4) or octv)
+        ms = int(round(60000.0 / bpm * 4 / ln * (1.5 if dot else 1)))
+        hz = 0 if semis[n] is None else int(round(440.0 * 2 ** ((semis[n] - 9) / 12.0 + (o - 4))))
+        out.append((hz, ms))
+    return name, out
+if "--rtttl" in sys.argv:
+    name, TUNES[name] = rtttl(sys.argv[sys.argv.index("--rtttl") + 1])
+else:
+    name = next((a for a in sys.argv[1:] if a in TUNES), None)
 if not name: print(__doc__); sys.exit(1)
 client = open_client(); st = {}
 def grab(od, inst, d): st[od.name] = d
