@@ -23,6 +23,7 @@
 #include <extensionsystem/pluginmanager.h>
 #include <coreplugin/generalsettings.h>
 #include "hwsettings.h"
+#include "tunesettings.h"
 
 ConfigCubeHWWidget::ConfigCubeHWWidget(QWidget *parent) : ConfigTaskWidget(parent), m_refreshing(true)
 {
@@ -71,6 +72,7 @@ ConfigCubeHWWidget::ConfigCubeHWWidget(QWidget *parent) : ConfigTaskWidget(paren
     addWidgetBinding("TuneSettings", "Play", m_ui->cbPlay);
 
     setupCustomCombos();
+    connect(m_ui->btnPlay, SIGNAL(clicked()), this, SLOT(playTune()));
 
     enableControls(true);
     populateWidgets();
@@ -195,4 +197,20 @@ void ConfigCubeHWWidget::gps2Changed(int index)
 {
     Q_UNUSED(index);
     showSpeed(m_ui->cbGPS2->currentText(), m_ui->lblGPS2Speed, m_ui->cbGPS2TelemSpeed, m_ui->cbGPS2GPSSpeed, m_ui->cbGPS2ComSpeed, m_ui->cbGPS2GPSProtocol, m_ui->lblGPS2Protocol);
+}
+
+/* Play: send only TuneSettings.Play to the board, right now, saving nothing.
+ * The flight side starts the tune and puts the field back to None. */
+void ConfigCubeHWWidget::playTune()
+{
+    TuneSettings *tune = TuneSettings::GetInstance(getObjectManager());
+    if (!tune) {
+        return;
+    }
+    UAVObjectField *f = tune->getField("Play");
+    if (!f) {
+        return;
+    }
+    f->setValue(m_ui->cbPlay->currentText());
+    tune->updated();
 }
