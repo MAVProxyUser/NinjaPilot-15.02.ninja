@@ -215,32 +215,6 @@ static const struct tune_step ua_anthem[] = {
     { { 440, 440, 349, 220 }, 400 },
 };
 
-/* the boogie riff (Thorogood, 1982): 12/8, moderately slow. Three short hits
- * on G for beats 1-3, then the C G Bb figure as the three eighths of beat 4,
- * twice, landing on G. Up an octave from the record, where a motor can voice
- * it, with a thump under the first and third hits. */
-static const struct tune_step bad_to_the_bone[] = {
-    { { G4, G4, 0, G3 }, 250 },
-    { { 0, 0, 0, 0 }, 510 },
-    { { G4, G4, 0, 0 }, 250 },
-    { { 0, 0, 0, 0 }, 510 },
-    { { G4, G4, 0, G3 }, 250 },
-    { { 0, 0, 0, 0 }, 510 },
-    { { C5, C5, 0, 0 }, 253 },
-    { { G4, G4, 0, 0 }, 253 },
-    { { Bb4, Bb4, 0, 0 }, 253 },
-    { { G4, G4, 0, G3 }, 250 },
-    { { 0, 0, 0, 0 }, 510 },
-    { { G4, G4, 0, 0 }, 250 },
-    { { 0, 0, 0, 0 }, 510 },
-    { { G4, G4, 0, G3 }, 250 },
-    { { 0, 0, 0, 0 }, 510 },
-    { { C5, C5, 0, 0 }, 253 },
-    { { G4, G4, 0, 0 }, 253 },
-    { { Bb4, Bb4, 0, 0 }, 253 },
-    { { G4, G4, 0, G3 }, 760 },
-};
-
 /* the national anthem, the first line (Smith, c. 1775; public domain):
  * melody doubled, thirds under it, roots in the bass */
 static const struct tune_step star_spangled[] = {
@@ -270,7 +244,6 @@ static const struct tune tunes[] = {
     { "Chirps",        chirps,         sizeof(chirps) / sizeof(chirps[0]) },
     { "SOS",           sos,            sizeof(sos) / sizeof(sos[0]) },
     { "UAAnthem",      ua_anthem,      sizeof(ua_anthem) / sizeof(ua_anthem[0]) },
-    { "BadToTheBone",  bad_to_the_bone, sizeof(bad_to_the_bone) / sizeof(bad_to_the_bone[0]) },
     { "StarSpangledBanner", star_spangled, sizeof(star_spangled) / sizeof(star_spangled[0]) },
 };
 

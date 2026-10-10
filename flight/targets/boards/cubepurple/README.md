@@ -352,6 +352,9 @@ ground. `TuneSettings.Voices` = FourVoices sends each voice of a step to its
 own motors (melody doubled, harmony, bass), AllTogether sends standard
 BeepCommand. `Volume` 0..11, `Play` auditions any tune now. Tunes: the five,
 plus Axel F and Eye of the Tiger (brief motifs), Fur Elise, Mountain King,
-Gran Vals, Valkyries, Shave and a Haircut, Reveille, Happy Birthday, and
-effects Laser, Siren, Chirps, SOS. `esc/AM32-PR.md` is the upstream pull
+Gran Vals, Valkyries, Shave and a Haircut, Reveille, Happy Birthday, the
+Ukrainian anthem (from an RTTTL string; `esc_tune.py --rtttl` plays any) and
+the Star-Spangled Banner, and effects Laser, Siren, Chirps, SOS: twenty.
+`tune_render.py` renders them all to .wav. The GCS Cube page: On arm, On
+disarm, Voices, Volume, and a Play button beside each selector. `esc/AM32-PR.md` is the upstream pull
 request text: formats, limits, timing, examples and the copyright notes.

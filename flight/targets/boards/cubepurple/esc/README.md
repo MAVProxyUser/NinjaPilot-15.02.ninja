@@ -1,16 +1,19 @@
 # ESC firmware for the Vimdrones S50 (AM32, DroneCAN)
 
-* `AM32-v2.20-0001-BeepCommand.patch`, `AM32-v2.20-0002-...patch`: our changes
-  on top of AM32 v2.20 (the release the ESCs ship with). Adds
-  `uavcan.equipment.indication.BeepCommand` (1080): the ESC plays the note on
-  the motor from its main loop while stopped, interrupts masked like its own
-  beacon tones (the 10 kHz routine would otherwise zero the duty cycle and cut
-  the note to a click), capped at 400 ms.
+* `AM32-v2.20-0001..0006-*.patch`: our six commits on top of AM32 v2.20 (the
+  release the ESCs ship with): `uavcan.equipment.indication.BeepCommand`
+  (1080) played on the motor while stopped, interrupts masked like the beacon
+  tones; true pitch; `uavcan.equipment.indication.NoteCommand` (20400: mask,
+  volume, pitch, duration) for one note per motor; a note that finds the
+  motor running is dropped. Upstream pull request:
+  https://github.com/am32-firmware/AM32/pull/452 (branch `dronecan-notes` on
+  MAVProxyUser/AM32, the same six commits rebased onto AM32 main).
+* `AM32-PR.md`: the pull request text.
 * `AM32_VIMDRONES_S50_L431_CAN_2.20-beep.bin`: that patch built for the
   `VIMDRONES_S50_L431_CAN` target, bootloader signature and CRCs included.
 
 Rebuild: clone https://github.com/am32-firmware/AM32 at tag `v2.20`
-(`lineage/AM32` here), `git am AM32-v2.20-000*.patch`,
+(`lineage/AM32` here), `git am AM32-v2.20-00*.patch`,
 `make arm_sdk_install` (AM32's pinned gcc 10.3; Homebrew gcc 13 fails on
 `-Werror=array-bounds`), then `make VIMDRONES_S50_L431_CAN`.
 
