@@ -215,6 +215,23 @@ static const struct tune_step ua_anthem[] = {
     { { 440, 440, 349, 220 }, 400 },
 };
 
+/* the boogie riff (Thorogood, 1982): a shuffle in G, the low string doubled
+ * an octave down on the bass motor, a thump on the beat */
+static const struct tune_step bad_to_the_bone[] = {
+    { { G3, G3, 0, G3 }, 220 }, { { 0, 0, 0, 0 }, 80 }, { { G3, G3, 0, 0 }, 220 }, { { 0, 0, 0, 0 }, 80 },
+    { { G3, G3, 0, G3 }, 220 }, { { Bb3, Bb3, 0, 0 }, 110 }, { { G3, G3, 0, 0 }, 330 }, { { 0, 0, 0, 0 }, 160 },
+    { { G3, G3, 0, G3 }, 220 }, { { 0, 0, 0, 0 }, 80 }, { { G3, G3, 0, 0 }, 220 }, { { 0, 0, 0, 0 }, 80 },
+    { { G3, G3, 0, G3 }, 220 }, { { C4, C4, 0, 0 }, 110 }, { { Bb3, Bb3, 0, 0 }, 110 }, { { G3, G3, 0, G3 }, 500 },
+};
+
+/* the national anthem, the first line (Smith, c. 1775; public domain):
+ * melody doubled, thirds under it, roots in the bass */
+static const struct tune_step star_spangled[] = {
+    { { G4, G4, E4, C3 }, 300 }, { { E4, E4, C4, 0 }, 100 }, { { C4, C4, G3, C3 }, 400 }, { { E4, E4, C4, 0 }, 400 }, { { G4, G4, E4, C3 }, 400 },
+    { { C5, C5, E4, C3 }, 800 }, { { E5, E5, G4, C3 }, 300 }, { { D5, D5, G4, 0 }, 100 }, { { C5, C5, E4, C3 }, 400 },
+    { { E4, E4, C4, 0 }, 400 }, { { Gb4, Gb4, D4, D3 }, 400 }, { { G4, G4, D4, G3 }, 800 },
+};
+
 static const struct tune tunes[] = {
     { "None",          0,              0 },
     { "ImperialMarch", imperial_march, sizeof(imperial_march) / sizeof(imperial_march[0]) },
@@ -236,6 +253,8 @@ static const struct tune tunes[] = {
     { "Chirps",        chirps,         sizeof(chirps) / sizeof(chirps[0]) },
     { "SOS",           sos,            sizeof(sos) / sizeof(sos[0]) },
     { "UAAnthem",      ua_anthem,      sizeof(ua_anthem) / sizeof(ua_anthem[0]) },
+    { "BadToTheBone",  bad_to_the_bone, sizeof(bad_to_the_bone) / sizeof(bad_to_the_bone[0]) },
+    { "StarSpangledBanner", star_spangled, sizeof(star_spangled) / sizeof(star_spangled[0]) },
 };
 
 const struct tune *tune_get(uint8_t id)

@@ -118,7 +118,7 @@ struct tune_step { uint16_t hz[4]; uint16_t ms; };
 
 ## Example tones included
 
-Nineteen short tables in the reference sender, each a few seconds, arranged
+Twenty-one short tables in the reference sender, each a few seconds, arranged
 for four voices (melody doubled on two motors, a harmony line, a bass) and
 rendered to .wav by `tune_render.py` for listening off the bench. Lengths
 are as sent, including the gaps.
@@ -144,9 +144,11 @@ are as sent, including the gaps.
 | 17 | Chirps | droid chatter scattered over the four motors | ours | 1.2 s |
 | 18 | SOS | Morse, all motors | ours | 3.2 s |
 | 19 | UAAnthem | the Ukrainian anthem, opening phrase (Verbytsky, 1863), from an RTTTL string | public domain | 5.2 s |
+| 20 | BadToTheBone | the boogie riff (Thorogood, 1982) | in copyright, brief quotation | 3.4 s |
+| 21 | StarSpangledBanner | the first line (Smith, c. 1775) | public domain | 4.8 s |
 
-The two pieces marked as hooks (6, 7) and the march (1) are the only
-in-copyright material; see below. Everything else is either older than
+The three pieces marked as hooks or riffs (6, 7, 20) and the march (1) are
+the only in-copyright material; see below. Everything else is either older than
 copyright or written here.
 
 ## On copyright and the note tables
@@ -161,15 +163,15 @@ musical work, so, for the record:
   reference table: <https://guides.library.cornell.edu/copyright/publicdomain>.
   A composition and a *recording* of it are separate works: a public-domain
   symphony does not make a 1990 recording of it free, and vice versa.
-* The three in-copyright items, the march, the cop-theme hook and the boxing
-  riff, are quotations of an opening figure of a few seconds each,
+* The four in-copyright items, the march, the cop-theme hook, the boxing
+  riff and the boogie riff, are quotations of an opening figure of a few seconds each,
   re-rendered as timer values for a motor, non-commercial, and no
   substitute for the work. Those are the fair-use factors (purpose and
   character, nature, amount, market effect), see the Copyright Office's FAQ:
   <https://www.copyright.gov/help/faq/faq-fairuse.html> and its index of
   decisions: <https://www.copyright.gov/fair-use/>. Fair use is decided case
   by case; nothing here is legal advice, and a maintainer who would rather
-  not carry those three tables can drop them without touching the code: the
+  not carry those four tables can drop them without touching the code: the
   fifteen others and the mechanism do not depend on them.
 * **There is no "30-second rule"**, and never was. The Copyright Office is
   explicit that no amount of a work is automatically safe to take; Stanford's
@@ -199,7 +201,7 @@ musical work, so, for the record:
   `file.Read` served by the flight controller), all four back within a
   second of the last block.
 * Single notes, four-note figures, chained notes, chords (four pitches on
-  four motors), a volume ramp 1..11, formant-style triads, the nineteen
+  four motors), a volume ramp 1..11, formant-style triads, the twenty-one
   tunes above, and arming and disarming tunes from the flight controller,
   all audible and at pitch. A throttle opened during a tune spins the
   motors at once.
@@ -260,7 +262,7 @@ have no reply. What you can observe:
 * `esc.Status` error counts, temperature and voltage are unchanged by notes.
 
 The reference sender keeps a tune as steps of `{hz[4], ms}`, 0 meaning rest
-for that voice, and the nineteen tables above are exactly that. Anything in
+for that voice, and the twenty-one tables above are exactly that. Anything in
 RTTTL (the ringtone text format BlueJay's melody editor also takes) converts
 mechanically: `esc_tune.py --rtttl "UAAnthem:b=150,o=5,d=4:e,8e,8e,..."`
 plays one from the ground, and the anthem above was made that way.
