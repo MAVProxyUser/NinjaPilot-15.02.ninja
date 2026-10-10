@@ -215,13 +215,19 @@ static const struct tune_step ua_anthem[] = {
     { { 440, 440, 349, 220 }, 400 },
 };
 
-/* the boogie riff (Thorogood, 1982): a shuffle in G, the low string doubled
- * an octave down on the bass motor, a thump on the beat */
+/* the boogie riff (Thorogood, 1982): a slow shuffle in G, the stop-time
+ * figure "dun dun dun da-DUN". Up an octave from the record, because a motor
+ * cannot voice a low G, with a single thump under the first hit of each
+ * group; the hits are swung (long, then the hammer-on short) */
 static const struct tune_step bad_to_the_bone[] = {
-    { { G3, G3, 0, G3 }, 220 }, { { 0, 0, 0, 0 }, 80 }, { { G3, G3, 0, 0 }, 220 }, { { 0, 0, 0, 0 }, 80 },
-    { { G3, G3, 0, G3 }, 220 }, { { Bb3, Bb3, 0, 0 }, 110 }, { { G3, G3, 0, 0 }, 330 }, { { 0, 0, 0, 0 }, 160 },
-    { { G3, G3, 0, G3 }, 220 }, { { 0, 0, 0, 0 }, 80 }, { { G3, G3, 0, 0 }, 220 }, { { 0, 0, 0, 0 }, 80 },
-    { { G3, G3, 0, G3 }, 220 }, { { C4, C4, 0, 0 }, 110 }, { { Bb3, Bb3, 0, 0 }, 110 }, { { G3, G3, 0, G3 }, 500 },
+    { { G4, G4, 0, G3 }, 360 }, { { 0, 0, 0, 0 }, 140 },
+    { { G4, G4, 0, 0 }, 360 }, { { 0, 0, 0, 0 }, 140 },
+    { { G4, G4, 0, 0 }, 360 }, { { 0, 0, 0, 0 }, 60 },
+    { { Bb4, Bb4, 0, 0 }, 160 }, { { G4, G4, 0, G3 }, 520 }, { { 0, 0, 0, 0 }, 420 },
+    { { G4, G4, 0, G3 }, 360 }, { { 0, 0, 0, 0 }, 140 },
+    { { G4, G4, 0, 0 }, 360 }, { { 0, 0, 0, 0 }, 140 },
+    { { G4, G4, 0, 0 }, 360 }, { { 0, 0, 0, 0 }, 60 },
+    { { Bb4, Bb4, 0, 0 }, 160 }, { { C5, C5, 0, 0 }, 160 }, { { Bb4, Bb4, 0, 0 }, 160 }, { { G4, G4, 0, G3 }, 700 },
 };
 
 /* the national anthem, the first line (Smith, c. 1775; public domain):
