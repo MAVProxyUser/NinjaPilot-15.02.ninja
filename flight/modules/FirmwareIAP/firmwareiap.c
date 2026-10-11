@@ -161,6 +161,15 @@ static void FirmwareIAPCallback(UAVObjEvent *ev)
             data.ArmReset = 0;
             FirmwareIAPObjSet(&data);
         }
+#ifdef PIOS_IAP_OWN_BOARD_TYPE_ONLY
+        /* An OPLink sees every FirmwareIAPObj the GCS sends to the flight
+         * controller behind it (BoardType 0).  Only the sequence addressed to
+         * this board type may reset the modem. */
+        if (data.BoardType != bdinfo->board_type) {
+            iap_state = IAP_STATE_READY;
+            return;
+        }
+#endif
         switch (iap_state) {
         case IAP_STATE_READY:
             if (data.Command == IAP_CMD_STEP_1) {

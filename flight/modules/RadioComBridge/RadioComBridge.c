@@ -34,6 +34,7 @@
 #include <openpilot.h>
 #include <radiocombridge.h>
 #include <oplinkstatus.h>
+#include <firmwareiapobj.h>
 #include <objectpersistence.h>
 #include <oplinksettings.h>
 #include <oplinkreceiver.h>
@@ -611,6 +612,14 @@ static void ProcessTelemetryStream(UAVTalkConnection inConnectionHandle, UAVTalk
             case MetaObjectId(OPLINKSETTINGS_OBJID):
             case MetaObjectId(OPLINKRECEIVER_OBJID):
                 UAVTalkReceiveObject(inConnectionHandle);
+                break;
+            case FIRMWAREIAPOBJ_OBJID:
+            case MetaObjectId(FIRMWAREIAPOBJ_OBJID):
+                // the modem's own FirmwareIAP module (reboot / firmware update
+                // when BoardType is ours) and the flight controller behind the
+                // link both get to see it
+                UAVTalkReceiveObject(inConnectionHandle);
+                UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
                 break;
             case OBJECTPERSISTENCE_OBJID:
             case MetaObjectId(OBJECTPERSISTENCE_OBJID):

@@ -358,3 +358,18 @@ the Star-Spangled Banner, and effects Laser, Siren, Chirps, SOS: twenty.
 `tune_render.py` renders them all to .wav. The GCS Cube page: On arm, On
 disarm, Voices, Volume, and a Play button beside each selector. `esc/AM32-PR.md` is the upstream pull
 request text: formats, limits, timing, examples and the copyright notes.
+
+## Radio telemetry: OPLink pair for TELEM1 (2026-10-11)
+
+Two OPLink Mini modems were flashed from this tree and linked on the bench
+(remote `Connected` at -73 dBm, coordinator hearing it at -76 dBm, 1.25 mW,
+57600, channels 0..250).  The remote's main port is set to Telemetry for this
+board's TELEM1 (`HwSettings.RV_TelemetryPort = Telemetry`, 57600 - already the
+flight-ready setting): TX<->RX, RX<->TX, GND, 5 V.  The coordinator stays on the
+GCS machine's USB and the GCS connects to it like any USB board; the Cube's
+UAVTalk then rides the radio.
+
+The OPLink firmware build, the Python bootloader uploader (`ground/pyuavtalk/
+opdfu.py`), the pairing tool and the quirks that matter (first flash needs a
+replug, coordinator never says Connected, bootloader v2 vs v4 memory map) are
+in `flight/targets/boards/oplinkmini/README.md`.

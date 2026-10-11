@@ -104,6 +104,9 @@
 /* PIOS common peripherals */
 #define PIOS_INCLUDE_LED
 #define PIOS_INCLUDE_IAP
+/* the modem relays FirmwareIAPObj towards the flight controller behind it;
+ * it must only reboot itself when BoardType is its own (0x03) */
+#define PIOS_IAP_OWN_BOARD_TYPE_ONLY
 #define PIOS_INCLUDE_SERVO
 /* #define PIOS_INCLUDE_I2C_ESC */
 /* #define PIOS_INCLUDE_SDCARD */
