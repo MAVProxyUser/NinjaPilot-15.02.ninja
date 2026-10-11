@@ -86,7 +86,11 @@
 
 // The maximum amount of time without activity before initiating a reset.
 #define PIOS_RFM22B_SUPERVISOR_TIMEOUT   150  // ms
-#define RFM22B_KEEPALIVE_SLOTS           16   // an idle remote transmits an empty packet every Nth slot
+#define RFM22B_KEEPALIVE_SLOTS           16
+#define RFM22B_KEEPALIVE_LEN             7    // marker (3) + sender id (4)
+#define RFM22B_KEEPALIVE_MARK0           0x00
+#define RFM22B_KEEPALIVE_MARK1           0xA5
+#define RFM22B_KEEPALIVE_MARK2           0x5A   // an idle remote transmits an empty packet every Nth slot
 
 // this is too adjust the RF module so that it is on frequency
 #define OSC_LOAD_CAP                     0x7F  // cap = 12.5pf .. default
@@ -981,7 +985,18 @@ pios_rfm22b_int_result PIOS_RFM22B_ProcessRx(uint32_t rfm22b_id)
         rfm22b_dev->stats.rx_byte_count += rfm22b_dev->rx_buffer_wr;
 
         // Update the pair status with this packet.
-        rfm22_updatePairStatus(rfm22b_dev);
+        // A coordinator receives packets addressed to itself, so the destination
+        // id names nobody; use the id of the remote whose keepalive was heard last.
+        if (rfm22_isCoordinator(rfm22b_dev)) {
+            if (rfm22b_dev->last_sender_id) {
+                uint32_t dest = rfm22b_dev->rx_destination_id;
+                rfm22b_dev->rx_destination_id = rfm22b_dev->last_sender_id;
+                rfm22_updatePairStatus(rfm22b_dev);
+                rfm22b_dev->rx_destination_id = dest;
+            }
+        } else {
+            rfm22_updatePairStatus(rfm22b_dev);
+        }
 
         // We're finished with Rx mode
         rfm22b_dev->rfm22b_state = RFM22B_STATE_TRANSITION;
@@ -1364,6 +1379,7 @@ static enum pios_radio_event rfm22_init(struct pios_rfm22b_dev *rfm22b_dev)
     rfm22b_dev->rfm22b_state       = RFM22B_STATE_INITIALIZING;
     rfm22b_dev->last_contact       = 0;
     rfm22b_dev->idle_slots         = 0;
+    rfm22b_dev->last_sender_id     = 0;
 
     // software reset the RF chip .. following procedure according to Si4x3x Errata (rev. B)
     rfm22_write_claim(rfm22b_dev, RFM22_op_and_func_ctrl1, RFM22_opfc1_swres);
@@ -1842,8 +1858,12 @@ static enum pios_radio_event radio_txStart(struct pios_rfm22b_dev *radio_dev)
         if (++radio_dev->idle_slots < RFM22B_KEEPALIVE_SLOTS) {
             return RADIO_EVENT_RX_MODE;
         }
-        p[0] = 0;
-        len  = 1;
+        // marker + this remote's id: the coordinator learns who it hears
+        p[0] = RFM22B_KEEPALIVE_MARK0;
+        p[1] = RFM22B_KEEPALIVE_MARK1;
+        p[2] = RFM22B_KEEPALIVE_MARK2;
+        memcpy(p + 3, &radio_dev->deviceID, sizeof(radio_dev->deviceID));
+        len  = RFM22B_KEEPALIVE_LEN;
     }
     radio_dev->idle_slots = 0;
 
@@ -1998,6 +2018,21 @@ static enum pios_radio_event radio_receivePacket(struct pios_rfm22b_dev *radio_d
 
     enum pios_radio_event ret_event = RADIO_EVENT_RX_COMPLETE;
     if (good_packet || corrected_packet) {
+        // A remote's keepalive: learn its id (the coordinator's pair table shows
+        // it), and keep it away from the com port, it is not UAVTalk.
+        if ((data_len == RFM22B_KEEPALIVE_LEN) && (p[0] == RFM22B_KEEPALIVE_MARK0) &&
+            (p[1] == RFM22B_KEEPALIVE_MARK1) && (p[2] == RFM22B_KEEPALIVE_MARK2)) {
+            uint32_t sender;
+            memcpy(&sender, p + 3, sizeof(sender));
+            if (rfm22_isCoordinator(radio_dev) && sender) {
+                radio_dev->last_sender_id     = sender;
+                uint32_t dest = radio_dev->rx_destination_id;
+                radio_dev->rx_destination_id = sender;
+                rfm22_updatePairStatus(radio_dev);
+                radio_dev->rx_destination_id = dest;
+            }
+            data_len = 0;
+        }
         // Send the data to the com port
         bool rx_need_yield;
         if (radio_dev->rx_in_cb && (data_len > 0) && !radio_dev->ppm_only_mode) {

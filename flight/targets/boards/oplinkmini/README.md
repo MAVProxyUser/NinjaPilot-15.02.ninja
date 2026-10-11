@@ -162,9 +162,10 @@ that ID, synchronise to its packets and report `Connected`.  Each hop period is
 split in two: the coordinator transmits in the first half, *every* remote in
 the second (`rfm22_timeToSend`).  In stock 15.02 a remote only transmitted
 when it had data, so an idle link showed traffic one way and the coordinator
-never heard it; this tree's remote sends a one-byte keepalive every 16 idle
-slots (`RFM22B_KEEPALIVE_SLOTS`), so both modems' TX and RX LEDs show the link
-and the coordinator's pair table stays fresh.  The driver still only marks a
+never heard it; this tree's remote sends a 7-byte keepalive (marker + its own id) every 16
+idle slots (`RFM22B_KEEPALIVE_SLOTS`), so both modems' TX and RX LEDs show the
+link and the coordinator's pair table names the remote it hears (stock 15.02
+only ever stored the destination id, i.e. the coordinator's own).  The driver still only marks a
 remote Connected; the coordinator's system task reports Connected and lights
 its link LED when the pair table shows a remote heard recently
 (`oplinkmod.c`).  Changing the driver's own link state on the coordinator

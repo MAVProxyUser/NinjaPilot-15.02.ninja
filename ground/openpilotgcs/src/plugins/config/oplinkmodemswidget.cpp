@@ -426,9 +426,8 @@ void OPLinkModemPanel::refreshStatus()
     }
     m_link->setText(tr("Link: %1   quality %2   tx %3 B/s   rx %4 B/s   heap %5   resets %6")
                     .arg(state).arg(s.LinkQuality).arg(s.TXRate).arg(s.RXRate).arg(s.HeapRemaining).arg(s.Resets));
-    // The pair table holds the destination id of received packets: on a remote
-    // that is the coordinator it hears; on the coordinator it is its own id,
-    // because remotes address it, so it cannot say which remote spoke.
+    // The pair table: on a remote, the coordinator it hears; on the coordinator,
+    // the remotes it hears (their keepalives carry their id).
     bool coordinator = m_session->settings()->getData().Coordinator == OPLinkSettings::COORDINATOR_TRUE;
     QStringList pairs;
     int best = -127;
@@ -439,9 +438,10 @@ void OPLinkModemPanel::refreshStatus()
         }
     }
     if (coordinator) {
+        // remotes announce their id in their keepalives, so these are real remote ids
         m_pairs->setText(pairs.isEmpty()
-                         ? tr("Hears: no remote traffic lately (a remote only transmits when it has data; run a link test)")
-                         : tr("Hears: a remote at %1 dBm").arg(best));
+                         ? tr("Hears: no remote (nothing received for a few seconds)")
+                         : tr("Hears remote(s): %1").arg(pairs.join(", ")));
     } else {
         m_pairs->setText(tr("Hears: %1").arg(pairs.isEmpty() ? tr("no coordinator") : pairs.join(", ")));
     }

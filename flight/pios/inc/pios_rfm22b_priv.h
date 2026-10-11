@@ -783,6 +783,8 @@ struct pios_rfm22b_dev {
     portTickType last_contact;
     // idle transmit slots skipped since the last packet (remote keepalive)
     uint8_t idle_slots;
+    // the remote whose keepalive the coordinator heard last: its real id for the pair table
+    uint32_t last_sender_id;
 };
 
 
