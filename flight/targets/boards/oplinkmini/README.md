@@ -286,3 +286,9 @@ USB on the flight-controller-side modem then only serves the modem's own
 objects (settings, status, the link test, the halt that starts a flash), so the
 cable can stay plugged in for flashing and configuration.  Both modems need
 this firmware; the GCS-side modem behaves as before.
+
+Result on the bench (2026-10-11, coordinator on the Cube's TELEM1 with its
+USB attached, 1687 on the Mac, 115200): GCS handshake over the radio in 1 s,
+60 of 60 requests answered (HwSettings round trip 29-69 ms), the full 25 Hz
+stream arrives (651 objects in 10 s), the Cube reports 0 transmit failures,
+and the GCS loads every configuration page.
