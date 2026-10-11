@@ -26,6 +26,7 @@
  */
 
 #include "configoplinkwidget.h"
+#include <QDateTime>
 
 #include <coreplugin/generalsettings.h>
 #include <oplinksettings.h>
@@ -112,6 +113,19 @@ ConfigOPLinkWidget::ConfigOPLinkWidget(QWidget *parent) : ConfigTaskWidget(paren
 
     // Request and update of the setting object.
     settingsUpdated = false;
+
+    // Link test: GCS -> this modem -> radio -> far modem (answers) -> radio -> this modem -> GCS
+    linkTestObj = OPLinkLinkTest::GetInstance(objManager);
+    Q_ASSERT(linkTestObj);
+    connect(linkTestObj, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(linkTestReply(UAVObject *)));
+    linkTestTimer = new QTimer(this);
+    connect(linkTestTimer, SIGNAL(timeout()), this, SLOT(linkTestTick()));
+    connect(m_oplink->linkTestButton, SIGNAL(clicked()), this, SLOT(startLinkTest()));
+    linkTestSeq     = 0;
+    linkTestReplies = 0;
+    linkTestRttSum  = 0;
+    linkTestRttMax  = 0;
+
     autoLoadWidgets();
     disableMouseWheelEvents();
     updateEnableControls();
@@ -378,3 +392,95 @@ void ConfigOPLinkWidget::channelChanged(bool isMax)
    @}
    @}
  */
+
+/*
+ * Link test.  Twenty OPLinkLinkTest requests go out 100 ms apart; the modem at
+ * the far end of the radio answers each one with a Reply that carries its own
+ * identity, link state and settings (RadioComBridge.c).  No flight controller
+ * is involved, so this works with two modems on the bench, and it shows the
+ * far modem's settings without a second GCS connection.
+ */
+void ConfigOPLinkWidget::startLinkTest()
+{
+    if (linkTestTimer->isActive()) {
+        return;
+    }
+    linkTestSent.clear();
+    linkTestReplies   = 0;
+    linkTestSentCount = 0;
+    linkTestRttSum    = 0;
+    linkTestRttMax    = 0;
+    linkTestSeq       = (quint16)(QDateTime::currentMSecsSinceEpoch() & 0x7FFF);
+    linkTestClock.start();
+    m_oplink->linkTestButton->setEnabled(false);
+    m_oplink->linkTestResult->setText(tr("Testing..."));
+    m_oplink->linkTestRemote->setText(tr("waiting for the far modem"));
+    linkTestTimer->start(LINKTEST_PERIOD);
+    linkTestTick();
+}
+
+void ConfigOPLinkWidget::linkTestTick()
+{
+    if (linkTestSentCount >= LINKTEST_COUNT) {
+        linkTestTimer->stop();
+        QTimer::singleShot(LINKTEST_SETTLE, this, SLOT(finishLinkTest()));
+        return;
+    }
+    ++linkTestSentCount;
+    OPLinkLinkTest::DataFields d = linkTestObj->getData();
+    d.Seq  = ++linkTestSeq;
+    d.Echo = OPLinkLinkTest::ECHO_REQUEST;
+    for (unsigned int i = 0; i < OPLinkLinkTest::PAYLOAD_NUMELEM; ++i) {
+        d.Payload[i] = (quint8)(d.Seq + i);
+    }
+    linkTestSent[d.Seq] = linkTestClock.elapsed();
+    linkTestObj->setData(d);
+    linkTestObj->updated();
+    m_oplink->linkTestResult->setText(tr("Testing... %1 sent, %2 replies").arg(linkTestSentCount).arg(linkTestReplies));
+}
+
+void ConfigOPLinkWidget::linkTestReply(UAVObject *object)
+{
+    Q_UNUSED(object);
+    OPLinkLinkTest::DataFields d = linkTestObj->getData();
+    if (d.Echo != OPLinkLinkTest::ECHO_REPLY) {
+        return;
+    }
+    qint64 sentAt = linkTestSent.value(d.Seq, -1);
+    if (sentAt < 0) {
+        return;
+    }
+    linkTestSent.remove(d.Seq);
+    double rtt = linkTestClock.elapsed() - sentAt;
+    ++linkTestReplies;
+    linkTestRttSum += rtt;
+    linkTestRttMax  = qMax(linkTestRttMax, rtt);
+
+    UAVObjectField *f;
+    QString state = (f = linkTestObj->getField("LinkState")) ? f->getValue().toString() : "?";
+    QString power = (f = linkTestObj->getField("MaxRFPower")) ? f->getValue().toString() : "?";
+    QString speed = (f = linkTestObj->getField("ComSpeed")) ? f->getValue().toString() : "?";
+    QString mainp = (f = linkTestObj->getField("MainPort")) ? f->getValue().toString() : "?";
+    QString flexi = (f = linkTestObj->getField("FlexiPort")) ? f->getValue().toString() : "?";
+    QString vcp   = (f = linkTestObj->getField("VCPPort")) ? f->getValue().toString() : "?";
+    m_oplink->linkTestRemote->setText(tr("Far modem %1: %2, %3 (hears us at %4 dBm), %5 mW, %6 bps, channels %7..%8, main %9, flexi %10, VCP %11")
+                                      .arg(QString::number(d.DeviceID, 16).toUpper())
+                                      .arg(d.Coordinator == OPLinkLinkTest::COORDINATOR_TRUE ? tr("coordinator") : tr("remote bound to %1").arg(QString::number(d.CoordID, 16).toUpper()))
+                                      .arg(state).arg((int)d.RSSI).arg(power).arg(speed).arg(d.MinChannel).arg(d.MaxChannel)
+                                      .arg(mainp).arg(flexi).arg(vcp));
+}
+
+void ConfigOPLinkWidget::finishLinkTest()
+{
+    int sent = LINKTEST_COUNT;
+    int lost = sent - linkTestReplies;
+    if (linkTestReplies > 0) {
+        m_oplink->linkTestResult->setText(tr("%1/%2 round trips, %3 lost, mean %4 ms, max %5 ms")
+                                          .arg(linkTestReplies).arg(sent).arg(lost)
+                                          .arg((int)(linkTestRttSum / linkTestReplies)).arg((int)linkTestRttMax));
+    } else {
+        m_oplink->linkTestResult->setText(tr("No reply from the far modem (%1 sent)").arg(sent));
+        m_oplink->linkTestRemote->setText(tr("not paired, out of range, or the far modem runs an older firmware"));
+    }
+    m_oplink->linkTestButton->setEnabled(true);
+}

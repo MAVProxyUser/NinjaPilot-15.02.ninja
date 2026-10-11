@@ -173,6 +173,8 @@ extern "C" {
 				success or NULL on failure.
 		*/
 		HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path);
+		/** Open a device by an IOHIDDeviceRef (macOS only). */
+		HID_API_EXPORT hid_device * HID_API_CALL hid_open_ref(void *device_ref);
 
 		/** @brief Write an Output report to a HID device.
 

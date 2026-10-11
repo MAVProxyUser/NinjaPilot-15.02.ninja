@@ -58,7 +58,8 @@ HEADERS += \
     calibration/thermal/dataacquisitiontransition.h \
     calibration/thermal/settingshandlingtransitions.h \
     calibration/thermal/compensationcalculationtransition.h \
-    configoplinkwidget.h
+    configoplinkwidget.h \
+    oplinkmodemswidget.h
 
 SOURCES += \
     configrevowidget.cpp \
@@ -99,7 +100,8 @@ SOURCES += \
     calibration/thermal/thermalcalibration.cpp \
     calibration/thermal/thermalcalibrationhelper.cpp \
     calibration/thermal/thermalcalibrationmodel.cpp \
-    configoplinkwidget.cpp
+    configoplinkwidget.cpp \
+    oplinkmodemswidget.cpp
 
 FORMS += \
     revosensors.ui \

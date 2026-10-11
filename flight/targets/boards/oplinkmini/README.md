@@ -112,3 +112,56 @@ the remote and green+orange on the coordinator.
 The remote's main port is set for the Cube Purple's TELEM1 (`RV_TelemetryPort
 = Telemetry`, 57600): TX, RX, GND and 5 V between the two, then the GCS talks
 to the Cube through the coordinator's USB.
+
+## In the GCS (2026-10-11)
+
+* **A modem with no flight controller behind it jumps to Configuration -> OPLink.**
+  The GCS telemetry layer only passed OPLinkSettings and ObjectPersistence to a
+  modem that never completes the handshake; it now also passes OPLinkLinkTest
+  and FirmwareIAPObj (`telemetry.cpp`), so the page can test the link and
+  reboot the modem.
+* **Link test** on the OPLink page: 20 `OPLinkLinkTest` requests go through the
+  connected modem; the modem at the far end of the radio answers each one
+  (`RadioComBridge.c`) with its identity, link state and settings, so the page
+  shows round trips, loss, RTT and the far modem's configuration.  No flight
+  controller needed.  Firmware echo at 57600 measures ~35 ms per round trip.
+* **Two or more modems on USB: the OPLink entry becomes the modems page.**
+  Every modem gets a panel (status, role, pair table with RSSI, firmware, the
+  settings form, Apply / Save / Reboot / Test link) and an "include" box;
+  *Auto-configure* makes one the coordinator (the GCS's own modem unless you
+  pick one) and binds every other checked modem to it as a remote, same power,
+  speed and channels, Main port = Telemetry, Flexi and VCP off, then saves and
+  reboots them all.  The modem the GCS is connected to keeps using that
+  connection; the others get a private UAVTalk session over their own HID
+  (`oplinkmodemswidget.cpp`).  Hot-plugging rebuilds the panels.
+* **Boards of one kind are told apart** in the Connections box (`USB: OPLinkMini
+  2387`), and the HID layer opens the board with the requested serial through
+  the USB monitor's device reference instead of "the first one hidapi finds"
+  (`ophid.cpp`, `hid_open_ref` in the bundled hidapi): the old behaviour always
+  opened the same modem and failed while the GCS held it.
+* Modem reboot from the GCS or the tools is `FirmwareIAPObj` 1122 / 2233 /
+  **4455** (a plain reset back into the firmware); 3344 still parks the modem in
+  its bootloader for a flash.  The IAP module ignores a repeated identical
+  command (its own description refresh re-enters the callback), and a
+  FirmwareIAPObj *read* over USB is answered by the near modem only.
+
+Traps met on the way: the GCS telemetry transmits a settings object the moment
+`setData` runs and ignores a second write while that one is in flight, so a
+page must build the whole `DataFields` and write it once; a panel must not mark
+its settings "seen" before the modem has sent them.
+
+## What a coordinator is (stock 15.02 radio protocol)
+
+One coordinator per network.  Its Device ID seeds the frequency-hopping
+sequence (`rfm22_gen_channels`) and its clock is the time base; remotes bind to
+that ID, synchronise to its packets and report `Connected`.  Each hop period is
+split in two: the coordinator transmits in the first half, *every* remote in
+the second (`rfm22_timeToSend`).  Consequences:
+
+* the coordinator's downlink is a broadcast all remotes hear (PPM, GCS traffic);
+* several remotes share one uplink slot and contend for it, so a second or
+  third remote costs the others their uplink air time (no per-remote slots);
+* no meshing or relaying: a remote that cannot hear the coordinator is simply
+  disconnected (and re-initialises its radio every 150 ms until it can);
+* nothing is routed per node: the GCS's objects reach every remote's main port,
+  every remote's objects come back to the coordinator.

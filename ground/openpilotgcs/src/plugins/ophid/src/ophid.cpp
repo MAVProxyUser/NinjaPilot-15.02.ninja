@@ -26,6 +26,8 @@
  */
 
 #include "ophid.h"
+#include "ophid_usbmon.h"
+#include <QDebug>
 #include "ophid_const.h"
 #include "coreplugin/connectionmanager.h"
 #include <extensionsystem/pluginmanager.h>
@@ -329,7 +331,24 @@ bool RawHID::openDevice()
 {
     OPHID_TRACE("IN");
 
-    uint32_t opened = dev.open(USB_MAX_DEVICES, USB_VID, USB_PID_ANY, USB_USAGE_PAGE, USB_USAGE);
+    uint32_t opened = 0;
+#if defined(Q_OS_MAC)
+    // The USB monitor already holds a reference to every board on the bus:
+    // open exactly the one with this serial through it.  hidapi's own
+    // enumeration is the fallback; it picks the first board of a kind and
+    // comes back empty when asked while another board is held open.
+    foreach(const USBPortInfo &port, USBMonitor::instance()->availableDevices()) {
+        if (port.serialNumber == serialNumber && port.dev_handle) {
+            opened = dev.openRef(port.dev_handle);
+            if (opened) {
+                break;
+            }
+        }
+    }
+#endif
+    if (!opened) {
+        opened = dev.open(USB_MAX_DEVICES, USB_VID, USB_PID_ANY, USB_USAGE_PAGE, USB_USAGE, serialNumber);
+    }
 
     OPHID_DEBUG("opened %d devices", opened);
     for (uint32_t i = 0; i < opened; i++) {

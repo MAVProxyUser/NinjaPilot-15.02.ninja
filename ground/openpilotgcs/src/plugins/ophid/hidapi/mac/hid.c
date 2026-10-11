@@ -689,6 +689,38 @@ static void *read_thread(void *param)
 	return NULL;
 }
 
+/* Open a device by the IOHIDDeviceRef another IOHIDManager (the GCS's USB
+   monitor) already holds for it: no enumeration through this library's own
+   manager, whose device list is only refilled from the run loop it was
+   scheduled on and so comes back empty when asked from another thread. */
+hid_device * HID_API_EXPORT hid_open_ref(void *device_ref)
+{
+	IOHIDDeviceRef os_dev = (IOHIDDeviceRef) device_ref;
+	hid_device *dev = NULL;
+	char str[32];
+
+	if (!os_dev)
+		return NULL;
+	dev = new_hid_device();
+	if (hid_init() < 0)
+		return NULL;
+	if (IOHIDDeviceOpen(os_dev, kIOHIDOptionsTypeSeizeDevice) != kIOReturnSuccess) {
+		free_hid_device(dev);
+		return NULL;
+	}
+	CFRetain(os_dev);
+	dev->device_handle = os_dev;
+	dev->max_input_report_len = (CFIndex) get_max_report_length(os_dev);
+	dev->input_report_buf = calloc(dev->max_input_report_len, sizeof(uint8_t));
+	sprintf(str, "HIDAPI_%p", os_dev);
+	dev->run_loop_mode = CFStringCreateWithCString(NULL, str, kCFStringEncodingASCII);
+	IOHIDDeviceRegisterInputReportCallback(os_dev, dev->input_report_buf, dev->max_input_report_len, &hid_report_callback, dev);
+	IOHIDDeviceRegisterRemovalCallback(dev->device_handle, hid_device_removal_callback, dev);
+	pthread_create(&dev->thread, NULL, read_thread, dev);
+	pthread_barrier_wait(&dev->barrier);
+	return dev;
+}
+
 hid_device * HID_API_EXPORT hid_open_path(const char *path)
 {
 	CFIndex i;

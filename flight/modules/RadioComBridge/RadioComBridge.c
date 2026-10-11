@@ -38,6 +38,7 @@
 #include <objectpersistence.h>
 #include <oplinksettings.h>
 #include <oplinkreceiver.h>
+#include <oplinklinktest.h>
 #include <radiocombridgestats.h>
 #include <uavtalk_priv.h>
 #include <pios_rfm22b.h>
@@ -173,6 +174,8 @@ static int32_t RadioComBridgeStart(void)
         // Configure our UAVObjects for updates.
         UAVObjConnectQueue(UAVObjGetByID(OPLINKSTATUS_OBJID), data->uavtalkEventQueue, EV_UPDATED | EV_UPDATED_MANUAL | EV_UPDATE_REQ);
         UAVObjConnectQueue(UAVObjGetByID(OBJECTPERSISTENCE_OBJID), data->uavtalkEventQueue, EV_UPDATED | EV_UPDATED_MANUAL);
+        // a link-test Reply built by this modem goes back out over the radio
+        UAVObjConnectQueue(UAVObjGetByID(OPLINKLINKTEST_OBJID), data->radioEventQueue, EV_UPDATED);
         if (data->isCoordinator) {
             UAVObjConnectQueue(UAVObjGetByID(OPLINKRECEIVER_OBJID), data->radioEventQueue, EV_UPDATED | EV_UPDATED_MANUAL | EV_UPDATE_REQ);
         } else {
@@ -235,6 +238,7 @@ static int32_t RadioComBridgeInitialize(void)
     OPLinkStatusInitialize();
     ObjectPersistenceInitialize();
     OPLinkReceiverInitialize();
+    OPLinkLinkTestInitialize();
     RadioComBridgeStatsInitialize();
 
     // Initialise UAVTalk
@@ -617,9 +621,12 @@ static void ProcessTelemetryStream(UAVTalkConnection inConnectionHandle, UAVTalk
             case MetaObjectId(FIRMWAREIAPOBJ_OBJID):
                 // the modem's own FirmwareIAP module (reboot / firmware update
                 // when BoardType is ours) and the flight controller behind the
-                // link both get to see it
+                // link both get to see a write; a read is answered here only,
+                // or the far modem's answer would overwrite ours at the GCS
                 UAVTalkReceiveObject(inConnectionHandle);
-                UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
+                if (UAVTalkGetPacketType(inConnectionHandle) != UAVTALK_TYPE_OBJ_REQ) {
+                    UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
+                }
                 break;
             case OBJECTPERSISTENCE_OBJID:
             case MetaObjectId(OBJECTPERSISTENCE_OBJID):
@@ -673,6 +680,39 @@ static void ProcessRadioStream(UAVTalkConnection inConnectionHandle, UAVTalkConn
                 // These objects are shadowed by the modem and are not transmitted to the telemetry port
                 // - OPLINKSTATUS_OBJID : ground station will receive the OPLM link status instead
                 // - OPLINKSETTINGS_OBJID : ground station will read and write the OPLM settings instead
+                break;
+            case OPLINKLINKTEST_OBJID:
+                // Link test with no flight controller: a Request that reaches us over the
+                // radio is answered with a Reply describing this modem (sent back over the
+                // radio by radioTxTask); a Reply that reaches us over the radio is for the
+                // GCS behind our telemetry port.
+                UAVTalkReceiveObject(inConnectionHandle);
+                {
+                    OPLinkLinkTestData t;
+                    OPLinkLinkTestGet(&t);
+                    if (t.Echo == OPLINKLINKTEST_ECHO_REQUEST) {
+                        OPLinkStatusData st;
+                        OPLinkSettingsData se;
+                        OPLinkStatusGet(&st);
+                        OPLinkSettingsGet(&se);
+                        t.Echo        = OPLINKLINKTEST_ECHO_REPLY;
+                        t.DeviceID    = st.DeviceID;
+                        t.LinkState   = st.LinkState;
+                        t.RSSI        = st.PairSignalStrengths[0];
+                        t.Coordinator = se.Coordinator;
+                        t.CoordID     = se.CoordID;
+                        t.MaxRFPower  = se.MaxRFPower;
+                        t.ComSpeed    = se.ComSpeed;
+                        t.MinChannel  = se.MinChannel;
+                        t.MaxChannel  = se.MaxChannel;
+                        t.MainPort    = se.MainPort;
+                        t.FlexiPort   = se.FlexiPort;
+                        t.VCPPort     = se.VCPPort;
+                        OPLinkLinkTestSet(&t);
+                    } else {
+                        UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
+                    }
+                }
                 break;
             case OPLINKRECEIVER_OBJID:
             case MetaObjectId(OPLINKRECEIVER_OBJID):

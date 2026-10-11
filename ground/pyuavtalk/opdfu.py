@@ -359,6 +359,28 @@ def halt_to_bootloader(serial=None, timeout=25.0, board_type=0):
     return bl
 
 
+def reboot_firmware(serial=None, board_type=3, timeout=20.0):
+    """Firmware -> firmware: 1122, 2233, 4455 (plain reset, no bootloader stop).
+    Returns the +FW device info once the board is back on USB, or None."""
+    import uavtalk
+    try:
+        client, raw, info = open_uavtalk(serial, wait=2.0)
+    except RuntimeError:
+        return None
+    sn = info["serial_number"][:-3]
+    quiet = lambda *a: None
+    client.run(duration=0.5, on_object=quiet)
+    for cmd in (1122, 2233, 4455):
+        client.send_object("FirmwareIAPObj", {"Command": cmd, "BoardRevision": 0, "BoardType": board_type},
+                           msg_type=uavtalk.TYPE_OBJ_ACK)
+        try:
+            client.run(duration=0.7, on_object=quiet)
+        except Exception:
+            break
+    raw.close()
+    return wait_for("+FW", sn, timeout=timeout, gone_first=True)
+
+
 def open_bootloader(serial=None, wait=20.0, rescue=False):
     """Grab a +BL interface and put it in DFU mode. rescue=True waits for one to appear."""
     devs = enumerate_boards(serial, "+BL")
@@ -512,6 +534,7 @@ def main():
     sub.add_parser("list").set_defaults(f=cmd_list)
     p = sub.add_parser("info"); p.add_argument("--wait", type=float, default=0); p.add_argument("--jump", action="store_true"); p.set_defaults(f=cmd_info)
     p = sub.add_parser("halt"); p.set_defaults(f=cmd_halt)
+    p = sub.add_parser("reboot"); p.set_defaults(f=lambda a: print("rebooted: %s" % (reboot_firmware(a.serial, a.board_type or 3) or "did not come back")))
     p = sub.add_parser("jump"); p.add_argument("--safeboot", action="store_true"); p.add_argument("--erase-settings", action="store_true")
     p.add_argument("--wait", type=float, default=0, help="wait this long for a board to show up in bootloader mode"); p.set_defaults(f=cmd_jump)
     for name, f in (("flash", cmd_flash), ("rescue", cmd_rescue)):

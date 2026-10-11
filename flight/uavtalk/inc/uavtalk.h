@@ -66,6 +66,7 @@ void UAVTalkAddStats(UAVTalkConnection connection, UAVTalkStats *stats, bool res
 void UAVTalkResetStats(UAVTalkConnection connection);
 void UAVTalkGetLastTimestamp(UAVTalkConnection connection, uint16_t *timestamp);
 uint32_t UAVTalkGetPacketObjId(UAVTalkConnection connection);
+uint8_t UAVTalkGetPacketType(UAVTalkConnection connection);
 
 #endif // UAVTALK_H
 /**

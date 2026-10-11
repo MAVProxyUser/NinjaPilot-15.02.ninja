@@ -28,6 +28,10 @@
 #define CONFIGPIPXTREMEWIDGET_H
 
 #include <oplinksettings.h>
+#include <oplinklinktest.h>
+#include <QTimer>
+#include <QElapsedTimer>
+#include <QMap>
 
 #include "ui_oplink.h"
 #include "configtaskwidget.h"
@@ -54,6 +58,19 @@ private:
 
     // Are the settings current?
     bool settingsUpdated;
+    // Link test: round trips through the modem at the far end of the radio
+    OPLinkLinkTest *linkTestObj;
+    QTimer *linkTestTimer;
+    QElapsedTimer linkTestClock;
+    QMap<quint16, qint64> linkTestSent;
+    quint16 linkTestSeq;
+    int linkTestSentCount;
+    int linkTestReplies;
+    double linkTestRttSum;
+    double linkTestRttMax;
+    static const int LINKTEST_COUNT    = 20;
+    static const int LINKTEST_PERIOD   = 100; // ms between requests
+    static const int LINKTEST_SETTLE   = 1500; // ms to wait for the last replies
 
 protected:
     void updateEnableControls();
@@ -65,6 +82,10 @@ private slots:
     void minChannelChanged();
     void maxChannelChanged();
     void channelChanged(bool isMax);
+    void startLinkTest();
+    void linkTestTick();
+    void linkTestReply(UAVObject *object);
+    void finishLinkTest();
 };
 
 #endif // CONFIGTXPIDWIDGET_H

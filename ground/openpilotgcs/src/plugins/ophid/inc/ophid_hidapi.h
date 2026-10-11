@@ -46,7 +46,8 @@ public:
 
     ~opHID_hidapi();
 
-    int open(int max, int vid, int pid, int usage_page, int usage);
+    int open(int max, int vid, int pid, int usage_page, int usage, const QString &serial = QString());
+    int openRef(void *deviceRef);
 
     int receive(int, void *buf, int len, int timeout);
 

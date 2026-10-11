@@ -32,6 +32,8 @@
 #include <unistd.h>
 #include "ophid_const.h"
 #include "ophid_hidapi.h"
+#include <QDebug>
+#include <QThread>
 
 /**
  * \brief Constructor
@@ -82,7 +84,7 @@ opHID_hidapi::~opHID_hidapi()
  */
 int opHID_hidapi::enumerate(struct hid_device_info * *current_device_pptr, int *devices_found)
 {
-    int retry = 5;
+    int retry = 20;
 
     *devices_found = 0;
 
@@ -110,6 +112,12 @@ int opHID_hidapi::enumerate(struct hid_device_info * *current_device_pptr, int *
         if (*devices_found) {
             break;
         }
+        // hid_enumerate resets the manager's matching and the device list is
+        // refilled from the GUI thread's run loop: an instant retry sees it
+        // empty, a paced one (with that loop running) does not
+        hid_free_enumeration(*current_device_pptr);
+        *current_device_pptr = NULL;
+        QThread::msleep(50);
     }
 
     OPHID_TRACE("OUT");
@@ -127,7 +135,7 @@ int opHID_hidapi::enumerate(struct hid_device_info * *current_device_pptr, int *
  * \return Number of opened device.
  * \retval 0 or 1.
  */
-int opHID_hidapi::open(int max, int vid, int pid, int usage_page, int usage)
+int opHID_hidapi::open(int max, int vid, int pid, int usage_page, int usage, const QString &serial)
 {
     Q_UNUSED(max);
     Q_UNUSED(usage_page);
@@ -156,7 +164,11 @@ int opHID_hidapi::open(int max, int vid, int pid, int usage_page, int usage)
 
     // If caller knows which one to look for open it right away
     if (vid != 0 && pid != 0) {
-        handle = hid_open(vid, pid, NULL);
+        // a serial picks one board among several of the same kind
+        wchar_t wserial[USB_MAX_STRING_SIZE];
+        int n = serial.isEmpty() ? 0 : serial.toWCharArray(wserial);
+        wserial[n] = 0;
+        handle = hid_open(vid, pid, n ? wserial : NULL);
 
         if (!handle) {
             OPHID_ERROR("Unable to open device.");
@@ -185,9 +197,21 @@ int opHID_hidapi::open(int max, int vid, int pid, int usage_page, int usage)
                             tmp_device_ptr->vendor_id,
                             tmp_device_ptr->product_id);
 
-                handle = hid_open(tmp_device_ptr->vendor_id,
-                                  tmp_device_ptr->product_id,
-                                  NULL);
+                // only the board with the requested serial, if one was given: the
+                // first hit of a vid/pid would otherwise always be the same modem
+                // (and fail while the GCS's own connection holds it)
+                if (!serial.isEmpty()) {
+                    QString found = tmp_device_ptr->serial_number ? QString::fromWCharArray(tmp_device_ptr->serial_number) : QString();
+                    if (found != serial) {
+                        tmp_device_ptr = tmp_device_ptr->next;
+                        continue;
+                    }
+                    handle = hid_open_path(tmp_device_ptr->path);
+                } else {
+                    handle = hid_open(tmp_device_ptr->vendor_id,
+                                      tmp_device_ptr->product_id,
+                                      NULL);
+                }
 
                 if (handle) {
                     devices_found = 1;
@@ -229,6 +253,20 @@ int opHID_hidapi::open(int max, int vid, int pid, int usage_page, int usage)
  * \return Number of bytes received, or -1 on error.
  * \retval -1 for error or bytes received.
  */
+int opHID_hidapi::openRef(void *deviceRef)
+{
+#if defined(Q_OS_MAC)
+    if (handle) {
+        OPHID_WARNING("HID device seems already open.");
+    }
+    handle = hid_open_ref(deviceRef);
+    return handle ? 1 : 0;
+#else
+    Q_UNUSED(deviceRef);
+    return 0;
+#endif
+}
+
 int opHID_hidapi::receive(int num, void *buf, int len, int timeout)
 {
     Q_UNUSED(num);

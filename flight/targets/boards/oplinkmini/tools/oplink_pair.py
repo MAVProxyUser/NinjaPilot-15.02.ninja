@@ -154,15 +154,18 @@ def reboot(m):
     (this tree's firmware answers the IAP sequence for its own board type), then jump."""
     serial = m.serial
     m.close()
-    bl = opdfu.halt_to_bootloader(serial, board_type=OPLINK_BOARD_TYPE, timeout=12.0)
-    if not bl:
-        print("%s: no bootloader after the halt (older firmware?) -> replug it to apply the settings" % serial)
-        return False
-    time.sleep(0.3)
-    dfu = opdfu.open_bootloader(serial)
-    dfu.jump()
-    dfu.hid.close()
-    fw = opdfu.wait_for("+FW", serial, timeout=15.0)
+    fw = opdfu.reboot_firmware(serial, board_type=OPLINK_BOARD_TYPE, timeout=20.0)
+    if not fw:
+        # firmware without the plain-reboot command: go through the bootloader instead
+        bl = opdfu.halt_to_bootloader(serial, board_type=OPLINK_BOARD_TYPE, timeout=12.0)
+        if not bl:
+            print("%s: did not reboot (older firmware?) -> replug it to apply the settings" % serial)
+            return False
+        time.sleep(0.3)
+        dfu = opdfu.open_bootloader(serial)
+        dfu.jump()
+        dfu.hid.close()
+        fw = opdfu.wait_for("+FW", serial, timeout=15.0)
     print("%s: rebooted%s" % (serial, "" if fw else " (did not re-enumerate yet)"))
     return bool(fw)
 
@@ -322,6 +325,46 @@ def modem_tty(serial):
     return None
 
 
+def cmd_flash(a):
+    """Reflash a modem running this tree's firmware and keep its settings: a v2
+    bootloader erases the settings area with the code bank, so they are read
+    first and written back (saved, rebooted) if the board comes up different."""
+    ms = modems(a.serial)
+    for m in ms:
+        se = m.fetch("OPLinkSettings")
+        serial = m.serial
+        m.close()
+        if not se:
+            print("%s: no OPLinkSettings readable, flashing without restore" % serial)
+        print("== %s: flashing %s" % (serial, os.path.basename(a.image)), flush=True)
+        bl = opdfu.halt_to_bootloader(serial, board_type=OPLINK_BOARD_TYPE, timeout=15.0)
+        if not bl:
+            print("%s: halt failed" % serial)
+            continue
+        time.sleep(0.5)
+        dfu = opdfu.open_bootloader(serial)
+        try:
+            opdfu.flash(dfu, a.image, verify=True, jump=True)
+        finally:
+            dfu.hid.close()
+        info = opdfu.wait_for("+FW", serial, timeout=20.0)
+        if not info:
+            print("%s: did not come back" % serial)
+            continue
+        time.sleep(1.5)
+        if se:
+            m2 = Modem(info)
+            now = m2.fetch("OPLinkSettings")
+            if now and all(now.get(k) == v for k, v in se.items()):
+                print("%s: settings survived the flash" % serial)
+                m2.close()
+            else:
+                print("%s: settings were erased by the bootloader, restoring and rebooting" % serial)
+                ok = m2.write_settings(se, save=True)
+                print("%s: %s" % (serial, "saved" if ok else "save NOT confirmed"))
+                reboot(m2)
+
+
 def cmd_linktest(a):
     """Prove the radio carries data both ways with no flight controller: the remote's
     USB serial port (VCPPort = Serial) stands in for the flight controller, this tool
@@ -431,6 +474,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status").set_defaults(f=cmd_status)
     p = sub.add_parser("watch"); p.add_argument("--seconds", type=float, default=20.0); p.set_defaults(f=cmd_watch)
+    p = sub.add_parser("flash"); p.add_argument("image"); p.set_defaults(f=cmd_flash)
     p = sub.add_parser("linktest"); p.add_argument("--seconds", type=float, default=10.0)
     p.add_argument("--remote", help="serial prefix of the remote (default: the non-coordinator)")
     p.add_argument("--keep", action="store_true", help="leave the remote's VCPPort = Serial afterwards"); p.set_defaults(f=cmd_linktest)

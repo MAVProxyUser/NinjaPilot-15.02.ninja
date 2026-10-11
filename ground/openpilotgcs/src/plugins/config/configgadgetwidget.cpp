@@ -41,6 +41,9 @@
 #include "configtxpidwidget.h"
 #include "config_cc_hw_widget.h"
 #include "configoplinkwidget.h"
+#include "oplinkmodemswidget.h"
+#include "ophid/inc/ophid_usbmon.h"
+#include <coreplugin/modemanager.h>
 #include "defaultattitudewidget.h"
 #include "defaulthwsettingswidget.h"
 #include "uavobjectutilmanager.h"
@@ -158,6 +161,16 @@ ConfigGadgetWidget::ConfigGadgetWidget(QWidget *parent) : QWidget(parent)
     oplinkTimeout   = new QTimer(this);
     connect(oplinkTimeout, SIGNAL(timeout()), this, SLOT(onOPLinkDisconnect()));
     oplinkConnected = false;
+    oplinkTabShown  = false;
+
+    // Two OPLinks on USB: a page with both of them, no flight controller needed.
+    modemsWidget    = NULL;
+    modemsPageTimer = new QTimer(this);
+    modemsPageTimer->setSingleShot(true);
+    connect(modemsPageTimer, SIGNAL(timeout()), this, SLOT(updateModemsPage()));
+    connect(USBMonitor::instance(), SIGNAL(deviceDiscovered()), this, SLOT(scheduleModemsPageUpdate()));
+    connect(USBMonitor::instance(), SIGNAL(deviceRemoved()), this, SLOT(scheduleModemsPageUpdate()));
+    scheduleModemsPageUpdate();
 }
 
 ConfigGadgetWidget::~ConfigGadgetWidget()
@@ -400,14 +413,90 @@ void ConfigGadgetWidget::updateOPLinkStatus(UAVObject *)
     oplinkTimeout->start(5000);
     if (!oplinkConnected) {
         qDebug() << "ConfigGadgetWidget onOPLinkConnect";
+        oplinkConnected = true;
+        if (!modemsWidget) {
+            // the pair page, when two modems are on USB, takes this slot instead
+            QIcon *icon = new QIcon();
+            icon->addFile(":/configgadget/images/pipx-normal.png", QSize(), QIcon::Normal, QIcon::Off);
+            icon->addFile(":/configgadget/images/pipx-selected.png", QSize(), QIcon::Selected, QIcon::Off);
+            QWidget *qwd = new ConfigOPLinkWidget(this);
+            stackWidget->insertTab(ConfigGadgetWidget::oplink, qwd, *icon, QString("OPLink"));
+            oplinkTabShown = true;
 
+            // A modem with nothing behind it: this page is the one that matters, show it.
+            ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+            TelemetryManager *telMngr = pm->getObject<TelemetryManager>();
+            if (!(telMngr && telMngr->isConnected())) {
+                showPage(ConfigGadgetWidget::oplink);
+            }
+        }
+    }
+}
+
+int ConfigGadgetWidget::modemsPageIndex() const
+{
+    if (!modemsWidget) {
+        return -1;
+    }
+    for (int i = 0; i < 12; ++i) {
+        if (stackWidget->getWidget(i) == modemsWidget) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void ConfigGadgetWidget::showPage(int index)
+{
+    if (Core::ModeManager::instance()) {
+        Core::ModeManager::instance()->activateModeByWorkspaceName("Configuration");
+    }
+    stackWidget->setCurrentIndex(index);
+}
+
+void ConfigGadgetWidget::scheduleModemsPageUpdate()
+{
+    modemsPageTimer->start(1500);
+}
+
+void ConfigGadgetWidget::updateModemsPage()
+{
+    int modems = ConfigOPLinkModemsWidget::modemsOnUsb().size();
+
+    if (modems >= 2 && !modemsWidget) {
+        qDebug() << "ConfigGadgetWidget: two OPLinks on USB, opening the modems page";
         QIcon *icon = new QIcon();
         icon->addFile(":/configgadget/images/pipx-normal.png", QSize(), QIcon::Normal, QIcon::Off);
         icon->addFile(":/configgadget/images/pipx-selected.png", QSize(), QIcon::Selected, QIcon::Off);
-
-        QWidget *qwd = new ConfigOPLinkWidget(this);
-        stackWidget->insertTab(ConfigGadgetWidget::oplink, qwd, *icon, QString("OPLink"));
-        oplinkConnected = true;
+        // one OPLink entry: the pair page replaces the single-modem page
+        if (oplinkTabShown) {
+            if (stackWidget->currentIndex() == ConfigGadgetWidget::oplink) {
+                stackWidget->setCurrentIndex(0);
+            }
+            stackWidget->removeTab(ConfigGadgetWidget::oplink);
+            oplinkTabShown = false;
+        }
+        modemsWidget = new ConfigOPLinkModemsWidget(this);
+        stackWidget->insertTab(ConfigGadgetWidget::oplink, modemsWidget, *icon, QString("OPLink"));
+        showPage(ConfigGadgetWidget::oplink);
+    } else if (modems < 2 && modemsWidget) {
+        int index = modemsPageIndex();
+        if (stackWidget->currentIndex() == index) {
+            stackWidget->setCurrentIndex(0);
+        }
+        if (index >= 0) {
+            stackWidget->removeTab(index); // deletes the widget
+        } else {
+            delete modemsWidget;
+        }
+        modemsWidget = NULL;
+        if (oplinkConnected && !oplinkTabShown) {
+            QIcon *icon2 = new QIcon();
+            icon2->addFile(":/configgadget/images/pipx-normal.png", QSize(), QIcon::Normal, QIcon::Off);
+            icon2->addFile(":/configgadget/images/pipx-selected.png", QSize(), QIcon::Selected, QIcon::Off);
+            stackWidget->insertTab(ConfigGadgetWidget::oplink, new ConfigOPLinkWidget(this), *icon2, QString("OPLink"));
+            oplinkTabShown = true;
+        }
     }
 }
 
@@ -416,9 +505,11 @@ void ConfigGadgetWidget::onOPLinkDisconnect()
     qDebug() << "ConfigGadgetWidget onOPLinkDisconnect";
     oplinkTimeout->stop();
     oplinkConnected = false;
-
-    if (stackWidget->currentIndex() == ConfigGadgetWidget::oplink) {
-        stackWidget->setCurrentIndex(0);
+    if (oplinkTabShown) {
+        if (stackWidget->currentIndex() == ConfigGadgetWidget::oplink) {
+            stackWidget->setCurrentIndex(0);
+        }
+        stackWidget->removeTab(ConfigGadgetWidget::oplink);
+        oplinkTabShown = false;
     }
-    stackWidget->removeTab(ConfigGadgetWidget::oplink);
 }

@@ -59,6 +59,7 @@ ifndef TESTAPP
     SRC += $(OPUAVSYNTHDIR)/oplinksettings.c
     SRC += $(OPUAVSYNTHDIR)/objectpersistence.c
     SRC += $(OPUAVSYNTHDIR)/oplinkreceiver.c
+    SRC += $(OPUAVSYNTHDIR)/oplinklinktest.c
     SRC += $(OPUAVSYNTHDIR)/radiocombridgestats.c
     SRC += $(OPUAVSYNTHDIR)/firmwareiapobj.c
 else

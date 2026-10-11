@@ -1701,6 +1701,42 @@
             </widget>
            </item>
            <item row="2" column="0" colspan="2">
+            <widget class="QGroupBox" name="linkTestGroupBox">
+             <property name="title">
+              <string>Link test</string>
+             </property>
+             <property name="toolTip">
+              <string>Sends 20 requests through this modem; the modem at the far end of the radio answers each one. Works with two modems on the bench, no flight controller needed.</string>
+             </property>
+             <layout class="QGridLayout" name="linkTestLayout">
+              <item row="0" column="0">
+               <widget class="QPushButton" name="linkTestButton">
+                <property name="text">
+                 <string>Test link</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QLabel" name="linkTestResult">
+                <property name="text">
+                 <string>Not run</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="0" colspan="2">
+               <widget class="QLabel" name="linkTestRemote">
+                <property name="text">
+                 <string>Far modem: unknown</string>
+                </property>
+                <property name="wordWrap">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item row="3" column="0" colspan="2">
             <spacer name="verticalSpacer">
              <property name="orientation">
               <enum>Qt::Vertical</enum>
