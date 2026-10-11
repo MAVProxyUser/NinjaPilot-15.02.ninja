@@ -781,6 +781,8 @@ struct pios_rfm22b_dev {
     portTickType tx_complete_ticks;
     portTickType time_delta;
     portTickType last_contact;
+    // idle transmit slots skipped since the last packet (remote keepalive)
+    uint8_t idle_slots;
 };
 
 

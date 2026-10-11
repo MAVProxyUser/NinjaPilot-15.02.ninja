@@ -27,7 +27,7 @@
 
 #include "telemetry.h"
 #include "oplinksettings.h"
-#include "oplinklinktest.h"
+#include "oplinkstatus.h"
 #include "firmwareiapobj.h"
 #include "objectpersistence.h"
 #include <QElapsedTimer>
@@ -400,7 +400,7 @@ void Telemetry::processObjectQueue()
         // save, the link test through to the far modem, and the halt that reboots it.
         if ((objInfo.obj->getObjID() != GCSTelemetryStats::OBJID) &&
             (objInfo.obj->getObjID() != OPLinkSettings::OBJID) &&
-            (objInfo.obj->getObjID() != OPLinkLinkTest::OBJID) &&
+            (objInfo.obj->getObjID() != OPLinkStatus::OBJID) &&
             (objInfo.obj->getObjID() != FirmwareIAPObj::OBJID) &&
             (objInfo.obj->getObjID() != ObjectPersistence::OBJID)) {
             objInfo.obj->emitTransactionCompleted(false);

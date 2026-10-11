@@ -26,6 +26,9 @@
  */
 
 #include "configoplinkwidget.h"
+#include <uavtalk/telemetrymanager.h>
+#include <uavtalk/uavtalk.h>
+#include <extensionsystem/pluginmanager.h>
 #include <QDateTime>
 
 #include <coreplugin/generalsettings.h>
@@ -114,17 +117,19 @@ ConfigOPLinkWidget::ConfigOPLinkWidget(QWidget *parent) : ConfigTaskWidget(paren
     // Request and update of the setting object.
     settingsUpdated = false;
 
-    // Link test: GCS -> this modem -> radio -> far modem (answers) -> radio -> this modem -> GCS
-    linkTestObj = OPLinkLinkTest::GetInstance(objManager);
-    Q_ASSERT(linkTestObj);
-    connect(linkTestObj, SIGNAL(objectUpdated(UAVObject *)), this, SLOT(linkTestReply(UAVObject *)));
+    // Link test: a request for all instances of OPLinkStatus is relayed over the
+    // radio and answered by the far modem (RadioComBridge.c); the GCS tells the
+    // answer from this modem's own status stream by its DeviceID.
     linkTestTimer = new QTimer(this);
     connect(linkTestTimer, SIGNAL(timeout()), this, SLOT(linkTestTick()));
+    connect(oplinkStatusObj, SIGNAL(objectUnpacked(UAVObject *)), this, SLOT(linkTestReply(UAVObject *)));
     connect(m_oplink->linkTestButton, SIGNAL(clicked()), this, SLOT(startLinkTest()));
     linkTestSeq     = 0;
     linkTestReplies = 0;
     linkTestRttSum  = 0;
     linkTestRttMax  = 0;
+    linkTestNearId  = 0;
+    linkTestPending = false;
 
     autoLoadWidgets();
     disableMouseWheelEvents();
@@ -394,23 +399,23 @@ void ConfigOPLinkWidget::channelChanged(bool isMax)
  */
 
 /*
- * Link test.  Twenty OPLinkLinkTest requests go out 100 ms apart; the modem at
- * the far end of the radio answers each one with a Reply that carries its own
- * identity, link state and settings (RadioComBridge.c).  No flight controller
- * is involved, so this works with two modems on the bench, and it shows the
- * far modem's settings without a second GCS connection.
+ * Link test.  Twenty requests for "all instances" of OPLinkStatus, one at a
+ * time: the connected modem relays such a request over the radio, the modem at
+ * the far end answers with its own status, and that answer comes back through
+ * the connected modem.  The far modem's DeviceID differs from the connected
+ * one's, which is how a reply is recognised.  No flight controller involved.
  */
 void ConfigOPLinkWidget::startLinkTest()
 {
     if (linkTestTimer->isActive()) {
         return;
     }
-    linkTestSent.clear();
     linkTestReplies   = 0;
     linkTestSentCount = 0;
     linkTestRttSum    = 0;
     linkTestRttMax    = 0;
-    linkTestSeq       = (quint16)(QDateTime::currentMSecsSinceEpoch() & 0x7FFF);
+    linkTestPending   = false;
+    linkTestNearId    = static_cast<OPLinkStatus *>(oplinkStatusObj)->getData().DeviceID;
     linkTestClock.start();
     m_oplink->linkTestButton->setEnabled(false);
     m_oplink->linkTestResult->setText(tr("Testing..."));
@@ -426,48 +431,43 @@ void ConfigOPLinkWidget::linkTestTick()
         QTimer::singleShot(LINKTEST_SETTLE, this, SLOT(finishLinkTest()));
         return;
     }
+    // one request in flight at a time; an unanswered one counts as lost
     ++linkTestSentCount;
-    OPLinkLinkTest::DataFields d = linkTestObj->getData();
-    d.Seq  = ++linkTestSeq;
-    d.Echo = OPLinkLinkTest::ECHO_REQUEST;
-    for (unsigned int i = 0; i < OPLinkLinkTest::PAYLOAD_NUMELEM; ++i) {
-        d.Payload[i] = (quint8)(d.Seq + i);
+    linkTestPending = true;
+    linkTestSent[0] = linkTestClock.elapsed();
+    {
+        ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+        TelemetryManager *tm = pm->getObject<TelemetryManager>();
+        if (tm && tm->uavTalk()) {
+            tm->uavTalk()->sendObjectRequest(oplinkStatusObj, true); // past the transaction queue
+        } else {
+            oplinkStatusObj->requestUpdateAll();
+        }
     }
-    linkTestSent[d.Seq] = linkTestClock.elapsed();
-    linkTestObj->setData(d);
-    linkTestObj->updated();
     m_oplink->linkTestResult->setText(tr("Testing... %1 sent, %2 replies").arg(linkTestSentCount).arg(linkTestReplies));
 }
 
 void ConfigOPLinkWidget::linkTestReply(UAVObject *object)
 {
     Q_UNUSED(object);
-    OPLinkLinkTest::DataFields d = linkTestObj->getData();
-    if (d.Echo != OPLinkLinkTest::ECHO_REPLY) {
+    if (!linkTestPending) {
         return;
     }
-    qint64 sentAt = linkTestSent.value(d.Seq, -1);
-    if (sentAt < 0) {
-        return;
+    OPLinkStatus::DataFields d = static_cast<OPLinkStatus *>(oplinkStatusObj)->getData();
+    if (d.DeviceID == 0 || d.DeviceID == linkTestNearId) {
+        return; // the connected modem's own stream
     }
-    linkTestSent.remove(d.Seq);
-    double rtt = linkTestClock.elapsed() - sentAt;
+    linkTestPending = false;
+    double rtt = linkTestClock.elapsed() - linkTestSent.value(0, 0);
     ++linkTestReplies;
     linkTestRttSum += rtt;
     linkTestRttMax  = qMax(linkTestRttMax, rtt);
 
-    UAVObjectField *f;
-    QString state = (f = linkTestObj->getField("LinkState")) ? f->getValue().toString() : "?";
-    QString power = (f = linkTestObj->getField("MaxRFPower")) ? f->getValue().toString() : "?";
-    QString speed = (f = linkTestObj->getField("ComSpeed")) ? f->getValue().toString() : "?";
-    QString mainp = (f = linkTestObj->getField("MainPort")) ? f->getValue().toString() : "?";
-    QString flexi = (f = linkTestObj->getField("FlexiPort")) ? f->getValue().toString() : "?";
-    QString vcp   = (f = linkTestObj->getField("VCPPort")) ? f->getValue().toString() : "?";
-    m_oplink->linkTestRemote->setText(tr("Far modem %1: %2, %3 (hears us at %4 dBm), %5 mW, %6 bps, channels %7..%8, main %9, flexi %10, VCP %11")
-                                      .arg(QString::number(d.DeviceID, 16).toUpper())
-                                      .arg(d.Coordinator == OPLinkLinkTest::COORDINATOR_TRUE ? tr("coordinator") : tr("remote bound to %1").arg(QString::number(d.CoordID, 16).toUpper()))
-                                      .arg(state).arg((int)d.RSSI).arg(power).arg(speed).arg(d.MinChannel).arg(d.MaxChannel)
-                                      .arg(mainp).arg(flexi).arg(vcp));
+    UAVObjectField *f = oplinkStatusObj->getField("LinkState");
+    QString state     = f ? f->getValue().toString() : "?";
+    m_oplink->linkTestRemote->setText(tr("Far modem %1: %2, hears us at %3 dBm, quality %4, %5 radio resets, firmware heap %6")
+                                      .arg(QString::number(d.DeviceID, 16).toUpper()).arg(state)
+                                      .arg((int)d.PairSignalStrengths[0]).arg(d.LinkQuality).arg(d.Resets).arg(d.HeapRemaining));
 }
 
 void ConfigOPLinkWidget::finishLinkTest()

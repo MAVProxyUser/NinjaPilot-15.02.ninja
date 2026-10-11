@@ -28,7 +28,7 @@
 #define CONFIGPIPXTREMEWIDGET_H
 
 #include <oplinksettings.h>
-#include <oplinklinktest.h>
+#include <oplinkstatus.h>
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QMap>
@@ -59,7 +59,8 @@ private:
     // Are the settings current?
     bool settingsUpdated;
     // Link test: round trips through the modem at the far end of the radio
-    OPLinkLinkTest *linkTestObj;
+    quint32 linkTestNearId;
+    bool linkTestPending;
     QTimer *linkTestTimer;
     QElapsedTimer linkTestClock;
     QMap<quint16, qint64> linkTestSent;
@@ -69,7 +70,7 @@ private:
     double linkTestRttSum;
     double linkTestRttMax;
     static const int LINKTEST_COUNT    = 20;
-    static const int LINKTEST_PERIOD   = 100; // ms between requests
+    static const int LINKTEST_PERIOD   = 200; // ms between requests (one in flight at a time; a hop period apart)
     static const int LINKTEST_SETTLE   = 1500; // ms to wait for the last replies
 
 protected:

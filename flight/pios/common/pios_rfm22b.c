@@ -86,6 +86,7 @@
 
 // The maximum amount of time without activity before initiating a reset.
 #define PIOS_RFM22B_SUPERVISOR_TIMEOUT   150  // ms
+#define RFM22B_KEEPALIVE_SLOTS           16   // an idle remote transmits an empty packet every Nth slot
 
 // this is too adjust the RF module so that it is on frequency
 #define OSC_LOAD_CAP                     0x7F  // cap = 12.5pf .. default
@@ -1362,6 +1363,7 @@ static enum pios_radio_event rfm22_init(struct pios_rfm22b_dev *rfm22b_dev)
     rfm22b_dev->tx_complete_ticks  = 0;
     rfm22b_dev->rfm22b_state       = RFM22B_STATE_INITIALIZING;
     rfm22b_dev->last_contact       = 0;
+    rfm22b_dev->idle_slots         = 0;
 
     // software reset the RF chip .. following procedure according to Si4x3x Errata (rev. B)
     rfm22_write_claim(rfm22b_dev, RFM22_op_and_func_ctrl1, RFM22_opfc1_swres);
@@ -1832,8 +1834,18 @@ static enum pios_radio_event radio_txStart(struct pios_rfm22b_dev *radio_dev)
 
     // Always send a packet if this modem is a coordinator.
     if ((len == 0) && !rfm22_isCoordinator(radio_dev)) {
-        return RADIO_EVENT_RX_MODE;
+        // A remote with nothing to say still sends a one-byte packet every few
+        // slots: the coordinator keeps hearing it (pair table, link state,
+        // its RX light), and the remote's TX light shows the link is alive.
+        // One zero byte rides the ordinary data path (a stray 0x00 is nothing
+        // to a UAVTalk parser); an empty packet is the coordinator's beacon.
+        if (++radio_dev->idle_slots < RFM22B_KEEPALIVE_SLOTS) {
+            return RADIO_EVENT_RX_MODE;
+        }
+        p[0] = 0;
+        len  = 1;
     }
+    radio_dev->idle_slots = 0;
 
     // Increment the packet sequence number.
     radio_dev->stats.tx_seq++;

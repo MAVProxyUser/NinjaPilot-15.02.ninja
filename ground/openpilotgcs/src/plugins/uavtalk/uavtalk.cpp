@@ -686,8 +686,11 @@ bool UAVTalk::transmitObject(quint8 type, quint32 objId, quint16 instId, UAVObje
 {
     // Important note : obj can be null (when type is NACK for example) so protect all obj dereferences.
 
-    // If all instances are requested on a single instance object it is an error
-    if ((obj != NULL) && (instId == ALL_INSTANCES) && obj->isSingleInstance()) {
+    // If all instances are sent for a single instance object it is an error.
+    // A *request* for all instances of one is valid UAVTalk and stays as sent:
+    // a flight controller answers with its instance 0, and an OPLink modem
+    // takes it as a question for the modem at the far end of the radio.
+    if ((obj != NULL) && (instId == ALL_INSTANCES) && obj->isSingleInstance() && (type != TYPE_OBJ_REQ)) {
         instId = 0;
     }
     bool allInstances = (instId == ALL_INSTANCES);

@@ -595,6 +595,18 @@ uint8_t UAVTalkGetPacketType(UAVTalkConnection connectionHandle)
 }
 
 /**
+ * Get the instance id of the packet just received.
+ */
+uint16_t UAVTalkGetPacketInstId(UAVTalkConnection connectionHandle)
+{
+    UAVTalkConnectionData *connection;
+
+    CHECKCONHANDLE(connectionHandle, connection, return 0);
+
+    return connection->iproc.instId;
+}
+
+/**
  * Receive an object. This function process objects received through the telemetry stream.
  *
  * Parser errors are considered as transmission errors and are not NACKed.

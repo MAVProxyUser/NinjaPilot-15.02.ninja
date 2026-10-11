@@ -120,11 +120,15 @@ to the Cube through the coordinator's USB.
   modem that never completes the handshake; it now also passes OPLinkLinkTest
   and FirmwareIAPObj (`telemetry.cpp`), so the page can test the link and
   reboot the modem.
-* **Link test** on the OPLink page: 20 `OPLinkLinkTest` requests go through the
-  connected modem; the modem at the far end of the radio answers each one
-  (`RadioComBridge.c`) with its identity, link state and settings, so the page
-  shows round trips, loss, RTT and the far modem's configuration.  No flight
-  controller needed.  Firmware echo at 57600 measures ~35 ms per round trip.
+* **Link test** on the OPLink page, with no new UAVObject: a request for *all
+  instances* of OPLinkStatus (an instance id the modem's own status never
+  uses) is relayed over the radio, the modem at the far end answers with its
+  status, and the near modem passes that one answer to the GCS
+  (`RadioComBridge.c`; the GCS's UAVTalk no longer rewrites such a request to
+  instance 0, and the page sends it straight through the UAVTalk instance,
+  past the telemetry transaction queue).  The page tells the answer from the
+  connected modem's own stream by DeviceID.  20 requests at 200 ms, ~55 ms
+  per round trip at 57600, no flight controller needed.
 * **Two or more modems on USB: the OPLink entry becomes the modems page.**
   Every modem gets a panel (status, role, pair table with RSSI, firmware, the
   settings form, Apply / Save / Reboot / Test link) and an "include" box;
@@ -156,7 +160,15 @@ One coordinator per network.  Its Device ID seeds the frequency-hopping
 sequence (`rfm22_gen_channels`) and its clock is the time base; remotes bind to
 that ID, synchronise to its packets and report `Connected`.  Each hop period is
 split in two: the coordinator transmits in the first half, *every* remote in
-the second (`rfm22_timeToSend`).  Consequences:
+the second (`rfm22_timeToSend`).  In stock 15.02 a remote only transmitted
+when it had data, so an idle link showed traffic one way and the coordinator
+never heard it; this tree's remote sends a one-byte keepalive every 16 idle
+slots (`RFM22B_KEEPALIVE_SLOTS`), so both modems' TX and RX LEDs show the link
+and the coordinator's pair table stays fresh.  The driver still only marks a
+remote Connected; the coordinator's system task reports Connected and lights
+its link LED when the pair table shows a remote heard recently
+(`oplinkmod.c`).  Changing the driver's own link state on the coordinator
+broke reception (tried, reverted).  Consequences:
 
 * the coordinator's downlink is a broadcast all remotes hear (PPM, GCS traffic);
 * several remotes share one uplink slot and contend for it, so a second or

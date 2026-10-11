@@ -45,6 +45,7 @@
 #include <openpilot.h>
 
 #include <oplinkstatus.h>
+#include <oplinksettings.h>
 #include <taskinfo.h>
 
 #include <pios_rfm22b.h>
@@ -113,6 +114,10 @@ static void systemTask(__attribute__((unused)) void *parameters)
     uint16_t prev_tx_count = 0;
     uint16_t prev_rx_count = 0;
     bool first_time = true;
+    // settings are applied at boot; the role does not change at runtime
+    OPLinkSettingsData oplinkSettings;
+    OPLinkSettingsGet(&oplinkSettings);
+    bool is_coordinator = (oplinkSettings.Coordinator == OPLINKSETTINGS_COORDINATOR_TRUE);
 
     /* create all modules thread */
     MODULE_TASKCREATE_ALL;
@@ -187,7 +192,22 @@ static void systemTask(__attribute__((unused)) void *parameters)
             oplinkStatus.LinkState = OPLINKSTATUS_LINKSTATE_DISABLED;
         }
 
-        if (radio_stats.link_state == OPLINKSTATUS_LINKSTATE_CONNECTED) {
+        // The radio driver only ever marks a remote Connected.  A coordinator is
+        // linked when its pair table shows a remote heard recently (remotes send
+        // keepalives when idle); it says so in the status object and on the LED.
+        bool linked = (radio_stats.link_state == OPLINKSTATUS_LINKSTATE_CONNECTED);
+        if (!linked && is_coordinator && pios_rfm22b_id) {
+            for (uint8_t i = 0; i < OPLINKSTATUS_PAIRIDS_NUMELEM; ++i) {
+                if (pairIDs[i] && (pairSignalStrengths[i] > -127)) {
+                    linked = true;
+                }
+            }
+            if (linked && ((oplinkStatus.LinkState == OPLINKSTATUS_LINKSTATE_ENABLED) ||
+                           (oplinkStatus.LinkState == OPLINKSTATUS_LINKSTATE_DISCONNECTED))) {
+                oplinkStatus.LinkState = OPLINKSTATUS_LINKSTATE_CONNECTED;
+            }
+        }
+        if (linked) {
             LINK_LED_ON;
         } else {
             LINK_LED_OFF;

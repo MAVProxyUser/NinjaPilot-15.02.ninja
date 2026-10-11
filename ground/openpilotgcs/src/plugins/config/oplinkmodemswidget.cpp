@@ -12,11 +12,11 @@
 #include "uavobject.h"
 #include "uavobjectfield.h"
 #include "uavtalk/uavtalk.h"
+#include "uavtalk/telemetrymanager.h"
 #include "ophid/inc/ophid.h"
 #include "ophid/inc/ophid_usbmon.h"
 #include "oplinkstatus.h"
 #include "oplinksettings.h"
-#include "oplinklinktest.h"
 #include "objectpersistence.h"
 #include "firmwareiapobj.h"
 #include <coreplugin/icore.h>
@@ -41,7 +41,7 @@
 static const int POLL_PERIOD_MS        = 1000;
 static const int REBOOT_STEP_MS        = 700;
 static const int LINKTEST_COUNT        = 20;
-static const int LINKTEST_PERIOD_MS    = 100;
+static const int LINKTEST_PERIOD_MS    = 200;
 static const int LINKTEST_SETTLE_MS    = 1500;
 static const quint8 OPLINK_BOARD_TYPE  = 0x03;
 static const quint16 IAP_STEP_1        = 1122;
@@ -83,7 +83,6 @@ void OPLinkModemSession::bindObjects(UAVObjectManager *manager)
 {
     m_status      = OPLinkStatus::GetInstance(manager);
     m_settings    = OPLinkSettings::GetInstance(manager);
-    m_linkTest    = OPLinkLinkTest::GetInstance(manager);
     m_persistence = ObjectPersistence::GetInstance(manager);
     m_iap = FirmwareIAPObj::GetInstance(manager);
 }
@@ -196,6 +195,26 @@ void OPLinkModemSession::poll()
     }
 }
 
+void OPLinkModemSession::requestAll(UAVObject *obj)
+{
+    if (!m_open) {
+        return;
+    }
+    if (m_private) {
+        m_talk->sendObjectRequest(obj, true);
+    } else {
+        // straight through the link: the telemetry queue would hold the next
+        // request until this one's transaction times out
+        ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+        TelemetryManager *tm = pm->getObject<TelemetryManager>();
+        if (tm && tm->uavTalk()) {
+            tm->uavTalk()->sendObjectRequest(obj, true);
+        } else {
+            obj->requestUpdateAll();
+        }
+    }
+}
+
 void OPLinkModemSession::saveSettings()
 {
     ObjectPersistence::DataFields d = m_persistence->getData();
@@ -243,7 +262,7 @@ void OPLinkModemSession::rebootStep()
 
 OPLinkModemPanel::OPLinkModemPanel(OPLinkModemSession *session, QWidget *parent) :
     QGroupBox(parent), m_session(session), m_settingsSeen(false),
-    m_testSeq(0), m_testSentCount(0), m_testReplies(0), m_testRttSum(0), m_testRttMax(0)
+    m_testSentAt(0), m_testPending(false), m_knownDeviceId(0), m_testSentCount(0), m_testReplies(0), m_testRttSum(0), m_testRttMax(0)
 {
     setTitle(QString("%1  %2%3").arg(session->product()).arg(session->serial().left(24))
              .arg(session->isPrivate() ? "" : tr("  (the GCS connection)")));
@@ -336,7 +355,7 @@ OPLinkModemPanel::OPLinkModemPanel(OPLinkModemSession *session, QWidget *parent)
     connect(m_session->status(), SIGNAL(objectUpdated(UAVObject *)), this, SLOT(refreshStatus()));
     connect(m_session->settings(), SIGNAL(objectUnpacked(UAVObject *)), this, SLOT(refreshSettings()));
     connect(m_session->persistence(), SIGNAL(objectUnpacked(UAVObject *)), this, SLOT(persistenceUpdated(UAVObject *)));
-    connect(m_session->linkTest(), SIGNAL(objectUnpacked(UAVObject *)), this, SLOT(linkTestReply(UAVObject *)));
+    connect(m_session->status(), SIGNAL(objectUnpacked(UAVObject *)), this, SLOT(linkTestReply(UAVObject *)));
 
     m_testTimer = new QTimer(this);
     connect(m_testTimer, SIGNAL(timeout()), this, SLOT(linkTestTick()));
@@ -389,6 +408,14 @@ void OPLinkModemPanel::setRadio(const QString &power, const QString &speed, int 
 void OPLinkModemPanel::refreshStatus()
 {
     OPLinkStatus::DataFields s = m_session->status()->getData();
+
+    // the far modem's answers to a link test arrive in this same object
+    if (m_knownDeviceId == 0 && s.DeviceID) {
+        m_knownDeviceId = s.DeviceID;
+    }
+    if (m_knownDeviceId && s.DeviceID && s.DeviceID != m_knownDeviceId) {
+        return;
+    }
     UAVObjectField *linkField  = m_session->status()->getField("LinkState");
     QString state = linkField ? linkField->getValue().toString() : "?";
 
@@ -399,13 +426,25 @@ void OPLinkModemPanel::refreshStatus()
     }
     m_link->setText(tr("Link: %1   quality %2   tx %3 B/s   rx %4 B/s   heap %5   resets %6")
                     .arg(state).arg(s.LinkQuality).arg(s.TXRate).arg(s.RXRate).arg(s.HeapRemaining).arg(s.Resets));
+    // The pair table holds the destination id of received packets: on a remote
+    // that is the coordinator it hears; on the coordinator it is its own id,
+    // because remotes address it, so it cannot say which remote spoke.
+    bool coordinator = m_session->settings()->getData().Coordinator == OPLinkSettings::COORDINATOR_TRUE;
     QStringList pairs;
+    int best = -127;
     for (unsigned int i = 0; i < OPLinkStatus::PAIRIDS_NUMELEM; ++i) {
         if (s.PairIDs[i]) {
             pairs << QString("%1 at %2 dBm").arg(QString::number(s.PairIDs[i], 16).toUpper()).arg((int)s.PairSignalStrengths[i]);
+            best = qMax(best, (int)s.PairSignalStrengths[i]);
         }
     }
-    m_pairs->setText(tr("Hears: %1").arg(pairs.isEmpty() ? tr("nobody") : pairs.join(", ")));
+    if (coordinator) {
+        m_pairs->setText(pairs.isEmpty()
+                         ? tr("Hears: no remote traffic lately (a remote only transmits when it has data; run a link test)")
+                         : tr("Hears: a remote at %1 dBm").arg(best));
+    } else {
+        m_pairs->setText(tr("Hears: %1").arg(pairs.isEmpty() ? tr("no coordinator") : pairs.join(", ")));
+    }
     if (s.Description[0] == 'O' && s.Description[1] == 'p') {
         QByteArray tag;
         for (int i = 14; i < 40; ++i) {
@@ -512,12 +551,11 @@ void OPLinkModemPanel::startLinkTest()
     if (m_testTimer->isActive()) {
         return;
     }
-    m_testSent.clear();
     m_testReplies   = 0;
     m_testSentCount = 0;
     m_testRttSum    = 0;
     m_testRttMax    = 0;
-    m_testSeq       = (quint16)(QDateTime::currentMSecsSinceEpoch() & 0x7FFF);
+    m_testPending   = false;
     m_testClock.start();
     m_testButton->setEnabled(false);
     m_testResult->setText(tr("Testing..."));
@@ -533,39 +571,30 @@ void OPLinkModemPanel::linkTestTick()
         return;
     }
     ++m_testSentCount;
-    OPLinkLinkTest *t = m_session->linkTest();
-    OPLinkLinkTest::DataFields d = t->getData();
-    d.Seq  = ++m_testSeq;
-    d.Echo = OPLinkLinkTest::ECHO_REQUEST;
-    for (unsigned int i = 0; i < OPLinkLinkTest::PAYLOAD_NUMELEM; ++i) {
-        d.Payload[i] = (quint8)(d.Seq + i);
-    }
-    m_testSent[d.Seq] = m_testClock.elapsed();
-    t->setData(d);
-    m_session->send(t);
+    m_testPending = true;
+    m_testSentAt  = m_testClock.elapsed();
+    m_session->requestAll(m_session->status());
 }
 
 void OPLinkModemPanel::linkTestReply(UAVObject *object)
 {
     Q_UNUSED(object);
-    OPLinkLinkTest *t = m_session->linkTest();
-    OPLinkLinkTest::DataFields d = t->getData();
-    if (d.Echo != OPLinkLinkTest::ECHO_REPLY) {
+    if (!m_testPending) {
         return;
     }
-    qint64 sentAt = m_testSent.value(d.Seq, -1);
-    if (sentAt < 0) {
+    OPLinkStatus::DataFields d = m_session->status()->getData();
+    if (d.DeviceID == 0 || d.DeviceID == m_knownDeviceId) {
         return;
     }
-    m_testSent.remove(d.Seq);
-    double rtt = m_testClock.elapsed() - sentAt;
+    m_testPending = false;
+    double rtt = m_testClock.elapsed() - m_testSentAt;
     ++m_testReplies;
     m_testRttSum += rtt;
     m_testRttMax  = qMax(m_testRttMax, rtt);
-    UAVObjectField *f;
-    QString state = (f = t->getField("LinkState")) ? f->getValue().toString() : "?";
+    UAVObjectField *f = m_session->status()->getField("LinkState");
+    QString state     = f ? f->getValue().toString() : "?";
     m_testResult->setText(tr("Testing... %1 replies from %2 (%3, hears us at %4 dBm)")
-                          .arg(m_testReplies).arg(QString::number(d.DeviceID, 16).toUpper()).arg(state).arg((int)d.RSSI));
+                          .arg(m_testReplies).arg(QString::number(d.DeviceID, 16).toUpper()).arg(state).arg((int)d.PairSignalStrengths[0]));
 }
 
 void OPLinkModemPanel::finishLinkTest()

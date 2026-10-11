@@ -32,7 +32,6 @@ class UAVTalk;
 class RawHID;
 class OPLinkStatus;
 class OPLinkSettings;
-class OPLinkLinkTest;
 class ObjectPersistence;
 class FirmwareIAPObj;
 
@@ -77,10 +76,7 @@ public:
     {
         return m_settings;
     }
-    OPLinkLinkTest *linkTest() const
-    {
-        return m_linkTest;
-    }
+    void requestAll(UAVObject *obj);
     ObjectPersistence *persistence() const
     {
         return m_persistence;
@@ -111,7 +107,6 @@ private:
     UAVTalk *m_talk;
     OPLinkStatus *m_status;
     OPLinkSettings *m_settings;
-    OPLinkLinkTest *m_linkTest;
     ObjectPersistence *m_persistence;
     FirmwareIAPObj *m_iap;
     QTimer *m_pollTimer;
@@ -183,8 +178,9 @@ private:
 
     QTimer *m_testTimer;
     QElapsedTimer m_testClock;
-    QMap<quint16, qint64> m_testSent;
-    quint16 m_testSeq;
+    qint64 m_testSentAt;
+    bool m_testPending;
+    quint32 m_knownDeviceId;
     int m_testSentCount;
     int m_testReplies;
     double m_testRttSum;
