@@ -121,6 +121,7 @@ UAVOBJSRCFILENAMES += receiveractivity
 UAVOBJSRCFILENAMES += altitudeholdsettings
 UAVOBJSRCFILENAMES += oplinksettings
 UAVOBJSRCFILENAMES += oplinkstatus
+UAVOBJSRCFILENAMES += radiocombridgestats
 UAVOBJSRCFILENAMES += altitudefiltersettings
 UAVOBJSRCFILENAMES += altitudeholdstatus
 UAVOBJSRCFILENAMES += waypoint
