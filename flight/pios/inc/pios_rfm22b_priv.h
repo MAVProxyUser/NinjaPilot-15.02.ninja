@@ -40,6 +40,7 @@
 // ************************************
 
 #define RFM22B_MAX_PACKET_LEN                     64
+#define RFM22B_MAX_HOP_CHANNELS                   32  // MAX_CHANNELS in the driver
 #define RFM22B_NUM_CHANNELS                       251
 
 // ************************************
@@ -764,7 +765,7 @@ struct pios_rfm22b_dev {
     bool         ppm_only_mode;
 
     // The channel list
-    uint8_t      channels[RFM22B_NUM_CHANNELS];
+    uint8_t      channels[RFM22B_MAX_HOP_CHANNELS]; // the hop table never holds more than this
     // The number of frequency hopping channels.
     uint8_t      num_channels;
     // The frequency hopping step size
@@ -781,10 +782,13 @@ struct pios_rfm22b_dev {
     portTickType tx_complete_ticks;
     portTickType time_delta;
     portTickType last_contact;
-    // idle transmit slots skipped since the last packet (remote keepalive)
-    uint8_t idle_slots;
-    // the remote whose keepalive the coordinator heard last: its real id for the pair table
-    uint32_t last_sender_id;
+    // when this remote last announced itself (keepalive)
+    portTickType last_keepalive;
+    // extra wait before the next keepalive (0..3 slots) and the generator behind it
+    uint32_t     keepalive_jitter_ms;
+    uint32_t     keepalive_lcg;
+    // the chip reported a power-on reset since the last init (its registers are gone)
+    bool por_detected;
 };
 
 

@@ -290,11 +290,15 @@ void PIOS_Board_Init(void)
         if (PIOS_USART_Init(&pios_usart3_id, &pios_usart_telem_flexi_cfg)) {
             PIOS_Assert(0);
         }
-        PIOS_Assert(pios_uart_rx_buffer);
-        PIOS_Assert(pios_uart_tx_buffer);
+        // its own buffers: Main and Flexi used to share one pair, so enabling
+        // both made two drivers write the same FIFO
+        uint8_t *flexi_rx_buffer = (uint8_t *)pios_malloc(PIOS_COM_TELEM_RX_BUF_LEN);
+        uint8_t *flexi_tx_buffer = (uint8_t *)pios_malloc(PIOS_COM_TELEM_TX_BUF_LEN);
+        PIOS_Assert(flexi_rx_buffer);
+        PIOS_Assert(flexi_tx_buffer);
         if (PIOS_COM_Init(&pios_com_telem_uart_flexi_id, &pios_usart_com_driver, pios_usart3_id,
-                          pios_uart_rx_buffer, PIOS_COM_TELEM_RX_BUF_LEN,
-                          pios_uart_tx_buffer, PIOS_COM_TELEM_TX_BUF_LEN)) {
+                          flexi_rx_buffer, PIOS_COM_TELEM_RX_BUF_LEN,
+                          flexi_tx_buffer, PIOS_COM_TELEM_TX_BUF_LEN)) {
             PIOS_Assert(0);
         }
         PIOS_COM_TELEMETRY = PIOS_COM_TELEM_UART_FLEXI;

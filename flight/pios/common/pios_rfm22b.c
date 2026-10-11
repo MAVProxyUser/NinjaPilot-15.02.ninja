@@ -86,7 +86,9 @@
 
 // The maximum amount of time without activity before initiating a reset.
 #define PIOS_RFM22B_SUPERVISOR_TIMEOUT   150  // ms
-#define RFM22B_KEEPALIVE_SLOTS           16
+#define RFM22B_KEEPALIVE_MS              500  // a remote announces itself this often when it has a free slot
+#define RFM22B_KEEPALIVE_FORCE_MS        1000 // ... and at least this often even if every slot carries data
+#define RFM22B_PAIR_TIMEOUT_S            3    // a pair entry not refreshed for this long is dropped
 #define RFM22B_KEEPALIVE_LEN             7    // marker (3) + sender id (4)
 #define RFM22B_KEEPALIVE_MARK0           0x00
 #define RFM22B_KEEPALIVE_MARK1           0xA5
@@ -130,6 +132,19 @@
 #endif
 
 #define CONNECTED_TIMEOUT (250 / portTICK_RATE_MS) /* ms */
+
+/**
+ * How long a remote may go without hearing the coordinator before the link is
+ * declared down: at least CONNECTED_TIMEOUT, and at least two and a half TDM
+ * cycles so that one lost coordinator packet does not flap the link state at
+ * the slow air rates (one cycle is two packet times).
+ */
+static inline uint32_t rfm22_connectedTimeoutMs(const struct pios_rfm22b_dev *rfm22b_dev)
+{
+    uint32_t scaled = (uint32_t)rfm22b_dev->packet_time * 5;
+
+    return (scaled > (uint32_t)CONNECTED_TIMEOUT) ? scaled : (uint32_t)CONNECTED_TIMEOUT;
+}
 #define MAX_CHANNELS      32
 
 /* Local type definitions */
@@ -193,6 +208,7 @@ static void rfm22b_add_rx_status(struct pios_rfm22b_dev *rfm22b_dev, enum pios_r
 static void rfm22_setNominalCarrierFrequency(struct pios_rfm22b_dev *rfm22b_dev, uint8_t init_chan);
 static bool rfm22_setFreqHopChannel(struct pios_rfm22b_dev *rfm22b_dev, uint8_t channel);
 static void rfm22_updatePairStatus(struct pios_rfm22b_dev *radio_dev);
+static void rfm22_agePairStats(struct pios_rfm22b_dev *radio_dev);
 static void rfm22_calculateLinkQuality(struct pios_rfm22b_dev *rfm22b_dev);
 static bool rfm22_isConnected(struct pios_rfm22b_dev *rfm22b_dev);
 static bool rfm22_isCoordinator(struct pios_rfm22b_dev *rfm22b_dev);
@@ -612,10 +628,24 @@ void PIOS_RFM22B_SetChannelConfig(uint32_t rfm22b_id, enum rfm22b_datarate datar
     }
     rfm22b_dev->packet_time = (ppm_mode ? packet_time_ppm[datarate] : packet_time[datarate]);
 
+    // settings come from the user: keep them inside the channel plan
+    if (max_chan > RFM22B_NUM_CHANNELS - 1) {
+        max_chan = RFM22B_NUM_CHANNELS - 1;
+    }
+    if (min_chan > max_chan) {
+        // an inverted range is garbage: use the whole plan, which is what a
+        // default-configured coordinator hops over, so the modem can still link
+        min_chan = 0;
+        max_chan = RFM22B_NUM_CHANNELS - 1;
+    }
     uint8_t num_found = 0;
     rfm22_gen_channels(rfm22_destinationID(rfm22b_dev), datarate, min_chan, max_chan,
                        rfm22b_dev->channels, &num_found);
-
+    if (num_found < 2) {
+        // a range too narrow for this rate: fall back to the full plan
+        rfm22_gen_channels(rfm22_destinationID(rfm22b_dev), datarate, 0, RFM22B_NUM_CHANNELS - 1,
+                           rfm22b_dev->channels, &num_found);
+    }
     rfm22b_dev->num_channels = num_found;
 
     // Calculate the maximum packet length from the datarate.
@@ -694,7 +724,7 @@ uint8_t PIOS_RFM2B_GetPairStats(uint32_t rfm22b_id, uint32_t *device_ids, int8_t
         return 0;
     }
 
-    uint8_t mp = (max_pairs >= OPLINKSTATUS_PAIRIDS_NUMELEM) ? max_pairs : OPLINKSTATUS_PAIRIDS_NUMELEM;
+    uint8_t mp = (max_pairs < OPLINKSTATUS_PAIRIDS_NUMELEM) ? max_pairs : OPLINKSTATUS_PAIRIDS_NUMELEM;
     for (uint8_t i = 0; i < mp; ++i) {
         device_ids[i] = rfm22b_dev->pair_stats[i].pairID;
         RSSIs[i] = rfm22b_dev->pair_stats[i].rssi;
@@ -886,6 +916,11 @@ pios_rfm22b_int_result PIOS_RFM22B_ProcessTx(uint32_t rfm22b_id)
         return PIOS_RFM22B_INT_FAILURE;
     }
 
+    // Packet sent: check it first, the two flags can arrive in one status read
+    if (rfm22b_dev->status_regs.int_status_1.packet_sent_interrupt) {
+        rfm22b_dev->rfm22b_state = RFM22B_STATE_TRANSITION;
+        return PIOS_RFM22B_TX_COMPLETE;
+    }
     // TX FIFO almost empty, it needs filling up
     if (rfm22b_dev->status_regs.int_status_1.tx_fifo_almost_empty) {
         // Add data to the TX FIFO buffer
@@ -900,14 +935,8 @@ pios_rfm22b_int_result PIOS_RFM22B_ProcessTx(uint32_t rfm22b_id)
         rfm22b_dev->tx_data_rd += bytes_to_write;
         rfm22_deassertCs(rfm22b_dev);
         rfm22_releaseBus(rfm22b_dev);
-
         return PIOS_RFM22B_INT_SUCCESS;
-    } else if (rfm22b_dev->status_regs.int_status_1.packet_sent_interrupt) {
-        // Transition out of Tx mode.
-        rfm22b_dev->rfm22b_state = RFM22B_STATE_TRANSITION;
-        return PIOS_RFM22B_TX_COMPLETE;
     }
-
     return 0;
 }
 
@@ -948,8 +977,11 @@ pios_rfm22b_int_result PIOS_RFM22B_ProcessRx(uint32_t rfm22b_id)
         // read the total length of the packet data
         uint32_t len = rfm22_read(rfm22b_dev, RFM22_received_packet_length);
 
-        // The received packet is going to be larger than the receive buffer
-        if (len > rfm22b_dev->max_packet_len) {
+        // The received packet is going to be larger than the receive buffer,
+        // or too short to carry the RS parity (the length is subtracted
+        // unsigned later: a 0..3 byte packet would wrap to a 250-byte read)
+        if ((len > rfm22b_dev->max_packet_len) || (len == 0) ||
+            (!rfm22b_dev->ppm_only_mode && (len < RS_ECC_NPARITY))) {
             rfm22_releaseBus(rfm22b_dev);
             rfm22_rxFailure(rfm22b_dev);
             return PIOS_RFM22B_INT_FAILURE;
@@ -984,17 +1016,12 @@ pios_rfm22b_int_result PIOS_RFM22B_ProcessRx(uint32_t rfm22b_id)
         // Increment the total byte received count.
         rfm22b_dev->stats.rx_byte_count += rfm22b_dev->rx_buffer_wr;
 
-        // Update the pair status with this packet.
-        // A coordinator receives packets addressed to itself, so the destination
-        // id names nobody; use the id of the remote whose keepalive was heard last.
-        if (rfm22_isCoordinator(rfm22b_dev)) {
-            if (rfm22b_dev->last_sender_id) {
-                uint32_t dest = rfm22b_dev->rx_destination_id;
-                rfm22b_dev->rx_destination_id = rfm22b_dev->last_sender_id;
-                rfm22_updatePairStatus(rfm22b_dev);
-                rfm22b_dev->rx_destination_id = dest;
-            }
-        } else {
+        // Update the pair status with this packet.  Everything a coordinator
+        // receives carries its own id as the destination and so names nobody:
+        // its pair table is fed by the remotes' keepalives instead, which carry
+        // the sender's id (radio_receivePacket), so each remote's signal
+        // strength and last-contact time are its own.
+        if (!rfm22_isCoordinator(rfm22b_dev)) {
             rfm22_updatePairStatus(rfm22b_dev);
         }
 
@@ -1169,6 +1196,7 @@ static void pios_rfm22_task(void *parameters)
         return;
     }
     portTickType lastEventTicks = xTaskGetTickCount();
+    portTickType lastAgeTicks   = xTaskGetTickCount();
 
     while (1) {
 #if defined(PIOS_INCLUDE_WDG) && defined(PIOS_WDG_RFM22B)
@@ -1192,7 +1220,15 @@ static void pios_rfm22_task(void *parameters)
         } else {
             // Has it been too long since the last event?
             portTickType curTicks = xTaskGetTickCount();
-            if (pios_rfm22_time_difference_ms(lastEventTicks, curTicks) > PIOS_RFM22B_SUPERVISOR_TIMEOUT) {
+            // The supervisor must outlast at least one missed coordinator packet at
+            // every air rate: a TDM cycle is two packet times, so allow two and a
+            // half cycles (the slow rates would otherwise reset on every single
+            // lost packet; 9600 bps has 80 ms packets).
+            uint32_t supervisor_ms = PIOS_RFM22B_SUPERVISOR_TIMEOUT;
+            if ((uint32_t)rfm22b_dev->packet_time * 5 > supervisor_ms) {
+                supervisor_ms = (uint32_t)rfm22b_dev->packet_time * 5;
+            }
+            if (pios_rfm22_time_difference_ms(lastEventTicks, curTicks) > supervisor_ms) {
                 // Clear the event queue.
                 enum pios_radio_event event;
                 while (xQueueReceive(rfm22b_dev->eventQueue, &event, 0) == pdTRUE) {
@@ -1206,6 +1242,17 @@ static void pios_rfm22_task(void *parameters)
         }
 
         // Change channels if necessary.
+        // age the pair table once a second; a modem not heard for a while
+        // disappears from it (and from the coordinator's idea of being linked)
+        if (pios_rfm22_time_difference_ms(lastAgeTicks, xTaskGetTickCount()) >= 1000) {
+            lastAgeTicks = xTaskGetTickCount();
+            rfm22_agePairStats(rfm22b_dev);
+        }
+        // a radio that reports a power-on reset has lost its registers: re-init now
+        if (rfm22b_dev->por_detected) {
+            rfm22b_dev->por_detected = false;
+            rfm22_process_event(rfm22b_dev, RADIO_EVENT_ERROR);
+        }
         if (rfm22_changeChannel(rfm22b_dev)) {
             rfm22_process_event(rfm22b_dev, RADIO_EVENT_RX_MODE);
         }
@@ -1249,12 +1296,12 @@ static void pios_rfm22_inject_event(struct pios_rfm22b_dev *rfm22b_dev, enum pio
 {
     if (inISR) {
         // Store the event.
-        portBASE_TYPE pxHigherPriorityTaskWoken1;
+        portBASE_TYPE pxHigherPriorityTaskWoken1 = pdFALSE;
         if (xQueueSendFromISR(rfm22b_dev->eventQueue, &event, &pxHigherPriorityTaskWoken1) != pdTRUE) {
             return;
         }
         // Signal the semaphore to wake up the handler thread.
-        portBASE_TYPE pxHigherPriorityTaskWoken2;
+        portBASE_TYPE pxHigherPriorityTaskWoken2 = pdFALSE;
         if (xSemaphoreGiveFromISR(rfm22b_dev->isrPending, &pxHigherPriorityTaskWoken2) != pdTRUE) {
             // Something went fairly seriously wrong
             rfm22b_dev->errors++;
@@ -1357,7 +1404,8 @@ static enum pios_radio_event rfm22_init(struct pios_rfm22b_dev *rfm22b_dev)
 
     // Initlize the link stats.
     for (uint8_t i = 0; i < RFM22B_RX_PACKET_STATS_LEN; ++i) {
-        rfm22b_dev->rx_packet_stats[i] = 0;
+        // all "failure": link quality starts at 0, not at 128 with no peer
+        rfm22b_dev->rx_packet_stats[i] = 0xFFFFFFFF;
     }
 
     // Initialize the state
@@ -1378,8 +1426,9 @@ static enum pios_radio_event rfm22_init(struct pios_rfm22b_dev *rfm22b_dev)
     rfm22b_dev->tx_complete_ticks  = 0;
     rfm22b_dev->rfm22b_state       = RFM22B_STATE_INITIALIZING;
     rfm22b_dev->last_contact       = 0;
-    rfm22b_dev->idle_slots         = 0;
-    rfm22b_dev->last_sender_id     = 0;
+    rfm22b_dev->last_keepalive     = 0;
+    rfm22b_dev->keepalive_jitter_ms = 0;
+    rfm22b_dev->por_detected       = false;
 
     // software reset the RF chip .. following procedure according to Si4x3x Errata (rev. B)
     rfm22_write_claim(rfm22b_dev, RFM22_op_and_func_ctrl1, RFM22_opfc1_swres);
@@ -1427,6 +1476,7 @@ static enum pios_radio_event rfm22_init(struct pios_rfm22b_dev *rfm22b_dev)
 #endif
 
         // incorrect RF module type
+        rfm22_releaseBus(rfm22b_dev);
         return RADIO_EVENT_FATAL_ERROR;
     }
     if (device_version != RFM22_DEVICE_VERSION_B1) {
@@ -1434,6 +1484,7 @@ static enum pios_radio_event rfm22_init(struct pios_rfm22b_dev *rfm22b_dev)
         DEBUG_PRINTF(2, "rf device version: INCORRECT\n\r");
 #endif
         // incorrect RF module version
+        rfm22_releaseBus(rfm22b_dev);
         return RADIO_EVENT_FATAL_ERROR;
     }
 
@@ -1563,6 +1614,9 @@ static enum pios_radio_event rfm22_init(struct pios_rfm22b_dev *rfm22b_dev)
     // Initialize the frequency and datarate to te default.
     rfm22_setNominalCarrierFrequency(rfm22b_dev, 0);
     pios_rfm22_setDatarate(rfm22b_dev);
+
+    // the software reset above raises the chip's power-on flag: that one is ours
+    rfm22b_dev->por_detected = false;
 
     return RADIO_EVENT_INITIALIZED;
 }
@@ -1748,6 +1802,7 @@ static bool pios_rfm22_readStatus(struct pios_rfm22b_dev *rfm22b_dev)
 
     // the RF module has gone and done a reset - we need to re-initialize the rf module
     if (rfm22b_dev->status_regs.int_status_2.poweron_reset) {
+        rfm22b_dev->por_detected = true;
         return false;
     }
 
@@ -1841,31 +1896,53 @@ static enum pios_radio_event radio_txStart(struct pios_rfm22b_dev *radio_dev)
         }
     }
 
+    // A remote announces itself (marker + its own id) every RFM22B_KEEPALIVE_MS
+    // in a slot with no serial data, so the coordinator learns who it hears and
+    // its pair table (its idea of being linked) stays fresh.  A remote whose
+    // every slot carries data gives the announcement one slot every
+    // RFM22B_KEEPALIVE_FORCE_MS instead and the serial data waits a slot:
+    // without that the coordinator would age a busy remote out.  The PPM
+    // payload, if any, still goes out in front of it.
+    portTickType now = xTaskGetTickCount();
+    bool remote = !rfm22_isCoordinator(radio_dev);
+    uint32_t since_keepalive = remote ? pios_rfm22_time_difference_ms(radio_dev->last_keepalive, now) : 0;
+    bool force_keepalive     = remote && (since_keepalive >= RFM22B_KEEPALIVE_FORCE_MS);
+    // All remotes share the same uplink slots, so two idle remotes whose
+    // keepalives once fell into the same slot would collide there every period
+    // for ever and the coordinator would hear neither: each period adds a
+    // per-remote random 0..3 slots.
+    uint32_t keepalive_ms    = RFM22B_KEEPALIVE_MS + radio_dev->keepalive_jitter_ms;
+    uint8_t ppm_len = len;
+
     // Append data from the com interface if applicable.
-    if (!radio_dev->ppm_only_mode && radio_dev->tx_out_cb) {
+    if (!radio_dev->ppm_only_mode && radio_dev->tx_out_cb && !force_keepalive) {
         // Try to get some data to send
         bool need_yield = false;
         len += (radio_dev->tx_out_cb)(radio_dev->tx_out_context, p + len, max_data_len - len, NULL, &need_yield);
     }
 
     // Always send a packet if this modem is a coordinator.
-    if ((len == 0) && !rfm22_isCoordinator(radio_dev)) {
-        // A remote with nothing to say still sends a one-byte packet every few
-        // slots: the coordinator keeps hearing it (pair table, link state,
-        // its RX light), and the remote's TX light shows the link is alive.
-        // One zero byte rides the ordinary data path (a stray 0x00 is nothing
-        // to a UAVTalk parser); an empty packet is the coordinator's beacon.
-        if (++radio_dev->idle_slots < RFM22B_KEEPALIVE_SLOTS) {
+    if (remote) {
+        bool com_data = len > ppm_len;
+        if (force_keepalive || (!com_data && (since_keepalive >= keepalive_ms))) {
+            if ((uint16_t)len + RFM22B_KEEPALIVE_LEN <= max_data_len) {
+                p[len]     = RFM22B_KEEPALIVE_MARK0;
+                p[len + 1] = RFM22B_KEEPALIVE_MARK1;
+                p[len + 2] = RFM22B_KEEPALIVE_MARK2;
+                memcpy(p + len + 3, &radio_dev->deviceID, sizeof(radio_dev->deviceID));
+                len += RFM22B_KEEPALIVE_LEN;
+                radio_dev->last_keepalive = now;
+                if (!radio_dev->keepalive_lcg) {
+                    radio_dev->keepalive_lcg = radio_dev->deviceID ^ 0x9E3779B9;
+                }
+                radio_dev->keepalive_lcg = radio_dev->keepalive_lcg * 1103515245u + 12345u;
+                radio_dev->keepalive_jitter_ms = ((radio_dev->keepalive_lcg >> 24) & 3) * 2 * radio_dev->packet_time;
+            }
+        }
+        if (len == 0) {
             return RADIO_EVENT_RX_MODE;
         }
-        // marker + this remote's id: the coordinator learns who it hears
-        p[0] = RFM22B_KEEPALIVE_MARK0;
-        p[1] = RFM22B_KEEPALIVE_MARK1;
-        p[2] = RFM22B_KEEPALIVE_MARK2;
-        memcpy(p + 3, &radio_dev->deviceID, sizeof(radio_dev->deviceID));
-        len  = RFM22B_KEEPALIVE_LEN;
     }
-    radio_dev->idle_slots = 0;
 
     // Increment the packet sequence number.
     radio_dev->stats.tx_seq++;
@@ -1943,6 +2020,10 @@ static enum pios_radio_event radio_receivePacket(struct pios_rfm22b_dev *radio_d
 {
     bool good_packet = true;
     bool corrected_packet = false;
+    if (!radio_dev->ppm_only_mode && (rx_len < RS_ECC_NPARITY)) {
+        rfm22b_add_rx_status(radio_dev, RADIO_ERROR_RX_PACKET);
+        return RADIO_EVENT_RX_COMPLETE;
+    }
     uint8_t data_len = rx_len;
 
     // We don't rsencode ppm only packets.
@@ -1969,6 +2050,7 @@ static enum pios_radio_event radio_receivePacket(struct pios_rfm22b_dev *radio_d
         // Ensure the packet it long enough
         if (data_len < ppm_len) {
             good_packet = false;
+            corrected_packet = false;
         }
 
         // Verify the CRC if this is a PPM only packet.
@@ -2025,7 +2107,6 @@ static enum pios_radio_event radio_receivePacket(struct pios_rfm22b_dev *radio_d
             uint32_t sender;
             memcpy(&sender, p + 3, sizeof(sender));
             if (rfm22_isCoordinator(radio_dev) && sender) {
-                radio_dev->last_sender_id     = sender;
                 uint32_t dest = radio_dev->rx_destination_id;
                 radio_dev->rx_destination_id = sender;
                 rfm22_updatePairStatus(radio_dev);
@@ -2103,6 +2184,22 @@ static enum pios_radio_event radio_rxData(struct pios_rfm22b_dev *radio_dev)
  *
  * @param[in] rfm22b_dev  The device structure
  */
+/**
+ * Age the pair table: every entry counts the seconds since it was refreshed and
+ * is dropped after RFM22B_PAIR_TIMEOUT_S.
+ */
+static void rfm22_agePairStats(struct pios_rfm22b_dev *radio_dev)
+{
+    for (uint8_t i = 0; i < OPLINKSTATUS_PAIRIDS_NUMELEM; ++i) {
+        if (radio_dev->pair_stats[i].pairID && (++radio_dev->pair_stats[i].lastContact > RFM22B_PAIR_TIMEOUT_S)) {
+            radio_dev->pair_stats[i].pairID = 0;
+            radio_dev->pair_stats[i].rssi   = -127;
+            radio_dev->pair_stats[i].afc_correction = 0;
+            radio_dev->pair_stats[i].lastContact    = 0;
+        }
+    }
+}
+
 static void rfm22_updatePairStatus(struct pios_rfm22b_dev *radio_dev)
 {
     int8_t rssi    = radio_dev->rssi_dBm;
@@ -2312,7 +2409,7 @@ static uint8_t rfm22_calcChannel(struct pios_rfm22b_dev *rfm22b_dev, uint8_t ind
     if (idx != rfm22b_dev->channel_index) {
         if (!rfm22_isCoordinator(rfm22b_dev) &&
             pios_rfm22_time_difference_ms(rfm22b_dev->last_contact, xTaskGetTickCount()) >=
-            CONNECTED_TIMEOUT) {
+            rfm22_connectedTimeoutMs(rfm22b_dev)) {
             // Set the link state to disconnected.
             if (rfm22b_dev->stats.link_state == OPLINKSTATUS_LINKSTATE_CONNECTED) {
                 rfm22b_dev->stats.link_state = OPLINKSTATUS_LINKSTATE_DISCONNECTED;
@@ -2485,10 +2582,10 @@ static struct pios_rfm22b_dev *pios_rfm22_alloc(void)
     struct pios_rfm22b_dev *rfm22b_dev;
 
     rfm22b_dev = (struct pios_rfm22b_dev *)pios_malloc(sizeof(*rfm22b_dev));
-    rfm22b_dev->spi_id = 0;
     if (!rfm22b_dev) {
         return NULL;
     }
+    rfm22b_dev->spi_id = 0;
 
     rfm22b_dev->magic = PIOS_RFM22B_DEV_MAGIC;
     return rfm22b_dev;
@@ -2638,9 +2735,8 @@ static void rfm22_hmac_sha1(const uint8_t *data, size_t len,
 {
     uint8_t ipad[64] = { 0 };
     uint8_t opad[64] = { 0 };
-    static SHA1_CTX *ctx;
-
-    ctx = pios_malloc(sizeof(SHA1_CTX));
+    SHA1_CTX ctx_storage;
+    SHA1_CTX *ctx = &ctx_storage; // on the stack: this board's heap never frees
 
     memcpy(ipad, key, SHA1_DIGEST_LENGTH);
     memcpy(opad, key, SHA1_DIGEST_LENGTH);
@@ -2659,8 +2755,6 @@ static void rfm22_hmac_sha1(const uint8_t *data, size_t len,
     SHA1Update(ctx, opad, sizeof(opad));
     SHA1Update(ctx, digest, SHA1_DIGEST_LENGTH);
     SHA1Final(digest, ctx);
-
-    pios_free(ctx);
 }
 
 static bool rfm22_gen_channels(uint32_t coordid, enum rfm22b_datarate rate, uint8_t min,
@@ -2668,12 +2762,17 @@ static bool rfm22_gen_channels(uint32_t coordid, enum rfm22b_datarate rate, uint
 {
     uint32_t data = 0;
     uint8_t cpos  = 0;
-    uint8_t chan_range = (max / channel_spacing[rate] - min / channel_spacing[rate]) + 1;
+    uint16_t chan_range = (max / channel_spacing[rate] - min / channel_spacing[rate]) + 1;
     uint8_t key[SHA1_DIGEST_LENGTH] = { 0 };
     uint8_t digest[SHA1_DIGEST_LENGTH];
-    uint8_t *all_channels;
+    // not from the heap: this board's heap never frees
+    static uint8_t all_channels[RFM22B_NUM_CHANNELS];
 
-    all_channels = pios_malloc(RFM22B_NUM_CHANNELS);
+    if (chan_range > RFM22B_NUM_CHANNELS) {
+        chan_range = RFM22B_NUM_CHANNELS;
+    }
+
+
 
     memcpy(key, &coordid, sizeof(coordid));
 
@@ -2705,8 +2804,6 @@ static bool rfm22_gen_channels(uint32_t coordid, enum rfm22b_datarate rate, uint
     }
 
     *clen = cpos & 0xfe;
-
-    pios_free(all_channels);
 
     return *clen > 0;
 }
