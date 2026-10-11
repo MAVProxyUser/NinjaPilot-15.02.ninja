@@ -178,3 +178,23 @@ broke reception (tried, reverted).  Consequences:
   disconnected (and re-initialises its radio every 150 ms until it can);
 * nothing is routed per node: the GCS's objects reach every remote's main port,
   every remote's objects come back to the coordinator.
+
+## Updating a modem's bootloader (done on the PipXtreme, 2026-10-11)
+
+A v2 bootloader (2012 boards) has the old memory map (117660-byte code bank
+that overlaps the settings area, so every flash wipes the settings) and
+ignores the erase-settings command.  The tree's updater replaces it:
+
+    make bu_oplinkmini                       # bootloader v4 wrapped in an updater image
+    opdfu.py --serial <sn> --board-type 3 flash build/bu_oplinkmini/bu_oplinkmini.opfw
+    # the updater runs in place of the firmware: LED solid 3 s, flicker while it
+    # rewrites the 12 KB bootloader, three slow blinks, dark.  It has no USB and
+    # never resets: unplug and replug the modem.
+    opdfu.py --serial <sn> rescue build/fw_oplinkmini/fw_oplinkmini.opfw --count 1
+    # the new bootloader sits in DFU (the updater erased the firmware on purpose);
+    # then configure the modem again, the settings area is fresh
+
+The updater refuses a bootloader whose board type or revision differ from the
+one in flash.  Power loss during its two seconds of flash writes leaves the
+board for an SWD programmer, so do it on a board you trust.  Afterwards the
+capabilities read "bootloader v4, code bank 102300 bytes".
