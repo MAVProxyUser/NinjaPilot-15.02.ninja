@@ -439,9 +439,13 @@ void OPLinkModemPanel::refreshStatus()
     }
     if (coordinator) {
         // remotes announce their id in their keepalives, so these are real remote ids
-        m_pairs->setText(pairs.isEmpty()
-                         ? tr("Hears: no remote (nothing received for a few seconds)")
-                         : tr("Hears remote(s): %1").arg(pairs.join(", ")));
+        if (pairs.isEmpty()) {
+            m_pairs->setText(tr("Hears: no remote (nothing received for a few seconds)"));
+        } else if (pairs.size() == 1) {
+            m_pairs->setText(tr("Hears remote %1").arg(pairs.first()));
+        } else {
+            m_pairs->setText(tr("Hears %1 remotes: %2").arg(pairs.size()).arg(pairs.join(", ")));
+        }
     } else {
         m_pairs->setText(tr("Hears: %1").arg(pairs.isEmpty() ? tr("no coordinator") : pairs.join(", ")));
     }
