@@ -61,6 +61,13 @@ objects draw from a byte budget (35 % of `TelemetrySpeed`, bursts capped at
 240 bytes) and are sent non-blocking, so a slow radio behind TELEM1 is not
 flooded and request replies are never starved by the stream.
 
+TELEM1 is received through DMA (`pios_usart_dma_rx_cfg` in board_hw_defs.c,
+DMA1 stream 5): with the stock interrupt-per-byte reception the USART lost about
+one byte in a thousand under load, i.e. one 125-byte frame in twenty on a modem
+link (measured 4 of 72 in 60 s, then 0 of 72 with DMA).  The driver drains the
+ring on the idle-line interrupt and whenever the reader runs dry; GPS and the
+receiver UARTs keep the interrupt path.
+
 TELEM1 was verified with an OPLink Mini (Main port, TX/RX crossed, 115200 on
 both sides) and the GCS at the far end of the radio: handshake, settings reads
 and the stream all work once both modems and the Cube carry the UAVTalk parser

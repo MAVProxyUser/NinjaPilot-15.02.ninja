@@ -254,6 +254,12 @@ zero.  The checksum state had been given the same guard earlier (SimPosix).
 Any modem or flight controller built before this needs a reflash before a
 UART link works.
 
+A second, smaller leak sat in the Cube's USART itself: interrupt-per-byte
+reception dropped about one byte in a thousand under load (one frame in
+twenty), so the Cube's TELEM1 now receives through DMA (`pios_usart.c`,
+`pios_usart_dma_rx_cfg`).  The F1 modem keeps interrupt reception; its UART
+intake is still to be measured the same way once it carries the parser fix.
+
 ## A modem on the flight controller's TELEM port
 
 Wiring (OPLink Main port, 4-pin: GND, 5 V, TX, RX; Cube TELEM1, 6-pin: 5 V,

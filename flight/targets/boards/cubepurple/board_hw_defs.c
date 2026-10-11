@@ -411,10 +411,20 @@ static const struct flashfs_logfs_cfg flashfs_internal_cfg = {
 
 /*
  * TELEM1 - USART2 on PD5 (tx) / PD6 (rx).  HwSettings.RV_TelemetryPort.
+ * Received through DMA (DMA1 stream 5, channel 4): interrupt-per-byte reception
+ * lost about one byte in a thousand under load, i.e. one frame in twenty on a
+ * modem link.
  */
+static const struct pios_usart_dma_rx_cfg pios_usart_telem1_dma_rx = {
+    .stream     = DMA1_Stream5,
+    .channel    = DMA_Channel_4,
+    .buffer_len = 512,
+};
+
 static const struct pios_usart_cfg pios_usart_telem1_cfg = {
     .regs  = USART2,
     .remap = GPIO_AF_USART2,
+    .dma_rx = &pios_usart_telem1_dma_rx,
     .init  = {
         .USART_BaudRate            = 57600,
         .USART_WordLength          = USART_WordLength_8b,
