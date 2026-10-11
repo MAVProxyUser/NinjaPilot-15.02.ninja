@@ -56,6 +56,7 @@ public slots:
     void tabAboutToChange(int i, bool *);
     void updateOPLinkStatus(UAVObject *object);
     void onOPLinkDisconnect();
+    void showOPLinkPageIfAlone();
     void updateModemsPage();
     void scheduleModemsPageUpdate();
 
@@ -78,6 +79,7 @@ private:
 
     // A timer that timesout the connction to the OPLink.
     QTimer *oplinkTimeout;
+    QTimer *oplinkJumpTimer;
     QTimer *modemsPageTimer;
     QWidget *modemsWidget;
     int modemsPageIndex() const;

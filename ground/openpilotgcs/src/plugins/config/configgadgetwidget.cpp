@@ -162,6 +162,9 @@ ConfigGadgetWidget::ConfigGadgetWidget(QWidget *parent) : QWidget(parent)
     connect(oplinkTimeout, SIGNAL(timeout()), this, SLOT(onOPLinkDisconnect()));
     oplinkConnected = false;
     oplinkTabShown  = false;
+    oplinkJumpTimer = new QTimer(this);
+    oplinkJumpTimer->setSingleShot(true);
+    connect(oplinkJumpTimer, SIGNAL(timeout()), this, SLOT(showOPLinkPageIfAlone()));
 
     // Two OPLinks on USB: a page with both of them, no flight controller needed.
     modemsWidget    = NULL;
@@ -423,13 +426,21 @@ void ConfigGadgetWidget::updateOPLinkStatus(UAVObject *)
             stackWidget->insertTab(ConfigGadgetWidget::oplink, qwd, *icon, QString("OPLink"));
             oplinkTabShown = true;
 
-            // A modem with nothing behind it: this page is the one that matters, show it.
-            ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
-            TelemetryManager *telMngr = pm->getObject<TelemetryManager>();
-            if (!(telMngr && telMngr->isConnected())) {
-                showPage(ConfigGadgetWidget::oplink);
-            }
+            // A modem with nothing behind it: this page is the one that matters.
+            // A flight controller behind the modem answers over the radio a
+            // little after the modem's first status, so give it a moment.
+            oplinkJumpTimer->start(3000);
         }
+    }
+}
+
+void ConfigGadgetWidget::showOPLinkPageIfAlone()
+{
+    ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+    TelemetryManager *telMngr = pm->getObject<TelemetryManager>();
+
+    if (oplinkConnected && oplinkTabShown && !(telMngr && telMngr->isConnected())) {
+        showPage(ConfigGadgetWidget::oplink);
     }
 }
 
