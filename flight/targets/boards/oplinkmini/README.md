@@ -162,10 +162,15 @@ that ID, synchronise to its packets and report `Connected`.  Each hop period is
 split in two: the coordinator transmits in the first half, *every* remote in
 the second (`rfm22_timeToSend`).  In stock 15.02 a remote only transmitted
 when it had data, so an idle link showed traffic one way and the coordinator
-never heard it; this tree's remote sends a 7-byte keepalive (marker + its own id) every 16
-idle slots (`RFM22B_KEEPALIVE_SLOTS`), so both modems' TX and RX LEDs show the
-link and the coordinator's pair table names the remote it hears (stock 15.02
-only ever stored the destination id, i.e. the coordinator's own).  The driver still only marks a
+never heard it; this tree's remote sends a 7-byte keepalive (marker + its own id) every
+500 ms in a slot with no data, at least once a second even when every slot
+carries data (the data waits one slot), with a random 0..3-slot jitter so two
+idle remotes cannot collide in lockstep for ever (`RFM22B_KEEPALIVE_MS`,
+`RFM22B_KEEPALIVE_FORCE_MS`).  Both modems' TX and RX LEDs show the link, and
+the coordinator's pair table is fed only by those keepalives, so each remote's
+signal strength and last-contact time are its own (stock 15.02 only ever stored
+the destination id, i.e. the coordinator's own); an entry not refreshed for 3 s
+is dropped (`RFM22B_PAIR_TIMEOUT_S`).  The driver still only marks a
 remote Connected; the coordinator's system task reports Connected and lights
 its link LED when the pair table shows a remote heard recently
 (`oplinkmod.c`).  Changing the driver's own link state on the coordinator
@@ -175,7 +180,8 @@ broke reception (tried, reverted).  Consequences:
 * several remotes share one uplink slot and contend for it, so a second or
   third remote costs the others their uplink air time (no per-remote slots);
 * no meshing or relaying: a remote that cannot hear the coordinator is simply
-  disconnected (and re-initialises its radio every 150 ms until it can);
+  disconnected (and re-initialises its radio every 150 ms, longer at the slow
+  air rates, until it can);
 * nothing is routed per node: the GCS's objects reach every remote's main port,
   every remote's objects come back to the coordinator.
 
@@ -198,3 +204,79 @@ The updater refuses a bootloader whose board type or revision differ from the
 one in flash.  Power loss during its two seconds of flash writes leaves the
 board for an SWD programmer, so do it on a board you trust.  Afterwards the
 capabilities read "bootloader v4, code bank 102300 bytes".
+
+## Robustness pass (2026-10-11)
+
+Driver fixes in `pios_rfm22b.c`, all exercised on the three-modem bench:
+
+* packets shorter than the ECC parity, or empty, are rejected at the FIFO and
+  in `radio_receivePacket` instead of being decoded (a short PPM packet clears
+  both the good and the corrected flag);
+* the keepalive runs on the wall clock, is forced through under load and is
+  jittered (see above); the pair table is aged once a second;
+* a power-on-reset flag from the chip re-initialises the radio (and is cleared
+  at the end of `rfm22_init`, or the radio re-initialises for ever);
+* the receive statistics start as "nothing received" (a fresh or lonely modem
+  reads link quality 0, not 128);
+* channel settings are clamped (max 250, an inverted range or one too narrow
+  for the air rate falls back to the whole plan, which a default coordinator
+  hops over, so the modem still links);
+* the supervisor timeout and the connected timeout scale with the air rate
+  (two and a half TDM cycles): at 4800 bps a remote used to reset on every lost
+  coordinator packet;
+* smaller things: HMAC context on the stack, static channel buffer, allocation
+  checked before use, SPI bus released on the fatal init paths, ISR woken flags
+  initialised, `GetPairStats` bounded.
+
+Measured: a rebooting remote leaves the coordinator's pair table after 5.7 s
+and is back 4 s later; 60 s soaks at 57600 and 4800 with 0 resets and 0
+timeouts on every modem; a remote whose USB port is flooded (105 KB in 15 s)
+stays in the coordinator's table; a wrong CoordID never links and reads quality
+0; the modem-to-modem link test runs 20/20 at both 57600 and 115200.
+
+Hardware note: modem 49FF6E06 (1687) transmits about 19 dB weaker than the
+others (the coordinator hears it at -79 dBm only at the 100 mW setting, not at
+all at 1.25 mW); it is the likely "runs hot" board.  Keep it at 100 mW or set it
+aside.
+
+## The UART parser bug (fixed 2026-10-11, affects every board)
+
+`flight/uavtalk/uavtalk.c` ran the SYNC and TYPE states in one pass and the
+TYPE state read its byte without checking that the chunk still had one.  When
+a frame's sync byte was the last byte of a read, a stale byte became the type,
+the frame was lost and the real type byte then failed as a sync byte.  A USB
+read hands over 64-byte reports so this rarely struck there; a UART reader is
+woken by the first byte and often gets one-byte chunks, so on the modem's UART
+intake and on the Cube's TELEM1 nearly every frame died (7 % of the flight
+controller's stream reached the GCS, requests were answered one time in ten,
+the handshake never completed) while every counter that was looked at read
+zero.  The checksum state had been given the same guard earlier (SimPosix).
+Any modem or flight controller built before this needs a reflash before a
+UART link works.
+
+## A modem on the flight controller's TELEM port
+
+Wiring (OPLink Main port, 4-pin: GND, 5 V, TX, RX; Cube TELEM1, 6-pin: 5 V,
+TX, RX, CTS, RTS, GND): modem TX to Cube RX, modem RX to Cube TX.  Both modems
+and the Cube's `TelemetrySpeed` at 115200: the flight controller streams about
+3 KB/s, which the 100 kbit/s air rate behind 57600 cannot carry; at 192 kbit/s
+the downlink has about 5 KB/s.  `tools/flash.sh` picks the first usbmodem port
+it sees; with two such ports flash with `uploader.py --port /dev/tty.usbmodem...`.
+
+The Cube firmware (`PIOS_TELEMETRY_DUAL_PORT`, `telemetry.c`) runs TELEM1 and
+USB as two telemetry links at once: each has its own UAVTalk connection and
+receive task, requests are answered on the port they arrived on, periodic
+updates and the handshake follow the port a ground station last spoke on (USB
+until either has), the handshake beacon goes out on both while nothing is
+connected, and periodic non-priority objects on the UART spend from a byte
+budget (35 % of the UART rate, bursts capped at 240 bytes, the modem's buffer)
+and are sent without blocking.  Stock 15.02 sent everything to USB as soon as a
+cable was attached, so a bench with the Cube on USB never used TELEM1.
+
+The modem (`RadioComBridge.c`) reads its telemetry UART and USB at the same
+time with separate parsers.  The radio is relayed through the UART as long as a
+flight controller has been heard there in the last 10 s, otherwise through USB;
+USB on the flight-controller-side modem then only serves the modem's own
+objects (settings, status, the link test, the halt that starts a flash), so the
+cable can stay plugged in for flashing and configuration.  Both modems need
+this firmware; the GCS-side modem behaves as before.

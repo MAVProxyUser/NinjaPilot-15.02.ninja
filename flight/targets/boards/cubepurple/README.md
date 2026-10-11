@@ -48,6 +48,29 @@ hook (commit d9272ee75 or later); before that, cut the other supply once
 and use the USB path.  The GCS reboot (1122/2233/3344) is unchanged: it
 comes back as the application.
 
+## TELEM1 and USB at the same time (2026-10-11)
+
+Stock 15.02 routed telemetry to USB whenever a cable was attached, so a modem
+on TELEM1 was dead on any bench with the Cube on USB.  With
+`PIOS_TELEMETRY_DUAL_PORT` (pios_config.h) the telemetry module runs both as
+separate links: own UAVTalk connection and receive task each, replies on the
+port the request came in on, the periodic stream and the handshake on the port
+a ground station last spoke on (USB until either has), the handshake beacon on
+both ports while nothing is connected.  On the UART, periodic non-priority
+objects draw from a byte budget (35 % of `TelemetrySpeed`, bursts capped at
+240 bytes) and are sent non-blocking, so a slow radio behind TELEM1 is not
+flooded and request replies are never starved by the stream.
+
+TELEM1 was verified with an OPLink Mini (Main port, TX/RX crossed, 115200 on
+both sides) and the GCS at the far end of the radio: handshake, settings reads
+and the stream all work once both modems and the Cube carry the UAVTalk parser
+fix (`flight/uavtalk/uavtalk.c`, TYPE state; see the OPLink README).  To see
+the raw bytes on TELEM1 set `RV_TelemetryPort = ComBridge` and `USB_VCPPort =
+ComBridge` (`ComUsbBridgeSpeed` = the UART rate) and read the Cube's serial
+port on the host; restore both afterwards.  `tools/flash.sh` picks the first
+usbmodem port it finds; with several, run `uploader.py --port` yourself after
+`tools/iap_reboot.py --hold`.
+
 ## DroneCAN on CAN2
 
 CAN2 (PB12/PB6, 1 Mbit/s) runs a small DroneCAN v0 node (`MODULE DroneCAN`,
