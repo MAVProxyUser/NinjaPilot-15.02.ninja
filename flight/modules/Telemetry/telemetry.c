@@ -164,6 +164,7 @@ static void usbRxTask(void *parameters);
 static int32_t transmitUsbData(uint8_t *data, int32_t length);
 static UAVTalkConnection activeConnection(void);
 static UAVTalkConnection otherConnection(void);
+static int32_t sendWaiting(uint32_t port, uint8_t *data, int32_t length);
 #else
 static uint32_t getComPort(bool input);
 #define activeConnection() uavTalkCon
@@ -611,9 +612,29 @@ static void usbRxTask(__attribute__((unused)) void *parameters)
 static int32_t transmitUsbData(uint8_t *data, int32_t length)
 {
     if (PIOS_COM_Available(PIOS_COM_TELEM_USB)) {
-        return PIOS_COM_SendBuffer(PIOS_COM_TELEM_USB, data, length);
+        return sendWaiting(PIOS_COM_TELEM_USB, data, length);
     }
     return -1;
+}
+
+/**
+ * A blocking send that waits for the port instead of giving up: the periodic
+ * stream holds the port's mutex while it waits for buffer space and
+ * PIOS_COM_SendBuffer gives up on the mutex after 5 ms, which dropped about a
+ * third of all request replies, acks and handshake frames (the GCS then logged
+ * "transaction failed" and retried).  Replies must not be dropped.
+ */
+static int32_t sendWaiting(uint32_t port, uint8_t *data, int32_t length)
+{
+    int32_t rc = -2;
+
+    for (int i = 0; (i < 50) && (rc == -2); ++i) {
+        rc = PIOS_COM_SendBuffer(port, data, length);
+        if (rc == -2) {
+            vTaskDelay(1);
+        }
+    }
+    return rc;
 }
 
 /**
@@ -707,6 +728,9 @@ static int32_t transmitData(uint8_t *data, int32_t length)
     if (outputPort && txDropWhenBusy && (xTaskGetCurrentTaskHandle() == telemetryTxTaskHandle)) {
         // a budgeted periodic update: never wait for room, never hold the port
         return PIOS_COM_SendBufferNonBlocking(outputPort, data, length);
+    }
+    if (outputPort) {
+        return sendWaiting(outputPort, data, length);
     }
 #else
     uint32_t outputPort = getComPort(false);

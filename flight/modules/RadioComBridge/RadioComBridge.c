@@ -596,10 +596,16 @@ static int32_t UAVTalkSendHandler(uint8_t *buf, int32_t length)
     if (outputPort) {
         // Following call can fail with -2 error code (buffer full) or -3 error code (could not acquire send mutex)
         // It is the caller responsibility to retry in such cases...
+        // a full buffer is normal under load: wait a little for it to drain
+        // (the UART frees 11 bytes a millisecond at 115200) instead of
+        // dropping the frame at once
         ret = -2;
         uint8_t count = 5;
         while (count-- > 0 && ret < -1) {
             ret = PIOS_COM_SendBufferNonBlocking(outputPort, buf, length);
+            if (ret < -1 && count) {
+                vTaskDelay(1);
+            }
         }
     } else {
         ret = -1;
@@ -619,6 +625,9 @@ static int32_t UsbSendHandler(uint8_t *buf, int32_t length)
         uint8_t count = 5;
         while (count-- > 0 && ret < -1) {
             ret = PIOS_COM_SendBufferNonBlocking(PIOS_COM_TELEM_USB_HID, buf, length);
+            if (ret < -1 && count) {
+                vTaskDelay(1);
+            }
         }
     }
     return ret;
@@ -647,6 +656,9 @@ static int32_t RadioSendHandler(uint8_t *buf, int32_t length)
         uint8_t count = 5;
         while (count-- > 0 && ret < -1) {
             ret = PIOS_COM_SendBufferNonBlocking(outputPort, buf, length);
+            if (ret < -1 && count) {
+                vTaskDelay(1);
+            }
         }
         return ret;
     } else {
