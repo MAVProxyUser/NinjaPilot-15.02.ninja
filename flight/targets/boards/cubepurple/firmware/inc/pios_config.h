@@ -145,6 +145,8 @@
 #define PIOS_INCLUDE_COM_FLEXI
 /* #define PIOS_INCLUDE_COM_AUX */
 #define PIOS_TELEM_PRIORITY_QUEUE
+/* TELEM1 and USB are both telemetry links at the same time (a modem on TELEM1 keeps working with USB attached) */
+#define PIOS_TELEMETRY_DUAL_PORT
 #define PIOS_INCLUDE_GPS
 /* #define PIOS_GPS_MINIMAL */
 #define PIOS_INCLUDE_GPS_NMEA_PARSER
