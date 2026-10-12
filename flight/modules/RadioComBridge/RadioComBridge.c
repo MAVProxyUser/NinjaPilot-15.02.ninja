@@ -60,6 +60,7 @@
 #define SERIAL_RX_BUF_LEN 100
 #define PPM_INPUT_TIMEOUT 100
 #define UART_RELAY_HOLD_MS 10000
+#define IAP_FAR_ANSWER_MS  150
 
 
 // ****************
@@ -84,6 +85,13 @@ typedef struct {
     // this modem's own objects (settings, status, link test, reboot/flash).
     UAVTalkConnection usbUAVTalkCon;
     uint32_t lastUartFrameTicks;
+    // A board-identification read (FirmwareIAPObj) from the GCS is relayed to
+    // the far end while the link is up; this modem answers with its own only if
+    // nothing comes back in time, so the GCS sees the flight controller behind
+    // the radio and a bare modem pair still identifies.
+    UAVTalkConnection iapRequestCon;
+    uint32_t iapRequestTicks;
+    bool     iapRequestPending;
 
     // Queue handles.
     xQueueHandle uavtalkEventQueue;
@@ -253,6 +261,7 @@ static int32_t RadioComBridgeInitialize(void)
     data->radioUAVTalkCon    = UAVTalkInitialize(&RadioSendHandler);
     data->usbUAVTalkCon      = UAVTalkInitialize(&UsbSendHandler);
     data->lastUartFrameTicks = 0;
+    data->iapRequestPending  = false;
 
     // Initialize the queues.
     data->uavtalkEventQueue  = xQueueCreate(EVENT_QUEUE_SIZE, sizeof(UAVObjEvent));
@@ -455,6 +464,12 @@ static void telemetryRxTask(__attribute__((unused)) void *parameters)
 #ifdef PIOS_INCLUDE_WDG
         PIOS_WDG_UpdateFlag(PIOS_WDG_TELEMETRYRX);
 #endif
+        if (data->iapRequestPending &&
+            ((uint32_t)(xTaskGetTickCount() - data->iapRequestTicks) > IAP_FAR_ANSWER_MS)) {
+            // nothing identified itself at the far end: answer with this modem
+            data->iapRequestPending = false;
+            UAVTalkSendObject(data->iapRequestCon, FirmwareIAPObjHandle(), 0, false, 0);
+        }
         if (!uart && !usb) {
             vTaskDelay(5);
             continue;
@@ -708,10 +723,24 @@ static uint8_t ProcessTelemetryStream(UAVTalkConnection inConnectionHandle, UAVT
             case MetaObjectId(FIRMWAREIAPOBJ_OBJID):
                 // the modem's own FirmwareIAP module (reboot / firmware update
                 // when BoardType is ours) and the flight controller behind the
-                // link both get to see a write; a read is answered here only,
-                // or the far modem's answer would overwrite ours at the GCS
+                // link both get to see a write.  A read identifies the board to
+                // the GCS: with the link up it goes to the far end first and
+                // this modem answers only if nothing comes back (see the task).
+                if ((objId == FIRMWAREIAPOBJ_OBJID) && (UAVTalkGetPacketType(inConnectionHandle) == UAVTALK_TYPE_OBJ_REQ)) {
+                    uint8_t linkState;
+                    OPLinkStatusLinkStateGet(&linkState);
+                    if (relay && (linkState == OPLINKSTATUS_LINKSTATE_CONNECTED)) {
+                        UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
+                        data->iapRequestCon     = inConnectionHandle;
+                        data->iapRequestTicks   = xTaskGetTickCount();
+                        data->iapRequestPending = true;
+                    } else {
+                        UAVTalkReceiveObject(inConnectionHandle);
+                    }
+                    break;
+                }
                 UAVTalkReceiveObject(inConnectionHandle);
-                if (relay && (UAVTalkGetPacketType(inConnectionHandle) != UAVTALK_TYPE_OBJ_REQ)) {
+                if (relay) {
                     UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
                 }
                 break;
@@ -790,6 +819,14 @@ static void ProcessRadioStream(UAVTalkConnection inConnectionHandle, UAVTalkConn
                 // - OPLINKRECEIVER_OBJID : not sure why
                 // some objects will send back a response to the remote modem
                 UAVTalkReceiveObject(inConnectionHandle);
+                break;
+            case FIRMWAREIAPOBJ_OBJID:
+                // the flight controller at the far end identifying itself: the GCS
+                // gets that, not this modem's own answer
+                if (UAVTalkGetPacketType(inConnectionHandle) != UAVTALK_TYPE_OBJ_REQ) {
+                    data->iapRequestPending = false;
+                }
+                UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
                 break;
             default:
                 // all other packets are relayed to the telemetry port

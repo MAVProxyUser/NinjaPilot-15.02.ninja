@@ -340,11 +340,15 @@ def halt_to_bootloader(serial=None, timeout=25.0, board_type=0):
             client.run(duration=0.5, on_object=lambda o, i, d: got.update(d) if o.name == "FirmwareIAPObj" else None)
             if got:
                 break
-        if got:
+        if got and got["BoardType"] == board_type:
             fields = {"BoardRevision": got["BoardRevision"], "BoardType": got["BoardType"], "crc": got["crc"],
                       "Description": got["Description"], "CPUSerial": got["CPUSerial"],
                       "BootloaderRevision": got["BootloaderRevision"]}
             print("  board type %d rev %d, bootloader rev %d" % (got["BoardType"], got["BoardRevision"], got["BootloaderRevision"]))
+        elif got:
+            # the modem relayed the read to the flight controller behind the radio
+            # (that is what the GCS wants); address the modem by type, blind
+            print("  (FirmwareIAPObj readback is board type %d, the far end; sending the sequence to type %d blind)" % (got["BoardType"], board_type))
         else:
             print("  (no FirmwareIAPObj readback; sending the sequence blind)")
     for cmd in (1122, 2233, 3344):
