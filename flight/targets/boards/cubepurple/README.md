@@ -68,6 +68,12 @@ link (measured 4 of 72 in 60 s, then 0 of 72 with DMA).  The driver drains the
 ring on the idle-line interrupt and whenever the reader runs dry; GPS and the
 receiver UARTs keep the interrupt path.
 
+Replies, acks and the handshake wait for the telemetry port instead of being
+dropped while the periodic stream holds its mutex (`sendWaiting` in
+telemetry.c): before this a third of all request replies were lost, over USB
+as well as over the radio, and the GCS logged "transaction failed" and retried
+(90 of 90 requests answered afterwards, 3-5 ms median over USB).
+
 TELEM1 was verified with an OPLink Mini (Main port, TX/RX crossed, 115200 on
 both sides) and the GCS at the far end of the radio: handshake, settings reads
 and the stream all work once both modems and the Cube carry the UAVTalk parser
@@ -77,6 +83,21 @@ ComBridge` (`ComUsbBridgeSpeed` = the UART rate) and read the Cube's serial
 port on the host; restore both afterwards.  `tools/flash.sh` picks the first
 usbmodem port it finds; with several, run `uploader.py --port` yourself after
 `tools/iap_reboot.py --hold`.
+
+## In the GCS
+
+The Output page knows this board (type 0x0C): bank 1 is MAIN OUT 1-8 on the IO
+co-processor (one PWM rate for all eight), bank 2 is AUX OUT 1-4 on TIM1, the
+channels carry their connector names, and a channel whose ActuatorSettings
+ChannelType is DroneCAN is labelled "CAN n" with the ESC index it drives (the
+PWM banks and modes do not apply to it; its min..max maps to esc.RawCommand
+0..8191).  "Test outputs" drives the CAN ESCs too: while the GCS holds the
+outputs the module sends ArmingStatus FULLY_ARMED, so the motor-order check
+works from that page (props off).  Through an OPLink the GCS identifies the
+board as this Cube (the modem relays the FirmwareIAPObj read to it), so the
+wizard and the board-specific pages work over the radio.  The eleven settings
+objects the GCS reports as "transaction failed" on every connect are the
+modules this firmware does not build (TxPID, OSD, RemoteID, MPU6000, ...).
 
 ## DroneCAN on CAN2
 

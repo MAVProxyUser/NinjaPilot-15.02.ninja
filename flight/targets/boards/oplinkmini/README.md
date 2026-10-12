@@ -117,9 +117,19 @@ to the Cube through the coordinator's USB.
 
 * **A modem with no flight controller behind it jumps to Configuration -> OPLink.**
   The GCS telemetry layer only passed OPLinkSettings and ObjectPersistence to a
-  modem that never completes the handshake; it now also passes OPLinkLinkTest
-  and FirmwareIAPObj (`telemetry.cpp`), so the page can test the link and
-  reboot the modem.
+  modem that never completes the handshake; it now also passes FirmwareIAPObj
+  (`telemetry.cpp`), so the page can test the link and reboot the modem.  The
+  jump happens at once for a modem with no radio link, after up to 10 s for a
+  linked modem whose flight controller has not completed its handshake, and
+  never once the autopilot connects (`configgadgetwidget.cpp`).
+* **The GCS sees the flight controller, not the modem.**  The GCS identifies
+  the connected board from a FirmwareIAPObj read.  While the radio link is up
+  and the modem is relaying, that read goes to the far end and the modem
+  answers with its own object only if nothing comes back within 150 ms
+  (`RadioComBridge.c`, `IAP_FAR_ANSWER_MS`); the far answer cancels the local
+  one.  So the wizard and the board-specific pages see the Cube through the
+  radio, and a bare modem pair still identifies itself.  `opdfu.py` sends its
+  halt sequence blind when the read-back is another board.
 * **Link test** on the OPLink page, with no new UAVObject: a request for *all
   instances* of OPLinkStatus (an instance id the modem's own status never
   uses) is relayed over the radio, the modem at the far end answers with its
@@ -286,6 +296,12 @@ USB on the flight-controller-side modem then only serves the modem's own
 objects (settings, status, the link test, the halt that starts a flash), so the
 cable can stay plugged in for flashing and configuration.  Both modems need
 this firmware; the GCS-side modem behaves as before.
+
+The flight controller's replies, acks and handshake frames wait for the
+telemetry port instead of being dropped when the periodic stream holds it
+(`telemetry.c`, `sendWaiting`): a third of them used to be lost, even over
+USB.  The modem's relay pauses a millisecond between its attempts when a buffer
+is full instead of dropping the frame at once.
 
 Result on the bench (2026-10-11, coordinator on the Cube's TELEM1 with its
 USB attached, 1687 on the Mac, 115200): GCS handshake over the radio in 1 s,
