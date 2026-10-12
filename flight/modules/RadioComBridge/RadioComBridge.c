@@ -60,7 +60,6 @@
 #define SERIAL_RX_BUF_LEN 100
 #define PPM_INPUT_TIMEOUT 100
 #define UART_RELAY_HOLD_MS 10000
-#define IAP_FAR_ANSWER_MS  150
 
 
 // ****************
@@ -86,12 +85,8 @@ typedef struct {
     UAVTalkConnection usbUAVTalkCon;
     uint32_t lastUartFrameTicks;
     // A board-identification read (FirmwareIAPObj) from the GCS is relayed to
-    // the far end while the link is up; this modem answers with its own only if
-    // nothing comes back in time, so the GCS sees the flight controller behind
-    // the radio and a bare modem pair still identifies.
-    UAVTalkConnection iapRequestCon;
-    uint32_t iapRequestTicks;
-    bool     iapRequestPending;
+    // the far end while the link is up and answered by this modem only when the
+    // link is down, so the GCS sees the flight controller behind the radio.
 
     // Queue handles.
     xQueueHandle uavtalkEventQueue;
@@ -261,7 +256,6 @@ static int32_t RadioComBridgeInitialize(void)
     data->radioUAVTalkCon    = UAVTalkInitialize(&RadioSendHandler);
     data->usbUAVTalkCon      = UAVTalkInitialize(&UsbSendHandler);
     data->lastUartFrameTicks = 0;
-    data->iapRequestPending  = false;
 
     // Initialize the queues.
     data->uavtalkEventQueue  = xQueueCreate(EVENT_QUEUE_SIZE, sizeof(UAVObjEvent));
@@ -464,12 +458,6 @@ static void telemetryRxTask(__attribute__((unused)) void *parameters)
 #ifdef PIOS_INCLUDE_WDG
         PIOS_WDG_UpdateFlag(PIOS_WDG_TELEMETRYRX);
 #endif
-        if (data->iapRequestPending &&
-            ((uint32_t)(xTaskGetTickCount() - data->iapRequestTicks) > IAP_FAR_ANSWER_MS)) {
-            // nothing identified itself at the far end: answer with this modem
-            data->iapRequestPending = false;
-            UAVTalkSendObject(data->iapRequestCon, FirmwareIAPObjHandle(), 0, false, 0);
-        }
         if (!uart && !usb) {
             vTaskDelay(5);
             continue;
@@ -615,7 +603,7 @@ static int32_t UAVTalkSendHandler(uint8_t *buf, int32_t length)
         // (the UART frees 11 bytes a millisecond at 115200) instead of
         // dropping the frame at once
         ret = -2;
-        uint8_t count = 5;
+        uint8_t count = 20;
         while (count-- > 0 && ret < -1) {
             ret = PIOS_COM_SendBufferNonBlocking(outputPort, buf, length);
             if (ret < -1 && count) {
@@ -667,8 +655,10 @@ static int32_t RadioSendHandler(uint8_t *buf, int32_t length)
     if (outputPort && PIOS_COM_Available(outputPort)) {
         // Following call can fail with -2 error code (buffer full) or -3 error code (could not acquire send mutex)
         // It is the caller responsibility to retry in such cases...
+        // a 145-byte reply (FirmwareIAPObj) needs that much free in a buffer the
+        // flight controller's stream keeps busy: wait up to 20 ms for it
         int32_t ret   = -2;
-        uint8_t count = 5;
+        uint8_t count = 20;
         while (count-- > 0 && ret < -1) {
             ret = PIOS_COM_SendBufferNonBlocking(outputPort, buf, length);
             if (ret < -1 && count) {
@@ -730,10 +720,9 @@ static uint8_t ProcessTelemetryStream(UAVTalkConnection inConnectionHandle, UAVT
                     uint8_t linkState;
                     OPLinkStatusLinkStateGet(&linkState);
                     if (relay && (linkState == OPLINKSTATUS_LINKSTATE_CONNECTED)) {
+                        // the far end answers (a flight controller, or nobody: the GCS
+                        // retries and a bare modem pair is configured from its own pages)
                         UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
-                        data->iapRequestCon     = inConnectionHandle;
-                        data->iapRequestTicks   = xTaskGetTickCount();
-                        data->iapRequestPending = true;
                     } else {
                         UAVTalkReceiveObject(inConnectionHandle);
                     }
@@ -821,11 +810,7 @@ static void ProcessRadioStream(UAVTalkConnection inConnectionHandle, UAVTalkConn
                 UAVTalkReceiveObject(inConnectionHandle);
                 break;
             case FIRMWAREIAPOBJ_OBJID:
-                // the flight controller at the far end identifying itself: the GCS
-                // gets that, not this modem's own answer
-                if (UAVTalkGetPacketType(inConnectionHandle) != UAVTALK_TYPE_OBJ_REQ) {
-                    data->iapRequestPending = false;
-                }
+                // the flight controller at the far end identifying itself
                 UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
                 break;
             default:

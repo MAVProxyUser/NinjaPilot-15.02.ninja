@@ -53,7 +53,7 @@
 #define PIOS_COM_TELEM_VCP_TX_BUF_LEN 256
 
 #define PIOS_COM_RFM22B_RF_RX_BUF_LEN 256
-#define PIOS_COM_RFM22B_RF_TX_BUF_LEN 256
+#define PIOS_COM_RFM22B_RF_TX_BUF_LEN 512 // room for a 145-byte FirmwareIAPObj reply next to the flight controller's stream
 
 #define PIOS_COM_TELEM_RX_BUF_LEN     256
 #define PIOS_COM_TELEM_TX_BUF_LEN     256
