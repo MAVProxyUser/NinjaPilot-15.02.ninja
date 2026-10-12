@@ -58,6 +58,7 @@ public slots:
     void updateOPLinkStatus(UAVObject *object);
     void onOPLinkDisconnect();
     void showOPLinkPageIfAlone();
+    void retryBoardIdentification();
     void updateModemsPage();
     void scheduleModemsPageUpdate();
 
@@ -71,6 +72,8 @@ signals:
 private:
     /* Board model the tabs were last built for; 0 = none yet. */
     int m_appliedBoard = 0;
+    QTimer *boardRetryTimer;
+    int boardRetries = 0;
 
 protected:
     void resizeEvent(QResizeEvent *event);

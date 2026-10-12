@@ -165,6 +165,9 @@ ConfigGadgetWidget::ConfigGadgetWidget(QWidget *parent) : QWidget(parent)
     oplinkJumpTimer = new QTimer(this);
     oplinkJumpTimer->setSingleShot(true);
     connect(oplinkJumpTimer, SIGNAL(timeout()), this, SLOT(showOPLinkPageIfAlone()));
+    boardRetryTimer = new QTimer(this);
+    boardRetryTimer->setSingleShot(true);
+    connect(boardRetryTimer, SIGNAL(timeout()), this, SLOT(retryBoardIdentification()));
 
     // Two OPLinks on USB: a page with both of them, no flight controller needed.
     modemsWidget    = NULL;
@@ -196,6 +199,8 @@ void ConfigGadgetWidget::resizeEvent(QResizeEvent *event)
 
 void ConfigGadgetWidget::onAutopilotDisconnect()
 {
+    boardRetryTimer->stop();
+    boardRetries = 0;
     QWidget *qwd = new DefaultAttitudeWidget(this);
 
     stackWidget->replaceTab(ConfigGadgetWidget::sensors, qwd);
@@ -236,8 +241,19 @@ void ConfigGadgetWidget::onAutopilotConnect()
          * came alive at all. The guard is about not rebuilding tabs; it was
          * never meant to suppress the connected signal. */
         if (board == 0 || board == m_appliedBoard) {
+            // Not known yet, or a modem on the way answered in place of the flight
+            // controller behind it (type 3): ask again in a moment rather than
+            // staying "Unknown" for the session.  A lost reply over a radio link
+            // is ordinary.
+            if (((board == 0) || ((board & 0xff00) == 0x0300)) && (boardRetries < 15) && !boardRetryTimer->isActive()) {
+                boardRetryTimer->start(2000);
+            }
             emit autopilotConnected();
             return;
+        }
+        if ((board & 0xff00) != 0x0300) {
+            boardRetryTimer->stop();
+            boardRetries = 0;
         }
         m_appliedBoard = board;
 
@@ -462,6 +478,25 @@ void ConfigGadgetWidget::showOPLinkPageIfAlone()
     }
     qDebug() << "ConfigGadgetWidget: modem with no radio link (" << linkState << "), showing the OPLink page";
     showPage(ConfigGadgetWidget::oplink);
+}
+
+void ConfigGadgetWidget::retryBoardIdentification()
+{
+    ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+    TelemetryManager *telMngr = pm->getObject<TelemetryManager>();
+    UAVObjectManager *objMngr = pm->getObject<UAVObjectManager>();
+
+    if (!(telMngr && telMngr->isConnected()) || !objMngr) {
+        return;
+    }
+    UAVObject *iap = objMngr->getObject(QString("FirmwareIAPObj"));
+    if (iap) {
+        qDebug() << "ConfigGadgetWidget: board not identified yet, asking again (" << boardRetries + 1 << ")";
+        iap->requestUpdate();
+    }
+    if (++boardRetries < 15) {
+        boardRetryTimer->start(2000);
+    }
 }
 
 int ConfigGadgetWidget::modemsPageIndex() const
