@@ -36,6 +36,7 @@
 #include "../uavobjectwidgetutils/configtaskwidget.h"
 
 #include <QWidget>
+#include <QElapsedTimer>
 #include <QList>
 #include <QTextBrowser>
 #include <QMessageBox>
@@ -80,6 +81,7 @@ private:
     // A timer that timesout the connction to the OPLink.
     QTimer *oplinkTimeout;
     QTimer *oplinkJumpTimer;
+    QElapsedTimer oplinkJumpClock;
     QTimer *modemsPageTimer;
     QWidget *modemsWidget;
     int modemsPageIndex() const;

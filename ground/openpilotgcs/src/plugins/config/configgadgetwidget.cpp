@@ -212,6 +212,8 @@ void ConfigGadgetWidget::onAutopilotDisconnect()
 
 void ConfigGadgetWidget::onAutopilotConnect()
 {
+    // a flight controller answered through whatever is connected: never jump to the OPLink page now
+    oplinkJumpTimer->stop();
     qDebug() << "ConfigGadgetWidget onAutopilotConnect";
     // First of all, check what Board type we are talking to, and
     // if necessary, remove/add tabs in the config gadget:
@@ -428,7 +430,8 @@ void ConfigGadgetWidget::updateOPLinkStatus(UAVObject *)
 
             // A modem with nothing behind it: this page is the one that matters.
             // A flight controller behind the modem answers over the radio a
-            // little after the modem's first status, so give it a moment.
+            // while after the modem's first status, so give it time.
+            oplinkJumpClock.start();
             oplinkJumpTimer->start(3000);
         }
     }
@@ -439,9 +442,24 @@ void ConfigGadgetWidget::showOPLinkPageIfAlone()
     ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
     TelemetryManager *telMngr = pm->getObject<TelemetryManager>();
 
-    if (oplinkConnected && oplinkTabShown && !(telMngr && telMngr->isConnected())) {
-        showPage(ConfigGadgetWidget::oplink);
+    if (!oplinkConnected || !oplinkTabShown || (telMngr && telMngr->isConnected())) {
+        // a flight controller answered: stay where the user is
+        return;
     }
+    // A modem linked to another modem may well have a flight controller behind
+    // it that is still completing its handshake over the radio: give that up
+    // to 10 s.  A modem with no radio link has nothing behind it.
+    bool linked = false;
+    if (oplinkStatusObj) {
+        UAVObjectField *field = oplinkStatusObj->getField("LinkState");
+        linked = field && (field->getValue().toString() == "Connected");
+    }
+    if (linked && (oplinkJumpClock.elapsed() < 10000)) {
+        oplinkJumpTimer->start(1000);
+        return;
+    }
+    qDebug() << "ConfigGadgetWidget: modem with nothing behind it, showing the OPLink page";
+    showPage(ConfigGadgetWidget::oplink);
 }
 
 int ConfigGadgetWidget::modemsPageIndex() const

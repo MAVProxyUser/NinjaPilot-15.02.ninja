@@ -467,6 +467,12 @@ void ConfigOutputWidget::refreshWidgetsValues(UAVObject *obj)
             // TIM5_CH1 (ch8). See osd32mp1/dt-pwm-unlock.sh for the pins.
             bankLabels << "1 TIM8 (1-3)" << "2 TIM4 (4-5)" << "3 TIM5 (6,8)" << "4 TIM3 (7)";
             channelBanks << 1 << 1 << 1 << 2 << 2 << 3 << 4 << 3 << 4 << 4;
+        } else if ((board & 0xff00) == 0x0C00) {
+            // CubePilot Cube Purple: MAIN OUT 1-8 live on the IO co-processor and
+            // share one PWM rate; AUX OUT 1-4 are TIM1.  Channels of type DroneCAN
+            // leave over CAN2 instead (labelled "CAN n" below) and ignore the banks.
+            bankLabels << "1 MAIN 1-8 (IO)" << "2 AUX 1-4 (TIM1)";
+            channelBanks << 1 << 1 << 1 << 1 << 1 << 1 << 1 << 1 << 2 << 2 << 2 << 2;
         } else if ((board & 0xff00) == 0x1200) {
             /* NinjaPilot ESP32 Thing Plus: the MCPWM driver applies bank
              * 0's rate to every timer (channels share MCPWM timers in
@@ -507,6 +513,10 @@ void ConfigOutputWidget::refreshWidgetsValues(UAVObject *obj)
         }
         int neutral = actuatorSettingsData.ChannelNeutral[outputChannelForm->index()];
         outputChannelForm->setNeutral(neutral);
+        // a channel that leaves over DroneCAN: say so, with the ESC it drives
+        if (actuatorSettingsData.ChannelType[outputChannelForm->index()] == ActuatorSettings::CHANNELTYPE_DRONECAN) {
+            outputChannelForm->setDroneCan(actuatorSettingsData.ChannelAddr[outputChannelForm->index()]);
+        }
     }
 
     setDirty(dirty);
