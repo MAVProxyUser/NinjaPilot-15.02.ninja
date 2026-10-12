@@ -446,19 +446,21 @@ void ConfigGadgetWidget::showOPLinkPageIfAlone()
         // a flight controller answered: stay where the user is
         return;
     }
-    // A modem linked to another modem may well have a flight controller behind
-    // it that is still completing its handshake over the radio: give that up
-    // to 10 s.  A modem with no radio link has nothing behind it.
-    bool linked = false;
+    // Only a modem with no radio link has nothing behind it.  A linked modem
+    // may have a flight controller at the far end whose handshake is still
+    // under way, so it never jumps; its OPLink page is one click away.
+    QString linkState;
     if (oplinkStatusObj) {
         UAVObjectField *field = oplinkStatusObj->getField("LinkState");
-        linked = field && (field->getValue().toString() == "Connected");
+        if (field) {
+            linkState = field->getValue().toString();
+        }
     }
-    if (linked && (oplinkJumpClock.elapsed() < 10000)) {
-        oplinkJumpTimer->start(1000);
+    if (linkState == "Connected") {
+        qDebug() << "ConfigGadgetWidget: modem is linked, not jumping to the OPLink page";
         return;
     }
-    qDebug() << "ConfigGadgetWidget: modem with nothing behind it, showing the OPLink page";
+    qDebug() << "ConfigGadgetWidget: modem with no radio link (" << linkState << "), showing the OPLink page";
     showPage(ConfigGadgetWidget::oplink);
 }
 
