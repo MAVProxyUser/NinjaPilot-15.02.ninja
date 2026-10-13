@@ -559,7 +559,8 @@ static void hid_device_removal_callback(void *context, IOReturn result,
 	hid_device *d = context;
 
 	d->disconnected = 1;
-	CFRunLoopStop(d->run_loop);
+	if (d->run_loop)
+		CFRunLoopStop(d->run_loop);
 }
 
 /* The Run Loop calls this function for each input report received.
@@ -671,6 +672,16 @@ static void *read_thread(void *param)
 			break;
 		}
 	}
+
+	/* This thread owns the run loop the device is scheduled on.  Take the
+	   device off it here, before the loop dies with the thread: the
+	   IOHIDDeviceRef is shared with the GCS's USB monitor and outlives this
+	   session, and IOKit's next notification for it walks every run loop it
+	   is still scheduled on.  Left behind, that walk hit a dead run loop and
+	   the GCS died with a segfault inside the read thread of whatever
+	   device was open at the time (every disconnect was a lottery). */
+	IOHIDDeviceUnscheduleFromRunLoop(dev->device_handle, CFRunLoopGetCurrent(), dev->run_loop_mode);
+	CFRunLoopRemoveSource(CFRunLoopGetCurrent(), dev->source, dev->run_loop_mode);
 
 	/* Now that the read thread is stopping, Wake any threads which are
 	   waiting on data (in hid_read_timeout()). Do this under a mutex to
@@ -1022,8 +1033,8 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 			dev->device_handle, dev->input_report_buf, dev->max_input_report_len,
 			NULL, dev);
 		IOHIDDeviceRegisterRemovalCallback(dev->device_handle, NULL, dev);
-		IOHIDDeviceUnscheduleFromRunLoop(dev->device_handle, dev->run_loop, dev->run_loop_mode);
-		IOHIDDeviceScheduleWithRunLoop(dev->device_handle, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
+		/* the read thread takes the device off its own run loop as it exits;
+		   do not move the shared device onto the main run loop here */
 	}
 
 	/* Cause read_thread() to stop. */
