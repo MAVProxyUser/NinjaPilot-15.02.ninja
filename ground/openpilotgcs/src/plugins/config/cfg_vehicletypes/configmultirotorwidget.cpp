@@ -533,6 +533,8 @@ void ConfigMultiRotorWidget::refreshWidgetsValues(QString frameType)
     // MixerValueYaw : negative = reversed
     setYawMixLevel(getMixerValue(mixer, "MixerValueYaw"));
 
+    reconcileMotorChannelsWithMixer(frameType, mixer);
+
     updateAirframe(frameType);
 }
 
@@ -1169,6 +1171,83 @@ bool ConfigMultiRotorWidget::setupMultiRotorMixer(double mixerFactors[8][3])
         }
     }
     return true;
+}
+
+/**
+ * The motor-to-channel boxes come from the GUI's own stored assignment
+ * (GUIConfigData), which is only rewritten by this page's Save.  The board's
+ * mixer is the truth: when it was changed by anything else (a tool over the
+ * radio, another ground station, a hand edit) the boxes were out of step with
+ * the vehicle, and a Save from here would silently have put the old
+ * assignment back.  Read the assignment off the mixer vectors instead, when
+ * they match the frame cleanly, and keep the stored assignment in step.
+ */
+void ConfigMultiRotorWidget::reconcileMotorChannelsWithMixer(const QString &frameType, UAVDataObject *mixer)
+{
+    // position -> expected (pitch sign, roll sign), the same tables Save uses
+    static const int quadX[4][2] = { { 1, 1 }, { 1, -1 }, { -1, -1 }, { -1, 1 } };
+    static const int quadP[4][2] = { { 1, 0 }, { 0, -1 }, { -1, 0 }, { 0, 1 } };
+    const int (*table)[2] = NULL;
+
+    if (frameType == "QuadX") {
+        table = quadX;
+    } else if (frameType == "QuadP") {
+        table = quadP;
+    } else {
+        return;
+    }
+    QList<QComboBox *> boxes;
+    boxes << m_aircraft->multiMotorChannelBox1 << m_aircraft->multiMotorChannelBox2
+          << m_aircraft->multiMotorChannelBox3 << m_aircraft->multiMotorChannelBox4;
+    int found[4] = { 0, 0, 0, 0 };
+    int count    = 0;
+    for (int channel = 0; channel < 12; channel++) {
+        if (!mixer->getField(QString("Mixer%1Type").arg(channel + 1))) {
+            break;
+        }
+        if (getMixerType(mixer, channel) != "Motor") {
+            continue;
+        }
+        double p = getMixerVectorValue(mixer, channel, VehicleConfig::MIXERVECTOR_PITCH);
+        double r = getMixerVectorValue(mixer, channel, VehicleConfig::MIXERVECTOR_ROLL);
+        int ps   = (p > 0) - (p < 0);
+        int rs   = (r > 0) - (r < 0);
+        for (int i = 0; i < 4; i++) {
+            if (!found[i] && (table[i][0] == ps) && (table[i][1] == rs)) {
+                found[i] = channel + 1;
+                count++;
+                break;
+            }
+        }
+    }
+    if (count != 4) {
+        // not a clean match for this frame (custom or partial mixer): keep what is stored
+        return;
+    }
+    bool changed = false;
+    for (int i = 0; i < 4; i++) {
+        if (boxes.at(i)->currentIndex() != found[i]) {
+            setComboCurrentIndex(boxes.at(i), found[i]);
+            changed = true;
+        }
+    }
+    if (!changed) {
+        return;
+    }
+    qDebug() << "ConfigMultiRotorWidget: motor channels taken from the board's mixer:" << found[0] << found[1] << found[2] << found[3];
+    GUIConfigDataUnion config = getConfigData();
+    if (frameType == "QuadX") {
+        config.multi.VTOLMotorNW = found[0];
+        config.multi.VTOLMotorNE = found[1];
+        config.multi.VTOLMotorSE = found[2];
+        config.multi.VTOLMotorSW = found[3];
+    } else {
+        config.multi.VTOLMotorN = found[0];
+        config.multi.VTOLMotorE = found[1];
+        config.multi.VTOLMotorS = found[2];
+        config.multi.VTOLMotorW = found[3];
+    }
+    setConfigData(config);
 }
 
 /**

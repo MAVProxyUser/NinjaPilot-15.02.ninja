@@ -407,21 +407,23 @@ void ConfigGadgetWidget::onAutopilotConnect()
 
 void ConfigGadgetWidget::tabAboutToChange(int i, bool *proceed)
 {
-    Q_UNUSED(i);
     *proceed = true;
     ConfigTaskWidget *wid = qobject_cast<ConfigTaskWidget *>(stackWidget->currentWidget());
-    if (!wid) {
-        return;
-    }
-    if (wid->isDirty()) {
+    if (wid && wid->isDirty()) {
         int ans = QMessageBox::warning(this, tr("Unsaved changes"), tr("The tab you are leaving has unsaved changes,"
                                                                        "if you proceed they will be lost.\n"
                                                                        "Do you still want to proceed?"), QMessageBox::Yes, QMessageBox::No);
         if (ans == QMessageBox::No) {
             *proceed = false;
-        } else {
-            wid->setDirty(false);
+            return;
         }
+        wid->setDirty(false);
+    }
+    // the page about to show re-reads its objects from the board, so it never
+    // shows what the board had at connect time if something changed since
+    ConfigTaskWidget *next = qobject_cast<ConfigTaskWidget *>(stackWidget->getWidget(i));
+    if (next) {
+        next->requestObjectsFromBoard();
     }
 }
 

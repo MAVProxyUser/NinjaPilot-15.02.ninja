@@ -286,6 +286,24 @@ void ConfigTaskWidget::populateWidgets()
     setDirty(dirtyBack);
 }
 
+/**
+ * Request a fresh copy of every object this page is bound to.  Objects
+ * changed on the board by someone else (another ground station, a tool over
+ * the radio, the board itself) otherwise stay stale in the page until the next
+ * connect; a page is re-read whenever its tab is shown.
+ */
+void ConfigTaskWidget::requestObjectsFromBoard()
+{
+    if (!m_isConnected) {
+        return;
+    }
+    foreach(UAVObject * obj, m_widgetBindingsPerObject.uniqueKeys()) {
+        if (obj) {
+            obj->requestUpdate();
+        }
+    }
+}
+
 void ConfigTaskWidget::refreshWidgetsValues(UAVObject *obj)
 {
     if (!m_isWidgetUpdatesAllowed) {

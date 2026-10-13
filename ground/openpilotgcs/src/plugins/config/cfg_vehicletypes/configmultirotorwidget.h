@@ -75,6 +75,7 @@ private:
     void setupRcOutputs(QList<QString> rcOutputList);
     void resetMixers();
     void setupQuadMotor(int channel, double roll, double pitch, double yaw);
+    void reconcileMotorChannelsWithMixer(const QString &frameType, UAVDataObject *mixer);
 
     void setYawMixLevel(int);
     void updateRcCurvesUsed();
