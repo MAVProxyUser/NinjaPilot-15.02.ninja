@@ -178,12 +178,18 @@ through the GPS module itself).
 
 The recipe in the repository notes applies (qmake straight from
 `ground/openpilotgcs/openpilotgcs.pro`, an empty `opfw_resource.qrc`,
-`make uavobjects_gcs` first).  Two things bit here: a fresh checkout lacks
-`ground/openpilotgcs/src/libs/eigen/Eigen/src/Core/util` (Eigen's own
-`.gitignore` hides it on a case-insensitive filesystem; copy it from a
-built tree), and a UAVObject over 256 bytes is silently dropped by the
-GCS's UAVTalk ("incorrect packet size" in the log), so keep the objects
-small.  The wizard was driven end to end over the automation port
+`make uavobjects_gcs` first).  A fresh checkout builds as of 2026-10-24;
+before that it failed three ways, all now fixed in git: `utils.pro` carried a
+hand-written moc rule for `submiteditorwidget.moc` that made qmake emit an
+unsatisfiable source-dir dependency on a clean build (qmake's own moc step
+handles that include, so the rule is gone); `qwtconfig.pri` asked for the Qt
+Designer plugin whose `qwt/designer/` directory is git-ignored (plugin off,
+the GCS never loads it); and 75 Eigen 3.4 headers under `Eigen/src/Core/`
+had never been committed because both `.gitignore` files list `core` and git
+on macOS matches ignore patterns case-insensitively (headers added, patterns
+anchored to `/core`).  Separately, a UAVObject over 256 bytes is silently
+dropped by the GCS's UAVTalk ("incorrect packet size" in the log), so keep
+the objects small.  The wizard was driven end to end over the automation port
 (`NINJAPILOT_GCS_AUTOMATION=1`, `ground/pyuavtalk/gcs_client.py`; commands
 take a `window` hint so a dialog stays addressable while the main window
 has focus, and a client that gives up mid-command no longer crashes the
@@ -286,10 +292,11 @@ make line, replace it:
   `IOHIDManagerOpen` refused that; it now matches OpenPilot's vendor id only
   and survives a failed open.  The wizard's final reboot uses the
   bootloader-less path (IAP reset, wait for telemetry).
-* Building the GCS from a fresh checkout needs two git-ignored directories
-  copied from an existing tree: `ground/openpilotgcs/src/libs/qwt/designer`
-  and Eigen's `Eigen/src/Core` (ignored by Eigen's own `.gitignore` rule
-  `core` on a case-insensitive filesystem).
+* Building the GCS from a fresh checkout used to need two git-ignored
+  directories copied from an existing tree (`qwt/designer`, Eigen's
+  `Eigen/src/Core`).  Fixed 2026-10-24: the Designer plugin is off, the Eigen
+  headers are committed, and the `core` ignore patterns are anchored (see
+  "Building the GCS for this tree").
 
 ## Receiver on the Mini Carrier (2026-09-29 findings)
 
