@@ -26,8 +26,9 @@ What already works:
 - `pixracer.c` (board bring-up/init task) compiles against FreeRTOS 11.3.
 - `pios_board.h` pin map and `pios_usb_board_data.c` are in place.
 
-What remains — a **driver-API rewrite**, because the source was written against
-a newer-generation PiOS whose driver interfaces differ from this tree's:
+What remains — a **driver-API rewrite**, because the source's board files use
+PiOS driver interfaces that differ from this tree's (the IMU driver is
+fork-local; the LED/USB/UART configs differ too):
 
 1. **Invensense IMU** (`pios_board.c`, `board_hw_defs.c`): the source uses a
    `pios_invensense.c` hand-written on that fork's `pixracer-port` branch
