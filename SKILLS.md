@@ -74,7 +74,7 @@ repo tree directly.
 
 ```bash
 # sync just the files you changed (fast path):
-rsync -a --exclude='.git' \
+rsync -a --exclude='.git' --exclude='osd32mp1/' \
   "/Users/kfinisterre/Desktop/OP Revo Redux/NinjaPilot-15.02.ninja/flight/path/to/file.c" \
   ~/ninjapilot-build/flight/path/to/file.c
 cd ~/ninjapilot-build && make -j4 ARM_SDK_PREFIX=arm-none-eabi- simposix
@@ -83,7 +83,7 @@ cd ~/ninjapilot-build && make -j4 ARM_SDK_PREFIX=arm-none-eabi- simposix
 - `ARM_SDK_PREFIX=arm-none-eabi-` is required (Homebrew toolchain isn't
   auto-detected).
 - Full-tree sync for a *worktree* build dir must INCLUDE `.git` (it's a
-  gitfile pointer version-info.py needs): `rsync -a <worktree>/ ~/ninjapilot-build-vN/`
+  gitfile pointer version-info.py needs): `rsync -a --exclude='osd32mp1/' <worktree>/ ~/ninjapilot-build-vN/`
   then `rm -rf build` before the first build (stale build dirs from
   another tree produce `invalid suffix 'xNone'` in firmware_info.c).
 - Variant build trees: `~/ninjapilot-build-v1..v4` ↔ worktrees
