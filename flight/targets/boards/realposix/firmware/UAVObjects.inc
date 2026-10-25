@@ -83,6 +83,7 @@ UAVOBJSRCFILENAMES += missionprogress
 UAVOBJSRCFILENAMES += ak8975sensor
 UAVOBJSRCFILENAMES += i2cbusscan
 UAVOBJSRCFILENAMES += sensorhubsettings
+UAVOBJSRCFILENAMES += settingsgeneration
 UAVOBJSRCFILENAMES += missionrecoverysettings
 UAVOBJSRCFILENAMES += pathstatus
 UAVOBJSRCFILENAMES += pathsummary

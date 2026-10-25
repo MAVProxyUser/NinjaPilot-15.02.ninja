@@ -35,6 +35,7 @@
 #include <actuatorsettings.h>
 #include <taskinfo.h>
 #include <stdlib.h>     /* getenv - runtime bus selection (RED vs BRK) */
+#include <pios_dsm.h>   /* PIOS_DSM_POSIX_Init + pios_dsm_posix_rcvr_driver (posix DSM) */
 
 
 /*

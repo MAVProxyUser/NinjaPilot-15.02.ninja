@@ -38,7 +38,14 @@
 #include <time.h>
 #include <errno.h>
 #include <stdio.h>
+/* prctl(PR_SET_NAME) is a Linux convenience for naming the reader thread.
+ * It does not exist on the macOS/BSD host used to build the sim targets,
+ * which also glob this file in via flight/pios/posix/library.mk. Guard it
+ * so simposix/simwroom/simlitewing (PIOS_INCLUDE_DSM is set on every posix
+ * board) still compile; the driver is only actually wired up on realposix. */
+#ifdef __linux__
 #include <sys/prctl.h>
+#endif
 
 #define DSM_POSIX_FRAME_SIZE   DSM_FRAME_LENGTH   /* 16 */
 #define DSM_POSIX_GAP_MS       4                  /* >4ms silence = frame boundary (frame is ~1.4ms @115200) */
@@ -132,7 +139,9 @@ static void *dsm_reader(void *arg)
 {
     struct pios_dsm_posix_dev *d = (struct pios_dsm_posix_dev *)arg;
 
+#ifdef __linux__
     prctl(PR_SET_NAME, "dsm-rcvr", 0, 0, 0);
+#endif
 
     uint8_t frame[64];
     int     len = 0;

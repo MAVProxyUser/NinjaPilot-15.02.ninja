@@ -60,6 +60,24 @@ ifeq ($(ERASE_FLASH), YES)
     CDEFS += -DERASE_FLASH
 endif
 
+# GCC 13 vs this F1 tree (same block as the OPLink Mini and Cube Purple
+# targets): strict-aliasing miscompiled the kernel's list handling, and the
+# packed UAVObject structs trip -Werror=address-of-packed-member.
+CFLAGS += -fno-strict-aliasing
+CPPFLAGS += -fno-strict-aliasing
+CFLAGS += -Wno-address-of-packed-member
+CPPFLAGS += -Wno-address-of-packed-member
+CFLAGS += -Wno-missing-attributes -Wno-misleading-indentation -Wno-attributes
+CFLAGS += -Wno-stringop-overflow -Wno-stringop-overread
+CPPFLAGS += -Wno-stringop-overflow -Wno-stringop-overread
+CFLAGS += -Wno-implicit-fallthrough -Wno-unused-function -Wno-unused-but-set-variable -Wno-array-bounds -Wno-maybe-uninitialized
+CPPFLAGS += -Wno-implicit-fallthrough -Wno-unused-function -Wno-unused-but-set-variable -Wno-array-bounds -Wno-maybe-uninitialized
+# CoordinateConversions.c and the legacy attitude math carry 23 unsuffixed
+# double constants that GCC 13 flags; the modem (oplinkmini) escapes this only
+# because it does not compile those files.
+CFLAGS += -Wno-unsuffixed-float-constants
+CPPFLAGS += -Wno-unsuffixed-float-constants
+
 # List C source files here (C dependencies are automatically generated).
 # Use file-extension c for "c-only"-files
 ifndef TESTAPP
@@ -88,6 +106,16 @@ ifndef TESTAPP
     SRC += $(OPUAVSYNTHDIR)/systemstats.c
     SRC += $(OPUAVSYNTHDIR)/systemalarms.c
     SRC += $(OPUAVSYNTHDIR)/systemsettings.c
+    # System/systemmod.c references SettingsGenerationHandle() unconditionally
+    # (the GCS-reconnect settings-generation optimisation). Every board that
+    # builds the System module needs this object or the link fails.
+    SRC += $(OPUAVSYNTHDIR)/settingsgeneration.c
+    # Stabilization unconditionally inits the relay-autotune objects, and the
+    # GPS module publishes receiver stats. Both arrived with the unified tree;
+    # add the objects this board's modules now reference.
+    SRC += $(OPUAVSYNTHDIR)/relaytuning.c
+    SRC += $(OPUAVSYNTHDIR)/relaytuningsettings.c
+    SRC += $(OPUAVSYNTHDIR)/gpsrxstats.c
     SRC += $(OPUAVSYNTHDIR)/stabilizationdesired.c
     SRC += $(OPUAVSYNTHDIR)/stabilizationsettings.c
     SRC += $(OPUAVSYNTHDIR)/stabilizationsettingsbank1.c
