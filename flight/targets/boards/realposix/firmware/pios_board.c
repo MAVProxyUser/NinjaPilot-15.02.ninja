@@ -290,6 +290,27 @@ void PIOS_Board_Init(void)
     }
 #endif /* PIOS_INCLUDE_UDPRCVR */
 
+#if defined(PIOS_INCLUDE_DSM)
+    /* Spektrum/DSM satellite serial receiver, registered as the DSM (MainPort)
+     * channel group. The tty defaults to PIOS_REALPOSIX_DSM_DEV (USART2 = PF4
+     * on the BRK) and is overridable with NINJAPILOT_DSM_DEV so any broken-out
+     * UART works (ttySTM2/5/7/1). Select it by setting
+     * ManualControlSettings.ChannelGroups to "DSM (MainPort)". Non-fatal: a
+     * missing/unbound tty just leaves the group unmapped. */
+    const char *dsm_dev = getenv("NINJAPILOT_DSM_DEV");
+    if (!dsm_dev || !*dsm_dev) {
+        dsm_dev = PIOS_REALPOSIX_DSM_DEV;
+    }
+    uint32_t pios_dsm_id;
+    if (PIOS_DSM_POSIX_Init(&pios_dsm_id, dsm_dev) == 0) {
+        uint32_t pios_dsm_rcvr_id;
+        if (PIOS_RCVR_Init(&pios_dsm_rcvr_id, &pios_dsm_posix_rcvr_driver, pios_dsm_id)) {
+            PIOS_Assert(0);
+        }
+        pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_DSMMAINPORT] = pios_dsm_rcvr_id;
+    }
+#endif /* PIOS_INCLUDE_DSM */
+
     // BootFault ties to IAP backup-register boot-count tracking on real
     // hardware (coptercontrol/pios_board.c) - there's no bootloader/IAP
     // hardware to check here, and no code path anywhere sets this alarm
