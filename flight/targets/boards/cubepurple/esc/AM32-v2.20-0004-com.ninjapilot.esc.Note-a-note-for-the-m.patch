@@ -1,0 +1,142 @@
+From 12758d734b4c0baeb3ee0b22127fa9a45224e7e7 Mon Sep 17 00:00:00 2001
+From: Kevin Finisterre <kfinisterre@KevinsMacStudio.localdomain>
+Date: Fri, 9 Oct 2026 16:23:07 -0400
+Subject: [PATCH 4/6] DroneCAN: com.ninjapilot.esc.Note, a note for the motors
+ named in a mask
+
+Vendor data type 20400: uint8 mask (bit i = ESC index i), uint8 volume
+(0..11 as BEEP_VOLUME, 255 = the ESC's own), float16 frequency, float16
+duration. Lets a flight controller give four motors four different
+pitches and a loudness per note; BeepCommand stays as the all-motors
+message. Played the same way, interrupts masked, 400 ms per command.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ Src/DroneCAN/DroneCAN.c | 48 +++++++++++++++++++++++++++++++++++++++++
+ Src/DroneCAN/DroneCAN.h |  1 +
+ Src/main.c              |  4 ++++
+ 3 files changed, 53 insertions(+)
+
+diff --git a/Src/DroneCAN/DroneCAN.c b/Src/DroneCAN/DroneCAN.c
+index 51ac776..237db1e 100644
+--- a/Src/DroneCAN/DroneCAN.c
++++ b/Src/DroneCAN/DroneCAN.c
+@@ -53,6 +53,16 @@ static bool done_startup;
+ #define UAVCAN_EQUIPMENT_INDICATION_BEEPCOMMAND_SIGNATURE (0xBE9EA9FEC2B15D52ULL)
+ volatile uint16_t dronecan_beep_hz;
+ volatile uint16_t dronecan_beep_ms;
++volatile uint8_t  dronecan_beep_volume = 255;   /* 0..11 for this note, 255 = the ESC's own */
++
++/* com.ninjapilot.esc.Note (vendor data type 20400): one note for the ESCs
++ * named in a mask, so four motors can hold four different pitches.
++ *   uint8 mask      bit i = ESC index i
++ *   uint8 volume    0..11 like BEEP_VOLUME, 255 = leave it
++ *   float16 frequency_hz
++ *   float16 duration_s  */
++#define NINJAPILOT_ESC_NOTE_ID 20400
++#define NINJAPILOT_ESC_NOTE_SIGNATURE (0x4E494E4A41504931ULL)
+ 
+ #define APP_SIGNATURE_MAGIC1 0x68f058e6
+ #define APP_SIGNATURE_MAGIC2 0xafcee5a0
+@@ -684,6 +694,35 @@ static void handle_RawCommand(CanardInstance *ins, CanardRxTransfer *transfer)
+ /*
+   handle ArmingStatus messages
+ */
++static void handle_Note(CanardInstance* ins, CanardRxTransfer* transfer)
++{
++    (void)ins;
++    uint8_t mask, volume;
++    uint16_t f16, d16;
++    uint32_t bit_ofs = 0;
++    if (transfer->payload_len < 6) {
++        return;
++    }
++    canardDecodeScalar(transfer, bit_ofs, 8, false, &mask);   bit_ofs += 8;
++    canardDecodeScalar(transfer, bit_ofs, 8, false, &volume); bit_ofs += 8;
++    canardDecodeScalar(transfer, bit_ofs, 16, true, &f16);    bit_ofs += 16;
++    canardDecodeScalar(transfer, bit_ofs, 16, true, &d16);
++    if (!(mask & (1u << (eepromBuffer.can.esc_index & 7u)))) {
++        return;                                   /* not for this motor */
++    }
++    float hz = canardConvertFloat16ToNativeFloat(f16);
++    float sec = canardConvertFloat16ToNativeFloat(d16);
++    if (!(hz >= 100.0f && hz <= 5000.0f) || !(sec > 0.0f)) {
++        return;
++    }
++    if (sec > 0.4f) {
++        sec = 0.4f;
++    }
++    dronecan_beep_volume = (volume <= 11) ? volume : 255;
++    dronecan_beep_hz = (uint16_t)hz;
++    dronecan_beep_ms = (uint16_t)(sec * 1000.0f);
++}
++
+ static void handle_BeepCommand(CanardInstance* ins, CanardRxTransfer* transfer)
+ {
+     (void)ins;
+@@ -702,6 +741,7 @@ static void handle_BeepCommand(CanardInstance* ins, CanardRxTransfer* transfer)
+     if (sec > 0.4f) {
+         sec = 0.4f;                 /* the signal watchdog is half a second when armed */
+     }
++    dronecan_beep_volume = 255;
+     dronecan_beep_hz = (uint16_t)hz;
+     dronecan_beep_ms = (uint16_t)(sec * 1000.0f);
+ }
+@@ -943,6 +983,10 @@ static void onTransferReceived(CanardInstance *ins, CanardRxTransfer *transfer)
+             handle_BeepCommand(ins, transfer);
+             break;
+         }
++        case NINJAPILOT_ESC_NOTE_ID: {
++            handle_Note(ins, transfer);
++            break;
++        }
+         }
+     }
+ }
+@@ -1008,6 +1052,10 @@ static bool shouldAcceptTransfer(const CanardInstance *ins,
+             *out_data_type_signature = UAVCAN_EQUIPMENT_INDICATION_BEEPCOMMAND_SIGNATURE;
+             return true;
+         }
++        case NINJAPILOT_ESC_NOTE_ID: {
++            *out_data_type_signature = NINJAPILOT_ESC_NOTE_SIGNATURE;
++            return true;
++        }
+         }
+     }
+     // we don't want any other messages
+diff --git a/Src/DroneCAN/DroneCAN.h b/Src/DroneCAN/DroneCAN.h
+index 29e765d..b5dd6dd 100644
+--- a/Src/DroneCAN/DroneCAN.h
++++ b/Src/DroneCAN/DroneCAN.h
+@@ -8,5 +8,6 @@ void DroneCAN_update();
+ bool DroneCAN_active();
+ extern volatile uint16_t dronecan_beep_hz;   /* a BeepCommand note waiting to be played */
+ extern volatile uint16_t dronecan_beep_ms;
++extern volatile uint8_t  dronecan_beep_volume;   /* 0..11 for that note, 255 = the ESC setting */
+ 
+ #endif // DRONECAN_SUPPORT
+diff --git a/Src/main.c b/Src/main.c
+index 4f4d811..f495611 100644
+--- a/Src/main.c
++++ b/Src/main.c
+@@ -1206,6 +1206,9 @@ if (!stepper_sine && armed) {
+                  * the duty cycle every 100 us and would cut the note to a click */
+                 __disable_irq();
+                 RELOAD_WATCHDOG_COUNTER();
++                if (dronecan_beep_volume <= 11) {
++                    setVolume(dronecan_beep_volume);      /* this note's loudness */
++                }
+                 comStep(3);
+                 /* playBJNote() runs TIM1 at prescaler 10 (clock / 11) but
+                  * sizes the period for clock / 10, so it sounds 10/11 of
+@@ -1216,6 +1219,7 @@ if (!stepper_sine && armed) {
+                 SET_PRESCALER_PWM(0);
+                 SET_AUTO_RELOAD_PWM(TIMER1_MAX_ARR);
+                 dronecan_beep_ms = 0;
++                setVolume(eepromBuffer.beep_volume);      /* back to the ESC's own */
+                 signaltimeout = 0;
+                 RELOAD_WATCHDOG_COUNTER();
+                 __enable_irq();
+-- 
+2.50.1 (Apple Git-155)
+

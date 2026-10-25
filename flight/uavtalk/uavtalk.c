@@ -583,6 +583,30 @@ uint32_t UAVTalkGetPacketObjId(UAVTalkConnection connectionHandle)
 }
 
 /**
+ * Get the type (UAVTALK_TYPE_OBJ, _OBJ_REQ, _OBJ_ACK, ...) of the packet just received.
+ */
+uint8_t UAVTalkGetPacketType(UAVTalkConnection connectionHandle)
+{
+    UAVTalkConnectionData *connection;
+
+    CHECKCONHANDLE(connectionHandle, connection, return 0);
+
+    return connection->iproc.type;
+}
+
+/**
+ * Get the instance id of the packet just received.
+ */
+uint16_t UAVTalkGetPacketInstId(UAVTalkConnection connectionHandle)
+{
+    UAVTalkConnectionData *connection;
+
+    CHECKCONHANDLE(connectionHandle, connection, return 0);
+
+    return connection->iproc.instId;
+}
+
+/**
  * Receive an object. This function process objects received through the telemetry stream.
  *
  * Parser errors are considered as transmission errors and are not NACKed.
@@ -921,8 +945,18 @@ static bool UAVTalkProcess_SYNC(UAVTalkConnectionData *connection, UAVTalkInputP
     return true;
 }
 
-static bool UAVTalkProcess_TYPE(UAVTalkConnectionData *connection, UAVTalkInputProcessor *iproc, uint8_t *rxbuffer, __attribute__((unused)) uint8_t length, uint8_t *position)
+static bool UAVTalkProcess_TYPE(UAVTalkConnectionData *connection, UAVTalkInputProcessor *iproc, uint8_t *rxbuffer, uint8_t length, uint8_t *position)
 {
+    /* The outer loop runs SYNC and TYPE in the same pass, so when the sync
+     * byte was the last byte of the chunk this state used to read one byte
+     * past the feed: a stale byte became the type, the frame was lost and the
+     * real type byte then failed as a sync byte.  A UART reader wakes on the
+     * first byte and often hands over one-byte chunks, so on that path nearly
+     * every frame died (the Cube's TELEM1 and the modem's UART intake), while
+     * 64-byte USB reports rarely split a frame there.  Wait for the byte. */
+    if (length <= (*position)) {
+        return false;
+    }
     uint8_t rxbyte = rxbuffer[(*position)++];
 
     if ((rxbyte & UAVTALK_TYPE_MASK) != UAVTALK_TYPE_VER) {

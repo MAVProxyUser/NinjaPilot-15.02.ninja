@@ -33,6 +33,7 @@
 #include <openpilot.h>
 
 #include "gpspositionsensor.h"
+#include "gpsrxstats.h"
 #include "homelocation.h"
 #include "gpstime.h"
 #include "gpssatellites.h"
@@ -64,7 +65,7 @@ static void updateHwSettings();
 
 #ifdef PIOS_GPS_SETS_HOMELOCATION
 static void setHomeLocation(GPSPositionSensorData *gpsData);
-static void homeLocationUpdatedCb(UAVObjEvent *ev);
+static void __attribute__((unused)) homeLocationUpdatedCb(UAVObjEvent *ev);
 static float GravityAccel(float latitude, float longitude, float altitude);
 #endif
 
@@ -186,6 +187,7 @@ int32_t GPSInitialize(void)
     // because the rest of the system expects to just
     // attach to their queues
     GPSPositionSensorInitialize();
+    GPSRxStatsInitialize();
     GPSVelocitySensorInitialize();
     GPSTimeInitialize();
     GPSSatellitesInitialize();
@@ -356,6 +358,22 @@ static void gpsTask(__attribute__((unused)) void *parameters)
             }
         }
 
+        // Parser counters, once a second, so link trouble is visible
+        {
+            static uint32_t lastStatsMs;
+            if ((uint32_t)(xTaskGetTickCount() * portTICK_RATE_MS) - lastStatsMs >= 1000) {
+                lastStatsMs = xTaskGetTickCount() * portTICK_RATE_MS;
+                GPSRxStatsData rs;
+                rs.Received       = gpsRxStats.gpsRxReceived;
+                rs.ChecksumErrors = gpsRxStats.gpsRxChkSumError;
+                rs.Oversize       = gpsRxStats.gpsRxOverflow;
+                rs.ParserErrors   = gpsRxStats.gpsRxParserError;
+                rs.LastOversizeClass = gpsRxStats.lastOversizeClass;
+                rs.LastOversizeId    = gpsRxStats.lastOversizeId;
+                rs.LastOversizeLen   = gpsRxStats.lastOversizeLen;
+                GPSRxStatsSet(&rs);
+            }
+        }
         // Check for GPS timeout
         timeNowMs = xTaskGetTickCount() * portTICK_RATE_MS;
 #ifdef USE_SIM_POSIX
@@ -371,8 +389,10 @@ static void gpsTask(__attribute__((unused)) void *parameters)
         GPSPositionSensorGet(&gpspositionsensor);
         bool gpsTimedOut = false;
 #else
-        bool gpsTimedOut = (timeNowMs - timeOfLastUpdateMs) >= GPS_TIMEOUT_MS ||
-                            (gpsSettings.DataProtocol == GPSSETTINGS_DATAPROTOCOL_UBX && gpspositionsensor.AutoConfigStatus == GPSPOSITIONSENSOR_AUTOCONFIGSTATUS_ERROR);
+        /* Only silence means no GPS.  A failed auto-configuration used to be
+         * folded in here and turned a receiver with a 3D fix into "NoGPS";
+         * it is reported as a GPS warning below instead. */
+        bool gpsTimedOut = (timeNowMs - timeOfLastUpdateMs) >= GPS_TIMEOUT_MS;
 #endif
         if (gpsTimedOut) {
             // we have not received any valid GPS sentences for a while.
@@ -387,7 +407,12 @@ static void gpsTask(__attribute__((unused)) void *parameters)
             if ((gpspositionsensor.PDOP < gpsSettings.MaxPDOP) && (gpspositionsensor.Satellites >= gpsSettings.MinSatellites) &&
                 (gpspositionsensor.Status == GPSPOSITIONSENSOR_STATUS_FIX3D) &&
                 (gpspositionsensor.Latitude != 0 || gpspositionsensor.Longitude != 0)) {
-                AlarmsClear(SYSTEMALARMS_ALARM_GPS);
+                if (gpsSettings.DataProtocol == GPSSETTINGS_DATAPROTOCOL_UBX &&
+                    gpspositionsensor.AutoConfigStatus == GPSPOSITIONSENSOR_AUTOCONFIGSTATUS_ERROR) {
+                    AlarmsSet(SYSTEMALARMS_ALARM_GPS, SYSTEMALARMS_ALARM_WARNING);
+                } else {
+                    AlarmsClear(SYSTEMALARMS_ALARM_GPS);
+                }
 #ifdef PIOS_GPS_SETS_HOMELOCATION
                 HomeLocationData home;
                 HomeLocationGet(&home);

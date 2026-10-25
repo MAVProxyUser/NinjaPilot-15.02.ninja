@@ -31,6 +31,7 @@
 #include <QLabel>
 #include "configrevowidget.h"
 #include "configrevohwwidget.h"
+#include "configcubehwwidget.h"
 
 #include "configvehicletypewidget.h"
 #include "configccattitudewidget.h"
@@ -40,6 +41,9 @@
 #include "configtxpidwidget.h"
 #include "config_cc_hw_widget.h"
 #include "configoplinkwidget.h"
+#include "oplinkmodemswidget.h"
+#include "ophid/inc/ophid_usbmon.h"
+#include <coreplugin/modemanager.h>
 #include "defaultattitudewidget.h"
 #include "defaulthwsettingswidget.h"
 #include "uavobjectutilmanager.h"
@@ -157,6 +161,22 @@ ConfigGadgetWidget::ConfigGadgetWidget(QWidget *parent) : QWidget(parent)
     oplinkTimeout   = new QTimer(this);
     connect(oplinkTimeout, SIGNAL(timeout()), this, SLOT(onOPLinkDisconnect()));
     oplinkConnected = false;
+    oplinkTabShown  = false;
+    oplinkJumpTimer = new QTimer(this);
+    oplinkJumpTimer->setSingleShot(true);
+    connect(oplinkJumpTimer, SIGNAL(timeout()), this, SLOT(showOPLinkPageIfAlone()));
+    boardRetryTimer = new QTimer(this);
+    boardRetryTimer->setSingleShot(true);
+    connect(boardRetryTimer, SIGNAL(timeout()), this, SLOT(retryBoardIdentification()));
+
+    // Two OPLinks on USB: a page with both of them, no flight controller needed.
+    modemsWidget    = NULL;
+    modemsPageTimer = new QTimer(this);
+    modemsPageTimer->setSingleShot(true);
+    connect(modemsPageTimer, SIGNAL(timeout()), this, SLOT(updateModemsPage()));
+    connect(USBMonitor::instance(), SIGNAL(deviceDiscovered()), this, SLOT(scheduleModemsPageUpdate()));
+    connect(USBMonitor::instance(), SIGNAL(deviceRemoved()), this, SLOT(scheduleModemsPageUpdate()));
+    scheduleModemsPageUpdate();
 }
 
 ConfigGadgetWidget::~ConfigGadgetWidget()
@@ -179,6 +199,8 @@ void ConfigGadgetWidget::resizeEvent(QResizeEvent *event)
 
 void ConfigGadgetWidget::onAutopilotDisconnect()
 {
+    boardRetryTimer->stop();
+    boardRetries = 0;
     QWidget *qwd = new DefaultAttitudeWidget(this);
 
     stackWidget->replaceTab(ConfigGadgetWidget::sensors, qwd);
@@ -186,11 +208,17 @@ void ConfigGadgetWidget::onAutopilotDisconnect()
     qwd = new DefaultHwSettingsWidget(this);
     stackWidget->replaceTab(ConfigGadgetWidget::hardware, qwd);
 
+    /* the placeholders above replaced the board's pages: the next connect
+     * must rebuild them even when it is the same board again */
+    m_appliedBoard = 0;
+
     emit autopilotDisconnected();
 }
 
 void ConfigGadgetWidget::onAutopilotConnect()
 {
+    // a flight controller answered through whatever is connected: never jump to the OPLink page now
+    oplinkJumpTimer->stop();
     qDebug() << "ConfigGadgetWidget onAutopilotConnect";
     // First of all, check what Board type we are talking to, and
     // if necessary, remove/add tabs in the config gadget:
@@ -213,8 +241,19 @@ void ConfigGadgetWidget::onAutopilotConnect()
          * came alive at all. The guard is about not rebuilding tabs; it was
          * never meant to suppress the connected signal. */
         if (board == 0 || board == m_appliedBoard) {
+            // Not known yet, or a modem on the way answered in place of the flight
+            // controller behind it (type 3): ask again in a moment rather than
+            // staying "Unknown" for the session.  A lost reply over a radio link
+            // is ordinary.
+            if (((board == 0) || ((board & 0xff00) == 0x0300)) && (boardRetries < 15) && !boardRetryTimer->isActive()) {
+                boardRetryTimer->start(2000);
+            }
             emit autopilotConnected();
             return;
+        }
+        if ((board & 0xff00) != 0x0300) {
+            boardRetryTimer->stop();
+            boardRetries = 0;
         }
         m_appliedBoard = board;
 
@@ -224,6 +263,14 @@ void ConfigGadgetWidget::onAutopilotConnect()
             stackWidget->replaceTab(ConfigGadgetWidget::sensors, qwd);
 
             qwd = new ConfigCCHWWidget(this);
+            stackWidget->replaceTab(ConfigGadgetWidget::hardware, qwd);
+        } else if ((board & 0xff00) == 0x0C00) {
+            /* CubePilot Cube Purple (0x0C): Revolution-class sensors page,
+             * its own hardware page (the Mini Carrier's connectors) */
+            QWidget *qwd = new ConfigRevoWidget(this);
+            stackWidget->replaceTab(ConfigGadgetWidget::sensors, qwd);
+
+            qwd = new ConfigCubeHWWidget(this);
             stackWidget->replaceTab(ConfigGadgetWidget::hardware, qwd);
         } else if (((board & 0xff00) == 0x0900) || ((board & 0xff00) == 0x1100)) {
             // Revolution family + NinjaPilot realposix (0x11): the Revo
@@ -360,21 +407,23 @@ void ConfigGadgetWidget::onAutopilotConnect()
 
 void ConfigGadgetWidget::tabAboutToChange(int i, bool *proceed)
 {
-    Q_UNUSED(i);
     *proceed = true;
     ConfigTaskWidget *wid = qobject_cast<ConfigTaskWidget *>(stackWidget->currentWidget());
-    if (!wid) {
-        return;
-    }
-    if (wid->isDirty()) {
+    if (wid && wid->isDirty()) {
         int ans = QMessageBox::warning(this, tr("Unsaved changes"), tr("The tab you are leaving has unsaved changes,"
                                                                        "if you proceed they will be lost.\n"
                                                                        "Do you still want to proceed?"), QMessageBox::Yes, QMessageBox::No);
         if (ans == QMessageBox::No) {
             *proceed = false;
-        } else {
-            wid->setDirty(false);
+            return;
         }
+        wid->setDirty(false);
+    }
+    // the page about to show re-reads its objects from the board, so it never
+    // shows what the board had at connect time if something changed since
+    ConfigTaskWidget *next = qobject_cast<ConfigTaskWidget *>(stackWidget->getWidget(i));
+    if (next) {
+        next->requestObjectsFromBoard();
     }
 }
 
@@ -387,14 +436,135 @@ void ConfigGadgetWidget::updateOPLinkStatus(UAVObject *)
     oplinkTimeout->start(5000);
     if (!oplinkConnected) {
         qDebug() << "ConfigGadgetWidget onOPLinkConnect";
+        oplinkConnected = true;
+        if (!modemsWidget) {
+            // the pair page, when two modems are on USB, takes this slot instead
+            QIcon *icon = new QIcon();
+            icon->addFile(":/configgadget/images/pipx-normal.png", QSize(), QIcon::Normal, QIcon::Off);
+            icon->addFile(":/configgadget/images/pipx-selected.png", QSize(), QIcon::Selected, QIcon::Off);
+            QWidget *qwd = new ConfigOPLinkWidget(this);
+            stackWidget->insertTab(ConfigGadgetWidget::oplink, qwd, *icon, QString("OPLink"));
+            oplinkTabShown = true;
 
+            // A modem with nothing behind it: this page is the one that matters.
+            // A flight controller behind the modem answers over the radio a
+            // while after the modem's first status, so give it time.
+            oplinkJumpClock.start();
+            oplinkJumpTimer->start(3000);
+        }
+    }
+}
+
+void ConfigGadgetWidget::showOPLinkPageIfAlone()
+{
+    ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+    TelemetryManager *telMngr = pm->getObject<TelemetryManager>();
+
+    if (!oplinkConnected || !oplinkTabShown || (telMngr && telMngr->isConnected())) {
+        // a flight controller answered: stay where the user is
+        return;
+    }
+    // Only a modem with no radio link has nothing behind it.  A linked modem
+    // may have a flight controller at the far end whose handshake is still
+    // under way, so it never jumps; its OPLink page is one click away.
+    QString linkState;
+    if (oplinkStatusObj) {
+        UAVObjectField *field = oplinkStatusObj->getField("LinkState");
+        if (field) {
+            linkState = field->getValue().toString();
+        }
+    }
+    if (linkState == "Connected") {
+        qDebug() << "ConfigGadgetWidget: modem is linked, not jumping to the OPLink page";
+        return;
+    }
+    qDebug() << "ConfigGadgetWidget: modem with no radio link (" << linkState << "), showing the OPLink page";
+    showPage(ConfigGadgetWidget::oplink);
+}
+
+void ConfigGadgetWidget::retryBoardIdentification()
+{
+    ExtensionSystem::PluginManager *pm = ExtensionSystem::PluginManager::instance();
+    TelemetryManager *telMngr = pm->getObject<TelemetryManager>();
+    UAVObjectManager *objMngr = pm->getObject<UAVObjectManager>();
+
+    if (!(telMngr && telMngr->isConnected()) || !objMngr) {
+        return;
+    }
+    UAVObject *iap = objMngr->getObject(QString("FirmwareIAPObj"));
+    if (iap) {
+        qDebug() << "ConfigGadgetWidget: board not identified yet, asking again (" << boardRetries + 1 << ")";
+        iap->requestUpdate();
+    }
+    if (++boardRetries < 15) {
+        boardRetryTimer->start(2000);
+    }
+}
+
+int ConfigGadgetWidget::modemsPageIndex() const
+{
+    if (!modemsWidget) {
+        return -1;
+    }
+    for (int i = 0; i < 12; ++i) {
+        if (stackWidget->getWidget(i) == modemsWidget) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void ConfigGadgetWidget::showPage(int index)
+{
+    if (Core::ModeManager::instance()) {
+        Core::ModeManager::instance()->activateModeByWorkspaceName("Configuration");
+    }
+    stackWidget->setCurrentIndex(index);
+}
+
+void ConfigGadgetWidget::scheduleModemsPageUpdate()
+{
+    modemsPageTimer->start(1500);
+}
+
+void ConfigGadgetWidget::updateModemsPage()
+{
+    int modems = ConfigOPLinkModemsWidget::modemsOnUsb().size();
+
+    if (modems >= 2 && !modemsWidget) {
+        qDebug() << "ConfigGadgetWidget: two OPLinks on USB, opening the modems page";
         QIcon *icon = new QIcon();
         icon->addFile(":/configgadget/images/pipx-normal.png", QSize(), QIcon::Normal, QIcon::Off);
         icon->addFile(":/configgadget/images/pipx-selected.png", QSize(), QIcon::Selected, QIcon::Off);
-
-        QWidget *qwd = new ConfigOPLinkWidget(this);
-        stackWidget->insertTab(ConfigGadgetWidget::oplink, qwd, *icon, QString("OPLink"));
-        oplinkConnected = true;
+        // one OPLink entry: the pair page replaces the single-modem page
+        if (oplinkTabShown) {
+            if (stackWidget->currentIndex() == ConfigGadgetWidget::oplink) {
+                stackWidget->setCurrentIndex(0);
+            }
+            stackWidget->removeTab(ConfigGadgetWidget::oplink);
+            oplinkTabShown = false;
+        }
+        modemsWidget = new ConfigOPLinkModemsWidget(this);
+        stackWidget->insertTab(ConfigGadgetWidget::oplink, modemsWidget, *icon, QString("OPLink"));
+        showPage(ConfigGadgetWidget::oplink);
+    } else if (modems < 2 && modemsWidget) {
+        int index = modemsPageIndex();
+        if (stackWidget->currentIndex() == index) {
+            stackWidget->setCurrentIndex(0);
+        }
+        if (index >= 0) {
+            stackWidget->removeTab(index); // deletes the widget
+        } else {
+            delete modemsWidget;
+        }
+        modemsWidget = NULL;
+        if (oplinkConnected && !oplinkTabShown) {
+            QIcon *icon2 = new QIcon();
+            icon2->addFile(":/configgadget/images/pipx-normal.png", QSize(), QIcon::Normal, QIcon::Off);
+            icon2->addFile(":/configgadget/images/pipx-selected.png", QSize(), QIcon::Selected, QIcon::Off);
+            stackWidget->insertTab(ConfigGadgetWidget::oplink, new ConfigOPLinkWidget(this), *icon2, QString("OPLink"));
+            oplinkTabShown = true;
+        }
     }
 }
 
@@ -403,9 +573,11 @@ void ConfigGadgetWidget::onOPLinkDisconnect()
     qDebug() << "ConfigGadgetWidget onOPLinkDisconnect";
     oplinkTimeout->stop();
     oplinkConnected = false;
-
-    if (stackWidget->currentIndex() == ConfigGadgetWidget::oplink) {
-        stackWidget->setCurrentIndex(0);
+    if (oplinkTabShown) {
+        if (stackWidget->currentIndex() == ConfigGadgetWidget::oplink) {
+            stackWidget->setCurrentIndex(0);
+        }
+        stackWidget->removeTab(ConfigGadgetWidget::oplink);
+        oplinkTabShown = false;
     }
-    stackWidget->removeTab(ConfigGadgetWidget::oplink);
 }

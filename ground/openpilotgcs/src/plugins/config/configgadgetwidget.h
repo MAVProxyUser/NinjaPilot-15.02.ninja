@@ -36,6 +36,7 @@
 #include "../uavobjectwidgetutils/configtaskwidget.h"
 
 #include <QWidget>
+#include <QElapsedTimer>
 #include <QList>
 #include <QTextBrowser>
 #include <QMessageBox>
@@ -47,7 +48,7 @@ class ConfigGadgetWidget : public QWidget {
 public:
     ConfigGadgetWidget(QWidget *parent = 0);
     ~ConfigGadgetWidget();
-    enum widgetTabs { hardware = 0, aircraft, input, output, sensors, stabilization, txpid, oplink };
+    enum widgetTabs { hardware = 0, aircraft, input, output, sensors, stabilization, txpid, oplink, modems };
     void startInputWizard();
 
 public slots:
@@ -56,6 +57,10 @@ public slots:
     void tabAboutToChange(int i, bool *);
     void updateOPLinkStatus(UAVObject *object);
     void onOPLinkDisconnect();
+    void showOPLinkPageIfAlone();
+    void retryBoardIdentification();
+    void updateModemsPage();
+    void scheduleModemsPageUpdate();
 
 signals:
     void autopilotConnected();
@@ -67,6 +72,8 @@ signals:
 private:
     /* Board model the tabs were last built for; 0 = none yet. */
     int m_appliedBoard = 0;
+    QTimer *boardRetryTimer;
+    int boardRetries = 0;
 
 protected:
     void resizeEvent(QResizeEvent *event);
@@ -76,7 +83,14 @@ private:
 
     // A timer that timesout the connction to the OPLink.
     QTimer *oplinkTimeout;
+    QTimer *oplinkJumpTimer;
+    QElapsedTimer oplinkJumpClock;
+    QTimer *modemsPageTimer;
+    QWidget *modemsWidget;
+    int modemsPageIndex() const;
+    void showPage(int index);
     bool oplinkConnected;
+    bool oplinkTabShown;
 
     MyTabbedStackWidget *stackWidget;
 };

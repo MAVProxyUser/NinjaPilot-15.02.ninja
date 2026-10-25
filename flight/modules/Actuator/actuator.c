@@ -50,6 +50,9 @@
 #include "taskinfo.h"
 #include <systemsettings.h>
 #include <sanitycheck.h>
+#ifdef MODULE_DRONECAN_BUILTIN
+#include "dronecan.h"
+#endif
 #ifndef PIOS_EXCLUDE_ADVANCED_FEATURES
 #include <vtolpathfollowersettings.h>
 #endif
@@ -538,6 +541,9 @@ static void actuatorTask(__attribute__((unused)) void *parameters)
         }
 
         PIOS_Servo_Update();
+#ifdef MODULE_DRONECAN_BUILTIN
+        DroneCANESCFlush();
+#endif
 
         if (!success) {
             command.NumFailedUpdates++;
@@ -727,6 +733,9 @@ static void setFailsafe()
     }
     // Send the updated command
     PIOS_Servo_Update();
+#ifdef MODULE_DRONECAN_BUILTIN
+    DroneCANESCFlush();
+#endif
 
     // Update output object's parts that we changed
     ActuatorCommandChannelSet(Channel);
@@ -825,6 +834,20 @@ static bool set_channel(uint8_t mixer_channel, uint16_t value)
     return true;
 }
 #else
+/*
+ * Boards whose outputs are not all this MCU's timer channels (an IO
+ * co-processor drives some) take the value here first.  The defaults take
+ * nothing, so every other board keeps using PIOS_Servo directly.
+ */
+bool __attribute__((weak)) PIOS_Board_ServoSet(uint8_t channel, uint16_t value)
+{
+    (void)channel; (void)value;
+    return false;
+}
+void __attribute__((weak)) PIOS_Board_ServoSetHz(const uint16_t *hz, uint8_t banks)
+{
+    (void)hz; (void)banks;
+}
 static bool set_channel(uint8_t mixer_channel, uint16_t value)
 {
 #ifdef PIOS_ACTUATOR_BRUSHED_OUTPUTS
@@ -884,12 +907,35 @@ static bool set_channel(uint8_t mixer_channel, uint16_t value)
             PIOS_Servo_Set(actuatorSettings.ChannelAddr[mixer_channel], value / ACTUATOR_ONESHOT125_PULSE_SCALE);
             break;
         default:
-            PIOS_Servo_Set(actuatorSettings.ChannelAddr[mixer_channel], value);
+            if (!PIOS_Board_ServoSet(actuatorSettings.ChannelAddr[mixer_channel], value)) {
+                PIOS_Servo_Set(actuatorSettings.ChannelAddr[mixer_channel], value);
+            }
             break;
         }
         return true;
     }
 
+#ifdef MODULE_DRONECAN_BUILTIN
+    case ACTUATORSETTINGS_CHANNELTYPE_DRONECAN:
+    {
+        /* ChannelMin..ChannelMax (us) -> esc.RawCommand 0..8191; the element
+         * is ChannelAddr.  The frame goes out in DroneCANESCFlush(). */
+        int32_t min = actuatorSettings.ChannelMin[mixer_channel];
+        int32_t max = actuatorSettings.ChannelMax[mixer_channel];
+        int32_t raw = 0;
+        if (max > min) {
+            raw = ((int32_t)value - min) * 8191 / (max - min);
+            if (raw < 0) {
+                raw = 0;
+            }
+            if (raw > 8191) {
+                raw = 8191;
+            }
+        }
+        DroneCANESCSet(actuatorSettings.ChannelAddr[mixer_channel], (int16_t)raw);
+        return true;
+    }
+#endif
 #if defined(PIOS_INCLUDE_I2C_ESC)
     case ACTUATORSETTINGS_CHANNELTYPE_MK:
         return PIOS_SetMKSpeed(actuatorSettings->ChannelAddr[mixer_channel], value);

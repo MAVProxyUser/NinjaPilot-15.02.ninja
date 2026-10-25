@@ -46,6 +46,7 @@ public:
     virtual QString bank();
 
     virtual void setName(const QString &name);
+    void setDroneCan(int escIndex);
     virtual void setBank(const QString &bank);
 
     virtual void setColor(const QColor &color);

@@ -51,6 +51,9 @@ struct GPS_RX_STATS {
     uint16_t gpsRxChkSumError;
     uint16_t gpsRxOverflow;
     uint16_t gpsRxParserError;
+    uint8_t  lastOversizeClass; /* the last message that did not fit */
+    uint8_t  lastOversizeId;
+    uint16_t lastOversizeLen;
 };
 
 int32_t GPSInitialize(void);

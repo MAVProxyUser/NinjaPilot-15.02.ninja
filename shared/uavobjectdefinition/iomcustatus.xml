@@ -1,0 +1,23 @@
+<xml>
+    <object name="IOMCUStatus" singleinstance="true" settings="false" category="System">
+        <description>The IO co-processor as the firmware sees it (Cube): link state and protocol version, its status flags, what it decodes on RC IN (channel count, RC OK and failsafe bits, the protocol number it detected, the first eight raw channels), the servo rail voltage that also feeds RC IN, its error counter and our transaction counters. ProtocolVersion2 dates the IO firmware and RcMaskAck says whether it took the RC protocol allow-mask (IO firmware after 2020-08 decodes nothing without it). Once a second.</description>
+        <field name="State" units="" type="enum" elements="1" options="Offline,Init,Up,Lost" defaultvalue="Offline"/>
+        <field name="ProtocolVersion" units="" type="uint16" elements="1" defaultvalue="0"/>
+        <field name="ProtocolVersion2" units="" type="uint16" elements="1" defaultvalue="0"/>
+        <field name="RcMaskAck" units="" type="enum" elements="1" options="NotWritten,Accepted,Rejected" defaultvalue="NotWritten"/>
+        <field name="StatusFlags" units="hex" type="uint16" elements="1" defaultvalue="0"/>
+        <field name="RcCount" units="" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="RcOk" units="" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="RcFailsafe" units="" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="RcProtocol" units="" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="RcChannel" units="us" type="uint16" elements="8" defaultvalue="0"/>
+        <field name="ServoRail" units="mV" type="uint16" elements="1" defaultvalue="0"/>
+        <field name="IoErrors" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="TxOk" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="TxFail" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="false" updatemode="manual" period="0"/>
+        <telemetryflight acked="false" updatemode="periodic" period="1000"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>

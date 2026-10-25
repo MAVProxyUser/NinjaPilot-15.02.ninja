@@ -15,6 +15,7 @@ OTHER_FILES += \
 HEADERS += \
     configrevowidget.h \
     configrevohwwidget.h \
+    configcubehwwidget.h \
     configplugin.h \
     configgadgetwidget.h \
     configgadgetfactory.h \
@@ -57,11 +58,13 @@ HEADERS += \
     calibration/thermal/dataacquisitiontransition.h \
     calibration/thermal/settingshandlingtransitions.h \
     calibration/thermal/compensationcalculationtransition.h \
-    configoplinkwidget.h
+    configoplinkwidget.h \
+    oplinkmodemswidget.h
 
 SOURCES += \
     configrevowidget.cpp \
     configrevohwwidget.cpp \
+    configcubehwwidget.cpp \
     configplugin.cpp \
     configgadgetwidget.cpp \
     configgadgetfactory.cpp \
@@ -97,11 +100,13 @@ SOURCES += \
     calibration/thermal/thermalcalibration.cpp \
     calibration/thermal/thermalcalibrationhelper.cpp \
     calibration/thermal/thermalcalibrationmodel.cpp \
-    configoplinkwidget.cpp
+    configoplinkwidget.cpp \
+    oplinkmodemswidget.cpp
 
 FORMS += \
     revosensors.ui \
     configrevohwwidget.ui \
+    configcubehwwidget.ui \
     airframe.ui \
     airframe_ccpm.ui \
     airframe_fixedwing.ui \

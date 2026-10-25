@@ -1,0 +1,15 @@
+<xml>
+    <object name="DroneCANUpdate" singleinstance="true" settings="false" category="System">
+        <description>Firmware update of one DroneCAN node (an ESC). The ground sets NodeId and ImageSize and Command = Begin: the module sends uavcan.protocol.file.BeginFirmwareUpdate, the node reboots into its bootloader and reads the image back from us 256 bytes at a time; each read is published as DroneCANFileRequest and answered from the DroneCANFileChunk objects the ground writes. State and Offset show progress; a read shorter than 256 bytes ends the update. Abort drops everything. Refused while armed.</description>
+        <field name="NodeId" units="" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="ImageSize" units="bytes" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="Command" units="" type="enum" elements="1" options="Idle,Begin,Abort" defaultvalue="Idle"/>
+        <field name="State" units="" type="enum" elements="1" options="Idle,BeginSent,Transferring,Done,Failed,Refused" defaultvalue="Idle"/>
+        <field name="Offset" units="bytes" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="Reads" units="" type="uint16" elements="1" defaultvalue="0"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="true" updatemode="manual" period="0"/>
+        <telemetryflight acked="false" updatemode="onchange" period="0"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>

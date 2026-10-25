@@ -37,6 +37,12 @@
 #define IAP_CMD_STEP_1      1122
 #define IAP_CMD_STEP_2      2233
 #define IAP_CMD_STEP_3      3344
+/* Like STEP_3, but a board that sits behind a bootloader of its own (Cube
+ * Purple: ArduPilot's) asks that bootloader to wait for an uploader instead
+ * of booting the application straight away.  Boards without the hook treat
+ * it exactly like STEP_3. */
+#define IAP_CMD_STEP_3_HOLD 6677
+#define IAP_CMD_STEP_3_REBOOT 4455 /* reset without an IAP request: boots the firmware again */
 
 #define IAP_CMD_CRC         100
 #define IAP_CMD_VERIFY      101
@@ -141,6 +147,13 @@ static void FirmwareIAPCallback(UAVObjEvent *ev)
     if (ev->obj == FirmwareIAPObjHandle()) {
         // Get the input object data
         FirmwareIAPObjGet(&data);
+        /* The description refresh below writes the object back, which fires this
+         * callback again with the same Command; that must not reset a sequence. */
+        static uint16_t last_command = 0;
+        if ((data.Command == last_command) && (iap_state == IAP_STATE_STEP_1 || iap_state == IAP_STATE_STEP_2)) {
+            return;
+        }
+        last_command = data.Command;
         this_time = get_time();
         delta     = this_time - last_time;
         last_time = this_time;
@@ -156,6 +169,15 @@ static void FirmwareIAPCallback(UAVObjEvent *ev)
             data.ArmReset = 0;
             FirmwareIAPObjSet(&data);
         }
+#ifdef PIOS_IAP_OWN_BOARD_TYPE_ONLY
+        /* An OPLink sees every FirmwareIAPObj the GCS sends to the flight
+         * controller behind it (BoardType 0).  Only the sequence addressed to
+         * this board type may reset the modem. */
+        if (data.BoardType != bdinfo->board_type) {
+            iap_state = IAP_STATE_READY;
+            return;
+        }
+#endif
         switch (iap_state) {
         case IAP_STATE_READY:
             if (data.Command == IAP_CMD_STEP_1) {
@@ -174,7 +196,15 @@ static void FirmwareIAPCallback(UAVObjEvent *ev)
             }
             break;
         case IAP_STATE_STEP_2:
-            if (data.Command == IAP_CMD_STEP_3) {
+            if (data.Command == IAP_CMD_STEP_3_REBOOT) {
+                /* plain reset: the bootloader sees no IAP request and boots the firmware */
+                if (delta > iap_time_3_low_end && delta < iap_time_3_high_end) {
+                    PIOS_SYS_Reset();
+                }
+                iap_state = IAP_STATE_READY;
+                break;
+            }
+            if ((data.Command == IAP_CMD_STEP_3) || (data.Command == IAP_CMD_STEP_3_HOLD)) {
                 if (delta > iap_time_3_low_end && delta < iap_time_3_high_end) {
 #ifndef PIOS_APPS_MINIMAL
                     FlightStatusData flightStatus;
@@ -190,6 +220,11 @@ static void FirmwareIAPCallback(UAVObjEvent *ev)
                     // we've met the time requirements.
                     PIOS_IAP_SetRequest1();
                     PIOS_IAP_SetRequest2();
+#ifdef PIOS_IAP_BOOTLOADER_HOLD
+                    if (data.Command == IAP_CMD_STEP_3_HOLD) {
+                        PIOS_IAP_BOOTLOADER_HOLD();
+                    }
+#endif
 
                     /* Note: Cant just wait timeout value, because first time is randomized */
                     reset_count = 0;

@@ -185,6 +185,61 @@ void VehicleConfigurationHelper::applyHardwareConfiguration()
          * over WiFi or the USB serial console. There are no CC_/RM_ port
          * muxes on this board, so there is nothing to write here. */
         break;
+    case VehicleConfigurationSource::CONTROLLER_CUBE:
+    {
+        /* Cube Purple: RC IN, TELEM1/2 and the GPS connector are fixed
+         * hardware, described by the "RV" (full-size Revolution) settings.
+         * The IO co-processor decodes PPM, S.Bus and DSM on RC IN and the
+         * firmware serves them all as the PWM group, so every input type
+         * lands on the same port. */
+        data.RV_RcvrPort      = HwSettings::RV_RCVRPORT_PWM;
+        data.RV_TelemetryPort = HwSettings::RV_TELEMETRYPORT_TELEMETRY;
+        data.RV_AuxPort       = HwSettings::RV_AUXPORT_DISABLED;
+        /* The serial GPS goes on GPS 2 (the 6-pin connector, UART8); GPS 1
+         * is the 8-pin connector with I2C/safety-switch lines, unused here. */
+        data.RV_GPSPort       = HwSettings::RV_GPSPORT_DISABLED;
+        data.CUBE_GPS2Port    = HwSettings::CUBE_GPS2PORT_DISABLED;
+        if (m_configSource->getGpsType() != VehicleConfigurationSource::GPS_DISABLED &&
+            m_configSource->getGpsType() != VehicleConfigurationSource::GPS_DRONECAN) {
+            data.CUBE_GPS2Port = HwSettings::CUBE_GPS2PORT_GPS;
+            data.OptionalModules[HwSettings::OPTIONALMODULES_GPS] = 1;
+            /* 230400: what a u-blox receiver runs at once ArduPilot has had
+             * it (the Matek M9N-5883 on this Cube does), and the firmware's
+             * GPS module has no auto-baud, so the choice has to be right. */
+            data.GPSSpeed = HwSettings::GPSSPEED_230400;
+            GPSSettings *gpsSettings = GPSSettings::GetInstance(m_uavoManager);
+            Q_ASSERT(gpsSettings);
+            GPSSettings::DataFields gpsData = gpsSettings->getData();
+            gpsData.UbxAutoConfig = GPSSettings::UBXAUTOCONFIG_CONFIGURE;
+            switch (m_configSource->getGpsType()) {
+            case VehicleConfigurationSource::GPS_NMEA:
+                gpsData.DataProtocol = GPSSettings::DATAPROTOCOL_NMEA;
+                break;
+            case VehicleConfigurationSource::GPS_UBX:
+                gpsData.DataProtocol = GPSSettings::DATAPROTOCOL_UBX;
+                break;
+            case VehicleConfigurationSource::GPS_PLATINUM:
+            {
+                gpsData.DataProtocol  = GPSSettings::DATAPROTOCOL_UBX;
+                gpsData.UbxAutoConfig = GPSSettings::UBXAUTOCONFIG_CONFIGURE;
+                AuxMagSettings *magSettings = AuxMagSettings::GetInstance(m_uavoManager);
+                Q_ASSERT(magSettings);
+                AuxMagSettings::DataFields magsData = magSettings->getData();
+                magsData.Usage = AuxMagSettings::USAGE_AUXONLY;
+                magSettings->setData(magsData);
+                addModifiedObject(magSettings, tr("Writing External Mag sensor settings"));
+                break;
+            }
+            default:
+                break;
+            }
+            gpsSettings->setData(gpsData);
+            addModifiedObject(gpsSettings, tr("Writing GPS sensor settings"));
+        } else {
+            data.OptionalModules[HwSettings::OPTIONALMODULES_GPS] = 0;
+        }
+        break;
+    }
     case VehicleConfigurationSource::CONTROLLER_REVO:
     case VehicleConfigurationSource::CONTROLLER_REALPOSIX:
     case VehicleConfigurationSource::CONTROLLER_NANO:
@@ -433,6 +488,12 @@ void VehicleConfigurationHelper::applyActuatorConfiguration()
         bankMode     = ActuatorSettings::BANKMODE_ONESHOT125;
         escFrequence = ONESHOT_ESC_FREQUENCY;
         break;
+    case VehicleConfigurationSource::ESC_DRONECAN:
+        /* Commands go out on CAN2 from the actuator module at its own rate;
+         * the PWM banks are idle, so leave them at their defaults. */
+        bankMode     = ActuatorSettings::BANKMODE_PWM;
+        escFrequence = LEGACY_ESC_FREQUENCY;
+        break;
     case VehicleConfigurationSource::ESC_BRUSHED:
         /* No ESC, so no frame rate and no pulse format. The outputs are an
          * LEDC duty cycle at a fixed 24 kHz carrier; PIOS_Servo_SetHz() is a
@@ -490,6 +551,37 @@ void VehicleConfigurationHelper::applyActuatorConfiguration()
             data.ChannelMin[i]     = actuatorSettings[i].channelMin;
             data.ChannelNeutral[i] = actuatorSettings[i].channelNeutral;
             data.ChannelMax[i]     = actuatorSettings[i].channelMax;
+        }
+
+        if (m_configSource->getEscType() == VehicleConfigurationSource::ESC_DRONECAN) {
+            /* Cube Purple: the first N mixer channels are the motors and they
+             * are DroneCAN ESCs on CAN2, element i of esc.RawCommand driving
+             * the ESC whose ESC_INDEX is i.  1000..2000 us maps to 0..8191 in
+             * the firmware; the idle point stays whatever the output page set,
+             * with a sane default if it never ran. */
+            int motors = 4;
+            switch (m_configSource->getVehicleSubType()) {
+            case VehicleConfigurationSource::MULTI_ROTOR_TRI_Y: motors = 3; break;
+            case VehicleConfigurationSource::MULTI_ROTOR_HEXA:
+            case VehicleConfigurationSource::MULTI_ROTOR_HEXA_H:
+            case VehicleConfigurationSource::MULTI_ROTOR_HEXA_X:
+            case VehicleConfigurationSource::MULTI_ROTOR_HEXA_COAX_Y: motors = 6; break;
+            case VehicleConfigurationSource::MULTI_ROTOR_OCTO:
+            case VehicleConfigurationSource::MULTI_ROTOR_OCTO_X:
+            case VehicleConfigurationSource::MULTI_ROTOR_OCTO_V:
+            case VehicleConfigurationSource::MULTI_ROTOR_OCTO_COAX_X:
+            case VehicleConfigurationSource::MULTI_ROTOR_OCTO_COAX_PLUS: motors = 8; break;
+            default: break;
+            }
+            for (int i = 0; i < motors && i < (int)ActuatorSettings::CHANNELTYPE_NUMELEM; i++) {
+                data.ChannelType[i] = ActuatorSettings::CHANNELTYPE_DRONECAN;
+                data.ChannelAddr[i] = i;
+                data.ChannelMin[i]  = 1000;
+                data.ChannelMax[i]  = 2000;
+                if (data.ChannelNeutral[i] < 1000 || data.ChannelNeutral[i] > 1200) {
+                    data.ChannelNeutral[i] = 1050;
+                }
+            }
         }
 
         if (esp32 && (bankMode == ActuatorSettings::BANKMODE_ONESHOT125 ||
@@ -918,6 +1010,10 @@ void VehicleConfigurationHelper::applyManualControlDefaults()
          * numbers, reversals and endpoints belong to the user's RC
          * calibration and survive the wizard untouched. */
         channelType = ManualControlSettings::CHANNELGROUPS_DSMMAINPORT;
+    } else if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_CUBE) {
+        /* Whatever is plugged into the Cube's RC IN (PPM, S.Bus, DSM) is
+         * decoded by the IO co-processor and served as the PWM group. */
+        channelType = ManualControlSettings::CHANNELGROUPS_PWM;
     } else if (m_configSource->getControllerType() == VehicleConfigurationSource::CONTROLLER_REALPOSIX) {
         /* Every receiver on this board arrives through the PPM channel
          * group - the UDP network receiver registers there by design

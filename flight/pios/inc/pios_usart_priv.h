@@ -38,6 +38,22 @@
 
 extern const struct pios_com_driver pios_usart_com_driver;
 
+#if defined(STM32F2XX) || defined(STM32F4XX)
+/*
+ * Optional: receive through a circular DMA buffer.  Interrupt-per-byte
+ * reception loses a byte whenever the interrupt is held off for more than one
+ * byte time (87 us at 115200), which happens often enough under load to break
+ * a few percent of the frames on a telemetry UART.  The DMA engine stores every
+ * byte on its own; the driver drains the ring into the com buffer from the
+ * USART's idle-line interrupt and whenever the reader runs dry.
+ */
+struct pios_usart_dma_rx_cfg {
+    DMA_Stream_TypeDef *stream;
+    uint32_t channel;    /* DMA_Channel_x */
+    uint16_t buffer_len; /* ring size, 256 or more */
+};
+#endif
+
 struct pios_usart_cfg {
     USART_TypeDef     *regs;
     uint32_t remap; /* GPIO_Remap_* */
@@ -45,6 +61,9 @@ struct pios_usart_cfg {
     struct stm32_gpio rx;
     struct stm32_gpio tx;
     struct stm32_irq  irq;
+#if defined(STM32F2XX) || defined(STM32F4XX)
+    const struct pios_usart_dma_rx_cfg *dma_rx; /* NULL: interrupt per byte */
+#endif
 };
 
 extern int32_t PIOS_USART_Init(uint32_t *usart_id, const struct pios_usart_cfg *cfg);

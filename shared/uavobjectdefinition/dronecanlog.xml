@@ -1,0 +1,12 @@
+<xml>
+    <object name="DroneCANLog" singleinstance="true" settings="false" category="System">
+        <description>The last uavcan.protocol.debug.LogMessage (data type 16383) heard on the bus: which node sent it, how many have been seen, and its text, prefixed by the source the node gave. Its own object because DroneCANStatus must stay under the 256-byte UAVTalk payload the GCS accepts.</description>
+        <field name="LogCount" units="" type="uint32" elements="1" defaultvalue="0"/>
+        <field name="LogNode" units="" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="LogText" units="" type="uint8" elements="96" defaultvalue="0"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="false" updatemode="manual" period="0"/>
+        <telemetryflight acked="false" updatemode="onchange" period="0"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>

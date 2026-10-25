@@ -11,6 +11,7 @@
 		<field name="RV_FlexiPort" units="function" type="enum" elements="1" options="Disabled,I2C,DSM,ComAux,ComBridge" defaultvalue="Disabled"/>
 		<field name="RV_TelemetryPort" units="function" type="enum" elements="1" options="Disabled,Telemetry,ComAux,ComBridge" defaultvalue="Telemetry"/>
 		<field name="RV_GPSPort" units="function" type="enum" elements="1" options="Disabled,Telemetry,GPS,ComAux,ComBridge" defaultvalue="GPS"/>
+		<field name="CUBE_GPS2Port" units="function" type="enum" elements="1" options="Disabled,Telemetry,GPS,ComAux,ComBridge" defaultvalue="Disabled"/>
 
 		<field name="RM_RcvrPort" units="function" type="enum" elements="1" options="Disabled,PWM,PPM,PPM+PWM,PPM+Telemetry,PPM+Outputs,Outputs,Telemetry" defaultvalue="PWM"/>
 		<field name="RM_MainPort" units="function" type="enum" elements="1" options="Disabled,Telemetry,GPS,S.Bus,DSM,DebugConsole,ComBridge,OsdHk" defaultvalue="Disabled"/>

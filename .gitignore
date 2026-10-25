@@ -10,7 +10,7 @@ GPATH
 GRTAGS
 GSYMS
 GTAGS
-core
+/core
 
 # flight
 /flight/*.pnproj

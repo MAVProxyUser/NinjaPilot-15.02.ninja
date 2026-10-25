@@ -27,6 +27,8 @@
 
 #include "telemetry.h"
 #include "oplinksettings.h"
+#include "oplinkstatus.h"
+#include "firmwareiapobj.h"
 #include "objectpersistence.h"
 #include <QElapsedTimer>
 #include <QtGlobal>
@@ -393,8 +395,13 @@ void Telemetry::processObjectQueue()
     GCSTelemetryStats::DataFields gcsStats = gcsStatsObj->getData();
     if (gcsStats.Status != GCSTelemetryStats::STATUS_CONNECTED) {
         objQueue.clear();
+        // A modem on its own never completes the handshake (that needs a flight
+        // controller behind it), yet the GCS still talks to it: its settings, the
+        // save, the link test through to the far modem, and the halt that reboots it.
         if ((objInfo.obj->getObjID() != GCSTelemetryStats::OBJID) &&
             (objInfo.obj->getObjID() != OPLinkSettings::OBJID) &&
+            (objInfo.obj->getObjID() != OPLinkStatus::OBJID) &&
+            (objInfo.obj->getObjID() != FirmwareIAPObj::OBJID) &&
             (objInfo.obj->getObjID() != ObjectPersistence::OBJID)) {
             objInfo.obj->emitTransactionCompleted(false);
             return;

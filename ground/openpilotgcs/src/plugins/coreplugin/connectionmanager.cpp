@@ -118,6 +118,9 @@ bool ConnectionManager::connectDevice(DevListItem device, bool remember)
         return false;
     }
 
+    // whoever holds this device outside the connection manager (the OPLink modems page) lets go now
+    emit deviceAboutToConnect(connection_device.device.name);
+
     QIODevice *io_dev = connection_device.connection->openDevice(connection_device.device.name);
     if (!io_dev) {
         return false;

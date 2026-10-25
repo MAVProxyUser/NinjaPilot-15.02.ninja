@@ -1,0 +1,44 @@
+From 32e3548a8ed20b32156f64d2ab1781ccd4832b4e Mon Sep 17 00:00:00 2001
+From: Kevin Finisterre <kfinisterre@KevinsMacStudio.localdomain>
+Date: Fri, 9 Oct 2026 15:39:17 -0400
+Subject: [PATCH 2/6] DroneCAN BeepCommand: play the note with interrupts
+ masked
+
+tenKhzRoutine() rewrites the duty cycle every 100 us, zero while the motor
+is stopped, which cut each note to a single click. The beacon tunes mask
+interrupts for the same reason; do the same, watchdog reloaded either side.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ Src/main.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/Src/main.c b/Src/main.c
+index 7335ade..7e32cea 100644
+--- a/Src/main.c
++++ b/Src/main.c
+@@ -1201,8 +1201,11 @@ if (!stepper_sine && armed) {
+             }
+ #if DRONECAN_SUPPORT
+             if (dronecan_beep_ms && !running) {
+-                /* a note from the flight controller: same footing as the
+-                 * beacon tones above, energise a phase pair and sing */
++                /* a note from the flight controller, played like the beacon
++                 * tunes: interrupts masked, because tenKhzRoutine() rewrites
++                 * the duty cycle every 100 us and would cut the note to a click */
++                __disable_irq();
++                RELOAD_WATCHDOG_COUNTER();
+                 comStep(3);
+                 playBJNote(dronecan_beep_hz, dronecan_beep_ms);
+                 allOff();
+@@ -1211,6 +1214,7 @@ if (!stepper_sine && armed) {
+                 dronecan_beep_ms = 0;
+                 signaltimeout = 0;
+                 RELOAD_WATCHDOG_COUNTER();
++                __enable_irq();
+             }
+ #endif
+ 
+-- 
+2.50.1 (Apple Git-155)
+

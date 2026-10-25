@@ -153,6 +153,23 @@ $(OUTDIR)/$(notdir $(basename $(1))).opfw : $(1) $(1).firmware_info.bin
 	$(V1) $(CAT) $(1) $(1).firmware_info.bin > $$@
 endef
 
+# ArduPilot / PX4 bootloader image: the raw image padded to the firmware bank
+# less the descriptor, the OpenPilot firmware info block appended where the
+# running firmware reads it, wrapped in the .apj container the PX4 uploader,
+# QGroundControl and Mission Planner accept.  Only for boards that define
+# PX4_BOARD_ID.
+#  $(1) = path to bin file
+define APJ_TEMPLATE
+$(OUTDIR)/$(notdir $(basename $(1))).apj : $(1) $(1).firmware_info.bin
+	@$(ECHO) "  APJ        " $$(call toprel, $$@)
+	$(V1) $(PYTHON) $(ROOT_DIR)/make/scripts/make_apj.py \
+		$(1) $$@ \
+		--board-id $(PX4_BOARD_ID) \
+		--description "OpenPilot $(BOARD_NAME)" \
+		--pad-to $$$$(( $(FW_BANK_SIZE) - $(FW_DESC_SIZE) )) \
+		--append $(1).firmware_info.bin
+endef
+
 # Assemble: create object files from assembler source files.
 define ASSEMBLE_TEMPLATE
 $(OUTDIR)/$(notdir $(basename $(1))).o : $(1)

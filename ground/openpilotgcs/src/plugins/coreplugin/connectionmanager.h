@@ -119,6 +119,7 @@ protected:
     void updateConnectionDropdown();
 
 signals:
+    void deviceAboutToConnect(QString deviceName);
     void deviceConnected(QIODevice *device);
     void deviceAboutToDisconnect();
     void deviceDisconnected();

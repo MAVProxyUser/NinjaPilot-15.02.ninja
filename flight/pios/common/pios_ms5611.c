@@ -29,7 +29,7 @@
  */
 
 #include "pios.h"
-#ifdef PIOS_INCLUDE_MS5611
+#if defined(PIOS_INCLUDE_MS5611) || defined(PIOS_INCLUDE_MS5611_SPI)
 #include <pios_ms5611.h>
 #define POW2(x) (1 << x)
 
@@ -92,6 +92,12 @@ static int64_t compensation_t2;
 static uint32_t oversampling;
 static const struct pios_ms5611_cfg *dev_cfg;
 static int32_t i2c_id;
+#if defined(PIOS_INCLUDE_MS5611_SPI)
+/* The Cube's MS5611 hangs off SPI1 (shared with the IMU): same command set,
+ * a chip select instead of an address. */
+static uint32_t ms5611_spi_id;
+static uint32_t ms5611_spi_slave;
+#endif
 static PIOS_SENSORS_1Axis_SensorsWithTemp results;
 
 // sensor driver interface
@@ -114,6 +120,15 @@ const PIOS_SENSORS_Driver PIOS_MS5611_Driver = {
  * Initialise the MS5611 sensor
  */
 int32_t ms5611_read_flag;
+#if defined(PIOS_INCLUDE_MS5611_SPI)
+void PIOS_MS5611_SPI_Init(const struct pios_ms5611_cfg *cfg, uint32_t spi_id, uint32_t slave_num)
+{
+    ms5611_spi_id    = spi_id;
+    ms5611_spi_slave = slave_num;
+    PIOS_MS5611_Init(cfg, 0);
+}
+#endif
+
 void PIOS_MS5611_Init(const struct pios_ms5611_cfg *cfg, int32_t i2c_device)
 {
     i2c_id = i2c_device;
@@ -332,6 +347,24 @@ static float PIOS_MS5611_GetPressure(void)
  */
 static int32_t PIOS_MS5611_Read(uint8_t address, uint8_t *buffer, uint8_t len)
 {
+#if defined(PIOS_INCLUDE_MS5611_SPI)
+    if (ms5611_spi_id != 0) {
+        int32_t rc = 0;
+        if (PIOS_SPI_ClaimBus(ms5611_spi_id) != 0) {
+            return -1;
+        }
+        PIOS_SPI_SetClockSpeed(ms5611_spi_id, SPI_BaudRatePrescaler_8);
+        PIOS_SPI_RC_PinSet(ms5611_spi_id, ms5611_spi_slave, 0);
+        if (PIOS_SPI_TransferByte(ms5611_spi_id, address) < 0) {
+            rc = -1;
+        } else if (PIOS_SPI_TransferBlock(ms5611_spi_id, NULL, buffer, len, NULL) < 0) {
+            rc = -1;
+        }
+        PIOS_SPI_RC_PinSet(ms5611_spi_id, ms5611_spi_slave, 1);
+        PIOS_SPI_ReleaseBus(ms5611_spi_id);
+        return rc;
+    }
+#endif
     const struct pios_i2c_txn txn_list[] = {
         {
             .info = __func__,
@@ -362,6 +395,22 @@ static int32_t PIOS_MS5611_Read(uint8_t address, uint8_t *buffer, uint8_t len)
  */
 static int32_t PIOS_MS5611_WriteCommand(uint8_t command)
 {
+#if defined(PIOS_INCLUDE_MS5611_SPI)
+    if (ms5611_spi_id != 0) {
+        int32_t rc = 0;
+        if (PIOS_SPI_ClaimBus(ms5611_spi_id) != 0) {
+            return -1;
+        }
+        PIOS_SPI_SetClockSpeed(ms5611_spi_id, SPI_BaudRatePrescaler_8);
+        PIOS_SPI_RC_PinSet(ms5611_spi_id, ms5611_spi_slave, 0);
+        if (PIOS_SPI_TransferByte(ms5611_spi_id, command) < 0) {
+            rc = -1;
+        }
+        PIOS_SPI_RC_PinSet(ms5611_spi_id, ms5611_spi_slave, 1);
+        PIOS_SPI_ReleaseBus(ms5611_spi_id);
+        return rc;
+    }
+#endif
     const struct pios_i2c_txn txn_list[] = {
         {
             .info = __func__,

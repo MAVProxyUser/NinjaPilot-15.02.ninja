@@ -39,7 +39,13 @@
 
 // Private constants
 #define STACK_SAFETYCOUNT 16
-#define STACK_SIZE        (190 + STACK_SAFETYSIZE)
+/* Stack the scheduler task itself needs on top of the largest callback it
+ * hosts.  190 bytes was measured with GCC 4; a board can raise it (GCC 13 on
+ * the Cube left 36 bytes in one scheduler task). */
+#ifndef PIOS_CALLBACKSCHEDULER_TASK_STACK
+#define PIOS_CALLBACKSCHEDULER_TASK_STACK 190
+#endif
+#define STACK_SIZE        (PIOS_CALLBACKSCHEDULER_TASK_STACK + STACK_SAFETYSIZE)
 #define STACK_SAFETYSIZE  8
 #define MAX_SLEEP         1000
 

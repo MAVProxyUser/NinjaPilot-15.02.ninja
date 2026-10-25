@@ -143,6 +143,16 @@ void OutputChannelForm::setName(const QString &name)
     ui.actuatorName->setText(name);
 }
 
+/**
+ * Mark the channel as one that leaves the board over DroneCAN (esc.RawCommand
+ * to the given ESC index) rather than a PWM pin.
+ */
+void OutputChannelForm::setDroneCan(int escIndex)
+{
+    ui.actuatorNumber->setText(QString("%1 CAN %2").arg(index() + 1).arg(escIndex));
+    ui.actuatorNumber->setToolTip(tr("Output %1: DroneCAN ESC index %2 on CAN2 (esc.RawCommand, min..max = 0..8191; the PWM pin is not used)").arg(index() + 1).arg(escIndex));
+}
+
 void OutputChannelForm::setColor(const QColor &color)
 {
     QString stylesheet = ui.actuatorNumberFrame->styleSheet();
@@ -504,7 +514,22 @@ void OutputChannelForm::updateChannelLabel()
             isEsp32 = true;
         }
     }
-    if (isLitewing && index() < 4) {
+    /* CubePilot Cube Purple (0x0C): channels 1-8 are MAIN OUT on the IO
+     * co-processor (one PWM rate for all eight), 9-12 are AUX OUT 1-4 on TIM1. */
+    bool isCube = false;
+    if (pm) {
+        UAVObjectUtilManager *utilMngr = pm->getObject<UAVObjectUtilManager>();
+        if (utilMngr && (utilMngr->getBoardModel() & 0xff00) == 0x0C00) {
+            isCube = true;
+        }
+    }
+    if (isCube && index() < 8) {
+        ui.actuatorNumber->setText(QString("%1 MAIN %2").arg(index() + 1).arg(index() + 1));
+        ui.actuatorNumber->setToolTip(tr("Output %1: MAIN OUT %2 on the IO co-processor (PWM; a DroneCAN channel is sent on CAN2 instead)").arg(index() + 1).arg(index() + 1));
+    } else if (isCube && index() < 12) {
+        ui.actuatorNumber->setText(QString("%1 AUX %2").arg(index() + 1).arg(index() - 7));
+        ui.actuatorNumber->setToolTip(tr("Output %1: AUX OUT %2 (TIM1)").arg(index() + 1).arg(index() - 7));
+    } else if (isLitewing && index() < 4) {
         ui.actuatorNumber->setText(QString("%1 %2").arg(index() + 1).arg(litewingPins[index()]));
         ui.actuatorNumber->setToolTip(tr("Output %1: %2").arg(index() + 1).arg(litewingPinDetail[index()]));
     } else if (isRealposix && index() < 8) {

@@ -41,6 +41,12 @@ class UAVTALK_EXPORT TelemetryManager : public QObject {
     Q_OBJECT
 
 public:
+    // the raw link, for a one-off request outside the transaction queue
+    // (the OPLink link test asks the far modem for its status this way)
+    UAVTalk *uavTalk() const
+    {
+        return m_uavTalk;
+    }
     enum ConnectionState {
         TELEMETRY_DISCONNECTED,
         TELEMETRY_CONNECTED,

@@ -1,0 +1,27 @@
+<xml>
+    <object name="DroneCANParam" singleinstance="true" settings="false" category="System">
+        <description>One DroneCAN parameter transaction with a node (uavcan.protocol.param.GetSet, service 11, and ExecuteOpcode, service 10). Write NodeId, Op and either Index (Name empty) or Name; for Set also ValueType and IntValue/RealValue. The module answers by setting Result and the Response fields and clearing Op. Save/Erase are ExecuteOpcode (ResponseInt = ok). Info is GetNodeInfo (service 1): ResponseName = node name, ResponseInt = software major*256+minor, DefaultInt = vcs commit. Bench tool: tools/esc_params.py.</description>
+        <field name="NodeId" units="" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="Index" units="" type="uint16" elements="1" defaultvalue="0"/>
+        <field name="Name" units="" type="uint8" elements="32" defaultvalue="0"/>
+        <field name="ValueType" units="" type="enum" elements="1" options="Empty,Integer,Real,Boolean,String" defaultvalue="Empty"/>
+        <field name="IntValue" units="" type="int32" elements="1" defaultvalue="0"/>
+        <field name="RealValue" units="" type="float" elements="1" defaultvalue="0"/>
+        <field name="Op" units="" type="enum" elements="1" options="None,Get,Set,Save,Erase,Info,Raw" defaultvalue="None"/>
+        <field name="Result" units="" type="enum" elements="1" options="Idle,Pending,OK,Timeout,Error" defaultvalue="Idle"/>
+        <field name="ResponseName" units="" type="uint8" elements="32" defaultvalue="0"/>
+        <field name="ResponseType" units="" type="enum" elements="1" options="Empty,Integer,Real,Boolean,String" defaultvalue="Empty"/>
+        <field name="ResponseInt" units="" type="int32" elements="1" defaultvalue="0"/>
+        <field name="ResponseReal" units="" type="float" elements="1" defaultvalue="0"/>
+        <field name="DefaultInt" units="" type="int32" elements="1" defaultvalue="0"/>
+        <field name="DefaultReal" units="" type="float" elements="1" defaultvalue="0"/>
+        <field name="MinInt" units="" type="int32" elements="1" defaultvalue="0"/>
+        <field name="MaxInt" units="" type="int32" elements="1" defaultvalue="0"/>
+        <field name="RawLen" units="" type="uint8" elements="1" defaultvalue="0"/>
+        <field name="Raw" units="" type="uint8" elements="64" defaultvalue="0"/>
+        <access gcs="readwrite" flight="readwrite"/>
+        <telemetrygcs acked="false" updatemode="manual" period="0"/>
+        <telemetryflight acked="false" updatemode="onchange" period="0"/>
+        <logging updatemode="manual" period="0"/>
+    </object>
+</xml>

@@ -98,11 +98,15 @@ pvPortMalloc(size_t s)
 	return pios_general_malloc(NULL, s, true);
 }
 
+/* FreeRTOS V10+ aliases these to pvPortMalloc/vPortFree unless a separate
+ * stack heap is configured, and then a second definition is a redefinition. */
+#if ( configSTACK_ALLOCATION_FROM_SEPARATE_HEAP == 1 )
 void *
 pvPortMallocStack(size_t s)
 {
 	return pios_general_malloc(NULL, s, false);
 }
+#endif
 
 void
 vPortFree(void *p)

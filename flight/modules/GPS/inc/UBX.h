@@ -311,7 +311,10 @@ struct UBX_NAV_SVINFO_SV {
 };
 
 // SV information message
-#define MAX_SVS 32
+/* A u-blox 9 lists every channel it tracks or searches in NAV-SVINFO -
+ * far more than 32 with four constellations - and a message longer than
+ * this struct is skipped, which left the sky view empty. */
+#define MAX_SVS 96
 
 struct UBX_NAV_SVINFO {
     uint32_t iTOW; // GPS Millisecond Time of Week (ms)

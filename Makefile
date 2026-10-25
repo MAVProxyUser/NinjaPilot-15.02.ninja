@@ -210,14 +210,14 @@ export OPGCSSYNTHDIR := $(BUILD_DIR)/openpilotgcs-synthetics
 DIRS += $(OPGCSSYNTHDIR)
 
 # Define supported board lists
-ALL_BOARDS    := coptercontrol oplinkmini simposix realposix simwroom simlitewing
-
+ALL_BOARDS    := coptercontrol oplinkmini simposix realposix simwroom simlitewing cubepurple
 # Short names of each board (used to display board name in parallel builds)
 coptercontrol_short    := 'cc  '
 oplinkmini_short       := 'oplm'
 simposix_short          := 'posx'
 simwroom_short          := 'wrom'
 simlitewing_short       := 'ltwg'
+cubepurple_short        := 'cube'
 realposix_short         := 'real'
 
 # Start out assuming that we'll build fw, bl and bu for all boards
@@ -228,9 +228,9 @@ EF_BOARDS  := $(ALL_BOARDS)
 
 # SimPosix doesn't have a BL, BU or EF target so we need to
 # filter them out to prevent errors on the all_flight target.
-BL_BOARDS  := $(filter-out simposix realposix simwroom simlitewing, $(BL_BOARDS))
-BU_BOARDS  := $(filter-out simposix realposix simwroom simlitewing gpsplatinum, $(BU_BOARDS))
-EF_BOARDS  := $(filter-out simposix realposix simwroom simlitewing, $(EF_BOARDS))
+BL_BOARDS  := $(filter-out simposix realposix simwroom simlitewing cubepurple, $(BL_BOARDS))
+BU_BOARDS  := $(filter-out simposix realposix simwroom simlitewing gpsplatinum cubepurple, $(BU_BOARDS))
+EF_BOARDS  := $(filter-out simposix realposix simwroom simlitewing cubepurple, $(EF_BOARDS))
 
 # Generate the targets for whatever boards are left in each list
 FW_TARGETS := $(addprefix fw_, $(FW_BOARDS))

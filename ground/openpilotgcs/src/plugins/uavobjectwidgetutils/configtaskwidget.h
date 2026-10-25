@@ -150,6 +150,8 @@ public:
     void addHelpButton(QPushButton *button, QString url);
     void forceShadowUpdates();
     void forceConnectedState();
+    // ask the board for every object this page shows (a page must never show stale data)
+    void requestObjectsFromBoard();
     virtual bool shouldObjectBeSaved(UAVObject *object);
 
 public slots:

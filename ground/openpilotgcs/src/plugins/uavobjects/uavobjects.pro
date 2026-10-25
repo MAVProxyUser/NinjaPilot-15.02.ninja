@@ -36,6 +36,19 @@ HEADERS += \
     $$UAVOBJECT_SYNTHETICS/accelgyrosettings.h \
     $$UAVOBJECT_SYNTHETICS/ak8975sensor.h \
     $$UAVOBJECT_SYNTHETICS/i2cbusscan.h \
+    $$UAVOBJECT_SYNTHETICS/dronecanescstatus.h \
+    $$UAVOBJECT_SYNTHETICS/dronecanesccommand.h \
+    $$UAVOBJECT_SYNTHETICS/dronecanparam.h \
+    $$UAVOBJECT_SYNTHETICS/dronecanlog.h \
+    $$UAVOBJECT_SYNTHETICS/gpsrxstats.h \
+    $$UAVOBJECT_SYNTHETICS/iomcustatus.h \
+    $$UAVOBJECT_SYNTHETICS/dronecanupdate.h \
+    $$UAVOBJECT_SYNTHETICS/dronecanfilerequest.h \
+    $$UAVOBJECT_SYNTHETICS/dronecanfilechunk.h \
+    $$UAVOBJECT_SYNTHETICS/dronecanbeep.h \
+    $$UAVOBJECT_SYNTHETICS/dronecannote.h \
+    $$UAVOBJECT_SYNTHETICS/tunesettings.h \
+    $$UAVOBJECT_SYNTHETICS/dronecanstatus.h \
     $$UAVOBJECT_SYNTHETICS/sensorhubsettings.h \
     $$UAVOBJECT_SYNTHETICS/accelsensor.h \
     $$UAVOBJECT_SYNTHETICS/accelstate.h \
@@ -152,6 +165,19 @@ SOURCES += \
     $$UAVOBJECT_SYNTHETICS/accelgyrosettings.cpp \
     $$UAVOBJECT_SYNTHETICS/ak8975sensor.cpp \
     $$UAVOBJECT_SYNTHETICS/i2cbusscan.cpp \
+    $$UAVOBJECT_SYNTHETICS/dronecanescstatus.cpp \
+    $$UAVOBJECT_SYNTHETICS/dronecanesccommand.cpp \
+    $$UAVOBJECT_SYNTHETICS/dronecanparam.cpp \
+    $$UAVOBJECT_SYNTHETICS/dronecanlog.cpp \
+    $$UAVOBJECT_SYNTHETICS/gpsrxstats.cpp \
+    $$UAVOBJECT_SYNTHETICS/iomcustatus.cpp \
+    $$UAVOBJECT_SYNTHETICS/dronecanupdate.cpp \
+    $$UAVOBJECT_SYNTHETICS/dronecanfilerequest.cpp \
+    $$UAVOBJECT_SYNTHETICS/dronecanfilechunk.cpp \
+    $$UAVOBJECT_SYNTHETICS/dronecanbeep.cpp \
+    $$UAVOBJECT_SYNTHETICS/dronecannote.cpp \
+    $$UAVOBJECT_SYNTHETICS/tunesettings.cpp \
+    $$UAVOBJECT_SYNTHETICS/dronecanstatus.cpp \
     $$UAVOBJECT_SYNTHETICS/sensorhubsettings.cpp \
     $$UAVOBJECT_SYNTHETICS/accelsensor.cpp \
     $$UAVOBJECT_SYNTHETICS/accelstate.cpp \

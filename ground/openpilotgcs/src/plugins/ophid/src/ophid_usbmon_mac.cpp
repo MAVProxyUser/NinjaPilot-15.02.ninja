@@ -232,7 +232,17 @@ void USBMonitor::run()
     }
 
     // No matching filter
-    IOHIDManagerSetDeviceMatching(hid_manager, NULL);
+    /* Match OpenPilot's vendor id only.  A manager that matches every HID
+     * device (keyboards included) cannot be opened on current macOS without
+     * the Input Monitoring permission, and we never need those devices. */
+    int vendor = idVendor_OpenPilot;
+    CFNumberRef vendorRef = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &vendor);
+    CFMutableDictionaryRef matching = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+                                                                &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFDictionarySetValue(matching, CFSTR(kIOHIDVendorIDKey), vendorRef);
+    IOHIDManagerSetDeviceMatching(hid_manager, matching);
+    CFRelease(matching);
+    CFRelease(vendorRef);
 
     CFRunLoopRef loop = CFRunLoopGetCurrent();
     // set up a callbacks for device attach & detach
@@ -241,9 +251,10 @@ void USBMonitor::run()
     IOHIDManagerRegisterDeviceRemovalCallback(hid_manager, detach_callback, this);
     ret = IOHIDManagerOpen(hid_manager, kIOHIDOptionsTypeNone);
     if (ret != kIOReturnSuccess) {
-        IOHIDManagerUnscheduleFromRunLoop(hid_manager, loop, kCFRunLoopDefaultMode);
-        CFRelease(hid_manager);
-        return;
+        /* The attach/detach callbacks this monitor lives on are delivered
+         * without the open (devices are opened individually by hidapi), so
+         * keep going rather than silently listing nothing. */
+        qWarning("USBMonitor: IOHIDManagerOpen failed (0x%x), continuing with device matching only", ret);
     }
 
     while (m_terminate.available()) {

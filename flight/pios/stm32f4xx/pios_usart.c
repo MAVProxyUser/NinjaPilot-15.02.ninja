@@ -65,7 +65,15 @@ struct pios_usart_dev {
     uint32_t rx_in_context;
     pios_com_callback tx_out_cb;
     uint32_t tx_out_context;
+
+    /* DMA reception (cfg->dma_rx): the ring and how far it has been drained */
+    uint8_t  *dma_buf;
+    uint16_t dma_len;
+    uint16_t dma_pos;
+    uint32_t rx_dropped; /* bytes the com buffer could not take */
 };
+
+static void PIOS_USART_dma_drain(struct pios_usart_dev *usart_dev, bool *need_yield);
 
 static bool PIOS_USART_validate(struct pios_usart_dev *usart_dev)
 {
@@ -156,6 +164,23 @@ static void PIOS_USART_6_irq_handler(void)
     PIOS_USART_generic_irq_handler(PIOS_USART_6_id);
 }
 
+#if defined(UART7) && defined(UART8)
+/* STM32F42x/43x: UART7 and UART8 (Cube Purple GPS 2 is UART8). */
+static uint32_t PIOS_USART_7_id;
+void UART7_IRQHandler(void) __attribute__((alias("PIOS_USART_7_irq_handler")));
+static void PIOS_USART_7_irq_handler(void)
+{
+    PIOS_USART_generic_irq_handler(PIOS_USART_7_id);
+}
+
+static uint32_t PIOS_USART_8_id;
+void UART8_IRQHandler(void) __attribute__((alias("PIOS_USART_8_irq_handler")));
+static void PIOS_USART_8_irq_handler(void)
+{
+    PIOS_USART_generic_irq_handler(PIOS_USART_8_id);
+}
+#endif
+
 /**
  * Initialise a single USART device
  */
@@ -214,9 +239,49 @@ int32_t PIOS_USART_Init(uint32_t *usart_id, const struct pios_usart_cfg *cfg)
     case (uint32_t)USART6:
         PIOS_USART_6_id = (uint32_t)usart_dev;
         break;
+#if defined(UART7) && defined(UART8)
+    case (uint32_t)UART7:
+        PIOS_USART_7_id = (uint32_t)usart_dev;
+        break;
+    case (uint32_t)UART8:
+        PIOS_USART_8_id = (uint32_t)usart_dev;
+        break;
+#endif
     }
     NVIC_Init((NVIC_InitTypeDef *)&(usart_dev->cfg->irq.init));
-    USART_ITConfig(usart_dev->cfg->regs, USART_IT_RXNE, ENABLE);
+    if (usart_dev->cfg->dma_rx && usart_dev->cfg->dma_rx->stream && usart_dev->cfg->dma_rx->buffer_len) {
+        /* circular DMA into a ring, drained on the idle-line interrupt (DMA1/2 clocks are on, pios_sys.c) */
+        const struct pios_usart_dma_rx_cfg *dma = usart_dev->cfg->dma_rx;
+        usart_dev->dma_buf = (uint8_t *)pios_malloc(dma->buffer_len);
+        if (usart_dev->dma_buf) {
+            usart_dev->dma_len = dma->buffer_len;
+            usart_dev->dma_pos = 0;
+            DMA_InitTypeDef dma_init;
+            DMA_DeInit(dma->stream);
+            DMA_StructInit(&dma_init);
+            dma_init.DMA_Channel            = dma->channel;
+            dma_init.DMA_PeripheralBaseAddr = (uint32_t)&usart_dev->cfg->regs->DR;
+            dma_init.DMA_Memory0BaseAddr    = (uint32_t)usart_dev->dma_buf;
+            dma_init.DMA_DIR = DMA_DIR_PeripheralToMemory;
+            dma_init.DMA_BufferSize         = dma->buffer_len;
+            dma_init.DMA_PeripheralInc      = DMA_PeripheralInc_Disable;
+            dma_init.DMA_MemoryInc          = DMA_MemoryInc_Enable;
+            dma_init.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
+            dma_init.DMA_MemoryDataSize     = DMA_MemoryDataSize_Byte;
+            dma_init.DMA_Mode = DMA_Mode_Circular;
+            dma_init.DMA_Priority           = DMA_Priority_High;
+            dma_init.DMA_FIFOMode           = DMA_FIFOMode_Disable;
+            dma_init.DMA_MemoryBurst        = DMA_MemoryBurst_Single;
+            dma_init.DMA_PeripheralBurst    = DMA_PeripheralBurst_Single;
+            DMA_Init(dma->stream, &dma_init);
+            DMA_Cmd(dma->stream, ENABLE);
+            USART_DMACmd(usart_dev->cfg->regs, USART_DMAReq_Rx, ENABLE);
+            USART_ITConfig(usart_dev->cfg->regs, USART_IT_IDLE, ENABLE);
+        }
+    }
+    if (!usart_dev->dma_buf) {
+        USART_ITConfig(usart_dev->cfg->regs, USART_IT_RXNE, ENABLE);
+    }
     USART_ITConfig(usart_dev->cfg->regs, USART_IT_TXE, ENABLE);
 
     // FIXME XXX Clear / reset uart here - sends NUL char else
@@ -238,7 +303,32 @@ static void PIOS_USART_RxStart(uint32_t usart_id, __attribute__((unused)) uint16
 
     PIOS_Assert(valid);
 
+    if (usart_dev->dma_buf) {
+        /* the reader ran dry: have the interrupt handler drain the ring now */
+        NVIC_SetPendingIRQ(usart_dev->cfg->irq.init.NVIC_IRQChannel);
+        return;
+    }
     USART_ITConfig(usart_dev->cfg->regs, USART_IT_RXNE, ENABLE);
+}
+
+/**
+ * Move what the DMA engine has stored since the last call into the com buffer.
+ * Interrupt context only (the idle-line interrupt, or the one RxStart pends).
+ */
+static void PIOS_USART_dma_drain(struct pios_usart_dev *usart_dev, bool *need_yield)
+{
+    uint16_t pos = usart_dev->dma_len - (uint16_t)DMA_GetCurrDataCounter(usart_dev->cfg->dma_rx->stream);
+
+    while (usart_dev->dma_pos != pos) {
+        uint16_t n = (pos > usart_dev->dma_pos) ? (pos - usart_dev->dma_pos) : (usart_dev->dma_len - usart_dev->dma_pos);
+        if (usart_dev->rx_in_cb) {
+            uint16_t taken = (usart_dev->rx_in_cb)(usart_dev->rx_in_context, &usart_dev->dma_buf[usart_dev->dma_pos], n, NULL, need_yield);
+            if (taken < n) {
+                usart_dev->rx_dropped += n - taken;
+            }
+        }
+        usart_dev->dma_pos = (usart_dev->dma_pos + n) % usart_dev->dma_len;
+    }
 }
 static void PIOS_USART_TxStart(uint32_t usart_id, __attribute__((unused)) uint16_t tx_bytes_avail)
 {
@@ -316,13 +406,19 @@ static void PIOS_USART_generic_irq_handler(uint32_t usart_id)
 
     PIOS_Assert(valid);
 
-    /* Force read of dr after sr to make sure to clear error flags */
+    /* Force read of dr after sr to make sure to clear error flags (with DMA
+     * reception a pending byte belongs to the DMA engine: leave DR alone then) */
     volatile uint16_t sr = usart_dev->cfg->regs->SR;
-    volatile uint8_t dr  = usart_dev->cfg->regs->DR;
+    volatile uint8_t dr  = 0;
+    if (!usart_dev->dma_buf || !(sr & USART_SR_RXNE)) {
+        dr = usart_dev->cfg->regs->DR;
+    }
 
-    /* Check if RXNE flag is set */
-    bool rx_need_yield   = false;
-    if (sr & USART_SR_RXNE) {
+    bool rx_need_yield = false;
+    if (usart_dev->dma_buf) {
+        /* idle line, or pended by RxStart: hand over what the DMA has stored */
+        PIOS_USART_dma_drain(usart_dev, &rx_need_yield);
+    } else if (sr & USART_SR_RXNE) {
         uint8_t byte = dr;
         if (usart_dev->rx_in_cb) {
             (void)(usart_dev->rx_in_cb)(usart_dev->rx_in_context, &byte, 1, NULL, &rx_need_yield);

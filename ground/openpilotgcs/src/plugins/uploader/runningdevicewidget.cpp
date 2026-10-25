@@ -88,6 +88,10 @@ void RunningDeviceWidget::populate()
     case 0x0903:
         devicePic.load(":/uploader/images/gcs-board-revo.png");
         break;
+    case 0x0C01:
+        // CubePilot Cube Purple: no artwork yet, the Revolution picture stands in
+        devicePic.load(":/uploader/images/gcs-board-revo.png");
+        break;
     case 0x1101:
         // NinjaPilot realposix on the Octavo OSD32MP1-RED (drawn in-tree:
         // this fork's qrc no longer carries the Revolution artwork)

@@ -122,6 +122,34 @@ static UAVTalkConnection uavTalkCon;
 #ifdef PIOS_INCLUDE_RFM22B
 static UAVTalkConnection radioUavTalkCon;
 #endif
+#ifdef PIOS_TELEMETRY_DUAL_PORT
+// The telemetry UART and USB each get their own UAVTalk connection and receive
+// task, so a modem on the UART keeps working while a USB cable is attached
+// (stock behaviour: USB takes the whole link as soon as it is plugged in).
+// Requests and acks are answered on the port they arrived on; periodic updates
+// and the handshake go to the port a ground station last spoke on, USB until
+// either has (a USB-only bench behaves as before).
+static UAVTalkConnection usbUavTalkCon;
+static xTaskHandle usbRxTaskHandle;
+static volatile uint32_t lastUsbRxTicks;
+static volatile uint32_t lastUartRxTicks;
+// The UART usually feeds a radio modem with far less capacity than the UART
+// itself, and no flow control: bursts of periodic updates at full UART speed
+// overflow the modem's small radio buffer (whole frames lost) and the blocking
+// send holds the port mutex so request replies and the handshake are dropped
+// too.  Periodic, non-priority objects therefore spend from a byte budget
+// (refilled at a fraction of the UART rate, bursts capped at the modem's
+// buffer) and are sent without blocking; what does not fit is skipped and the
+// next period sends fresh data.  Replies, acks, settings and priority objects
+// are never throttled.
+#define UART_BUDGET_BURST_BYTES   240
+#define UART_BUDGET_PERCENT       35
+static uint32_t uartBudgetBytesPerSec;
+static uint32_t uartBudgetTokens;
+static uint32_t uartBudgetTicks;
+static uint32_t uartBudgetSkipped;
+static bool txDropWhenBusy;
+#endif
 
 // Private functions
 static void telemetryTxTask(void *parameters);
@@ -131,6 +159,16 @@ static void radioRxTask(void *parameters);
 static int32_t transmitRadioData(uint8_t *data, int32_t length);
 #endif
 static int32_t transmitData(uint8_t *data, int32_t length);
+#ifdef PIOS_TELEMETRY_DUAL_PORT
+static void usbRxTask(void *parameters);
+static int32_t transmitUsbData(uint8_t *data, int32_t length);
+static UAVTalkConnection activeConnection(void);
+static UAVTalkConnection otherConnection(void);
+static int32_t sendWaiting(uint32_t port, uint8_t *data, int32_t length);
+#else
+static uint32_t getComPort(bool input);
+#define activeConnection() uavTalkCon
+#endif
 static void registerObject(UAVObjHandle obj);
 static void updateObject(UAVObjHandle obj, int32_t eventType);
 static int32_t setUpdatePeriod(UAVObjHandle obj, int32_t updatePeriodMs);
@@ -139,7 +177,6 @@ static void processObjEvent(UAVObjEvent *ev);
 static void updateTelemetryStats();
 static void gcsTelemetryStatsUpdated();
 static void updateSettings();
-static uint32_t getComPort(bool input);
 
 /**
  * Initialise the telemetry module
@@ -164,6 +201,14 @@ int32_t TelemetryStart(void)
     if (radioPort) {
         xTaskCreate(radioRxTask, "RadioRx", STACK_SIZE_RADIO_RX_BYTES / 4, NULL, TASK_PRIORITY_RADRX, &radioRxTaskHandle);
         PIOS_TASK_MONITOR_RegisterTask(TASKINFO_RUNNING_RADIORX, radioRxTaskHandle);
+    }
+#endif
+#ifdef PIOS_TELEMETRY_DUAL_PORT
+    if (PIOS_COM_TELEM_USB) {
+        xTaskCreate(usbRxTask, "TelUsbRx", STACK_SIZE_RX_BYTES / 4, NULL, TASK_PRIORITY_RX, &usbRxTaskHandle);
+#ifndef PIOS_INCLUDE_RFM22B
+        PIOS_TASK_MONITOR_RegisterTask(TASKINFO_RUNNING_RADIORX, usbRxTaskHandle);
+#endif
     }
 #endif
 
@@ -199,6 +244,9 @@ int32_t TelemetryInitialize(void)
 
     // Initialise UAVTalk
     uavTalkCon = UAVTalkInitialize(&transmitData);
+#ifdef PIOS_TELEMETRY_DUAL_PORT
+    usbUavTalkCon = UAVTalkInitialize(&transmitUsbData);
+#endif
 #ifdef PIOS_INCLUDE_RFM22B
     radioUavTalkCon = UAVTalkInitialize(&transmitRadioData);
 #endif
@@ -355,14 +403,51 @@ static void processObjEvent(UAVObjEvent *ev)
         if ((ev->event == EV_UPDATED && (updateMode == UPDATEMODE_ONCHANGE || updateMode == UPDATEMODE_THROTTLED))
             || ev->event == EV_UPDATED_MANUAL
             || (ev->event == EV_UPDATED_PERIODIC && updateMode != UPDATEMODE_THROTTLED)) {
+            int32_t maxRetries = MAX_RETRIES;
+#ifdef PIOS_TELEMETRY_DUAL_PORT
+            txDropWhenBusy = false;
+            if ((activeConnection() == uavTalkCon) && (ev->event != EV_UPDATED_MANUAL) &&
+                !UAVObjIsPriority(ev->obj) && !UAVObjIsSettings(ev->obj) && !UAVObjGetTelemetryAcked(&metadata)) {
+                uint32_t now     = xTaskGetTickCount();
+                uint32_t elapsed = now - uartBudgetTicks;
+                uartBudgetTicks  = now;
+                uartBudgetTokens += (uartBudgetBytesPerSec * elapsed) / 1000;
+                if (uartBudgetTokens > UART_BUDGET_BURST_BYTES) {
+                    uartBudgetTokens = UART_BUDGET_BURST_BYTES;
+                }
+                uint32_t need = UAVObjGetNumBytes(ev->obj) + 12;
+                if (uartBudgetTokens < need) {
+                    ++uartBudgetSkipped;
+                    return;
+                }
+                uartBudgetTokens -= need;
+                txDropWhenBusy = true;
+                maxRetries     = 1;
+            }
+#endif
             // Send update to GCS (with retries)
-            while (retries < MAX_RETRIES && success == -1) {
+            while (retries < maxRetries && success == -1) {
                 // call blocks until ack is received or timeout
-                success = UAVTalkSendObject(uavTalkCon, ev->obj, ev->instId, UAVObjGetTelemetryAcked(&metadata), REQ_TIMEOUT_MS);
+                success = UAVTalkSendObject(activeConnection(), ev->obj, ev->instId, UAVObjGetTelemetryAcked(&metadata), REQ_TIMEOUT_MS);
                 if (success == -1) {
                     ++retries;
                 }
             }
+#ifdef PIOS_TELEMETRY_DUAL_PORT
+            txDropWhenBusy = false;
+#endif
+#ifdef PIOS_TELEMETRY_DUAL_PORT
+            // While no ground station is connected the handshake beacon also
+            // goes out on the other port, so a GCS on either one can answer.
+            if (ev->obj == FlightTelemetryStatsHandle()) {
+                FlightTelemetryStatsData flightStats;
+                FlightTelemetryStatsGet(&flightStats);
+                UAVTalkConnection other = otherConnection();
+                if ((flightStats.Status != FLIGHTTELEMETRYSTATS_STATUS_CONNECTED) && other) {
+                    UAVTalkSendObject(other, ev->obj, ev->instId, false, 0);
+                }
+            }
+#endif
             // Update stats
             txRetries += retries;
             if (success == -1) {
@@ -372,7 +457,7 @@ static void processObjEvent(UAVObjEvent *ev)
             // Request object update from GCS (with retries)
             while (retries < MAX_RETRIES && success == -1) {
                 // call blocks until update is received or timeout
-                success = UAVTalkSendObjectRequest(uavTalkCon, ev->obj, ev->instId, REQ_TIMEOUT_MS);
+                success = UAVTalkSendObjectRequest(activeConnection(), ev->obj, ev->instId, REQ_TIMEOUT_MS);
                 if (success == -1) {
                     ++retries;
                 }
@@ -461,7 +546,11 @@ static void telemetryRxTask(__attribute__((unused)) void *parameters)
 {
     // Task loop
     while (1) {
+#ifdef PIOS_TELEMETRY_DUAL_PORT
+        uint32_t inputPort = PIOS_COM_Available(telemetryPort) ? telemetryPort : 0;
+#else
         uint32_t inputPort = getComPort(true);
+#endif
 
         if (inputPort) {
             // Block until data are available
@@ -484,6 +573,9 @@ static void telemetryRxTask(__attribute__((unused)) void *parameters)
 
             bytes_to_process = PIOS_COM_ReceiveBuffer(inputPort, serial_data, sizeof(serial_data), 500);
             if (bytes_to_process > 0) {
+#ifdef PIOS_TELEMETRY_DUAL_PORT
+                lastUartRxTicks = xTaskGetTickCount() | 1;
+#endif
                 UAVTalkProcessInputStream(uavTalkCon, serial_data, bytes_to_process);
             }
         } else {
@@ -491,6 +583,96 @@ static void telemetryRxTask(__attribute__((unused)) void *parameters)
         }
     }
 }
+
+#ifdef PIOS_TELEMETRY_DUAL_PORT
+/**
+ * USB telemetry receive task: the second channel.
+ */
+static void usbRxTask(__attribute__((unused)) void *parameters)
+{
+    while (1) {
+        if (PIOS_COM_Available(PIOS_COM_TELEM_USB)) {
+            uint8_t serial_data[16];
+            uint16_t bytes_to_process;
+
+            bytes_to_process = PIOS_COM_ReceiveBuffer(PIOS_COM_TELEM_USB, serial_data, sizeof(serial_data), 500);
+            if (bytes_to_process > 0) {
+                lastUsbRxTicks = xTaskGetTickCount() | 1;
+                UAVTalkProcessInputStream(usbUavTalkCon, serial_data, bytes_to_process);
+            }
+        } else {
+            vTaskDelay(5);
+        }
+    }
+}
+
+/**
+ * Transmit on the USB port (the USB connection's output).
+ */
+static int32_t transmitUsbData(uint8_t *data, int32_t length)
+{
+    if (PIOS_COM_Available(PIOS_COM_TELEM_USB)) {
+        return sendWaiting(PIOS_COM_TELEM_USB, data, length);
+    }
+    return -1;
+}
+
+/**
+ * A blocking send that waits for the port instead of giving up: the periodic
+ * stream holds the port's mutex while it waits for buffer space and
+ * PIOS_COM_SendBuffer gives up on the mutex after 5 ms, which dropped about a
+ * third of all request replies, acks and handshake frames (the GCS then logged
+ * "transaction failed" and retried).  Replies must not be dropped.
+ */
+static int32_t sendWaiting(uint32_t port, uint8_t *data, int32_t length)
+{
+    int32_t rc = -2;
+
+    for (int i = 0; (i < 50) && (rc == -2); ++i) {
+        rc = PIOS_COM_SendBuffer(port, data, length);
+        if (rc == -2) {
+            vTaskDelay(1);
+        }
+    }
+    return rc;
+}
+
+/**
+ * The connection periodic updates and the handshake go out on: the only port
+ * that is up, else the one a ground station spoke on most recently, USB when
+ * neither has spoken yet.
+ */
+static UAVTalkConnection activeConnection(void)
+{
+    bool usbUp  = PIOS_COM_Available(PIOS_COM_TELEM_USB);
+    bool uartUp = telemetryPort && PIOS_COM_Available(telemetryPort);
+
+    if (!usbUp) {
+        return uavTalkCon;
+    }
+    if (!uartUp || !lastUartRxTicks) {
+        return usbUavTalkCon;
+    }
+    if (!lastUsbRxTicks || ((int32_t)(lastUartRxTicks - lastUsbRxTicks) > 0)) {
+        return uavTalkCon;
+    }
+    return usbUavTalkCon;
+}
+
+/**
+ * The connection that is up but not the active one, or 0.
+ */
+static UAVTalkConnection otherConnection(void)
+{
+    bool usbUp  = PIOS_COM_Available(PIOS_COM_TELEM_USB);
+    bool uartUp = telemetryPort && PIOS_COM_Available(telemetryPort);
+
+    if (!usbUp || !uartUp) {
+        return 0;
+    }
+    return (activeConnection() == uavTalkCon) ? usbUavTalkCon : uavTalkCon;
+}
+#endif /* PIOS_TELEMETRY_DUAL_PORT */
 
 #ifdef PIOS_INCLUDE_RFM22B
 /**
@@ -540,7 +722,19 @@ static int32_t transmitRadioData(uint8_t *data, int32_t length)
  */
 static int32_t transmitData(uint8_t *data, int32_t length)
 {
+#ifdef PIOS_TELEMETRY_DUAL_PORT
+    uint32_t outputPort = (telemetryPort && PIOS_COM_Available(telemetryPort)) ? telemetryPort : 0;
+
+    if (outputPort && txDropWhenBusy && (xTaskGetCurrentTaskHandle() == telemetryTxTaskHandle)) {
+        // a budgeted periodic update: never wait for room, never hold the port
+        return PIOS_COM_SendBufferNonBlocking(outputPort, data, length);
+    }
+    if (outputPort) {
+        return sendWaiting(outputPort, data, length);
+    }
+#else
     uint32_t outputPort = getComPort(false);
+#endif
 
     if (outputPort) {
         return PIOS_COM_SendBuffer(outputPort, data, length);
@@ -637,6 +831,9 @@ static void updateTelemetryStats()
 #ifdef PIOS_INCLUDE_RFM22B
     UAVTalkAddStats(radioUavTalkCon, &utalkStats, true);
 #endif
+#ifdef PIOS_TELEMETRY_DUAL_PORT
+    UAVTalkAddStats(usbUavTalkCon, &utalkStats, true);
+#endif
 
     // Get object data
     FlightTelemetryStatsGet(&flightStats);
@@ -732,6 +929,15 @@ static void updateSettings()
         // Retrieve settings
         uint8_t speed;
         HwSettingsTelemetrySpeedGet(&speed);
+#ifdef PIOS_TELEMETRY_DUAL_PORT
+        {
+            static const uint32_t bauds[] = { 2400, 4800, 9600, 19200, 38400, 57600, 115200 };
+            uint32_t baud = (speed < NELEMENTS(bauds)) ? bauds[speed] : 57600;
+            uartBudgetBytesPerSec = (baud / 10) * UART_BUDGET_PERCENT / 100;
+            uartBudgetTokens      = UART_BUDGET_BURST_BYTES;
+            uartBudgetTicks       = xTaskGetTickCount();
+        }
+#endif
 
         // Set port speed
         switch (speed) {
@@ -764,6 +970,7 @@ static void updateSettings()
  * Determine input/output com port as highest priority available
  * @param[in] input Returns the approproate input com port if true, else the appropriate output com port
  */
+#ifndef PIOS_TELEMETRY_DUAL_PORT
 #ifdef PIOS_INCLUDE_RFM22B
 static uint32_t getComPort(bool input)
 #else
@@ -788,6 +995,7 @@ static uint32_t getComPort(__attribute__((unused)) bool input)
         return 0;
     }
 }
+#endif /* !PIOS_TELEMETRY_DUAL_PORT */
 
 /**
  * @}

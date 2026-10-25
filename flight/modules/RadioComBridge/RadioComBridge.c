@@ -34,6 +34,7 @@
 #include <openpilot.h>
 #include <radiocombridge.h>
 #include <oplinkstatus.h>
+#include <firmwareiapobj.h>
 #include <objectpersistence.h>
 #include <oplinksettings.h>
 #include <oplinkreceiver.h>
@@ -58,6 +59,7 @@
 #define MAX_PORT_DELAY    200
 #define SERIAL_RX_BUF_LEN 100
 #define PPM_INPUT_TIMEOUT 100
+#define UART_RELAY_HOLD_MS 10000
 
 
 // ****************
@@ -75,6 +77,16 @@ typedef struct {
     // The UAVTalk connection on the com side.
     UAVTalkConnection telemUAVTalkCon;
     UAVTalkConnection radioUAVTalkCon;
+    // USB gets its own parser so that a flight controller on the telemetry
+    // UART and a tool on USB can both be served at the same time: the radio
+    // is relayed through the UART while a flight controller is heard there
+    // (within UART_RELAY_HOLD_MS), else through USB; USB then only carries
+    // this modem's own objects (settings, status, link test, reboot/flash).
+    UAVTalkConnection usbUAVTalkCon;
+    uint32_t lastUartFrameTicks;
+    // A board-identification read (FirmwareIAPObj) from the GCS is relayed to
+    // the far end while the link is up and answered by this modem only when the
+    // link is down, so the GCS sees the flight controller behind the radio.
 
     // Queue handles.
     xQueueHandle uavtalkEventQueue;
@@ -107,8 +119,11 @@ static void radioTxTask(void *parameters);
 static void radioRxTask(void *parameters);
 static void PPMInputTask(void *parameters);
 static int32_t UAVTalkSendHandler(uint8_t *buf, int32_t length);
+static int32_t UsbSendHandler(uint8_t *buf, int32_t length);
 static int32_t RadioSendHandler(uint8_t *buf, int32_t length);
-static void ProcessTelemetryStream(UAVTalkConnection inConnectionHandle, UAVTalkConnection outConnectionHandle, uint8_t *rxbuffer, uint8_t count);
+static uint32_t relayPort(void);
+static bool usbUp(void);
+static uint8_t ProcessTelemetryStream(UAVTalkConnection inConnectionHandle, UAVTalkConnection outConnectionHandle, uint8_t *rxbuffer, uint8_t count, bool relay);
 static void ProcessRadioStream(UAVTalkConnection inConnectionHandle, UAVTalkConnection outConnectionHandle, uint8_t *rxbuffer, uint8_t count);
 static void objectPersistenceUpdatedCb(UAVObjEvent *objEv);
 static void registerObject(UAVObjHandle obj);
@@ -239,6 +254,8 @@ static int32_t RadioComBridgeInitialize(void)
     // Initialise UAVTalk
     data->telemUAVTalkCon    = UAVTalkInitialize(&UAVTalkSendHandler);
     data->radioUAVTalkCon    = UAVTalkInitialize(&RadioSendHandler);
+    data->usbUAVTalkCon      = UAVTalkInitialize(&UsbSendHandler);
+    data->lastUartFrameTicks = 0;
 
     // Initialize the queues.
     data->uavtalkEventQueue  = xQueueCreate(EVENT_QUEUE_SIZE, sizeof(UAVObjEvent));
@@ -344,8 +361,9 @@ static void telemetryTxTask(__attribute__((unused)) void *parameters)
             // Send update (with retries)
             int32_t ret = -1;
             uint32_t retries = 0;
+            UAVTalkConnection con = usbUp() ? data->usbUAVTalkCon : data->telemUAVTalkCon;
             while (retries <= MAX_RETRIES && ret == -1) {
-                ret = UAVTalkSendObject(data->telemUAVTalkCon, ev.obj, ev.instId, 0, RETRY_TIMEOUT_MS);
+                ret = UAVTalkSendObject(con, ev.obj, ev.instId, 0, RETRY_TIMEOUT_MS);
                 if (ret == -1) {
                     ++retries;
                 }
@@ -435,26 +453,68 @@ static void telemetryRxTask(__attribute__((unused)) void *parameters)
 {
     // Task loop
     while (1) {
-        uint32_t inputPort = data->parseUAVTalk ? PIOS_COM_TELEMETRY : 0;
+        uint32_t uart = data->parseUAVTalk ? PIOS_COM_TELEMETRY : 0;
+        bool usb = usbUp();
 #ifdef PIOS_INCLUDE_WDG
         PIOS_WDG_UpdateFlag(PIOS_WDG_TELEMETRYRX);
 #endif
-#if defined(PIOS_INCLUDE_USB)
-        // Determine output port (USB takes priority over telemetry port)
-        if (PIOS_USB_CheckAvailable(0) && PIOS_COM_TELEM_USB_HID) {
-            inputPort = PIOS_COM_TELEM_USB_HID;
-        }
-#endif /* PIOS_INCLUDE_USB */
-        if (inputPort) {
-            uint8_t serial_data[16];
-            uint16_t bytes_to_process = PIOS_COM_ReceiveBuffer(inputPort, serial_data, sizeof(serial_data), MAX_PORT_DELAY);
-            if (bytes_to_process > 0) {
-                ProcessTelemetryStream(data->telemUAVTalkCon, data->radioUAVTalkCon, serial_data, bytes_to_process);
-            }
-        } else {
+        if (!uart && !usb) {
             vTaskDelay(5);
+            continue;
+        }
+        uint8_t serial_data[16];
+        if (uart) {
+            // block here (briefly when USB must be polled too)
+            uint16_t n = PIOS_COM_ReceiveBuffer(uart, serial_data, sizeof(serial_data), usb ? 5 : MAX_PORT_DELAY);
+            if (n > 0) {
+                bool relay = (relayPort() == uart);
+                if (ProcessTelemetryStream(data->telemUAVTalkCon, data->radioUAVTalkCon, serial_data, n, relay) > 0) {
+                    // a flight controller (or a GCS on a cable) is talking on the UART
+                    data->lastUartFrameTicks = xTaskGetTickCount() | 1;
+                }
+            }
+        }
+        if (usb) {
+            uint16_t n = PIOS_COM_ReceiveBuffer(PIOS_COM_TELEM_USB_HID, serial_data, sizeof(serial_data), uart ? 0 : MAX_PORT_DELAY);
+            if (n > 0) {
+                bool relay = (relayPort() == PIOS_COM_TELEM_USB_HID);
+                ProcessTelemetryStream(data->usbUAVTalkCon, data->radioUAVTalkCon, serial_data, n, relay);
+            }
         }
     }
+}
+
+/**
+ * Is a USB host attached (HID telemetry)?
+ */
+static bool usbUp(void)
+{
+#if defined(PIOS_INCLUDE_USB)
+    return PIOS_COM_TELEM_USB_HID && PIOS_USB_CheckAvailable(0) && PIOS_COM_Available(PIOS_COM_TELEM_USB_HID);
+
+#else
+    return false;
+
+#endif
+}
+
+/**
+ * The port the radio is relayed to: the telemetry UART while a flight
+ * controller has been heard on it recently, else USB when a host is attached,
+ * else the UART.
+ */
+static uint32_t relayPort(void)
+{
+    uint32_t uart = data->parseUAVTalk ? PIOS_COM_TELEMETRY : 0;
+
+    if (uart && data->lastUartFrameTicks &&
+        ((uint32_t)(xTaskGetTickCount() - data->lastUartFrameTicks) < UART_RELAY_HOLD_MS)) {
+        return uart;
+    }
+    if (usbUp()) {
+        return PIOS_COM_TELEM_USB_HID;
+    }
+    return uart;
 }
 
 /**
@@ -534,24 +594,44 @@ static void serialRxTask(__attribute__((unused)) void *parameters)
 static int32_t UAVTalkSendHandler(uint8_t *buf, int32_t length)
 {
     int32_t ret;
-    uint32_t outputPort = data->parseUAVTalk ? PIOS_COM_TELEMETRY : 0;
+    uint32_t outputPort = relayPort();
 
-#if defined(PIOS_INCLUDE_USB)
-    // Determine output port (USB takes priority over telemetry port)
-    if (PIOS_COM_TELEM_USB_HID && PIOS_COM_Available(PIOS_COM_TELEM_USB_HID)) {
-        outputPort = PIOS_COM_TELEM_USB_HID;
-    }
-#endif /* PIOS_INCLUDE_USB */
     if (outputPort) {
         // Following call can fail with -2 error code (buffer full) or -3 error code (could not acquire send mutex)
         // It is the caller responsibility to retry in such cases...
+        // a full buffer is normal under load: wait a little for it to drain
+        // (the UART frees 11 bytes a millisecond at 115200) instead of
+        // dropping the frame at once
         ret = -2;
-        uint8_t count = 5;
+        uint8_t count = 20;
         while (count-- > 0 && ret < -1) {
             ret = PIOS_COM_SendBufferNonBlocking(outputPort, buf, length);
+            if (ret < -1 && count) {
+                vTaskDelay(1);
+            }
         }
     } else {
         ret = -1;
+    }
+    return ret;
+}
+
+/**
+ * Transmit to the USB host (the USB parser's replies and this modem's own objects).
+ */
+static int32_t UsbSendHandler(uint8_t *buf, int32_t length)
+{
+    int32_t ret = -1;
+
+    if (usbUp()) {
+        ret = -2;
+        uint8_t count = 5;
+        while (count-- > 0 && ret < -1) {
+            ret = PIOS_COM_SendBufferNonBlocking(PIOS_COM_TELEM_USB_HID, buf, length);
+            if (ret < -1 && count) {
+                vTaskDelay(1);
+            }
+        }
     }
     return ret;
 }
@@ -575,10 +655,15 @@ static int32_t RadioSendHandler(uint8_t *buf, int32_t length)
     if (outputPort && PIOS_COM_Available(outputPort)) {
         // Following call can fail with -2 error code (buffer full) or -3 error code (could not acquire send mutex)
         // It is the caller responsibility to retry in such cases...
+        // a 145-byte reply (FirmwareIAPObj) needs that much free in a buffer the
+        // flight controller's stream keeps busy: wait up to 20 ms for it
         int32_t ret   = -2;
-        uint8_t count = 5;
+        uint8_t count = 20;
         while (count-- > 0 && ret < -1) {
             ret = PIOS_COM_SendBufferNonBlocking(outputPort, buf, length);
+            if (ret < -1 && count) {
+                vTaskDelay(1);
+            }
         }
         return ret;
     } else {
@@ -593,24 +678,60 @@ static int32_t RadioSendHandler(uint8_t *buf, int32_t length)
  * @param[in] outConnectionHandle  The UAVTalk connection handle on the radio port.
  * @param[in] rxbyte  The received byte.
  */
-static void ProcessTelemetryStream(UAVTalkConnection inConnectionHandle, UAVTalkConnection outConnectionHandle, uint8_t *rxbuffer, uint8_t length)
+static uint8_t ProcessTelemetryStream(UAVTalkConnection inConnectionHandle, UAVTalkConnection outConnectionHandle, uint8_t *rxbuffer, uint8_t length, bool relay)
 {
-    uint8_t position = 0;
+    uint8_t position  = 0;
+    uint8_t completed = 0;
 
     // Keep reading until we receive a completed packet.
     while (position < length) {
         UAVTalkRxState state = UAVTalkProcessInputStreamQuiet(inConnectionHandle, rxbuffer, length, &position);
         if (state == UAVTALK_STATE_COMPLETE) {
+            ++completed;
             // We only want to unpack certain telemetry objects
             uint32_t objId = UAVTalkGetPacketObjId(inConnectionHandle);
             switch (objId) {
             case OPLINKSTATUS_OBJID:
+                // The GCS's link test: a request for *all* instances of OPLinkStatus
+                // (this modem's own status is instance 0 and is streamed anyway) is
+                // a question for the modem at the far end of the radio.
+                if ((UAVTalkGetPacketType(inConnectionHandle) == UAVTALK_TYPE_OBJ_REQ) &&
+                    (UAVTalkGetPacketInstId(inConnectionHandle) == UAVOBJ_ALL_INSTANCES)) {
+                    UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
+                } else {
+                    UAVTalkReceiveObject(inConnectionHandle);
+                }
+                break;
             case OPLINKSETTINGS_OBJID:
             case OPLINKRECEIVER_OBJID:
             case MetaObjectId(OPLINKSTATUS_OBJID):
             case MetaObjectId(OPLINKSETTINGS_OBJID):
             case MetaObjectId(OPLINKRECEIVER_OBJID):
                 UAVTalkReceiveObject(inConnectionHandle);
+                break;
+            case FIRMWAREIAPOBJ_OBJID:
+            case MetaObjectId(FIRMWAREIAPOBJ_OBJID):
+                // the modem's own FirmwareIAP module (reboot / firmware update
+                // when BoardType is ours) and the flight controller behind the
+                // link both get to see a write.  A read identifies the board to
+                // the GCS: with the link up it goes to the far end first and
+                // this modem answers only if nothing comes back (see the task).
+                if ((objId == FIRMWAREIAPOBJ_OBJID) && (UAVTalkGetPacketType(inConnectionHandle) == UAVTALK_TYPE_OBJ_REQ)) {
+                    uint8_t linkState;
+                    OPLinkStatusLinkStateGet(&linkState);
+                    if (relay && (linkState == OPLINKSTATUS_LINKSTATE_CONNECTED)) {
+                        // the far end answers (a flight controller, or nobody: the GCS
+                        // retries and a bare modem pair is configured from its own pages)
+                        UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
+                    } else {
+                        UAVTalkReceiveObject(inConnectionHandle);
+                    }
+                    break;
+                }
+                UAVTalkReceiveObject(inConnectionHandle);
+                if (relay) {
+                    UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
+                }
                 break;
             case OBJECTPERSISTENCE_OBJID:
             case MetaObjectId(OBJECTPERSISTENCE_OBJID):
@@ -625,15 +746,21 @@ static void ProcessTelemetryStream(UAVTalkConnection inConnectionHandle, UAVTalk
                 // The OBJECTPERSISTENCE logic can be broken too if for example OPLM nacks and then REVO acks...
                 UAVTalkReceiveObject(inConnectionHandle);
                 // relay packet to remote modem
-                UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
+                if (relay) {
+                    UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
+                }
                 break;
             default:
-                // all other packets are relayed to the remote modem
-                UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
+                // all other packets are relayed to the remote modem (not from a
+                // port that is only serving this modem's own objects)
+                if (relay) {
+                    UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
+                }
                 break;
             }
         }
     }
+    return completed;
 }
 
 /**
@@ -657,12 +784,21 @@ static void ProcessRadioStream(UAVTalkConnection inConnectionHandle, UAVTalkConn
             uint32_t objId = UAVTalkGetPacketObjId(inConnectionHandle);
             switch (objId) {
             case OPLINKSTATUS_OBJID:
+                // The far side's link test: a request over the radio is answered with
+                // our own status (sent back over the radio by UAVTalk); a status that
+                // arrives over the radio is the far modem answering our GCS, and goes
+                // to the telemetry port once.  The GCS tells the two apart by DeviceID.
+                if (UAVTalkGetPacketType(inConnectionHandle) == UAVTALK_TYPE_OBJ_REQ) {
+                    UAVTalkReceiveObject(inConnectionHandle);
+                } else {
+                    UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
+                }
+                break;
             case OPLINKSETTINGS_OBJID:
             case MetaObjectId(OPLINKSTATUS_OBJID):
             case MetaObjectId(OPLINKSETTINGS_OBJID):
                 // Ignore object...
                 // These objects are shadowed by the modem and are not transmitted to the telemetry port
-                // - OPLINKSTATUS_OBJID : ground station will receive the OPLM link status instead
                 // - OPLINKSETTINGS_OBJID : ground station will read and write the OPLM settings instead
                 break;
             case OPLINKRECEIVER_OBJID:
@@ -672,6 +808,10 @@ static void ProcessRadioStream(UAVTalkConnection inConnectionHandle, UAVTalkConn
                 // - OPLINKRECEIVER_OBJID : not sure why
                 // some objects will send back a response to the remote modem
                 UAVTalkReceiveObject(inConnectionHandle);
+                break;
+            case FIRMWAREIAPOBJ_OBJID:
+                // the flight controller at the far end identifying itself
+                UAVTalkRelayPacket(inConnectionHandle, outConnectionHandle);
                 break;
             default:
                 // all other packets are relayed to the telemetry port

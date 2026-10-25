@@ -856,9 +856,10 @@ Xcode SDKs (delete ALL of them incl. src/libs/qwt, glc_lib, sdlgamepad);
 generated Makefiles survive `test -e Makefile ||` and keep old SDKs (rm
 them all after any SDK change); uavobjects.pro's synthetics list is
 HAND-maintained and drifts behind the XML (regenerate it from
-ground/uavobject-synthetics/gcs - script in git history); the qmake
-moc-from-cpp rule for utils/submiteditorwidget is unquoted (re-quote
-after regenerating that Makefile); synthetics are expected at BOTH
+ground/uavobject-synthetics/gcs - script in git history); utils.pro
+must NOT carry a custom moc rule for submiteditorwidget - qmake's own
+moc_source step handles that #include, and a custom rule plus
+depend_includepath breaks CLEAN builds (fixed 2026-10-24); synthetics are expected at BOTH
 ground/build/ and REPO-ROOT/build/ (two symlinks). After every rebuild:
 `PlistBuddy -c "Add :NSHighResolutionCapable bool true"` on the bundle's
 Info.plist or macOS renders it blurry-upscaled. The firmware-vs-GCS

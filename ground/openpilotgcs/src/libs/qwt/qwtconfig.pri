@@ -114,7 +114,11 @@ QWT_CONFIG     += QwtOpenGL
 # Otherwise you have to build it from the designer directory.
 ######################################################################
 
-QWT_CONFIG     += QwtDesigner
+# The Qt Designer plugin is not part of this tree: qwt/designer/ is listed in
+# the repository .gitignore, so a fresh checkout has no designer.pro and
+# qmake -r fails with 'Cannot find file ... designer/designer.pro'. The GCS
+# never loads it (it only serves Qt Designer/Creator), so leave it off.
+# QWT_CONFIG     += QwtDesigner
 
 ######################################################################
 # Compile all Qwt classes into the designer plugin instead

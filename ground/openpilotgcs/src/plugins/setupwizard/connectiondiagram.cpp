@@ -86,6 +86,7 @@ void ConnectionDiagram::setupGraphicsScene()
             elementsToShow << "controller-cc";
             break;
         case VehicleConfigurationSource::CONTROLLER_REVO:
+        case VehicleConfigurationSource::CONTROLLER_CUBE:
     case VehicleConfigurationSource::CONTROLLER_REALPOSIX:
             elementsToShow << "controller-revo";
             break;
@@ -178,6 +179,7 @@ void ConnectionDiagram::setupGraphicsScene()
             }
             break;
         case VehicleConfigurationSource::CONTROLLER_REVO:
+        case VehicleConfigurationSource::CONTROLLER_CUBE:
     case VehicleConfigurationSource::CONTROLLER_REALPOSIX:
             prefix = "revo-";
             break;

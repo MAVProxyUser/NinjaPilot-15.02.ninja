@@ -181,8 +181,10 @@ not necessary for to use this port.  They are defined so the common demo files
 /*-----------------------------------------------------------*/
 
 #ifdef configASSERT
+#if ( configASSERT_DEFINED == 1 )
 	void vPortValidateInterruptPriority( void );
 	#define portASSERT_IF_INTERRUPT_PRIORITY_INVALID() 	vPortValidateInterruptPriority()
+#endif
 #endif
 
 /* portNOP() is not required by this port. */

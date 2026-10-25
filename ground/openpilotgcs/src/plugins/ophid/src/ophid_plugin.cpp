@@ -116,7 +116,9 @@ QList < Core::IConnection::device> RawHIDConnection::availableDevices()
     device dev;
     foreach(USBPortInfo prt, portsList) {
         dev.name = prt.serialNumber;
-        dev.displayName = prt.product;
+        // two boards of one kind (a pair of OPLinks) must be told apart in the
+        // Connections box, so the name carries the tail of the CPU serial
+        dev.displayName = prt.product + " " + prt.serialNumber.right(7).left(4);
         devices.append(dev);
     }
     return devices;

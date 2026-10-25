@@ -559,7 +559,8 @@ static void hid_device_removal_callback(void *context, IOReturn result,
 	hid_device *d = context;
 
 	d->disconnected = 1;
-	CFRunLoopStop(d->run_loop);
+	if (d->run_loop)
+		CFRunLoopStop(d->run_loop);
 }
 
 /* The Run Loop calls this function for each input report received.
@@ -672,6 +673,16 @@ static void *read_thread(void *param)
 		}
 	}
 
+	/* This thread owns the run loop the device is scheduled on.  Take the
+	   device off it here, before the loop dies with the thread: the
+	   IOHIDDeviceRef is shared with the GCS's USB monitor and outlives this
+	   session, and IOKit's next notification for it walks every run loop it
+	   is still scheduled on.  Left behind, that walk hit a dead run loop and
+	   the GCS died with a segfault inside the read thread of whatever
+	   device was open at the time (every disconnect was a lottery). */
+	IOHIDDeviceUnscheduleFromRunLoop(dev->device_handle, CFRunLoopGetCurrent(), dev->run_loop_mode);
+	CFRunLoopRemoveSource(CFRunLoopGetCurrent(), dev->source, dev->run_loop_mode);
+
 	/* Now that the read thread is stopping, Wake any threads which are
 	   waiting on data (in hid_read_timeout()). Do this under a mutex to
 	   make sure that a thread which is about to go to sleep waiting on
@@ -687,6 +698,38 @@ static void *read_thread(void *param)
 	pthread_barrier_wait(&dev->shutdown_barrier);
 
 	return NULL;
+}
+
+/* Open a device by the IOHIDDeviceRef another IOHIDManager (the GCS's USB
+   monitor) already holds for it: no enumeration through this library's own
+   manager, whose device list is only refilled from the run loop it was
+   scheduled on and so comes back empty when asked from another thread. */
+hid_device * HID_API_EXPORT hid_open_ref(void *device_ref)
+{
+	IOHIDDeviceRef os_dev = (IOHIDDeviceRef) device_ref;
+	hid_device *dev = NULL;
+	char str[32];
+
+	if (!os_dev)
+		return NULL;
+	dev = new_hid_device();
+	if (hid_init() < 0)
+		return NULL;
+	if (IOHIDDeviceOpen(os_dev, kIOHIDOptionsTypeSeizeDevice) != kIOReturnSuccess) {
+		free_hid_device(dev);
+		return NULL;
+	}
+	CFRetain(os_dev);
+	dev->device_handle = os_dev;
+	dev->max_input_report_len = (CFIndex) get_max_report_length(os_dev);
+	dev->input_report_buf = calloc(dev->max_input_report_len, sizeof(uint8_t));
+	sprintf(str, "HIDAPI_%p", os_dev);
+	dev->run_loop_mode = CFStringCreateWithCString(NULL, str, kCFStringEncodingASCII);
+	IOHIDDeviceRegisterInputReportCallback(os_dev, dev->input_report_buf, dev->max_input_report_len, &hid_report_callback, dev);
+	IOHIDDeviceRegisterRemovalCallback(dev->device_handle, hid_device_removal_callback, dev);
+	pthread_create(&dev->thread, NULL, read_thread, dev);
+	pthread_barrier_wait(&dev->barrier);
+	return dev;
 }
 
 hid_device * HID_API_EXPORT hid_open_path(const char *path)
@@ -980,14 +1023,18 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	if (!dev)
 		return;
 
-	/* Disconnect the report callback before close. */
-	if (!dev->disconnected) {
+	/* Disconnect the report callback before close.  Always, disconnected or
+	 * not: on macOS 10.10 and later a removal callback left registered on a
+	 * device that has already gone fires again later on this freed struct
+	 * (CFRunLoopStop on a garbage run loop; the GCS died that way every
+	 * time the board rebooted for a flash).  Same fix as upstream hidapi. */
+	{
 		IOHIDDeviceRegisterInputReportCallback(
 			dev->device_handle, dev->input_report_buf, dev->max_input_report_len,
 			NULL, dev);
 		IOHIDDeviceRegisterRemovalCallback(dev->device_handle, NULL, dev);
-		IOHIDDeviceUnscheduleFromRunLoop(dev->device_handle, dev->run_loop, dev->run_loop_mode);
-		IOHIDDeviceScheduleWithRunLoop(dev->device_handle, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
+		/* the read thread takes the device off its own run loop as it exits;
+		   do not move the shared device onto the main run loop here */
 	}
 
 	/* Cause read_thread() to stop. */

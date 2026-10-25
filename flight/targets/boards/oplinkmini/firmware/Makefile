@@ -28,6 +28,9 @@ override USE_DSP_LIB := NO
 
 # List of mandatory modules to include
 MODULES += RadioComBridge
+# Firmware update / reboot over UAVTalk (GCS 'Halt', opdfu.py halt): the modem
+# answers the 1122/2233/3344 sequence only when BoardType names its own board.
+MODULES += FirmwareIAP
 
 # List of optional modules to include
 OPTMODULES =
@@ -57,6 +60,7 @@ ifndef TESTAPP
     SRC += $(OPUAVSYNTHDIR)/objectpersistence.c
     SRC += $(OPUAVSYNTHDIR)/oplinkreceiver.c
     SRC += $(OPUAVSYNTHDIR)/radiocombridgestats.c
+    SRC += $(OPUAVSYNTHDIR)/firmwareiapobj.c
 else
     ## Test Code
     SRC += $(OPTESTS)/test_common.c
@@ -66,5 +70,25 @@ endif
 # Optional component libraries
 include $(FLIGHTLIB)/rscode/library.mk
 
+# GCC 13 vs this F1 tree (same block as the Cube Purple target):
+# strict-aliasing miscompiled the kernel's list handling, and the packed
+# UAVObject structs trip -Werror=address-of-packed-member.
+CFLAGS += -fno-strict-aliasing
+CPPFLAGS += -fno-strict-aliasing
+CFLAGS += -Wno-address-of-packed-member
+CPPFLAGS += -Wno-address-of-packed-member
+CFLAGS += -Wno-missing-attributes -Wno-misleading-indentation -Wno-attributes
+CFLAGS += -Wno-stringop-overflow -Wno-stringop-overread
+CPPFLAGS += -Wno-stringop-overflow -Wno-stringop-overread
+CFLAGS += -Wno-implicit-fallthrough -Wno-unused-function -Wno-unused-but-set-variable -Wno-array-bounds -Wno-maybe-uninitialized
+CPPFLAGS += -Wno-implicit-fallthrough -Wno-unused-function -Wno-unused-but-set-variable -Wno-array-bounds -Wno-maybe-uninitialized
+
+# A modem has no FlightStatus: FirmwareIAP must not look for one before resetting.
+CDEFS += -DPIOS_APPS_MINIMAL
+
 include $(ROOT_DIR)/make/apps-defs.mk
 include $(ROOT_DIR)/make/common-defs.mk
+
+# GCC 13 flags every unsuffixed double constant in the shared libraries;
+# must follow common-defs.mk, which turns the warning on.
+CONLYFLAGS += -Wno-unsuffixed-float-constants
