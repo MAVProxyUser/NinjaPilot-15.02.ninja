@@ -211,6 +211,9 @@ DIRS += $(OPGCSSYNTHDIR)
 
 # Define supported board lists
 ALL_BOARDS    := coptercontrol oplinkmini simposix realposix simwroom simlitewing cubepurple
+# pixracer (FMUv4) is a staged port, kept out of the default build until its
+# driver-API rewrite is finished and hardware-verified.  Add it back here to
+# work on it; see flight/targets/boards/pixracer/README.md.
 # Short names of each board (used to display board name in parallel builds)
 coptercontrol_short    := 'cc  '
 oplinkmini_short       := 'oplm'
@@ -219,6 +222,7 @@ simwroom_short          := 'wrom'
 simlitewing_short       := 'ltwg'
 cubepurple_short        := 'cube'
 realposix_short         := 'real'
+pixracer_short          := 'pxr '
 
 # Start out assuming that we'll build fw, bl and bu for all boards
 FW_BOARDS  := $(ALL_BOARDS)
@@ -228,9 +232,9 @@ EF_BOARDS  := $(ALL_BOARDS)
 
 # SimPosix doesn't have a BL, BU or EF target so we need to
 # filter them out to prevent errors on the all_flight target.
-BL_BOARDS  := $(filter-out simposix realposix simwroom simlitewing cubepurple, $(BL_BOARDS))
-BU_BOARDS  := $(filter-out simposix realposix simwroom simlitewing gpsplatinum cubepurple, $(BU_BOARDS))
-EF_BOARDS  := $(filter-out simposix realposix simwroom simlitewing cubepurple, $(EF_BOARDS))
+BL_BOARDS  := $(filter-out simposix realposix simwroom simlitewing cubepurple pixracer, $(BL_BOARDS))
+BU_BOARDS  := $(filter-out simposix realposix simwroom simlitewing gpsplatinum cubepurple pixracer, $(BU_BOARDS))
+EF_BOARDS  := $(filter-out simposix realposix simwroom simlitewing cubepurple pixracer, $(EF_BOARDS))
 
 # Generate the targets for whatever boards are left in each list
 FW_TARGETS := $(addprefix fw_, $(FW_BOARDS))
