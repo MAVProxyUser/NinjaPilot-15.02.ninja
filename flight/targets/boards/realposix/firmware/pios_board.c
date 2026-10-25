@@ -34,6 +34,7 @@
 #include <manualcontrolsettings.h>
 #include <actuatorsettings.h>
 #include <taskinfo.h>
+#include <stdlib.h>     /* getenv - runtime bus selection (RED vs BRK) */
 
 
 /*
@@ -185,7 +186,20 @@ void PIOS_Board_Init(void)
      * still leave a debuggable firmware, and the hub reports which sensors
      * came up. It only fails hard when NOTHING initialised.
      */
-    if (PIOS_SENSORS_HUB_Init(PIOS_REALPOSIX_I2C_DEV, PIOS_REALPOSIX_CAN_IF) != 0) {
+    /* The I2C bus is board-specific but the realposix target/config header is
+     * shared: the RED's sensor tree is on /dev/i2c-3, the BRK's on /dev/i2c-1
+     * (I2C2, PF1/PG15). Override the compile-time default at runtime via
+     * NINJAPILOT_I2C_DEV (and NINJAPILOT_CAN_IF) so one binary serves both -
+     * the per-board systemd unit sets them. Empty/unset -> the RED defaults. */
+    const char *i2c_dev = getenv("NINJAPILOT_I2C_DEV");
+    const char *can_if  = getenv("NINJAPILOT_CAN_IF");
+    if (!i2c_dev || !*i2c_dev) {
+        i2c_dev = PIOS_REALPOSIX_I2C_DEV;
+    }
+    if (!can_if || !*can_if) {
+        can_if = PIOS_REALPOSIX_CAN_IF;
+    }
+    if (PIOS_SENSORS_HUB_Init(i2c_dev, can_if) != 0) {
         PIOS_DEBUG_Assert(0);
     }
 #endif
@@ -275,6 +289,27 @@ void PIOS_Board_Init(void)
         printf("udp-ppm rcvr: init FAILED (port %u busy?)\n", PIOS_UDPRCVR_DEFAULT_PORT);
     }
 #endif /* PIOS_INCLUDE_UDPRCVR */
+
+#if defined(PIOS_INCLUDE_DSM)
+    /* Spektrum/DSM satellite serial receiver, registered as the DSM (MainPort)
+     * channel group. The tty defaults to PIOS_REALPOSIX_DSM_DEV (USART2 = PF4
+     * on the BRK) and is overridable with NINJAPILOT_DSM_DEV so any broken-out
+     * UART works (ttySTM2/5/7/1). Select it by setting
+     * ManualControlSettings.ChannelGroups to "DSM (MainPort)". Non-fatal: a
+     * missing/unbound tty just leaves the group unmapped. */
+    const char *dsm_dev = getenv("NINJAPILOT_DSM_DEV");
+    if (!dsm_dev || !*dsm_dev) {
+        dsm_dev = PIOS_REALPOSIX_DSM_DEV;
+    }
+    uint32_t pios_dsm_id;
+    if (PIOS_DSM_POSIX_Init(&pios_dsm_id, dsm_dev) == 0) {
+        uint32_t pios_dsm_rcvr_id;
+        if (PIOS_RCVR_Init(&pios_dsm_rcvr_id, &pios_dsm_posix_rcvr_driver, pios_dsm_id)) {
+            PIOS_Assert(0);
+        }
+        pios_rcvr_group_map[MANUALCONTROLSETTINGS_CHANNELGROUPS_DSMMAINPORT] = pios_dsm_rcvr_id;
+    }
+#endif /* PIOS_INCLUDE_DSM */
 
     // BootFault ties to IAP backup-register boot-count tracking on real
     // hardware (coptercontrol/pios_board.c) - there's no bootloader/IAP

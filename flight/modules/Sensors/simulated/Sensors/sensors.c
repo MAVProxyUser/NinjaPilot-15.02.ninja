@@ -220,8 +220,10 @@ static void sensorHubSettingsUpdatedCb(__attribute__((unused)) UAVObjEvent *ev)
     SensorHubSettingsData shs;
 
     SensorHubSettingsGet(&shs);
+#ifndef NINJAPILOT_BRK
     PIOS_SENSORS_HUB_SetCanStreamRates(shs.CanImuRateHz, shs.CanAk8975RateHz,
                                        shs.CanBaroRateHz, shs.CanMagRateHz);
+#endif
     PIOS_SHMLOG_Printf("[sensors] CAN stream command: imu=%u ak=%u baro=%u mag=%u Hz",
                        (unsigned)shs.CanImuRateHz, (unsigned)shs.CanAk8975RateHz,
                        (unsigned)shs.CanBaroRateHz, (unsigned)shs.CanMagRateHz);
@@ -699,6 +701,32 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                     am.Status = AUXMAGSENSOR_STATUS_OK;
                     am.Temperature = h.have_auxmag_temp ? h.auxmag_temp_raw : 0;
                     AuxMagSensorSet(&am);
+
+#ifdef NINJAPILOT_BRK
+                    /*
+                     * BRK build has CAN compiled out, so there is no RM3100 and
+                     * the local HMC5883L is the ONLY magnetometer. Publish it as
+                     * MagSensor (the board mag the estimator fuses), not just
+                     * AuxMagSensor - filtermag's default AuxMagSettings.Usage is
+                     * ONBOARDONLY and would otherwise ignore the aux mag, leaving
+                     * the AHRS with no heading reference and a MAG alarm. On a
+                     * non-BRK (RED) build this is compiled out and the RM3100
+                     * stays the board mag, so there is never a last-writer
+                     * conflict. Parallels the baro2 -> BaroSensor failover.
+                     */
+                    {
+                        MagSensorData m;
+                        float mv[3] = { h.mag2_ga[0] * 1000.0f,  /* Ga -> mGa */
+                                        h.mag2_ga[1] * 1000.0f,
+                                        h.mag2_ga[2] * 1000.0f };
+                        applyMagCal(mv);
+                        m.x = mv[0];
+                        m.y = mv[1];
+                        m.z = mv[2];
+                        m.temperature = h.baro_temp_c;
+                        MagSensorSet(&m);
+                    }
+#endif
                 }
 
                 if (h.gps_count != last_gps) {
@@ -860,10 +888,19 @@ static void SensorsTask(__attribute__((unused)) void *parameters)
                         if (revo.FusionAlgorithm == REVOSETTINGS_FUSIONALGORITHM_BASICCOMPLEMENTARY) {
                             static uint32_t prev_mag_count = 0;
                             static uint8_t mag_quiet_s = 0;
-                            if (h.mag_count > 0) {
-                                if (h.mag_count != prev_mag_count) {
-                                    uint32_t delta = h.mag_count - prev_mag_count;
-                                    prev_mag_count = h.mag_count;
+#ifdef NINJAPILOT_BRK
+                            /* No CAN RM3100 on the BRK: the local HMC5883L is
+                             * the board mag (published as MagSensor above), so
+                             * the transport-health tile must watch ITS counter
+                             * (mag2_count), else MAG stays greyed forever. */
+                            uint32_t mag_cnt = h.mag2_count;
+#else
+                            uint32_t mag_cnt = h.mag_count;   /* RM3100 over CAN */
+#endif
+                            if (mag_cnt > 0) {
+                                if (mag_cnt != prev_mag_count) {
+                                    uint32_t delta = mag_cnt - prev_mag_count;
+                                    prev_mag_count = mag_cnt;
                                     mag_quiet_s    = 0;
                                     if (delta >= 13) {   /* at least half the native rate */
                                         AlarmsClear(SYSTEMALARMS_ALARM_MAGNETOMETER);

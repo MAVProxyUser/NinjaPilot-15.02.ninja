@@ -34,6 +34,14 @@
 
 /* Public Functions */
 
+#ifdef PIOS_INCLUDE_DSM
+/* POSIX (realposix) Spektrum/DSM serial receiver - reads a Linux tty and
+ * exposes the standard RCVR driver. See flight/pios/posix/pios_dsm.c. */
+struct pios_rcvr_driver;
+extern const struct pios_rcvr_driver pios_dsm_posix_rcvr_driver;
+extern int32_t PIOS_DSM_POSIX_Init(uint32_t *dsm_id, const char *dev_path);
+#endif /* PIOS_INCLUDE_DSM */
+
 #endif /* PIOS_DSM_H */
 
 /**

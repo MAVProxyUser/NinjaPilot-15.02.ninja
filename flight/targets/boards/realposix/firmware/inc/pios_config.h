@@ -72,6 +72,10 @@
 #define PIOS_INCLUDE_SENSORS_HUB
 #define PIOS_REALPOSIX_I2C_DEV "/dev/i2c-3"
 #define PIOS_REALPOSIX_CAN_IF  "can0"
+/* Spektrum/DSM satellite serial port. Default USART2 = /dev/ttySTM2 = PF4 on
+ * the OSD32MP1-BRK; override at runtime with NINJAPILOT_DSM_DEV (other broken-
+ * out UARTs: ttySTM5=UART5 PB12, ttySTM7=UART7 PB3, ttySTM1=UART8 PE0). */
+#define PIOS_REALPOSIX_DSM_DEV "/dev/ttySTM2"
 
 #define PIOS_INCLUDE_DELAY
 #define PIOS_INCLUDE_I2C
