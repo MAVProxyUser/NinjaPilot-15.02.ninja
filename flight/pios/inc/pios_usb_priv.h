@@ -38,6 +38,10 @@ struct pios_usb_cfg {
     struct stm32_irq  irq;
     struct stm32_gpio vsense;
     bool vsense_active_low;
+    /* Ignore the VBUS-sense pin and treat USB as present once configured by the
+     * host (for boards where the pin is not wired the way the OTG core assumes,
+     * which otherwise drops every transmit). Defaults false; set per board. */
+    bool vsense_ignore;
 };
 
 extern int32_t PIOS_USB_Init(uint32_t *usb_id, const struct pios_usb_cfg *cfg);

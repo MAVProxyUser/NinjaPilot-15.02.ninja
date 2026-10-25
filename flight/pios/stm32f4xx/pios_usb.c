@@ -176,6 +176,9 @@ bool PIOS_USB_CheckAvailable(__attribute__((unused)) uint32_t id)
     }
 
     usb_found = ((usb_dev->cfg->vsense.gpio->IDR & usb_dev->cfg->vsense.init.GPIO_Pin) != 0) ^ usb_dev->cfg->vsense_active_low;
+    if (usb_dev->cfg->vsense_ignore) {
+        usb_found = 1;
+    }
 // Please note that checks of transfer_possible and the reconnection handling is
 // suppressed for non freertos mode (aka bootloader) as this is causing problems detecting connection and
 // broken communications.

@@ -41,6 +41,13 @@
 #include <uavobjectsinit.h>
 #include "hwsettings.h"
 #include "manualcontrolsettings.h"
+#include "taskinfo.h"
+/* This tree's pios.h does not pull the IMU driver in; the Pixracer target's
+ * own (superset, dual-IMU) pios_invensense.h is first on the include path
+ * (EXTRAINCDIRS += inc in the board Makefile). */
+#include "pios_invensense.h"
+#include "pios_hmc5x83.h"
+#include "pios_ms5611.h"
 
 /* Included here rather than from board_hw_defs.c: it depends on the UAVObject
  * headers above. */
@@ -216,7 +223,7 @@ static const struct pios_exti_cfg pios_exti_icm20608_cfg __exti_config = {
  * registers, which these parts limit to about 1 MHz, and prescaler 16 gives
  * 5.25 MHz for the sensor-register burst, well inside their 20 MHz limit.
  */
-static const struct pios_invensense_cfg pios_mpu9250_cfg = {
+static const struct pios_invensense_cfg __attribute__((unused)) pios_mpu9250_cfg = {
 	.exti_cfg = &pios_exti_mpu9250_cfg,
 	.type = PIOS_INVENSENSE_MPU9250,
 	/* DLPF on -> 1 kHz base rate; divider 0 keeps all 1000 samples/s */
@@ -233,7 +240,7 @@ static const struct pios_invensense_cfg pios_mpu9250_cfg = {
 	.fast_prescaler = SPI_BaudRatePrescaler_16,
 };
 
-static const struct pios_invensense_cfg pios_icm20608_cfg = {
+static const struct pios_invensense_cfg __attribute__((unused)) pios_icm20608_cfg = {
 	.exti_cfg = &pios_exti_icm20608_cfg,
 	.type = PIOS_INVENSENSE_ICM20608,
 	.smpl_rate_div = 0,
@@ -260,7 +267,7 @@ static const struct pios_invensense_cfg pios_icm20608_cfg = {
  */
 pios_hmc5x83_dev_t pios_hmc5983_id;
 
-static const struct pios_hmc5x83_cfg pios_hmc5983_cfg = {
+static const struct pios_hmc5x83_cfg __attribute__((unused)) pios_hmc5983_cfg = {
 	.M_ODR = PIOS_HMC5x83_ODR_75,
 	.Meas_Conf = PIOS_HMC5x83_MEASCONF_NORMAL,
 	.Gain = PIOS_HMC5x83_GAIN_1_9,
@@ -272,9 +279,8 @@ static const struct pios_hmc5x83_cfg pios_hmc5983_cfg = {
 
 #if defined(PIOS_INCLUDE_MS5611)
 /* MS5611 on SPI2, sharing the bus with the FRAM. */
-static const struct pios_ms5611_cfg pios_ms5611_cfg = {
+static const struct pios_ms5611_cfg __attribute__((unused)) pios_ms5611_cfg = {
 	.oversampling = MS5611_OSR_512,
-	.spi_prescaler = SPI_BaudRatePrescaler_8,
 };
 #endif /* PIOS_INCLUDE_MS5611 */
 
@@ -353,7 +359,7 @@ static void PIOS_Board_configure_com(const struct pios_usart_cfg *usart_port_cfg
  * main/flexi port pair instead.  The board_hw_defs side is already done.
  */
 static void __attribute__((unused)) PIOS_Board_configure_dsm(const struct pios_usart_cfg *usart_dsm_cfg, const struct pios_dsm_cfg *dsm_cfg,
-		const struct pios_com_driver *usart_com_driver, enum pios_dsm_proto *proto,
+		const struct pios_com_driver *usart_com_driver,
 		ManualControlSettingsChannelGroupsOptions channelgroup, uint8_t *bind)
 {
 	uint32_t pios_usart_dsm_id;
@@ -361,9 +367,11 @@ static void __attribute__((unused)) PIOS_Board_configure_dsm(const struct pios_u
 		PIOS_Assert(0);
 	}
 
+	/* This tree's PIOS_DSM_Init takes no protocol argument (the DSM2/DSMX
+	 * resolution is auto-detected), unlike the fork this board came from. */
 	uint32_t pios_dsm_id;
 	if (PIOS_DSM_Init(&pios_dsm_id, dsm_cfg, usart_com_driver,
-			pios_usart_dsm_id, *proto, *bind)) {
+			pios_usart_dsm_id, *bind)) {
 		PIOS_Assert(0);
 	}
 
@@ -521,6 +529,10 @@ volatile uint32_t pios_bringup_progress;
 volatile uint32_t pios_bringup_progress2;
 void *pios_bringup_reporter_handle;
 
+/* Filesystem ids the shared UAVObject/settings code links against. */
+uintptr_t pios_uavo_settings_fs_id;
+uintptr_t pios_user_fs_id;
+
 static void PIOS_Board_reporter_task(void *parameters)
 {
 	(void)parameters;
@@ -585,7 +597,7 @@ void PIOS_Board_Init(void) {
 	const struct pios_board_info * bdinfo = &pios_board_info_blob;
 
 #if defined(PIOS_INCLUDE_LED)
-	const struct pios_led_cfg * led_cfg = PIOS_BOARD_HW_DEFS_GetLedCfg(bdinfo->board_rev);
+	const struct pios_gpio_cfg * led_cfg = PIOS_BOARD_HW_DEFS_GetLedCfg(bdinfo->board_rev);
 	PIOS_Assert(led_cfg);
 	PIOS_LED_Init(led_cfg);
 
@@ -618,8 +630,7 @@ void PIOS_Board_Init(void) {
 	if (PIOS_Flash_Internal_Init(&flash_id, &flash_internal_cfg)) {
 		PIOS_DEBUG_Assert(0);
 	}
-	uintptr_t fs_id;
-	if (PIOS_FLASHFS_Logfs_Init(&fs_id, &flashfs_internal_cfg, &pios_internal_flash_driver, flash_id)) {
+	if (PIOS_FLASHFS_Logfs_Init(&pios_uavo_settings_fs_id, &flashfs_internal_cfg, &pios_internal_flash_driver, flash_id)) {
 		PIOS_DEBUG_Assert(0);
 	}
 #endif	/* PIOS_INCLUDE_FLASH_INTERNAL */
@@ -639,7 +650,7 @@ void PIOS_Board_Init(void) {
 	AlarmsInitialize();
 
 	/* Initialize the task monitor library */
-	TaskMonitorInitialize();
+	PIOS_TASK_MONITOR_Initialize(TASKINFO_RUNNING_NUMELEM);
 
 	/* Set up pulse timers */
 	BRINGUP_STEP(7);	/* before timers */
@@ -938,10 +949,10 @@ void PIOS_Board_Init(void) {
 	pios_bringup_sensors_found = sensors_found;
 
 	/* Highest priority so it keeps reporting through any lower-priority hang. */
-	xTaskCreate(PIOS_Board_reporter_task, (signed char *)"pxrRep",
+	xTaskCreate(PIOS_Board_reporter_task, "pxrRep",
 		    configMINIMAL_STACK_SIZE, NULL,
 		    tskIDLE_PRIORITY + configMAX_PRIORITIES - 1,
-		    &pios_bringup_reporter_handle);
+		    (xTaskHandle *)&pios_bringup_reporter_handle);
 	pios_bringup_progress = 1;	/* 1 = board init finished */
 
 	/*

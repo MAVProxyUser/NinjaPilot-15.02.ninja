@@ -40,6 +40,16 @@
 #include <pios_config.h>
 #include <pios_board_info.h>
 
+/* This tree's F4 CMSIS predates the F427 and does not expose UART7/8 in the
+ * IRQn_Type enum, though vectors_stm32f4xx.c and the F427 startup already wire
+ * their vector slots (IRQ 82/83). Define them here for this board only. */
+#ifndef UART7_IRQn
+#define UART7_IRQn ((IRQn_Type)82)
+#endif
+#ifndef UART8_IRQn
+#define UART8_IRQn ((IRQn_Type)83)
+#endif
+
 #if defined(PIOS_INCLUDE_LED)
 
 #include <pios_led_priv.h>
@@ -49,7 +59,7 @@
  * pin is driven LOW - hence active_high = false.  ArduPilot expresses the same
  * thing as HAL_GPIO_LED_ON defaulting to 0 (see AP_HAL/AP_HAL_Boards.h).
  */
-static const struct pios_led pios_leds[] = {
+static const struct pios_gpio pios_leds[] = {
 	[PIOS_LED_HEARTBEAT] = {
 		.pin = {
 			.gpio = GPIOB,
@@ -61,7 +71,7 @@ static const struct pios_led pios_leds[] = {
 				.GPIO_PuPd  = GPIO_PuPd_UP
 			},
 		},
-		.active_high = false,
+		.active_low = true,
 	},
 	[PIOS_LED_ALARM] = {
 		.pin = {
@@ -74,7 +84,7 @@ static const struct pios_led pios_leds[] = {
 				.GPIO_PuPd  = GPIO_PuPd_UP
 			},
 		},
-		.active_high = false,
+		.active_low = true,
 	},
 	[PIOS_LED_BLUE] = {
 		.pin = {
@@ -87,16 +97,16 @@ static const struct pios_led pios_leds[] = {
 				.GPIO_PuPd  = GPIO_PuPd_UP
 			},
 		},
-		.active_high = false,
+		.active_low = true,
 	},
 };
 
-static const struct pios_led_cfg pios_led_cfg = {
-	.leds     = pios_leds,
-	.num_leds = NELEMENTS(pios_leds),
+static const struct pios_gpio_cfg pios_led_cfg = {
+	.gpios     = pios_leds,
+	.num_gpios = NELEMENTS(pios_leds),
 };
 
-const struct pios_led_cfg * PIOS_BOARD_HW_DEFS_GetLedCfg (uint32_t board_revision)
+const struct pios_gpio_cfg * PIOS_BOARD_HW_DEFS_GetLedCfg (uint32_t board_revision)
 {
 	/* Only one hardware revision is supported so far (R12). */
 	(void)board_revision;

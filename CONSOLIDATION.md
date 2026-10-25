@@ -29,7 +29,7 @@ with `arm-none-eabi-gcc` 13.3:
 | `simwroom` | host | posix twin of the ESP32-WROOM board |
 | `simlitewing` | host | posix twin of the LiteWing board |
 | `realposix` | Linux (OSD32MP1) | builds on the board's embedded Linux, not on macOS (needs SocketCAN / `sys/prctl.h`) |
-| `pixracer` | STM32F427 | FMUv4 port, **staged / not in the default build** — see `flight/targets/boards/pixracer/README.md` |
+| `pixracer` | STM32F427 | CubePilot/mRo PixRacer (FMUv4); builds, sensors staged off pending hardware - see `flight/targets/boards/pixracer/README.md` |
 
 ## Folded-in sibling projects (`ports/`)
 

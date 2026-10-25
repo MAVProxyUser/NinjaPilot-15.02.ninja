@@ -94,9 +94,9 @@ ifndef TESTAPP
     ## Sensor drivers this board carries (MPU9250 + ICM-20608-G on SPI1,
     ## HMC5983 mag on SPI1, MS5611 baro on SPI2).  No IO co-processor and no
     ## FRAM, unlike the Cube Purple.
-    SRC += $(PIOSCOMMON)/pios_invensense.c
-    SRC += $(PIOSCOMMON)/pios_hmc5x83.c
-    SRC += $(PIOSCOMMON)/pios_ms5611.c
+    ## Pixracer carries its own (dual-IMU, superset) invensense driver so the
+    ## Cube Purple target keeps its flight-proven common copy untouched.
+    SRC += $(OPSYSTEM)/pios_invensense.c
 
     ## UAVObjects
     include ./UAVObjects.inc
@@ -106,6 +106,11 @@ else
     SRC += $(OPTESTS)/test_common.c
     SRC += $(OPTESTS)/$(TESTAPP).c
 endif
+
+# The Pixracer target ships its own (superset, dual-IMU) pios_invensense.h in
+# firmware/inc; put that dir ahead of flight/pios/inc so this build sees it
+# while the Cube Purple target keeps the common single-IMU header.
+EXTRAINCDIRS += inc
 
 include $(ROOT_DIR)/make/apps-defs.mk
 include $(ROOT_DIR)/make/common-defs.mk

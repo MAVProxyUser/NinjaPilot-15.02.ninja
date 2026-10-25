@@ -210,7 +210,7 @@ export OPGCSSYNTHDIR := $(BUILD_DIR)/openpilotgcs-synthetics
 DIRS += $(OPGCSSYNTHDIR)
 
 # Define supported board lists
-ALL_BOARDS    := coptercontrol oplinkmini simposix realposix simwroom simlitewing cubepurple
+ALL_BOARDS    := coptercontrol oplinkmini simposix realposix simwroom simlitewing cubepurple pixracer
 # pixracer (FMUv4) is a staged port, kept out of the default build until its
 # driver-API rewrite is finished and hardware-verified.  Add it back here to
 # work on it; see flight/targets/boards/pixracer/README.md.
