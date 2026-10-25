@@ -1,0 +1,130 @@
+# NinjaPilot litewing -- ESP-IDF configuration.
+#
+# Every non-obvious line here is a deliberate choice; please read the comment
+# before changing one.
+
+CONFIG_IDF_TARGET="esp32"
+
+# --- CPU ---------------------------------------------------------------
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# Dynamic frequency scaling OFF. It adds latency to every critical section
+# and varies the clock underneath a control loop. (The ArduPilot ESP32 port
+# leaves this ON for the original ESP32 and OFF for the S3, which looks like
+# an oversight rather than a decision.)
+CONFIG_PM_ENABLE=n
+
+# DUAL CORE. Unicore was a bring-up simplification; with WiFi telemetry in
+# the build it became a measured cost: WiFi+lwIP preempting the flight stack
+# produced a 5x jump in stabilization deadline warnings. Core 0 carries the
+# network stack and IDF housekeeping; core 1 carries every flight task (the
+# xTaskCreate shim in pios_esp32.h pins them). Timing was characterized
+# single-core -- re-run the loop measurements after any SMP-related change.
+CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU0=y
+# The dual-core bootloader outgrew the 0x8000 partition-table offset by 304
+# bytes at INFO log level. Warnings-only trims several KB and keeps every
+# partition -- and every stored setting and WiFi credential -- exactly where
+# it already is, which moving the table would not.
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+
+# --- Flash -------------------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- Performance -------------------------------------------------------
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# Keep the SPI master in IRAM: the gyro read is the hottest path on the board
+# and we do not want it stalling on a flash cache miss.
+CONFIG_SPI_MASTER_IN_IRAM=y
+
+# --- Watchdogs: ON -----------------------------------------------------
+# Deliberately enabled. The PiOS flag scheme in pios_wdg.c sits on top of the
+# task WDT, so a single stalled flight task takes the board down instead of
+# letting it fly on stale commands.
+#
+# The timeout must be LONGER than PIOS_WATCHDOG_TIMEOUT (250ms in
+# pios_board.h) or the hardware fires before PiOS gets a chance to.
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=2
+# ARMED: a registered task that stops checking in for 2s now resets the board,
+# which is the behaviour described at the top of pios/esp32/pios_wdg.c.
+# Verified by injecting a flag bit nothing ever sets: the watchdog trips 2.0s
+# later and names the task.
+#
+# This was deliberately held back until the xTaskCreate stack-size shim landed
+# (see pios_esp32.h). Before that every flight task ran on a quarter of its
+# intended stack and the resulting corruption produced intermittent panics in
+# telemetryRxTask and runNextCallback; arming the watchdog on top of that would
+# have turned them into in-flight resets rather than protection.
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
+CONFIG_ESP_INT_WDT=y
+
+# --- FreeRTOS ----------------------------------------------------------
+CONFIG_FREERTOS_HZ=1000
+
+# This tree predates FreeRTOS v8's type rename and still uses xTaskHandle,
+# xQueueHandle and xSemaphoreHandle throughout (pios_rcvr.h, pios_task_monitor.h,
+# uavobjectmanager.h, every generated UAVObject header...). The vendored
+# V11.3.0 kernel provides the old spellings; IDF's build turns them off by
+# default, so turn them back on rather than churning hundreds of files in
+# shared flight code.
+CONFIG_FREERTOS_ENABLE_BACKWARD_COMPATIBILITY=y
+# The tree's other targets need configMAX_PRIORITIES >= 8; IDF's default of 25
+# is comfortably above that, so nothing to set.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+
+# --- Diagnostics -------------------------------------------------------
+# A core dump to flash is how you find out what a crash on the bench was.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+
+# --- Not used (yet) ----------------------------------------------------
+CONFIG_BT_ENABLED=n
+
+# --- Bring-up diagnostics (turn off once stable) ------------------------
+# Comprehensive poisoning checks the canaries around every allocation on
+# free and on every heap operation, so a buffer overrun is reported at the
+# point of corruption rather than surfacing later as a wild pointer.
+CONFIG_HEAP_POISONING_COMPREHENSIVE=y
+CONFIG_HEAP_TRACING_STANDALONE=n
+
+# --- Console OFF UART0 -------------------------------------------------
+# UART0 carries UAVTalk to the GCS. Leaving IDF's console on it interleaves
+# log text into the middle of UAVTalk frames; the receiver then reports
+# "failed CRC check" in a loop and the link never establishes. pyuavtalk
+# silently drops the bad frames and limps along, which is why this looked
+# like flaky request/reply rather than corruption -- the GCS is stricter and
+# simply never links.
+#
+# The console lives on UART0 at GPIO43 (TX) / GPIO44 (RX) -- the CH340K that
+# the USB socket already goes to, so the boot log and panics need no second
+# adapter.
+#
+# It USED to sit on UART1 (GPIO17/18). That moved when the GPS was fitted:
+# UART1 is now the u-blox M10's port, and the ESP32-S3 has exactly three
+# UARTs. Do not put it back without moving the GPS first.
+#
+# GPIO 22-25 DO NOT EXIST on the ESP32-S3 (SOC_GPIO_VALID_GPIO_MASK masks bits
+# 22-25), which is where the esp32wroom target puts its console -- copying that
+# target verbatim gives a console on pins that cannot exist.
+CONFIG_ESP_CONSOLE_UART_CUSTOM=y
+# CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_1 is not set
+CONFIG_ESP_CONSOLE_UART_TX_GPIO=43
+CONFIG_ESP_CONSOLE_UART_RX_GPIO=44
+# 115200 to match the ROM bootloader, so esptool output and the application
+# log read at one rate.
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+
+# --- LiteWing / ESP32-S3 -----------------------------------------------------
+# The board reports "WiFi, BLE" with no PSRAM, and GPIO35/36/37 -- the octal
+# PSRAM pins on WROOM-1 parts that have it -- are wired to the optical-flow SPI
+# header here. Enabling PSRAM would fight that header for the pins.
+CONFIG_SPIRAM=n

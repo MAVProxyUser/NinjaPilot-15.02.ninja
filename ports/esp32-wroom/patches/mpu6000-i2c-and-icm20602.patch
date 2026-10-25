@@ -1,0 +1,380 @@
+diff --git a/flight/pios/common/pios_mpu6000.c b/flight/pios/common/pios_mpu6000.c
+index d30a8af64..883605858 100644
+--- a/flight/pios/common/pios_mpu6000.c
++++ b/flight/pios/common/pios_mpu6000.c
+@@ -63,6 +63,12 @@ const PIOS_SENSORS_Driver PIOS_MPU6000_Driver = {
+ struct mpu6000_dev {
+     uint32_t spi_id;
+     uint32_t slave_num;
++    /* I2C alternative. use_i2c selects the transport; the register map and
++     * everything above these accessors is identical either way, because the
++     * MPU6000 family exposes the same registers on both buses. */
++    uint32_t i2c_id;
++    uint8_t  i2c_addr;
++    bool     use_i2c;
+     QueueHandle_t queue;
+     const struct pios_mpu6000_cfg *cfg;
+     enum pios_mpu6000_range gyro_range;
+@@ -182,77 +188,118 @@ int32_t PIOS_MPU6000_Init(uint32_t spi_id, uint32_t slave_num, const struct pios
+     return 0;
+ }
+ 
++#if defined(PIOS_INCLUDE_I2C)
++/**
++ * @brief Bring up an MPU6000-family part on I2C instead of SPI.
++ *
++ * Same silicon, same registers, same configuration sequence -- only the
++ * transport differs. Useful for breakout boards that do not bring SDO/AD0
++ * out to a pin, which makes 4-wire SPI physically impossible.
++ *
++ * @param[in] i2c_id  PiOS I2C adapter id
++ * @param[in] i2c_addr 7-bit address: 0x68 with AD0 low, 0x69 with AD0 high
++ */
++int32_t PIOS_MPU6000_Init_I2C(uint32_t i2c_id, uint8_t i2c_addr, const struct pios_mpu6000_cfg *cfg)
++{
++    dev = PIOS_MPU6000_alloc(cfg);
++    if (dev == NULL) {
++        return -1;
++    }
++
++    dev->use_i2c   = true;
++    dev->i2c_id    = i2c_id;
++    dev->i2c_addr  = i2c_addr;
++    dev->spi_id    = 0;
++    dev->slave_num = 0;
++    dev->cfg = cfg;
++
++    PIOS_MPU6000_Config(cfg);
++
++    PIOS_EXTI_Init(cfg->exti_cfg);
++    return 0;
++}
++#endif /* PIOS_INCLUDE_I2C */
++
+ /**
+  * @brief Initialize the MPU6000 3-axis gyro sensor
+  * \return none
+  * \param[in] PIOS_MPU6000_ConfigTypeDef struct to be used to configure sensor.
+  *
+  */
++
++/*
++ * Bounded register write.
++ *
++ * PIOS_MPU6000_Config() originally retried each write with an unbounded
++ * `PIOS_MPU6000_SetRegBounded(...);`. That is fine when the part is
++ * present, but with nothing on the bus MISO floats high, every write reports
++ * failure, and board init hangs forever before telemetry starts -- the board
++ * looks dead rather than reporting a missing IMU. Retry a bounded number of
++ * times and give up.
++ */
++#define PIOS_MPU6000_SETREG_RETRIES 10
++
++static bool PIOS_MPU6000_SetRegBounded(uint8_t reg, uint8_t data)
++{
++    for (uint8_t i = 0; i < PIOS_MPU6000_SETREG_RETRIES; i++) {
++        if (PIOS_MPU6000_SetReg(reg, data) == 0) {
++            return true;
++        }
++    }
++    return false;
++}
++
+ static void PIOS_MPU6000_Config(struct pios_mpu6000_cfg const *cfg)
+ {
+     PIOS_MPU6000_Test();
+ 
+     // Reset chip
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_PWR_MGMT_REG, PIOS_MPU6000_PWRMGMT_IMU_RST) != 0) {
+-        ;
+-    }
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_PWR_MGMT_REG, PIOS_MPU6000_PWRMGMT_IMU_RST);
+     PIOS_DELAY_WaitmS(50);
+ 
+     // Reset chip and fifo
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_USER_CTRL_REG,
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_USER_CTRL_REG,
+                                PIOS_MPU6000_USERCTL_GYRO_RST |
+                                PIOS_MPU6000_USERCTL_SIG_COND |
+-                               PIOS_MPU6000_USERCTL_FIFO_RST) != 0) {
+-        ;
+-    }
++                               PIOS_MPU6000_USERCTL_FIFO_RST);
+ 
+     // Wait for reset to finish
+-    while (PIOS_MPU6000_GetReg(PIOS_MPU6000_USER_CTRL_REG) &
+-           (PIOS_MPU6000_USERCTL_GYRO_RST |
+-            PIOS_MPU6000_USERCTL_SIG_COND |
+-            PIOS_MPU6000_USERCTL_FIFO_RST)) {
+-        ;
++    /* Wait for the reset bits to self-clear, but bounded -- see the note on
++     * PIOS_MPU6000_SetRegBounded(). A missing device reads 0xFF forever. */
++    for (uint8_t i = 0; i < PIOS_MPU6000_SETREG_RETRIES; i++) {
++        int32_t uc = PIOS_MPU6000_GetReg(PIOS_MPU6000_USER_CTRL_REG);
++
++        if (uc < 0 || !(uc & (PIOS_MPU6000_USERCTL_GYRO_RST |
++                              PIOS_MPU6000_USERCTL_SIG_COND |
++                              PIOS_MPU6000_USERCTL_FIFO_RST))) {
++            break;
++        }
++        PIOS_DELAY_WaitmS(1);
+     }
+     PIOS_DELAY_WaitmS(10);
+     // Power management configuration
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_PWR_MGMT_REG, cfg->Pwr_mgmt_clk) != 0) {
+-        ;
+-    }
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_PWR_MGMT_REG, cfg->Pwr_mgmt_clk);
+ 
+     // Interrupt configuration
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_INT_CFG_REG, cfg->interrupt_cfg) != 0) {
+-        ;
+-    }
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_INT_CFG_REG, cfg->interrupt_cfg);
+ 
+     // Interrupt configuration
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_INT_EN_REG, cfg->interrupt_en) != 0) {
+-        ;
+-    }
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_INT_EN_REG, cfg->interrupt_en);
+ 
+     // FIFO storage
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_FIFO_EN_REG, cfg->Fifo_store) != 0) {
+-        ;
+-    }
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_FIFO_EN_REG, cfg->Fifo_store);
+     PIOS_MPU6000_ConfigureRanges(cfg->gyro_range, cfg->accel_range, cfg->filter);
+     // Interrupt configuration
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_USER_CTRL_REG, cfg->User_ctl) != 0) {
+-        ;
+-    }
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_USER_CTRL_REG, cfg->User_ctl);
+ 
+     // Interrupt configuration
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_PWR_MGMT_REG, cfg->Pwr_mgmt_clk) != 0) {
+-        ;
+-    }
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_PWR_MGMT_REG, cfg->Pwr_mgmt_clk);
+ 
+     // Interrupt configuration
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_INT_CFG_REG, cfg->interrupt_cfg) != 0) {
+-        ;
+-    }
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_INT_CFG_REG, cfg->interrupt_cfg);
+ 
+     // Interrupt configuration
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_INT_EN_REG, cfg->interrupt_en) != 0) {
+-        ;
+-    }
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_INT_EN_REG, cfg->interrupt_en);
+     if ((PIOS_MPU6000_GetReg(PIOS_MPU6000_INT_EN_REG)) != cfg->interrupt_en) {
+         return;
+     }
+@@ -273,29 +320,21 @@ int32_t PIOS_MPU6000_ConfigureRanges(
+     }
+ 
+     // update filter settings
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_DLPF_CFG_REG, filterSetting) != 0) {
+-        ;
+-    }
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_DLPF_CFG_REG, filterSetting);
+ 
+     // Sample rate divider, chosen upon digital filtering settings
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_SMPLRT_DIV_REG,
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_SMPLRT_DIV_REG,
+                                filterSetting == PIOS_MPU6000_LOWPASS_256_HZ ?
+-                               dev->cfg->Smpl_rate_div_no_dlp : dev->cfg->Smpl_rate_div_dlp) != 0) {
+-        ;
+-    }
++                               dev->cfg->Smpl_rate_div_no_dlp : dev->cfg->Smpl_rate_div_dlp);
+ 
+     dev->filter = filterSetting;
+ 
+     // Gyro range
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_GYRO_CFG_REG, gyroRange) != 0) {
+-        ;
+-    }
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_GYRO_CFG_REG, gyroRange);
+ 
+     dev->gyro_range = gyroRange;
+     // Set the accel range
+-    while (PIOS_MPU6000_SetReg(PIOS_MPU6000_ACCEL_CFG_REG, accelRange) != 0) {
+-        ;
+-    }
++    PIOS_MPU6000_SetRegBounded(PIOS_MPU6000_ACCEL_CFG_REG, accelRange);
+ 
+     dev->accel_range = accelRange;
+     return 0;
+@@ -310,6 +349,11 @@ static int32_t PIOS_MPU6000_ClaimBus(bool fast_spi)
+     if (PIOS_MPU6000_Validate(dev) != 0) {
+         return -1;
+     }
++    if (dev->use_i2c) {
++        /* PIOS_I2C_Transfer() serialises access itself and there is no chip
++         * select to assert, so claiming is a no-op on this transport. */
++        return 0;
++    }
+     if (PIOS_SPI_ClaimBus(dev->spi_id) != 0) {
+         return -2;
+     }
+@@ -336,6 +380,9 @@ static void PIOS_MPU6000_SetSpeed(const bool fast)
+  */
+ static int32_t PIOS_MPU6000_ClaimBusISR(bool *woken, bool fast_spi)
+ {
++    if (dev && dev->use_i2c) {
++        return 0;
++    }
+     if (PIOS_MPU6000_Validate(dev) != 0) {
+         return -1;
+     }
+@@ -353,6 +400,9 @@ static int32_t PIOS_MPU6000_ClaimBusISR(bool *woken, bool fast_spi)
+  */
+ static int32_t PIOS_MPU6000_ReleaseBus()
+ {
++    if (dev && dev->use_i2c) {
++        return 0;
++    }
+     if (PIOS_MPU6000_Validate(dev) != 0) {
+         return -1;
+     }
+@@ -368,6 +418,9 @@ static int32_t PIOS_MPU6000_ReleaseBus()
+  */
+ static int32_t PIOS_MPU6000_ReleaseBusISR(bool *woken)
+ {
++    if (dev && dev->use_i2c) {
++        return 0;
++    }
+     if (PIOS_MPU6000_Validate(dev) != 0) {
+         return -1;
+     }
+@@ -388,6 +441,20 @@ static int32_t PIOS_MPU6000_GetReg(uint8_t reg)
+         return -1;
+     }
+ 
++#if defined(PIOS_INCLUDE_I2C)
++    if (dev->use_i2c) {
++        uint8_t addr = reg;
++        const struct pios_i2c_txn txn_list[] = {
++            { .info = __func__, .addr = dev->i2c_addr, .rw = PIOS_I2C_TXN_WRITE, .len = 1, .buf = &addr },
++            { .info = __func__, .addr = dev->i2c_addr, .rw = PIOS_I2C_TXN_READ,  .len = 1, .buf = &data },
++        };
++        if (PIOS_I2C_Transfer(dev->i2c_id, txn_list, NELEMENTS(txn_list)) != 0) {
++            return -1;
++        }
++        return data;
++    }
++#endif
++
+     PIOS_SPI_TransferByte(dev->spi_id, (0x80 | reg)); // request byte
+     data = PIOS_SPI_TransferByte(dev->spi_id, 0); // receive response
+ 
+@@ -409,6 +476,16 @@ static int32_t PIOS_MPU6000_SetReg(uint8_t reg, uint8_t data)
+         return -1;
+     }
+ 
++#if defined(PIOS_INCLUDE_I2C)
++    if (dev->use_i2c) {
++        uint8_t buf[2] = { reg, data };
++        const struct pios_i2c_txn txn_list[] = {
++            { .info = __func__, .addr = dev->i2c_addr, .rw = PIOS_I2C_TXN_WRITE, .len = 2, .buf = buf },
++        };
++        return PIOS_I2C_Transfer(dev->i2c_id, txn_list, NELEMENTS(txn_list)) == 0 ? 0 : -2;
++    }
++#endif
++
+     if (PIOS_SPI_TransferByte(dev->spi_id, 0x7f & reg) != 0) {
+         PIOS_MPU6000_ReleaseBus();
+         return -2;
+@@ -516,20 +593,48 @@ static float PIOS_MPU6000_GetAccelScale()
+  * \return 0 if test succeeded
+  * \return non-zero value if test succeeded
+  */
++/*
++ * Parts this driver can drive.
++ *
++ * The MPU-6500 family (which includes the ICM-206xx) keeps the MPU6000's
++ * register map for everything this driver touches: the 14-byte burst from
++ * ACCEL_XOUT_H (0x3B) is the same AX/AY/AZ/TEMP/GX/GY/GZ layout, GYRO_CONFIG
++ * (0x1B) / ACCEL_CONFIG (0x1C) / CONFIG (0x1A) / SMPLRT_DIV (0x19) /
++ * INT_ENABLE (0x38) / USER_CTRL (0x6A) / PWR_MGMT_1 (0x6B) all match, and the
++ * full-scale codes give identical LSB-per-unit scaling. Only WHO_AM_I differs,
++ * so the ID gate is the only thing that has to know about them.
++ *
++ * The ICM-20602 additionally has ACCEL_CONFIG2 (0x1D) for the accel DLPF,
++ * which does not exist on the MPU6000. Its reset default (218Hz BW, 1kHz
++ * output) is what we want, so it is deliberately left alone.
++ */
++static const struct {
++    uint8_t     id;
++    const char *name;
++} pios_mpu6000_known_ids[] = {
++    { 0x68, "MPU6000/MPU6050" },
++    { 0x70, "MPU6500"         },
++    { 0x12, "ICM-20602"       },
++};
++
+ static int32_t PIOS_MPU6000_Test(void)
+ {
+-    /* Verify that ID matches (MPU6000 ID is 0x69) */
+     int32_t mpu6000_id = PIOS_MPU6000_ReadID();
+ 
+     if (mpu6000_id < 0) {
+         return -1;
+     }
+ 
+-    if (mpu6000_id != 0x68) {
+-        return -2;
++    for (uint8_t i = 0; i < NELEMENTS(pios_mpu6000_known_ids); i++) {
++        if (mpu6000_id == pios_mpu6000_known_ids[i].id) {
++            return 0;
++        }
+     }
+ 
+-    return 0;
++    /* Callers get -2 and the raw id via PIOS_MPU6000_ReadID(); "no IMU" and
++     * "an IMU this driver does not recognise" are very different problems and
++     * the board file is where that distinction can actually be reported. */
++    return -2;
+ }
+ 
+ /**
+@@ -612,6 +717,23 @@ static bool PIOS_MPU6000_ReadSensor(bool *woken)
+     if (PIOS_MPU6000_ClaimBusISR(woken, true) != 0) {
+         return false;
+     }
++
++#if defined(PIOS_INCLUDE_I2C)
++    if (dev->use_i2c) {
++        /* One repeated-START register read of the whole 14-byte block. The
++         * SPI path leaves buffer[0] as the throwaway command byte, so read
++         * into buffer[1] to keep the sample layout identical. */
++        uint8_t addr = PIOS_MPU6000_SENSOR_FIRST_REG;
++        const struct pios_i2c_txn txn_list[] = {
++            { .info = __func__, .addr = dev->i2c_addr, .rw = PIOS_I2C_TXN_WRITE,
++              .len = 1, .buf = &addr },
++            { .info = __func__, .addr = dev->i2c_addr, .rw = PIOS_I2C_TXN_READ,
++              .len = PIOS_MPU6000_SAMPLES_BYTES, .buf = &mpu6000_data.buffer[1] },
++        };
++        return PIOS_I2C_Transfer(dev->i2c_id, txn_list, NELEMENTS(txn_list)) == 0;
++    }
++#endif
++
+     if (PIOS_SPI_TransferBlock(dev->spi_id, &mpu6000_send_buf[0], &mpu6000_data.buffer[0], sizeof(mpu6000_data_t), NULL) < 0) {
+         PIOS_MPU6000_ReleaseBusISR(woken);
+         return false;
+diff --git a/flight/pios/inc/pios_mpu6000.h b/flight/pios/inc/pios_mpu6000.h
+index fc9538052..6f858f2fd 100644
+--- a/flight/pios/inc/pios_mpu6000.h
++++ b/flight/pios/inc/pios_mpu6000.h
+@@ -155,6 +155,11 @@ struct pios_mpu6000_cfg {
+ 
+ /* Public Functions */
+ extern int32_t PIOS_MPU6000_Init(uint32_t spi_id, uint32_t slave_num, const struct pios_mpu6000_cfg *new_cfg);
++#if defined(PIOS_INCLUDE_I2C)
++/* Same part, same registers, I2C instead of SPI. i2c_addr is 0x68 (AD0 low)
++ * or 0x69 (AD0 high). */
++extern int32_t PIOS_MPU6000_Init_I2C(uint32_t i2c_id, uint8_t i2c_addr, const struct pios_mpu6000_cfg *new_cfg);
++#endif
+ extern int32_t PIOS_MPU6000_ConfigureRanges(enum pios_mpu6000_range gyroRange, enum pios_mpu6000_accel_range accelRange, enum pios_mpu6000_filter filterSetting);
+ extern int32_t PIOS_MPU6000_ReadID();
+ extern void PIOS_MPU6000_Register();

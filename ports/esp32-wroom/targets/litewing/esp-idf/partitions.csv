@@ -1,0 +1,17 @@
+# NinjaPilot litewing partition table (4MB flash).
+#
+# The firmware is small -- CopterControl fits the same flight code in 116KB of
+# STM32 flash, and Xtensa is maybe 1.5x less dense -- so 1MB of app space is
+# already generous and leaves room for a second OTA slot later.
+#
+# 'settings' is reserved for the NVS-backed PIOS_FLASHFS replacement that is
+# not yet implemented (see pios_config.h). It is deliberately declared now so
+# that adding it later does not move every other partition and invalidate
+# anyone's flashed board.
+#
+# Name,     Type, SubType,  Offset,   Size
+nvs,        data, nvs,            ,   0x6000
+phy_init,   data, phy,            ,   0x1000
+factory,    app,  factory,        ,   1M
+settings,   data, nvs,            ,   0x8000
+coredump,   data, coredump,       ,   0x10000
