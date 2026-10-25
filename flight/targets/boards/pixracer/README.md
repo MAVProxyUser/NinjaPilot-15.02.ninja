@@ -8,8 +8,10 @@ same PX4-bootloader flash layout as the Cube Purple target, so it links at
 ## Status (2026-10-24)
 
 This target was **ported from the PixracerOpenPilot fork's `pixracer-port`
-branch**, which brought the board up to *telemetry over USB* on a different
-upstream (2025 OpenPilot). The port onto this tree (NinjaPilot, FreeRTOS
+branch**, which brought the board up to *telemetry over USB*. That fork is the **same
+OpenPilot 15.02 lineage** as this tree, on the official `RELEASE-15.02.02`
+tag (plus 2025 Qt6/Python-3 build-compat commits); NinjaPilot branched earlier
+in the same series (`fe04a9b6`, pre-CC3D-removal). The port onto this tree (NinjaPilot, FreeRTOS
 11.3.0, this tree's PiOS and UAVObject set) is **not finished** and the target
 is deliberately **excluded from `ALL_BOARDS`** so the default build stays
 green. To work on it, add `pixracer` back to `ALL_BOARDS` in the top-level
@@ -27,7 +29,9 @@ What already works:
 What remains — a **driver-API rewrite**, because the source was written against
 a newer-generation PiOS whose driver interfaces differ from this tree's:
 
-1. **Invensense IMU** (`pios_board.c`, `board_hw_defs.c`): the source
+1. **Invensense IMU** (`pios_board.c`, `board_hw_defs.c`): the source uses a
+   `pios_invensense.c` hand-written on that fork's `pixracer-port` branch
+   (stock 15.02.02 ships `pios_mpu6000.c`, not this driver). It
    configures the MPU9250 + ICM-20608-G through a `pios_invensense_t` /
    `pios_invensense_cfg` with `exti_cfg`, `gyro_range`, `pwr_mgmt_clk`,
    `PIOS_INVENSENSE_*` enums and a `PIOS_INVENSENSE_IRQHandler`. This tree's
@@ -49,7 +53,10 @@ then this directory is the staged groundwork, not a flashable image.
 
 ## Why this is separate from the old PixracerOpenPilot fork
 
-That fork (`../PixracerOpenPilot`) is a different upstream lineage with an
-incompatible tree layout (`flight/PiOS`, `flight/targets/Pixracer`). It cannot
-be git-merged into this tree; the board is brought across by hand, which is
-what this directory is.
+`../PixracerOpenPilot` is the **same OpenPilot 15.02 lineage** as this tree
+(based on the official `RELEASE-15.02.02` tag), but it keeps the stock
+OpenPilot directory layout (`flight/PiOS`, `flight/targets/Pixracer/System`)
+whereas this tree was restructured (`flight/pios`,
+`flight/targets/boards/<board>`), and its board drivers are fork-local. Those
+two differences, not a different upstream, are why it cannot be git-merged;
+the board is brought across by hand, which is what this directory is.

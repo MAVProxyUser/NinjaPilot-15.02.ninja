@@ -55,7 +55,10 @@ See `ports/README.md`.
 
 ## Still separate on disk (not git-folded)
 
-`../PixracerOpenPilot` and `../OpenPilot` are a different upstream lineage with
-an incompatible tree layout and cannot be git-merged; the PixRacer board is
-being brought across by hand (the `pixracer` target above). `../lineage/*`
+`../PixracerOpenPilot` and `../OpenPilot` are the **same OpenPilot 15.02
+lineage** as this tree (the PixRacer fork is on the official `RELEASE-15.02.02`
+tag; NinjaPilot branched earlier at `fe04a9b6`), but they keep the stock
+OpenPilot directory layout and fork-local board drivers, so they cannot be
+git-merged; the PixRacer board is brought across by hand (the `pixracer`
+target above). `../lineage/*`
 (ArduPilot, iNav, AM32, …) is third-party reference material, left as is.
