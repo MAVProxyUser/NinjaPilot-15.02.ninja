@@ -224,24 +224,6 @@ static inline float interceptor_level_thrust(float theta_off_deg, float roll_deg
 #define INTERCEPTOR_INTERCEPT_MAX_BANK_DEG stabSettings.stabBank.RollMax   /* the airframe's own configured roll limit, not a second one */
 #define INTERCEPTOR_INTERCEPT_MAX_SLEW_DPS 60.0f   /* = paths.c INTERCEPT_MAX_TURN_RATE */
 #define INTERCEPTOR_INTERCEPT_MAX_LEAD_S   2.5f    /* = paths.c INTERCEPT_ENDGAME_MAX_LEAD_S */
-/* TWO FIXES TRIED AND REVERTED (2026-09-25) for the residual "closes to ~3m then re-opens" pattern:
- * 1. Dropping the bank/pitch slew limit inside path_intercept()'s own INTERCEPT_ENDGAME_DIST (4m), on the theory
- *    the pattern was a reaction-lag problem a faster response would fix. A matched 3-seed check showed it uniformly
- *    WORSE (5.50/5.49/5.66m vs. 5.51/3.30/3.72m) - proof this is a KINEMATIC pure-pursuit overshoot, not a lag one:
- *    this vehicle commits to real forward airspeed and a real turn radius once in CRUISE, and reacting faster to
- *    the instantaneous bearing does not fix a flight path that geometrically cannot curve tightly enough on top of
- *    an already-poor approach angle - it just overcorrects harder.
- * 2. path_intercept()'s own GENERAL-case steering (constant-bearing via cross-LOS decomposition, matching the
- *    target's cross-range velocity to hold bearing fixed while closing range) ported from its velocity-vector
- *    output to a heading. The vector math is an exact match to paths.c and is not itself wrong - but it is the
- *    WRONG TOOL for this vehicle: PN deliberately steers OFF the direct target bearing to null cross-track motion,
- *    which is fine for a hover-capable vehicle whose camera can point independently of its flight direction, and
- *    is exactly what the user watched happen live ("hooked away... sign flip in the spline curve" - it was not a
- *    sign error, it was PN doing its job). For THIS tail-sitter, heading IS flight direction once in CRUISE, so
- *    steering off the direct bearing at all means the nose - and the camera - comes off the target, directly
- *    violating "never ever should you NOT have the object in camera view while in pursuit." PN and permanent
- *    nose-lock are incompatible for an airframe with no independent camera gimbal; do not retry PN/cross-LOS here
- *    without one. */
 /* Pitch has NO proportional gain, unlike bank: theta_off = elevation_deg - 90 is an exact geometric identity (the
  * nose-aim requirement), not a control law being tuned toward a setpoint - see block comment. */
 
@@ -278,8 +260,6 @@ static struct interceptor_aim interceptor_intercept_aim(float dT, float actual_y
         return aim;
     }
 
-    float Vtn = path.ModeParameters[PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELN];
-    float Vte = path.ModeParameters[PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELE];
     float vmax = path.EndingVelocity;
     if (vmax < 0.1f) {
         vmax = 0.1f;
@@ -288,13 +268,10 @@ static struct interceptor_aim interceptor_intercept_aim(float dT, float actual_y
     if (t_lead > INTERCEPTOR_INTERCEPT_MAX_LEAD_S) {
         t_lead = INTERCEPTOR_INTERCEPT_MAX_LEAD_S;
     }
-    /* Short-horizon lead point, used for BOTH bank/bearing and pitch/elevation, at every range - see this
-     * function's own block comment for the two range-dependent alternatives tried and reverted. Always aiming
-     * directly at this point (never a PN-style off-bearing correction) is what keeps the nose - and the camera -
-     * on the target throughout pursuit, which is the harder, non-negotiable requirement here. */
-    float lead_n = path.End.North + Vtn * t_lead;
-    float lead_e = path.End.East  + Vte * t_lead;
+    float lead_n = path.End.North + path.ModeParameters[PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELN] * t_lead;
+    float lead_e = path.End.East  + path.ModeParameters[PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELE] * t_lead;
     float lead_d = path.End.Down  + path.ModeParameters[PATHDESIRED_MODEPARAMETER_INTERCEPT_TARGETVELD] * t_lead;
+
     float dn = lead_n - pos.North;
     float de = lead_e - pos.East;
     if (dn * dn + de * de < 1e-6f) {
@@ -317,11 +294,11 @@ static struct interceptor_aim interceptor_intercept_aim(float dT, float actual_y
     lastBank = bank;
 
     /* ---- elevation (pitch/nose-aim) - see block comment for the frame-convention derivation ---- */
-    float horiz_range   = sqrtf(dn * dn + de * de);
-    float vertical_gap  = pos.Down - lead_d;   /* +ve: lead point is ABOVE us */
-    float elevation_deg = RAD2DEG(atan2f(vertical_gap, horiz_range));
-    float pitch_desired = elevation_deg - 90.0f;
-    float maxPitchStep   = INTERCEPTOR_INTERCEPT_MAX_SLEW_DPS * dT;
+    float horiz_range     = sqrtf(dn * dn + de * de);
+    float vertical_gap    = pos.Down - lead_d;   /* +ve: lead point is ABOVE us */
+    float elevation_deg   = RAD2DEG(atan2f(vertical_gap, horiz_range));
+    float pitch_desired   = elevation_deg - 90.0f;
+    float maxPitchStep    = INTERCEPTOR_INTERCEPT_MAX_SLEW_DPS * dT;
     float dPitch = pitch_desired - lastPitch;
     if (dPitch > maxPitchStep) { pitch_desired = lastPitch + maxPitchStep; } else if (dPitch < -maxPitchStep) { pitch_desired = lastPitch - maxPitchStep; }
     lastPitch = pitch_desired;
